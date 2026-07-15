@@ -1,43 +1,56 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 @dataclass
 class MarketState:
+    # Trend
+    trend: str = "UNKNOWN"
+    internal_trend: str = "UNKNOWN"
+    external_trend: str = "UNKNOWN"
 
-    trend:str="UNKNOWN"
+    # Structure
+    last_hh: Optional[float] = None
+    last_hl: Optional[float] = None
+    last_lh: Optional[float] = None
+    last_ll: Optional[float] = None
 
-    internal_trend:str="UNKNOWN"
+    # Events
+    bos: bool = False
+    choch: bool = False
+    mss: bool = False
 
-    external_trend:str="UNKNOWN"
+    # Smart Money Concepts
+    liquidity: bool = False
+    displacement: bool = False
+    orderblock: bool = False
+    breaker: bool = False
+    mitigation: bool = False
+    fvg: bool = False
+    ifvg: bool = False
 
-    last_hh=None
-    last_hl=None
-    last_lh=None
-    last_ll=None
+    # Price Location
+    premium: bool = False
+    discount: bool = False
 
-    bos=False
+    # Signal
+    symbol: str = ""
+    timeframe: str = ""
+    signal: str = "NONE"
 
-    choch=False
+    entry: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
 
-    mss=False
+    confidence: int = 0
+    score: float = 0.0
 
-    liquidity=False
+    notes: list = field(default_factory=list)
 
-    displacement=False
-
-    orderblock=False
-
-    breaker=False
-
-    mitigation=False
-
-    fvg=False
-
-    ifvg=False
-
-    premium=False
-
-    discount=False
-
-    confidence=0
-
-    score=0
+    def reset_signal(self):
+        self.signal = "NONE"
+        self.entry = None
+        self.stop_loss = None
+        self.take_profit = None
+        self.confidence = 0
+        self.score = 0.0
+        self.notes.clear()
