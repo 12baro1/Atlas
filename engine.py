@@ -1,40 +1,44 @@
-import ccxt
+"""
+engine.py
+Atlas SMC Engine v1
+"""
 
-class SMCEngine:
+from market_structure_engine import MarketStructureEngine
+from structure_labels import label_swings
+from bos_engine import BOSEngine
+from choch_engine import CHOCHEngine
+from liquidity_engine import LiquidityEngine
+from orderblock_engine import OrderBlockEngine
+
+
+class AtlasEngine:
 
     def __init__(self):
+        self.structure_engine = MarketStructureEngine()
+        self.bos = BOSEngine()
+        self.choch = CHOCHEngine()
+        self.liquidity = LiquidityEngine()
+        self.orderblocks = OrderBlockEngine()
 
-        self.exchange = ccxt.bybit({
-            "options": {
-                "defaultType": "swap"
-            },
-            "enableRateLimit": True
-        })
+    def analyze(self, candles):
 
-    def get_candles(self, symbol, timeframe, limit):
+        pivots = self.structure_engine.find_pivots(candles)
+        self.structure_engine.calculate_strength(candles)
+        self.structure_engine.merge_pivots()
+        self.structure_engine.filter_noise()
+        self.structure_engine.validate_sequence()
 
-        return self.exchange.fetch_ohlcv(
-            symbol,
-            timeframe,
-            limit=limit
-        )
+        labels = label_swings(self.structure_engine.pivots)
 
-    def scan(self, symbol):
+        labels = self.bos.detect(labels)
+        labels = self.choch.detect(labels)
 
-        print(f"\nAnaliz Başladı -> {symbol}")
+        liquidity = self.liquidity.detect(labels)
+        orderblocks = self.orderblocks.detect(candles, labels)
 
-        weekly = self.get_candles(symbol, "1w", 300)
-        daily = self.get_candles(symbol, "1d", 500)
-        h4 = self.get_candles(symbol, "4h", 1000)
-        h1 = self.get_candles(symbol, "1h", 1000)
-        m15 = self.get_candles(symbol, "15m", 1000)
-
-        print("Weekly :", len(weekly))
-        print("Daily  :", len(daily))
-        print("H4     :", len(h4))
-        print("H1     :", len(h1))
-        print("M15    :", len(m15))
-
-engine = SMCEngine()
-
-engine.scan("BTC/USDT:USDT")
+        return {
+            "pivots": self.structure_engine.pivots,
+            "structure": labels,
+            "liquidity": liquidity,
+            "orderblocks": orderblocks
+        }
