@@ -13,7 +13,7 @@ class Pivot:
 
     internal:bool=False
 
-    external:False=False
+    external:bool=False
 
     label:str=""
 
