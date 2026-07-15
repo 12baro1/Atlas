@@ -181,35 +181,7 @@ class BOSDetector:
         return True
 
 
-    def _create_signal(
-        self,
-        candle: Candle,
-        index: int,
-        pivot: Pivot,
-        state: MarketState,
-        bullish: bool
-    ):
-
-        self.signal.break_index = index
-        self.signal.break_price = candle.close
-        self.signal.pivot = pivot
-        self.signal.displacement = abs(
-            candle.close - pivot.price
-        )
-
-        self.signal.bullish = bullish
-        self.signal.bearish = not bullish
-
-        state.bos = True
-
-        if bullish:
-            state.trend = "BULLISH"
-            state.last_hh = candle.close
-        else:
-            state.trend = "BEARISH"
-            state.last_ll = candle.close
-
-        return self.signal
+        
           def _calculate_confidence(
         self,
         candle: Candle,
@@ -303,6 +275,7 @@ class BOSDetector:
             state.last_ll = candle.low
 
         return self.signal
+        
           def last_signal(self):
 
         return self.signal
