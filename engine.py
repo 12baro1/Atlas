@@ -9,6 +9,7 @@ from bos_engine import BOSEngine
 from choch_engine import CHOCHEngine
 from liquidity_engine import LiquidityEngine
 from orderblock_engine import OrderBlockEngine
+from fvg_engine import FVGEngine
 
 
 class AtlasEngine:
@@ -19,6 +20,7 @@ class AtlasEngine:
         self.choch = CHOCHEngine()
         self.liquidity = LiquidityEngine()
         self.orderblocks = OrderBlockEngine()
+        self.fvg = FVGEngine()
 
     def analyze(self, candles):
 
@@ -35,12 +37,14 @@ class AtlasEngine:
 
         liquidity = self.liquidity.detect(labels)
         orderblocks = self.orderblocks.detect(candles, labels)
+        fvg = self.fvg.detect(candles)
 
         return {
-            "pivots": self.structure_engine.pivots,
-            "structure": labels,
-            "liquidity": liquidity,
-            "orderblocks": orderblocks
+    "pivots": self.structure_engine.pivots,
+    "structure": labels,
+    "liquidity": liquidity,
+    "orderblocks": orderblocks,
+    "fvg": fvg
         }
         if __name__ == "__main__":
             print("Atlas Engine OK")
