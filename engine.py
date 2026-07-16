@@ -9,6 +9,7 @@ from bos_engine import BOSEngine
 from choch_engine import CHOCHEngine
 from liquidity_engine import LiquidityEngine
 from orderblock_engine import OrderBlockEngine
+from signal_engine import SignalEngine
 from mitigation_engine import MitigationEngine
 from fvg_engine import FVGEngine
 
@@ -21,6 +22,7 @@ class AtlasEngine:
         self.choch = CHOCHEngine()
         self.liquidity = LiquidityEngine()
         self.orderblocks = OrderBlockEngine()
+        self.signal = SignalEngine()
         self.mitigation = MitigationEngine()
         self.fvg = FVGEngine()
 
@@ -41,14 +43,21 @@ class AtlasEngine:
         orderblocks = self.orderblocks.detect(candles, labels)
         orderblocks = self.mitigation.detect(candles, orderblocks)
         fvg = self.fvg.detect(candles)
+        analysis = {
+            "structure": labels,
+            "liquidity": liquidity,
+            "orderblocks": orderblocks,
+            "fvg": fvg
+}
+
+signal = self.signal.generate(analysis)
 
         return {
-    "pivots": self.structure_engine.pivots,
-    "structure": labels,
-    "liquidity": liquidity,
-    "orderblocks": orderblocks,
-    "mitigation": orderblocks,
-    "fvg": fvg
+            "pivots": self.structure_engine.pivots,
+            "structure": labels,
+            "liquidity": liquidity,
+            "orderblocks": orderblocks,
+            "mitigation": orderblocks,
+            "fvg": fvg,
+            "signal": signal
         }
-        if __name__ == "__main__":
-            print("Atlas Engine OK")
