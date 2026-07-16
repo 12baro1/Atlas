@@ -43,6 +43,9 @@ for symbol in markets:
         print("Entry Valid :", result["entry"]["valid"])
         print("Reason :", result["entry"]["reason"])
 
+        print("Confirmed :", result["confirmation"]["confirmed"])
+        print("Confirm Reason :", result["confirmation"]["reason"])
+
         print("Weekly :", result["mtf"]["weekly"])
         print("Daily  :", result["mtf"]["daily"])
         print("H4     :", result["mtf"]["h4"])
