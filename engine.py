@@ -75,7 +75,7 @@ class AtlasEngine:
             h4_labels,
             labels
         )
-            analysis = {
+        analysis = {
             "structure": labels,
             "liquidity": liquidity,
             "orderblocks": orderblocks,
