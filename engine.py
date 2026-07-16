@@ -48,9 +48,9 @@ class AtlasEngine:
             "liquidity": liquidity,
             "orderblocks": orderblocks,
             "fvg": fvg
-}
+        }
 
-signal = self.signal.generate(analysis)
+        signal = self.signal.generate(analysis)
 
         return {
             "pivots": self.structure_engine.pivots,
