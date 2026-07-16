@@ -25,14 +25,16 @@ for symbol in markets:
 
         result = engine.analyze(data["15m"])
 
-        print(f"✓ {symbol}")
+        print(f"\n✓ {symbol}")
 
         if len(result["structure"]) > 0:
 
-            print(
-                "Son Yapı:",
-                result["structure"][-1]["label"]
-            )
+            print("Son Yapı:", result["structure"][-1]["label"])
+
+        print("Liquidity :", len(result["liquidity"]))
+        print("OrderBlocks :", len(result["orderblocks"]))
+        print("Mitigation :", len(result["mitigation"]))
+        print("FVG :", len(result["fvg"]))
 
     except Exception as e:
 
