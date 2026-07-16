@@ -38,6 +38,11 @@ for symbol in markets:
         print("Signal :", result["signal"]["signal"])
         print("Score :", result["signal"]["score"])
         print("Trend :", result["trend"])
+        print("Weekly :", result["mtf"]["weekly"])
+        print("Daily  :", result["mtf"]["daily"])
+        print("H4     :", result["mtf"]["h4"])
+        print("Entry  :", result["mtf"]["entry"])
+        print("Valid  :", result["mtf"]["valid"])
 
         print("--------------------------------")
 
