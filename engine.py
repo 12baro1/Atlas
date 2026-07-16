@@ -15,6 +15,7 @@ from fvg_engine import FVGEngine
 from trend_engine import TrendEngine
 from mtf_engine import MTFEngine
 from entry_engine import EntryEngine
+from entry_confirmation_engine import EntryConfirmationEngine
 
 
 class AtlasEngine:
@@ -31,6 +32,7 @@ class AtlasEngine:
         self.trend = TrendEngine()
         self.mtf = MTFEngine()
         self.entry = EntryEngine()
+        self.entry_confirmation = EntryConfirmationEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -95,7 +97,11 @@ class AtlasEngine:
             fvg,
             orderblocks
         )
-
+        confirmation = self.entry_confirmation.confirm(
+            mtf,
+            labels,
+            fvg
+        )
         signal = self.signal.generate(analysis)
 
         return {
@@ -109,4 +115,5 @@ class AtlasEngine:
             "trend": trend,
             "mtf": mtf,
             "entry": entry,
+            "confirmation": confirmation,
         }
