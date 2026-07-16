@@ -1,39 +1,47 @@
+"""
+signal_engine.py
+Atlas SMC Engine
+"""
+
 class SignalEngine:
 
     def generate(self, analysis):
 
-        score = 0
-        reasons = []
+        mtf = analysis["mtf"]
 
-        if analysis["structure"]:
-            last = analysis["structure"][-1]
+        if not mtf["valid"]:
+            return {
+                "signal": "NONE",
+                "score": 0,
+                "reasons": ["MTF not aligned"]
+            }
 
-            bullish = last["label"] in ["HH", "HL"]
-            bearish = last["label"] in ["LL", "LH"]
+        if mtf["entry"] == "LONG":
+            return {
+                "signal": "LONG",
+                "score": 100,
+                "reasons": [
+                    "Weekly aligned",
+                    "Daily aligned",
+                    "H4 aligned",
+                    "LONG setup"
+                ]
+            }
 
-            if bullish:
-                score += 25
-                score += min(len(analysis["liquidity"]) * 2, 20)
-                score += min(len(analysis["orderblocks"]) * 3, 20)
-                score += min(len(analysis["fvg"]), 15)
-                reasons.append("Bullish Structure")
-
-            elif bearish:
-                score -= 25
-                score -= min(len(analysis["liquidity"]) * 2, 20)
-                score -= min(len(analysis["orderblocks"]) * 3, 20)
-                score -= min(len(analysis["fvg"]), 15)
-                reasons.append("Bearish Structure")
-
-        if score >= 45:
-            signal = "LONG"
-        elif score <= -45:
-            signal = "SHORT"
-        else:
-            signal = "NONE"
+        if mtf["entry"] == "SHORT":
+            return {
+                "signal": "SHORT",
+                "score": -100,
+                "reasons": [
+                    "Weekly aligned",
+                    "Daily aligned",
+                    "H4 aligned",
+                    "SHORT setup"
+                ]
+            }
 
         return {
-            "signal": signal,
-            "score": score,
-            "reasons": reasons
+            "signal": "NONE",
+            "score": 0,
+            "reasons": []
         }
