@@ -1,47 +1,32 @@
 """
-signal_engine.py
+mtf_engine.py
 Atlas SMC Engine
 """
 
-class SignalEngine:
+class MTFEngine:
 
-    def generate(self, analysis):
+    def detect(self, weekly, daily, h4, entry):
 
-        mtf = analysis["mtf"]
+        w = weekly[-1]["label"] if weekly else None
+        d = daily[-1]["label"] if daily else None
+        h = h4[-1]["label"] if h4 else None
 
-        if not mtf["valid"]:
-            return {
-                "signal": "NONE",
-                "score": 0,
-                "reasons": ["MTF not aligned"]
-            }
+        weekly_trend = "BULLISH" if w in ["HH", "HL"] else "BEARISH"
+        daily_trend = "BULLISH" if d in ["HH", "HL"] else "BEARISH"
+        h4_trend = "BULLISH" if h in ["HH", "HL"] else "BEARISH"
 
-        if mtf["entry"] == "LONG":
-            return {
-                "signal": "LONG",
-                "score": 100,
-                "reasons": [
-                    "Weekly aligned",
-                    "Daily aligned",
-                    "H4 aligned",
-                    "LONG setup"
-                ]
-            }
+        entry_signal = "NONE"
 
-        if mtf["entry"] == "SHORT":
-            return {
-                "signal": "SHORT",
-                "score": -100,
-                "reasons": [
-                    "Weekly aligned",
-                    "Daily aligned",
-                    "H4 aligned",
-                    "SHORT setup"
-                ]
-            }
+        if weekly_trend == daily_trend == h4_trend == "BULLISH":
+            entry_signal = "LONG"
+
+        elif weekly_trend == daily_trend == h4_trend == "BEARISH":
+            entry_signal = "SHORT"
 
         return {
-            "signal": "NONE",
-            "score": 0,
-            "reasons": []
+            "weekly": weekly_trend,
+            "daily": daily_trend,
+            "h4": h4_trend,
+            "entry": entry_signal,
+            "valid": entry_signal != "NONE"
         }
