@@ -14,7 +14,7 @@ class LiquidityEngine:
 
         for item in structure:
 
-            if item["type"] == "HIGH":
+            if item["kind"] == "HIGH":
 
                 matched = False
 
