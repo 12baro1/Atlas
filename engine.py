@@ -42,3 +42,5 @@ class AtlasEngine:
             "liquidity": liquidity,
             "orderblocks": orderblocks
         }
+        if __name__ == "__main__":
+    print("Atlas Engine OK")
