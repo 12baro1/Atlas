@@ -1,62 +1,47 @@
 """
-mtf_engine.py
+signal_engine.py
 Atlas SMC Engine
 """
 
-class MTFEngine:
+class SignalEngine:
 
-    def detect(self, weekly, daily, h4, m15):
+    def generate(self, analysis):
 
-        result = {
-            "weekly": "NEUTRAL",
-            "daily": "NEUTRAL",
-            "h4": "NEUTRAL",
-            "entry": "NONE",
-            "valid": False
+        mtf = analysis["mtf"]
+
+        if not mtf["valid"]:
+            return {
+                "signal": "NONE",
+                "score": 0,
+                "reasons": ["MTF not aligned"]
+            }
+
+        if mtf["entry"] == "LONG":
+            return {
+                "signal": "LONG",
+                "score": 100,
+                "reasons": [
+                    "Weekly aligned",
+                    "Daily aligned",
+                    "H4 aligned",
+                    "LONG setup"
+                ]
+            }
+
+        if mtf["entry"] == "SHORT":
+            return {
+                "signal": "SHORT",
+                "score": -100,
+                "reasons": [
+                    "Weekly aligned",
+                    "Daily aligned",
+                    "H4 aligned",
+                    "SHORT setup"
+                ]
+            }
+
+        return {
+            "signal": "NONE",
+            "score": 0,
+            "reasons": []
         }
-
-        # Weekly
-        if weekly:
-            last = weekly[-1]["label"]
-
-            if last in ["HH", "HL"]:
-                result["weekly"] = "BULLISH"
-            elif last in ["LL", "LH"]:
-                result["weekly"] = "BEARISH"
-
-        # Daily
-        if daily:
-            last = daily[-1]["label"]
-
-            if last in ["HH", "HL"]:
-                result["daily"] = "BULLISH"
-            elif last in ["LL", "LH"]:
-                result["daily"] = "BEARISH"
-
-        # H4
-        if h4:
-            last = h4[-1]["label"]
-
-            if last in ["HH", "HL"]:
-                result["h4"] = "BULLISH"
-            elif last in ["LL", "LH"]:
-                result["h4"] = "BEARISH"
-
-        # Entry
-        if (
-            result["weekly"] == "BULLISH"
-            and result["daily"] == "BULLISH"
-            and result["h4"] == "BULLISH"
-        ):
-            result["entry"] = "LONG"
-            result["valid"] = True
-
-        elif (
-            result["weekly"] == "BEARISH"
-            and result["daily"] == "BEARISH"
-            and result["h4"] == "BEARISH"
-        ):
-            result["entry"] = "SHORT"
-            result["valid"] = True
-
-        return result
