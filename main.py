@@ -35,6 +35,11 @@ for symbol in markets:
         print("OrderBlocks :", len(result["orderblocks"]))
         print("Mitigation :", len(result["mitigation"]))
         print("FVG :", len(result["fvg"]))
+        print("Signal :", result["signal"]["signal"])
+        print("Score :", result["signal"]["score"])
+        print("Trend :", result["trend"])
+
+        print("--------------------------------")
 
     except Exception as e:
 
