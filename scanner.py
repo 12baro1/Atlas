@@ -19,7 +19,7 @@ print(f"\nToplam Coin: {len(symbols)}\n")
 
 for i, symbol in enumerate(symbols, 1):
     try:
-        candles = exchange.fetch_ohlcv(symbol, "15m", limit=100)
+        candles = exchange.fetch_ohlcv(symbol, "15m", limit=1000)
 
         if len(candles) > 0:
             print(f"[{i}/{len(symbols)}] ✅ {symbol} ({len(candles)} mum)")
