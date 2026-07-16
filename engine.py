@@ -14,6 +14,7 @@ from mitigation_engine import MitigationEngine
 from fvg_engine import FVGEngine
 from trend_engine import TrendEngine
 from mtf_engine import MTFEngine
+from entry_engine import EntryEngine
 
 
 class AtlasEngine:
@@ -29,6 +30,7 @@ class AtlasEngine:
         self.fvg = FVGEngine()
         self.trend = TrendEngine()
         self.mtf = MTFEngine()
+        self.entry = EntryEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -87,6 +89,12 @@ class AtlasEngine:
             [],
             labels
         )
+        entry = self.entry.generate(
+            mtf,
+            labels,
+            fvg,
+            orderblocks
+        )
 
         signal = self.signal.generate(analysis)
 
@@ -100,4 +108,5 @@ class AtlasEngine:
             "signal": signal,
             "trend": trend,
             "mtf": mtf,
+            "entry": entry,
         }
