@@ -13,6 +13,7 @@ from signal_engine import SignalEngine
 from mitigation_engine import MitigationEngine
 from fvg_engine import FVGEngine
 from trend_engine import TrendEngine
+from mtf_engine import MTFEngine
 
 
 class AtlasEngine:
@@ -27,6 +28,7 @@ class AtlasEngine:
         self.mitigation = MitigationEngine()
         self.fvg = FVGEngine()
         self.trend = TrendEngine()
+        self.mtf = MTFEngine()
 
     def analyze(self, candles):
 
@@ -51,6 +53,12 @@ class AtlasEngine:
             "orderblocks": orderblocks,
             "fvg": fvg
         }
+        mtf = self.mtf.detect(
+            [],      # Weekly (şimdilik boş)
+            [],      # Daily (şimdilik boş)
+            labels,  # H4 yerine geçici olarak mevcut yapı
+            labels   # 15M
+        )
         trend = self.trend.detect(
             [],
             [],
@@ -68,4 +76,5 @@ class AtlasEngine:
             "fvg": fvg,
             "signal": signal,
             "trend": trend,
+            "mtf": mtf,
         }
