@@ -96,7 +96,7 @@ class AtlasEngine:
                current_price
         )
 
-        timestamp = candles[-1].timestamp
+        timestamp = candles[-1].date
 
         killzone = self.killzone.detect(timestamp)
         session = self.session.check(timestamp)
