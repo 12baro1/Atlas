@@ -1,39 +1,29 @@
 """
 trend_engine.py
-Atlas Trend Engine
+Atlas SMC Engine
 """
 
 class TrendEngine:
 
-    def detect(self, weekly, daily, h4):
+    def detect(self, weekly, daily, structure):
 
-        score = 0
+        bullish = 0
+        bearish = 0
 
-        if weekly:
-            label = weekly[-1]["label"]
+        for item in structure[-10:]:
+
+            label = item.get("label", "")
+
             if label in ["HH", "HL"]:
-                score += 1
-            elif label in ["LL", "LH"]:
-                score -= 1
+                bullish += 1
 
-        if daily:
-            label = daily[-1]["label"]
-            if label in ["HH", "HL"]:
-                score += 1
             elif label in ["LL", "LH"]:
-                score -= 1
+                bearish += 1
 
-        if h4:
-            label = h4[-1]["label"]
-            if label in ["HH", "HL"]:
-                score += 1
-            elif label in ["LL", "LH"]:
-                score -= 1
-
-        if score >= 2:
+        if bullish >= bearish + 2:
             return "BULLISH"
 
-        if score <= -2:
+        elif bearish >= bullish + 2:
             return "BEARISH"
 
         return "RANGE"
