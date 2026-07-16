@@ -12,6 +12,7 @@ from orderblock_engine import OrderBlockEngine
 from signal_engine import SignalEngine
 from mitigation_engine import MitigationEngine
 from fvg_engine import FVGEngine
+from trend_engine import TrendEngine
 
 
 class AtlasEngine:
@@ -25,6 +26,7 @@ class AtlasEngine:
         self.signal = SignalEngine()
         self.mitigation = MitigationEngine()
         self.fvg = FVGEngine()
+        self.trend = TrendEngine()
 
     def analyze(self, candles):
 
@@ -49,6 +51,11 @@ class AtlasEngine:
             "orderblocks": orderblocks,
             "fvg": fvg
         }
+        trend = self.trend.detect(
+            [],
+            [],
+            labels
+        )
 
         signal = self.signal.generate(analysis)
 
@@ -60,4 +67,5 @@ class AtlasEngine:
             "mitigation": orderblocks,
             "fvg": fvg,
             "signal": signal
+            "trend": trend,
         }
