@@ -54,7 +54,6 @@ class AtlasEngine:
         orderblocks = self.mitigation.detect(candles, orderblocks)
         fvg = self.fvg.detect(candles)
         
-        }
         weekly_pivots = self.structure_engine.find_pivots(weekly)
         weekly_labels = label_swings(weekly_pivots)
         weekly_labels = self.bos.detect(weekly_labels)
