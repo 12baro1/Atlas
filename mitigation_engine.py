@@ -4,30 +4,22 @@ Atlas SMC Engine
 """
 
 class MitigationEngine:
-    """
-    Mitigation (v1)
 
-    Fiyatın Order Block, FVG veya Breaker
-    bölgesine geri dönmesini tespit eder.
-    """
-
-    def check(self, candles, zones):
+    def detect(self, candles, orderblocks):
 
         mitigated = []
 
-        for zone in zones:
+        for block in orderblocks:
 
-            top = zone["high"]
-            bottom = zone["low"]
-            start = zone.get("origin", zone.get("index", 0))
+            touched = False
 
-            for candle in candles[start + 1:]:
+            for candle in candles[block["index"] + 1:]:
 
-                if candle.high >= bottom and candle.low <= top:
-
-                    zone["mitigated"] = True
-                    zone["mitigation_index"] = getattr(candle, "index", None)
-                    mitigated.append(zone)
+                if candle.high >= block["low"] and candle.low <= block["high"]:
+                    touched = True
                     break
+
+            block["mitigated"] = touched
+            mitigated.append(block)
 
         return mitigated
