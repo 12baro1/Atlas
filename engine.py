@@ -30,7 +30,13 @@ class AtlasEngine:
         self.trend = TrendEngine()
         self.mtf = MTFEngine()
 
-    def analyze(self, candles):
+    def analyze(self, data):
+        weekly = data["1w"]
+        daily = data["1d"]
+        h4 = data["4h"]
+        m15 = data["15m"]
+
+        candles = m15
 
         pivots = self.structure_engine.find_pivots(candles)
         self.structure_engine.calculate_strength(candles)
@@ -53,12 +59,27 @@ class AtlasEngine:
             "orderblocks": orderblocks,
             "fvg": fvg
         }
-        mtf = self.mtf.detect(
-            [],      # Weekly (şimdilik boş)
-            [],      # Daily (şimdilik boş)
-            labels,  # H4 yerine geçici olarak mevcut yapı
-            labels   # 15M
-        )
+        weekly_pivots = self.structure_engine.find_pivots(weekly)
+        weekly_labels = label_swings(weekly_pivots)
+        weekly_labels = self.bos.detect(weekly_labels)
+        weekly_labels = self.choch.detect(weekly_labels)
+
+        daily_pivots = self.structure_engine.find_pivots(daily)
+        daily_labels = label_swings(daily_pivots)
+        daily_labels = self.bos.detect(daily_labels)
+        daily_labels = self.choch.detect(daily_labels)
+
+        h4_pivots = self.structure_engine.find_pivots(h4)
+        h4_labels = label_swings(h4_pivots)
+        h4_labels = self.bos.detect(h4_labels)
+        h4_labels = self.choch.detect(h4_labels)
+
+mtf = self.mtf.detect(
+    weekly_labels,
+    daily_labels,
+    h4_labels,
+    labels
+)
         trend = self.trend.detect(
             [],
             [],
