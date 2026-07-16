@@ -23,7 +23,7 @@ for symbol in markets:
 
         data = get_market_data(symbol)
 
-        result = engine.analyze(data["15m"])
+        result = engine.analyze(data)
 
         print(f"\n✓ {symbol}")
 
