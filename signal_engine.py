@@ -1,8 +1,3 @@
-"""
-signal_engine.py
-Atlas SMC Engine
-"""
-
 class SignalEngine:
 
     def generate(self, analysis):
@@ -13,24 +8,27 @@ class SignalEngine:
         if analysis["structure"]:
             last = analysis["structure"][-1]
 
-            if last["label"] in ["HH", "HL"]:
+            bullish = last["label"] in ["HH", "HL"]
+            bearish = last["label"] in ["LL", "LH"]
+
+            if bullish:
                 score += 25
+                score += min(len(analysis["liquidity"]) * 2, 20)
+                score += min(len(analysis["orderblocks"]) * 3, 20)
+                score += min(len(analysis["fvg"]), 15)
                 reasons.append("Bullish Structure")
 
-            elif last["label"] in ["LL", "LH"]:
+            elif bearish:
                 score -= 25
+                score -= min(len(analysis["liquidity"]) * 2, 20)
+                score -= min(len(analysis["orderblocks"]) * 3, 20)
+                score -= min(len(analysis["fvg"]), 15)
                 reasons.append("Bearish Structure")
-
-        score += min(len(analysis["liquidity"]) * 2, 20)
-        score += min(len(analysis["orderblocks"]) * 3, 20)
-        score += min(len(analysis["fvg"]), 15)
 
         if score >= 45:
             signal = "LONG"
-
-        elif score <= -20:
+        elif score <= -45:
             signal = "SHORT"
-
         else:
             signal = "NONE"
 
