@@ -18,40 +18,32 @@ class BOSEngine:
         for pivot in pivots:
 
             event = {
-                "index": pivot.index,
-                "price": pivot.price,
-                "kind": pivot.kind,
-                "label": "",
+                "index": pivot["index"],
+                "price": pivot["price"],
+                "kind": pivot["type"],
+                "label": pivot["label"],
                 "bos": False,
                 "direction": None
             }
 
-            if pivot.kind == "HIGH":
+            if pivot["type"] == "HIGH":
 
                 if last_high is None:
-                    event["label"] = "HH"
                     last_high = pivot
                 else:
-                    if pivot.price > last_high.price:
-                        event["label"] = "HH"
+                    if pivot["price"] > last_high["price"]:
                         event["bos"] = True
                         event["direction"] = "BULLISH"
-                    else:
-                        event["label"] = "LH"
                     last_high = pivot
 
             else:
 
                 if last_low is None:
-                    event["label"] = "LL"
                     last_low = pivot
                 else:
-                    if pivot.price < last_low.price:
-                        event["label"] = "LL"
+                    if pivot["price"] < last_low["price"]:
                         event["bos"] = True
                         event["direction"] = "BEARISH"
-                    else:
-                        event["label"] = "HL"
                     last_low = pivot
 
             structure.append(event)
