@@ -66,6 +66,6 @@ class AtlasEngine:
             "orderblocks": orderblocks,
             "mitigation": orderblocks,
             "fvg": fvg,
-            "signal": signal
+            "signal": signal,
             "trend": trend,
         }
