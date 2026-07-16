@@ -4,7 +4,7 @@ Atlas SMC Engine v1
 """
 
 from market_structure_engine import MarketStructureEngine
-from structure_labels import label_swings
+from utils.structure_labels import label_swings
 from bos_engine import BOSEngine
 from choch_engine import CHOCHEngine
 from liquidity_engine import LiquidityEngine
