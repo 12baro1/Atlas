@@ -3,7 +3,7 @@ engine.py
 Atlas SMC Engine v1
 """
 
-from market_structure_engine import MarketStructureEngine
+from core.market_structure_engine import MarketStructureEngine
 from utils.structure_labels import label_swings
 from bos_engine import BOSEngine
 from choch_engine import CHOCHEngine
