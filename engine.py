@@ -53,11 +53,7 @@ class AtlasEngine:
         orderblocks = self.orderblocks.detect(candles, labels)
         orderblocks = self.mitigation.detect(candles, orderblocks)
         fvg = self.fvg.detect(candles)
-        analysis = {
-            "structure": labels,
-            "liquidity": liquidity,
-            "orderblocks": orderblocks,
-            "fvg": fvg
+        
         }
         weekly_pivots = self.structure_engine.find_pivots(weekly)
         weekly_labels = label_swings(weekly_pivots)
@@ -80,6 +76,13 @@ class AtlasEngine:
             h4_labels,
             labels
         )
+            analysis = {
+            "structure": labels,
+            "liquidity": liquidity,
+            "orderblocks": orderblocks,
+            "fvg": fvg,
+            "mtf": mtf,
+        }
         trend = self.trend.detect(
             [],
             [],
