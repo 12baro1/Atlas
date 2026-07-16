@@ -16,7 +16,20 @@ from trend_engine import TrendEngine
 from mtf_engine import MTFEngine
 from entry_engine import EntryEngine
 from entry_confirmation_engine import EntryConfirmationEngine
-
+from premium_discount_engine import PremiumDiscountEngine
+from killzone_engine import KillZoneEngine
+from session_filter import SessionFilter
+from liquidity_sweep_engine import LiquiditySweepEngine
+from confluence_engine import ConfluenceEngine
+from risk_engine import RiskEngine
+from rr_engine import RREngine
+from position_manager import PositionManager
+from trade_manager import TradeManager
+from scanner_engine import ScannerEngine
+from telegram_engine import TelegramEngine
+from statistics_engine import StatisticsEngine
+from backtest_engine import BacktestEngine
+from config import Config
 
 class AtlasEngine:
 
@@ -33,6 +46,20 @@ class AtlasEngine:
         self.mtf = MTFEngine()
         self.entry = EntryEngine()
         self.entry_confirmation = EntryConfirmationEngine()
+        self.config = Config()
+        self.premium_discount = PremiumDiscountEngine()
+        self.killzone = KillZoneEngine()
+        self.session = SessionFilter()
+        self.liquidity_sweep = LiquiditySweepEngine()
+        self.confluence = ConfluenceEngine()
+        self.risk = RiskEngine()
+        self.rr = RREngine()
+        self.position = PositionManager()
+        self.trade = TradeManager()
+        self.scanner = ScannerEngine()
+        self.telegram = TelegramEngine()
+        self.statistics = StatisticsEngine()
+        self.backtest = BacktestEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -57,6 +84,22 @@ class AtlasEngine:
         orderblocks = self.orderblocks.detect(candles, labels)
         orderblocks = self.mitigation.detect(candles, orderblocks)
         fvg = self.fvg.detect(candles)
+        liquidity_sweep = self.liquidity_sweep.detect(candles)
+
+        swing_high = max(c.high for c in candles)
+        swing_low = min(c.low for c in candles)
+        current_price = candles[-1].close
+
+        premium_discount = self.premium_discount.calculate(
+               swing_high,
+               swing_low,
+               current_price
+        )
+
+        timestamp = candles[-1].timestamp
+
+        killzone = self.killzone.detect(timestamp)
+        session = self.session.check(timestamp)
         
         weekly_pivots = self.structure_engine.find_pivots(weekly)
         weekly_labels = label_swings(weekly_pivots)
@@ -79,18 +122,23 @@ class AtlasEngine:
             h4_labels,
             labels
         )
+        trend = self.trend.detect(
+            weekly_labels,
+            daily_labels,
+            labels
+        )
         analysis = {
             "structure": labels,
             "liquidity": liquidity,
             "orderblocks": orderblocks,
             "fvg": fvg,
             "mtf": mtf,
+            "trend": trend,
+            "liquidity_sweep": liquidity_sweep,
+            "premium_discount": premium_discount,
+            "killzone": killzone,
+            "session": session,
         }
-        trend = self.trend.detect(
-            [],
-            [],
-            labels
-        )
         entry = self.entry.generate(
             mtf,
             labels,
@@ -111,9 +159,17 @@ class AtlasEngine:
             "orderblocks": orderblocks,
             "mitigation": orderblocks,
             "fvg": fvg,
+
+            "liquidity_sweep": liquidity_sweep,
+            "premium_discount": premium_discount,
+            "killzone": killzone,
+            "session": session,
+
             "signal": signal,
             "trend": trend,
             "mtf": mtf,
             "entry": entry,
             "confirmation": confirmation,
-        }
+         }
+            
+        
