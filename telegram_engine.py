@@ -1,34 +1,58 @@
 """
 telegram_engine.py
-Atlas SMC Engine
+Atlas SMC Engine v2
 """
 
 class TelegramEngine:
 
-    def format_signal(self, state):
+    def format_signal(self, result):
 
-        lines = []
+        signal = result["signal"]
+        entry = result["entry"]
+        risk = result.get("risk")
+        rr = result.get("rr")
+        confluence = result.get("confluence")
 
-        lines.append("📊 ATLAS SIGNAL")
-        lines.append("")
-        lines.append(f"Symbol : {state.symbol}")
-        lines.append(f"Timeframe : {state.timeframe}")
-        lines.append(f"Signal : {state.signal}")
-        lines.append(f"Confidence : %{state.confidence}")
+        msg = []
 
-        if state.entry is not None:
-            lines.append(f"Entry : {state.entry}")
+        msg.append("📊 ATLAS SIGNAL")
+        msg.append("")
+        msg.append(f"Signal : {signal['signal']}")
+        msg.append(f"Strength : {signal['strength']}")
+        msg.append(f"Grade : {signal['grade']}")
+        msg.append(f"Stars : {signal['stars']}")
+        msg.append(f"Confidence : {signal['confidence']}%")
 
-        if state.stop_loss is not None:
-            lines.append(f"Stop Loss : {state.stop_loss}")
+        msg.append("")
 
-        if state.take_profit is not None:
-            lines.append(f"Take Profit : {state.take_profit}")
+        if confluence:
 
-        if state.notes:
-            lines.append("")
-            lines.append("Reasons:")
-            for note in state.notes:
-                lines.append(f"- {note}")
+            msg.append("SMC CHECKS")
 
-        return "\n".join(lines)
+            for item in confluence["checks"]:
+                msg.append(item)
+
+            msg.append("")
+
+        if entry["entry"] is not None:
+
+            msg.append(f"Entry : {entry['entry']}")
+            msg.append(f"Stop : {entry['stop_loss']}")
+
+            msg.append("")
+
+        if risk:
+
+            msg.append(f"TP1 : {risk['tp1']}")
+            msg.append(f"TP2 : {risk['tp2']}")
+            msg.append(f"TP3 : {risk['tp3']}")
+
+            msg.append("")
+
+        if rr:
+
+            msg.append(f"RR : {rr['rr']}")
+            msg.append(f"Quality : {rr['quality']}")
+            msg.append(f"RR Score : {rr['score']}")
+
+        return "\n".join(msg)
