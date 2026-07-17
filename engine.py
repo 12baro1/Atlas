@@ -175,6 +175,8 @@ class AtlasEngine:
             "fvg": fvg,
             "mtf": mtf,
             "trend": trend,
+            "entry": entry,
+            "confirmation": confirmation,
             "ote": ote,
             "liquidity_sweep": liquidity_sweep,
             "premium_discount": premium_discount,
