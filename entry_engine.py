@@ -1,6 +1,6 @@
 """
 entry_engine.py
-Atlas SMC Entry Engine
+Atlas SMC Entry Engine v2
 """
 
 class EntryEngine:
@@ -10,69 +10,124 @@ class EntryEngine:
         result = {
             "valid": False,
             "direction": "NONE",
-            "reason": "",
             "entry": None,
-            "stop_loss": None
+            "stop_loss": None,
+            "score": 0,
+            "reason": "",
+            "checks": []
         }
 
-        if not mtf.get("valid", False):
-            result["reason"] = "MTF not aligned"
+        direction = mtf.get("entry")
+
+        if direction not in ["LONG", "SHORT"]:
+            result["reason"] = "No MTF direction"
             return result
 
-        if not structure:
-            result["reason"] = "No structure"
-            return result
+        result["direction"] = direction
 
-        last = structure[-1]
-        label = last.get("label")
+        # -------------------------
+        # Structure
+        # -------------------------
 
-        if mtf["entry"] == "LONG":
+        if structure:
 
-            if label not in ["HH", "HL"]:
-                result["reason"] = "No bullish structure"
-                return result
+            last = structure[-1]["label"]
 
-            if not fvg:
-                result["reason"] = "No bullish FVG"
-                return result
+            if direction == "LONG":
 
-            if not orderblocks:
-                result["reason"] = "No bullish Order Block"
-                return result
+                if last in ["HH", "HL"]:
+                    result["score"] += 20
+                    result["checks"].append("✓ Bullish Structure")
+                else:
+                    result["checks"].append("✗ Bullish Structure")
 
-            last_fvg = fvg[-1]
-            last_ob = orderblocks[-1]
+            else:
 
-            result["valid"] = True
-            result["direction"] = "LONG"
-            result["entry"] = last_fvg["to"]      # FVG'nin alt sınırı
-            result["stop_loss"] = last_ob["low"]  # Order Block altı
-            result["reason"] = "Bullish setup confirmed"
-            return result
+                if last in ["LL", "LH"]:
+                    result["score"] += 20
+                    result["checks"].append("✓ Bearish Structure")
+                else:
+                    result["checks"].append("✗ Bearish Structure")
 
-        if mtf["entry"] == "SHORT":
+        # -------------------------
+        # FVG
+        # -------------------------
 
-            if label not in ["LL", "LH"]:
-                result["reason"] = "No bearish structure"
-                return result
+        selected_fvg = None
 
-            if not fvg:
-                result["reason"] = "No bearish FVG"
-                return result
+        for gap in reversed(fvg):
 
-            if not orderblocks:
-                result["reason"] = "No bearish Order Block"
-                return result
+            if gap["filled"]:
+                continue
 
-            last_fvg = fvg[-1]
-            last_ob = orderblocks[-1]
+            if gap["type"] == "BULLISH" and direction == "LONG":
+                selected_fvg = gap
+                break
 
-            result["valid"] = True
-            result["direction"] = "SHORT"
-            result["entry"] = last_fvg["from"]     # FVG'nin üst sınırı
-            result["stop_loss"] = last_ob["high"]  # Order Block üstü
-            result["reason"] = "Bearish setup confirmed"
-            return result
+            if gap["type"] == "BEARISH" and direction == "SHORT":
+                selected_fvg = gap
+                break
 
-        result["reason"] = "No entry"
+        if selected_fvg:
+
+            result["score"] += 25
+            result["checks"].append("✓ FVG")
+
+        else:
+
+            result["checks"].append("✗ FVG")
+
+        # -------------------------
+        # Order Block
+        # -------------------------
+
+        selected_ob = None
+
+        for ob in reversed(orderblocks):
+
+            if ob["mitigated"]:
+                continue
+
+            if ob["type"] == "BULLISH" and direction == "LONG":
+                selected_ob = ob
+                break
+
+            if ob["type"] == "BEARISH" and direction == "SHORT":
+                selected_ob = ob
+                break
+
+        if selected_ob:
+
+            result["score"] += 25
+            result["checks"].append("✓ Order Block")
+
+        else:
+
+            result["checks"].append("✗ Order Block")
+
+        # -------------------------
+        # Entry
+        # -------------------------
+
+        if selected_fvg and selected_ob:
+
+            if direction == "LONG":
+
+                result["entry"] = selected_fvg["to"]
+                result["stop_loss"] = selected_ob["low"]
+
+            else:
+
+                result["entry"] = selected_fvg["from"]
+                result["stop_loss"] = selected_ob["high"]
+
+            result["score"] += 30
+
+        result["valid"] = result["score"] >= 60
+
+        if result["valid"]:
+            result["reason"] = "High probability setup"
+        else:
+            result["reason"] = "Weak setup"
+
         return result
