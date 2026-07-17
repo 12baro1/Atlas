@@ -15,6 +15,7 @@ class ConfluenceEngine:
         premium_discount,
         liquidity_sweep,
         ote,
+        htf_orderblock,
         killzone,
         session,
         breaker=None
@@ -78,6 +79,13 @@ class ConfluenceEngine:
             checks.append("✔ Breaker Block")
         else:
             checks.append("✘ Breaker Block")
+
+        # HTF Order Block
+        if htf_orderblock["valid"]:
+            score += 10
+            checks.append("✔ HTF Order Block")
+        else:
+            checks.append("✘ HTF Order Block")
 
         # Killzone
         if killzone:
