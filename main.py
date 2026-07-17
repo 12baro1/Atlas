@@ -76,6 +76,6 @@ for symbol in markets:
 
         print("--------------------------------")
 
-    except Exception as e:
-
-        print(f"HATA {symbol}: {e}")
+    except Exception:
+        import traceback
+        traceback.print_exc()
