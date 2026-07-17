@@ -37,7 +37,6 @@ class TelegramEngine:
             msg.append("")
 
         msg.append("📍 ENTRY")
-
         msg.append(f"Direction : {entry['direction']}")
         msg.append(f"Valid : {entry['valid']}")
 
@@ -50,18 +49,15 @@ class TelegramEngine:
         if risk:
 
             msg.append("💰 RISK")
-
             msg.append(f"Capital At Risk : {risk['capital_at_risk']} USDT")
             msg.append(f"Position Size : {risk['position_size']}")
             msg.append(f"Risk : {risk['risk']}")
-
             msg.append("")
 
             msg.append(f"TP1 : {risk['tp1']}")
             msg.append(f"TP2 : {risk['tp2']}")
             msg.append(f"TP3 : {risk['tp3']}")
             msg.append(f"RR : {risk['rr']}")
-
             msg.append("")
 
         if rr:
@@ -84,10 +80,25 @@ class TelegramBot:
 
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
 
-        requests.post(
-            url,
-            data={
-                "chat_id": self.chat_id,
-                "text": message
-            }
-        )
+        try:
+
+            response = requests.post(
+                url,
+                data={
+                    "chat_id": self.chat_id,
+                    "text": message
+                },
+                timeout=10
+            )
+
+            print("========== TELEGRAM ==========")
+            print("Status :", response.status_code)
+            print("Response :", response.text)
+            print("==============================")
+
+            return response.ok
+
+        except Exception as e:
+
+            print("Telegram Error :", e)
+            return False
