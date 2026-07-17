@@ -25,56 +25,53 @@ for symbol in markets:
         print(data["symbol"])
 
         result = engine.analyze(data)
+
         if result is None:
             continue
 
+        analysis = result["analysis"]
+
         print(f"\n✓ {symbol}")
 
-        if len(result["structure"]) > 0:
+        if len(analysis["structure"]) > 0:
+            print("Son Yapı :", analysis["structure"][-1]["label"])
 
-            print("Son Yapı:", result["structure"][-1]["label"])
+        print("Liquidity :", len(analysis["liquidity"]))
+        print("OrderBlocks :", len(analysis["orderblocks"]))
+        print("FVG :", len(analysis["fvg"]))
 
-        print("Liquidity :", len(result["liquidity"]))
-        print("OrderBlocks :", len(result["orderblocks"]))
-        print("Mitigation :", len(result["mitigation"]))
-        print("FVG :", len(result["fvg"]))
         print("Signal :", result["signal"]["signal"])
         print("Confidence :", result["signal"]["confidence"])
         print("Grade :", result["signal"]["grade"])
-        print("Stars :", result["signal"]["stars"])
         print("Strength :", result["signal"]["strength"])
 
-        print("Checks:")
-        for check in result["signal"]["checks"]:
-            print("  -", check)
-        print("Trend :", result["trend"]["trend"])
-        print("Risk :", result["risk"])
+        print("Trend :", analysis["trend"]["trend"])
 
-        print("Entry :", result["entry"]["direction"])
-        print("Entry Price :", result["entry"]["entry"])
-        print("Stop Loss :", result["entry"]["stop_loss"])
-        print("Entry Valid :", result["entry"]["valid"])
-        print("Reason :", result["entry"]["reason"])
+        print("Entry :", analysis["entry"]["direction"])
+        print("Entry Price :", analysis["entry"]["entry"])
+        print("Stop Loss :", analysis["entry"]["stop_loss"])
+        print("Entry Valid :", analysis["entry"]["valid"])
+        print("Reason :", analysis["entry"]["reason"])
 
-        print("Confirmed :", result["confirmation"]["confirmed"])
-        print("Confirm Reason :", result["confirmation"]["reason"])
+        print("Confirmed :", analysis["confirmation"]["confirmed"])
+        print("Confirm Reason :", analysis["confirmation"]["reason"])
 
-        print("Weekly :", result["mtf"]["weekly"])
-        print("Daily  :", result["mtf"]["daily"])
-        print("H4     :", result["mtf"]["h4"])
-        print("Entry  :", result["mtf"]["entry"])
-        print("Valid  :", result["mtf"]["valid"])
+        print("Weekly :", analysis["mtf"]["weekly"])
+        print("Daily :", analysis["mtf"]["daily"])
+        print("H4 :", analysis["mtf"]["h4"])
+        print("Entry TF :", analysis["mtf"]["entry"])
+        print("MTF Valid :", analysis["mtf"]["valid"])
 
-        if "risk" in result and result["risk"]:
+        print("TP1 :", result["dynamic_tp"]["tp1"])
+        print("TP2 :", result["dynamic_tp"]["tp2"])
+        print("TP3 :", result["dynamic_tp"]["tp3"])
+
+        if result["risk"]:
 
             print("----- RISK -----")
-            print("Side :", result["risk"]["side"])
-            print("Entry :", result["risk"]["entry"])
-            print("SL :", result["risk"]["stop_loss"])
-            print("TP1 :", result["risk"]["tp1"])
-            print("TP2 :", result["risk"]["tp2"])
-            print("TP3 :", result["risk"]["tp3"])
-            print("RR :", result["risk"]["rr"])
+            print("Capital Risk :", result["risk"]["capital_at_risk"])
+            print("Position Size :", result["risk"]["position_size"])
+            print("Risk :", result["risk"]["risk"])
 
         print("--------------------------------")
 
