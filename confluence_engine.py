@@ -1,7 +1,8 @@
 """
 confluence_engine.py
-Atlas Confluence Engine v4
+Atlas Confluence Engine v2
 """
+
 
 class ConfluenceEngine:
 
@@ -13,127 +14,86 @@ class ConfluenceEngine:
         confirmation,
         premium_discount,
         liquidity_sweep,
-        breaker,
         ote,
         killzone,
-        session
+        session,
+        breaker=None
     ):
 
         score = 0
         checks = []
 
-        # MTF
+        # Multi Timeframe
         if mtf["valid"]:
-            score += 20
-            checks.append("✓ MTF Alignment")
+            score += 15
+            checks.append("✔ Multi Timeframe")
         else:
-            checks.append("✗ MTF")
+            checks.append("✘ Multi Timeframe")
 
         # Trend
-        trend_name = trend["trend"]
-
-        if trend_name == "BULLISH" and entry["direction"] == "LONG":
-            score += 15
-            checks.append("✓ Bullish Trend")
-
-        elif trend_name == "BEARISH" and entry["direction"] == "SHORT":
-            score += 15
-            checks.append("✓ Bearish Trend")
-
+        if trend["trend"] == entry["direction"]:
+            score += 10
+            checks.append("✔ Trend")
         else:
-            checks.append("✗ Trend")
+            checks.append("✘ Trend")
 
         # Entry
         if entry["valid"]:
             score += 20
-            checks.append("✓ Entry")
-
+            checks.append("✔ Entry")
         else:
-            checks.append("✗ Entry")
+            checks.append("✘ Entry")
 
         # Confirmation
         if confirmation["confirmed"]:
             score += 15
-            checks.append("✓ Confirmation")
-
+            checks.append("✔ Confirmation")
         else:
-            checks.append("✗ Confirmation")
+            checks.append("✘ Confirmation")
 
         # Premium / Discount
-        zone = premium_discount["zone"]
-
-        if entry["direction"] == "LONG":
-
-            if zone == "DISCOUNT":
-                score += 10
-                checks.append("✓ Discount")
-
-            else:
-                checks.append("✗ Premium")
-
-        elif entry["direction"] == "SHORT":
-
-            if zone == "PREMIUM":
-                score += 10
-                checks.append("✓ Premium")
-
-            else:
-                checks.append("✗ Discount")
+        if premium_discount["valid"]:
+            score += 10
+            checks.append("✔ Premium Zone")
+        else:
+            checks.append("✘ Premium Zone")
 
         # Liquidity Sweep
         if liquidity_sweep:
             score += 10
-            checks.append("✓ Liquidity Sweep")
-
+            checks.append("✔ Liquidity Sweep")
         else:
-            checks.append("✗ No Sweep")
+            checks.append("✘ Liquidity Sweep")
 
-        # -----------------
-        # Breaker Block
-        # -----------------
+        # OTE
+        if ote["valid"]:
+            score += 10
+            checks.append("✔ OTE")
+        else:
+            checks.append("✘ OTE")
 
-       if breaker:
-
-           score += 10
-           checks.append("✓ Breaker Block")
-
-       else:
-
-           checks.append("✗ Breaker Block")
-
-       # -----------------
-       # OTE
-       # -----------------
-
-       if ote["valid"]:
-
-           score += 10
-           checks.append("✓ OTE")
-
-       else:
-
-           checks.append("✗ OTE")
+        # Breaker
+        if breaker is not None and len(breaker) > 0:
+            score += 5
+            checks.append("✔ Breaker Block")
+        else:
+            checks.append("✘ Breaker Block")
 
         # Killzone
         if killzone:
-            score += 5
-            checks.append("✓ Killzone")
-
+            score += 3
+            checks.append("✔ Kill Zone")
         else:
-            checks.append("✗ Killzone")
+            checks.append("✘ Kill Zone")
 
         # Session
         if session:
-            score += 5
-            checks.append("✓ Session")
-
+            score += 2
+            checks.append("✔ Session")
         else:
-            checks.append("✗ Session")
-
-        confidence = min(score, 100)
+            checks.append("✘ Session")
 
         return {
-            "confidence": confidence,
             "score": score,
             "checks": checks
         }
