@@ -4,25 +4,29 @@ Atlas SMC Engine
 """
 
 class PremiumDiscountEngine:
-    """
-    Premium / Discount Zone (v1)
-    """
 
     def calculate(self, swing_high, swing_low, price):
 
         if swing_high <= swing_low:
             return {
+                "valid": False,
                 "premium": False,
                 "discount": False,
-                "equilibrium": None
+                "equilibrium": None,
+                "premium_zone": None,
+                "discount_zone": None
             }
 
         eq = (swing_high + swing_low) / 2
 
+        premium = price > eq
+        discount = price < eq
+
         return {
+            "valid": premium or discount,
             "equilibrium": eq,
-            "premium": price > eq,
-            "discount": price < eq,
+            "premium": premium,
+            "discount": discount,
             "premium_zone": (eq, swing_high),
             "discount_zone": (swing_low, eq)
         }
