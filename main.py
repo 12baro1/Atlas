@@ -25,6 +25,8 @@ for symbol in markets:
         print(data["symbol"])
 
         result = engine.analyze(data)
+        if result is None:
+            continue
 
         print(f"\n✓ {symbol}")
 
