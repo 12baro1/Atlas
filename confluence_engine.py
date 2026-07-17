@@ -13,6 +13,7 @@ class ConfluenceEngine:
         confirmation,
         premium_discount,
         liquidity_sweep,
+        breaker,
         killzone,
         session
     ):
@@ -85,6 +86,19 @@ class ConfluenceEngine:
 
         else:
             checks.append("✗ No Sweep")
+
+        # -----------------
+        # Breaker Block
+        # -----------------
+
+       if breaker:
+
+           score += 10
+           checks.append("✓ Breaker Block")
+
+       else:
+
+           checks.append("✗ Breaker Block")
 
         # Killzone
         if killzone:
