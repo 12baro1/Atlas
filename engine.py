@@ -125,6 +125,13 @@ class AtlasEngine:
         h4_labels = self.bos.detect(h4_labels)
         h4_labels = self.choch.detect(h4_labels)
 
+        mtf = self.mtf.detect(
+            weekly_labels,
+            daily_labels,
+            h4_labels,
+            labels
+        )
+
         trend = self.trend.calculate(mtf)
 
         entry = self.entry.generate(
