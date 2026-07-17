@@ -179,6 +179,17 @@ class AtlasEngine:
         analysis["confluence"] = confluence
 
         signal = self.signal.generate(analysis)
+        if signal["signal"] in ["LONG", "SHORT"] and signal["confidence"] >= 80:
+
+            message = self.telegram.format_signal({
+                "signal": signal,
+                "entry": entry,
+                "risk": risk,
+                "rr": rr,
+                "confluence": confluence
+            })
+
+            TelegramBot().send(message)
 
         return {
             "pivots": self.structure_engine.pivots,
