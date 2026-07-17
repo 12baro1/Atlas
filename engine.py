@@ -34,6 +34,7 @@ from config import Config
 from breaker_block_engine import BreakerBlockEngine
 from ote_engine import OTEEngine
 from htf_orderblock_engine import HTFOrderBlockEngine
+from htf_fvg_engine import HTFFVGEngine
 
 class AtlasEngine:
 
@@ -67,6 +68,7 @@ class AtlasEngine:
         self.breaker = BreakerBlockEngine()
         self.ote = OTEEngine()
         self.htf_orderblock = HTFOrderBlockEngine()
+        self.htf_fvg = HTFFVGEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -162,6 +164,14 @@ class AtlasEngine:
             current_price,
             daily_orderblocks,
             h4_orderblocks
+        )
+
+        h4_fvg = self.fvg.detect(h4)
+        daily_fvg = self.fvg.detect(daily)
+
+        htf_fvg = self.htf_fvg.detect(
+            h4_fvg,
+            daily_fvg
         )
 
         confirmation = self.entry_confirmation.confirm(
