@@ -15,15 +15,19 @@ class MTFEngine:
         daily_trend = "BULLISH" if d in ["HH", "HL"] else "BEARISH"
         h4_trend = "BULLISH" if h in ["HH", "HL"] else "BEARISH"
 
+        bulls = [weekly_trend, daily_trend, h4_trend].count("BULLISH")
+        bears = [weekly_trend, daily_trend, h4_trend].count("BEARISH")
+
         entry_signal = "NONE"
 
-        if weekly_trend == daily_trend == h4_trend == "BULLISH":
+        if bulls >= 2:
             entry_signal = "LONG"
 
-        elif weekly_trend == daily_trend == h4_trend == "BEARISH":
+        elif bears >= 2:
             entry_signal = "SHORT"
 
         return {
+            "trend": weekly_trend,
             "weekly": weekly_trend,
             "daily": daily_trend,
             "h4": h4_trend,
