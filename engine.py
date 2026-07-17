@@ -150,6 +150,34 @@ class AtlasEngine:
             labels,
             fvg
         )
+
+        confluence = self.confluence.evaluate(
+            mtf=mtf,
+            trend=trend,
+            entry=entry,
+            confirmation=confirmation,
+            premium_discount=premium_discount,
+            liquidity_sweep=liquidity_sweep,     
+            killzone=killzone,
+            session=session
+        )
+
+        risk = None
+
+        if entry["entry"] is not None and 
+        entry["stop_loss"] is not None:
+            risk = self.risk.calculate(
+                entry=entry["entry"],
+                stop_loss=entry["stop_loss"]
+            )
+
+        rr = None
+
+        if risk is not None:
+            rr = self.rr.evaluate(risk)
+
+        analysis["confluence"] = confluence
+
         signal = self.signal.generate(analysis)
 
         return {
@@ -170,6 +198,9 @@ class AtlasEngine:
             "mtf": mtf,
             "entry": entry,
             "confirmation": confirmation,
+            "confluence": confluence,
+            "risk": risk,
+            "rr": rr,
          }
             
         
