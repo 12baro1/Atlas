@@ -56,3 +56,24 @@ class TelegramEngine:
             msg.append(f"RR Score : {rr['score']}")
 
         return "\n".join(msg)
+        import requests
+
+
+        class TelegramBot:
+
+            def __init__(self):
+
+                self.token = "8451423294:AAFJ8gmvKPk23ierRsh4u5sX3SRIXk2uDWY"
+                self.chat_id = "6378242540"
+
+            def send(self, message):
+
+                url = f"https://api.telegram.org/bot{self.token}/sendMessage"
+
+                requests.post(
+                    url,
+                    data={
+                        "chat_id": self.chat_id,
+                        "text": message
+                    }
+                )
