@@ -1,36 +1,69 @@
 """
 rr_engine.py
-Atlas SMC Engine
+Atlas SMC Engine v2
 """
 
 class RREngine:
-    """
-    Risk / Reward validation engine.
-    """
 
-    def validate(self, entry, stop_loss, take_profit, minimum_rr=3.0):
+    def evaluate(self, risk):
 
-        if entry is None or stop_loss is None or take_profit is None:
-            return {
-                "valid": False,
-                "rr": 0
-            }
+        if risk is None:
+            return None
 
-        risk = abs(entry - stop_loss)
-        reward = abs(take_profit - entry)
+        rr = risk["rr"]
 
-        if risk == 0:
-            return {
-                "valid": False,
-                "rr": 0
-            }
+        if rr >= 5:
+            stars = "★★★★★"
+            quality = "EXCELLENT"
+            score = 100
 
-        rr = reward / risk
+        elif rr >= 4:
+            stars = "★★★★☆"
+            quality = "VERY GOOD"
+            score = 90
+
+        elif rr >= 3:
+            stars = "★★★☆☆"
+            quality = "GOOD"
+            score = 80
+
+        elif rr >= 2:
+            stars = "★★☆☆☆"
+            quality = "NORMAL"
+            score = 65
+
+        elif rr >= 1.5:
+            stars = "★☆☆☆☆"
+            quality = "WEAK"
+            score = 45
+
+        else:
+            stars = "☆☆☆☆☆"
+            quality = "AVOID"
+            score = 20
 
         return {
-            "valid": rr >= minimum_rr,
-            "rr": round(rr, 2),
-            "risk": risk,
-            "reward": reward,
-            "minimum_rr": minimum_rr
+
+            "rr": rr,
+
+            "score": score,
+
+            "quality": quality,
+
+            "stars": stars,
+
+            "entry": risk["entry"],
+
+            "stop_loss": risk["stop_loss"],
+
+            "tp1": risk["tp1"],
+
+            "tp2": risk["tp2"],
+
+            "tp3": risk["tp3"],
+
+            "position_size": risk["position_size"],
+
+            "capital_at_risk": risk["capital_at_risk"]
+
         }
