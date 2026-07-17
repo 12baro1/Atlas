@@ -123,11 +123,8 @@ class AtlasEngine:
             h4_labels,
             labels
         )
-        trend = self.trend.detect(
-            weekly_labels,
-            daily_labels,
-            h4_labels
-        )
+        trend = self.trend.calculate(mtf)
+        
         analysis = {
             "structure": labels,
             "liquidity": liquidity,
