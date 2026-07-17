@@ -14,6 +14,7 @@ class ConfluenceEngine:
         premium_discount,
         liquidity_sweep,
         breaker,
+        ote,
         killzone,
         session
     ):
@@ -99,6 +100,19 @@ class ConfluenceEngine:
        else:
 
            checks.append("✗ Breaker Block")
+
+       # -----------------
+       # OTE
+       # -----------------
+
+       if ote["valid"]:
+
+           score += 10
+           checks.append("✓ OTE")
+
+       else:
+
+           checks.append("✗ OTE")
 
         # Killzone
         if killzone:
