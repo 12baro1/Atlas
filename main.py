@@ -22,6 +22,7 @@ for symbol in markets:
     try:
 
         data = get_market_data(symbol)
+        print(data["symbol"])
 
         result = engine.analyze(data)
 
