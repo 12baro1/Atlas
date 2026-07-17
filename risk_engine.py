@@ -1,11 +1,11 @@
 """
 risk_engine.py
-Atlas Risk Engine v3
+Atlas Risk Engine v4
 """
 
 class RiskEngine:
 
-    def calculate(self, entry, stop_loss):
+    def calculate(self, entry, stop_loss, dynamic_tp=None):
 
         if entry is None or stop_loss is None:
             return None
@@ -15,27 +15,27 @@ class RiskEngine:
         if risk <= 0:
             return None
 
-        account_balance = 1000.0      # Hesap bakiyesi
-        risk_percent = 1.0            # İşlem başına %1 risk
+        account_balance = 1000.0
+        risk_percent = 1.0
 
         capital_at_risk = account_balance * (risk_percent / 100)
         position_size = capital_at_risk / risk
 
-        if entry > stop_loss:
+        side = "LONG" if entry > stop_loss else "SHORT"
 
-            side = "LONG"
+        tp1 = None
+        tp2 = None
+        tp3 = None
+        rr = None
 
-            tp1 = entry + (risk * 1.5)
-            tp2 = entry + (risk * 2.0)
-            tp3 = entry + (risk * 3.0)
+        if dynamic_tp is not None:
 
-        else:
+            tp1 = dynamic_tp.get("tp1")
+            tp2 = dynamic_tp.get("tp2")
+            tp3 = dynamic_tp.get("tp3")
 
-            side = "SHORT"
-
-            tp1 = entry - (risk * 1.5)
-            tp2 = entry - (risk * 2.0)
-            tp3 = entry - (risk * 3.0)
+            if tp3 is not None:
+                rr = round(abs(tp3 - entry) / risk, 2)
 
         return {
 
@@ -51,12 +51,12 @@ class RiskEngine:
 
             "position_size": round(position_size, 4),
 
-            "tp1": round(tp1, 8),
+            "tp1": tp1,
 
-            "tp2": round(tp2, 8),
+            "tp2": tp2,
 
-            "tp3": round(tp3, 8),
+            "tp3": tp3,
 
-            "rr": 3.0
+            "rr": rr
 
         }
