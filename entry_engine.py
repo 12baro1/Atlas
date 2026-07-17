@@ -10,7 +10,9 @@ class EntryEngine:
         result = {
             "valid": False,
             "direction": "NONE",
-            "reason": ""
+            "reason": "",
+            "entry": None,
+            "stop_loss": None
         }
 
         if not mtf.get("valid", False):
@@ -25,6 +27,7 @@ class EntryEngine:
         label = last.get("label")
 
         if mtf["entry"] == "LONG":
+
             if label not in ["HH", "HL"]:
                 result["reason"] = "No bullish structure"
                 return result
@@ -37,12 +40,18 @@ class EntryEngine:
                 result["reason"] = "No bullish Order Block"
                 return result
 
+            last_fvg = fvg[-1]
+            last_ob = orderblocks[-1]
+
             result["valid"] = True
             result["direction"] = "LONG"
+            result["entry"] = last_fvg["to"]      # FVG'nin alt sınırı
+            result["stop_loss"] = last_ob["low"]  # Order Block altı
             result["reason"] = "Bullish setup confirmed"
             return result
 
         if mtf["entry"] == "SHORT":
+
             if label not in ["LL", "LH"]:
                 result["reason"] = "No bearish structure"
                 return result
@@ -55,8 +64,13 @@ class EntryEngine:
                 result["reason"] = "No bearish Order Block"
                 return result
 
+            last_fvg = fvg[-1]
+            last_ob = orderblocks[-1]
+
             result["valid"] = True
             result["direction"] = "SHORT"
+            result["entry"] = last_fvg["from"]     # FVG'nin üst sınırı
+            result["stop_loss"] = last_ob["high"]  # Order Block üstü
             result["reason"] = "Bearish setup confirmed"
             return result
 
