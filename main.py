@@ -48,6 +48,8 @@ for symbol in markets:
         print("Risk :", result["risk"])
 
         print("Entry :", result["entry"]["direction"])
+        print("Entry Price :", result["entry"]["entry"])
+        print("Stop Loss :", result["entry"]["stop_loss"])
         print("Entry Valid :", result["entry"]["valid"])
         print("Reason :", result["entry"]["reason"])
 
