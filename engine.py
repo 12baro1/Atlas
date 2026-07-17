@@ -189,7 +189,7 @@ class AtlasEngine:
                 "rr": rr,
                 "confluence": confluence
             })
-
+            print(message)
             TelegramBot().send(message)
 
         return {
