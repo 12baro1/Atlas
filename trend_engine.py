@@ -1,64 +1,44 @@
 """
 trend_engine.py
-Atlas Trend Engine v2
+Atlas Trend Engine v4
 """
+
 
 class TrendEngine:
 
-    def detect(self, weekly, daily, h4):
+    def calculate(self, mtf):
 
-        def direction(structure):
+        weekly = mtf.get("weekly")
+        daily = mtf.get("daily")
+        h4 = mtf.get("h4")
 
-            if not structure:
-                return "RANGE"
+        bullish = 0
+        bearish = 0
 
-            bullish = 0
-            bearish = 0
+        for tf in [weekly, daily, h4]:
 
-            for item in structure:
+            if tf == "BULLISH":
+                bullish += 1
 
-                if item.get("bos"):
+            elif tf == "BEARISH":
+                bearish += 1
 
-                    if item.get("direction") == "BULLISH":
-                        bullish += 1
+        if bullish >= 2:
+            return {
+                "trend": "BULLISH",
+                "strength": bullish,
+                "score": bullish * 25
+            }
 
-                    elif item.get("direction") == "BEARISH":
-                        bearish += 1
-
-                if item.get("choch"):
-
-                    if item.get("direction") == "BULLISH":
-                        bullish += 2
-
-                    elif item.get("direction") == "BEARISH":
-                        bearish += 2
-
-            if bullish > bearish:
-                return "BULLISH"
-
-            if bearish > bullish:
-                return "BEARISH"
-
-            return "RANGE"
-
-        w = direction(weekly)
-        d = direction(daily)
-        h = direction(h4)
-
-        votes = [w, d, h]
-
-        if votes.count("BULLISH") >= 2:
-            trend = "BULLISH"
-
-        elif votes.count("BEARISH") >= 2:
-            trend = "BEARISH"
-
-        else:
-            trend = "RANGE"
+        if bearish >= 2:
+            return {
+                "trend": "BEARISH",
+                "strength": bearish,
+                "score": bearish * 25
+            }
 
         return {
-            "trend": trend,
-            "weekly": w,
-            "daily": d,
-            "h4": h
+            "trend": "RANGE",
+            "strength": 0,
+            "score": 0
         }
