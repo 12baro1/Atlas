@@ -1,52 +1,82 @@
 """
 trade_manager.py
-Atlas SMC Engine
+Atlas SMC Engine v2
 """
 
 class TradeManager:
-    """
-    Final trade validation.
-    """
 
-    def build(self, signal, entry, confirmation, risk, rr):
+    def build(
+        self,
+        signal,
+        entry,
+        confirmation,
+        confluence=None,
+        risk=None,
+    ):
 
-        if signal.get("signal") == "NONE":
-            return {
-                "valid": False,
-                "reason": "No signal"
-            }
+        score = 0
+        reasons = []
 
-        if not entry.get("valid", False):
-            return {
-                "valid": False,
-                "reason": "Entry rejected"
-            }
+        # Signal
+        if signal["signal"] != "NONE":
+            score += 20
+            reasons.append("Signal")
 
-        if not confirmation.get("confirmed", False):
-            return {
-                "valid": False,
-                "reason": confirmation.get("reason", "Confirmation failed")
-            }
+        # Entry
+        if entry["valid"]:
+            score += 20
+            reasons.append("Entry")
 
-        if not risk.get("valid", False):
-            return {
-                "valid": False,
-                "reason": "Risk invalid"
-            }
+        # Confirmation
+        if confirmation["confirmed"]:
+            score += 20
+            reasons.append("Confirmation")
 
-        if not rr.get("valid", False):
-            return {
-                "valid": False,
-                "reason": "Risk/Reward too low"
-            }
+        # Confluence
+        if confluence:
+
+            c = confluence.get("confidence", 0)
+
+            score += int(c * 0.30)
+
+            if c > 0:
+                reasons.append("Confluence")
+
+        # Risk
+        if risk is not None:
+            score += 10
+            reasons.append("Risk")
+
+        score = min(score, 100)
+
+        if score >= 90:
+            stars = "★★★★★"
+            grade = "A+"
+
+        elif score >= 80:
+            stars = "★★★★☆"
+            grade = "A"
+
+        elif score >= 70:
+            stars = "★★★☆☆"
+            grade = "B"
+
+        elif score >= 60:
+            stars = "★★☆☆☆"
+            grade = "C"
+
+        else:
+            stars = "★☆☆☆☆"
+            grade = "D"
 
         return {
-            "valid": True,
+            "valid": entry["valid"],
+            "score": score,
+            "grade": grade,
+            "stars": stars,
             "direction": signal["signal"],
-            "entry": risk["entry"],
-            "stop_loss": risk["sl"],
-            "tp1": risk["tp1"],
-            "tp2": risk["tp2"],
-            "tp3": risk["tp3"],
-            "rr": rr["rr"]
+            "reasons": reasons,
+            "entry": entry,
+            "confirmation": confirmation,
+            "risk": risk,
         }
