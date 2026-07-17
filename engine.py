@@ -64,6 +64,7 @@ class AtlasEngine:
         self.statistics = StatisticsEngine()
         self.backtest = BacktestEngine()
         self.breaker = BreakerBlockEngine()
+        self.ote = OTEEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -124,42 +125,22 @@ class AtlasEngine:
         h4_labels = self.bos.detect(h4_labels)
         h4_labels = self.choch.detect(h4_labels)
 
-        mtf = self.mtf.detect(
-            weekly_labels,
-            daily_labels,
-            h4_labels,
-            labels
-        )
         trend = self.trend.calculate(mtf)
-        
-        analysis = {
-            "structure": labels,
-            "liquidity": liquidity,
-            "orderblocks": orderblocks,
-            "fvg": fvg,
-            "mtf": mtf,
-            "trend": trend,
-            "ote": ote,
-            "liquidity_sweep": liquidity_sweep,
-            "premium_discount": premium_discount,
-            "killzone": killzone,
-            "session": session,
-            "breaker": breakers,
-        }
+
         entry = self.entry.generate(
             mtf,
             labels,
             fvg,
             orderblocks
         )
-        
+
         ote = self.ote.detect(
             swing_high,
             swing_low,
             current_price,
             entry["direction"]
         )
-        
+
         confirmation = self.entry_confirmation.confirm(
             mtf,
             labels,
@@ -180,13 +161,28 @@ class AtlasEngine:
             session=session
         )
 
+        analysis = {
+            "structure": labels,
+            "liquidity": liquidity,
+            "orderblocks": orderblocks,
+            "fvg": fvg,
+            "mtf": mtf,
+            "trend": trend,
+            "ote": ote,
+            "liquidity_sweep": liquidity_sweep,
+            "premium_discount": premium_discount,
+            "killzone": killzone,
+            "session": session,
+            "breaker": breakers,
+        }
+
         risk = None
 
         if entry["entry"] is not None and entry["stop_loss"] is not None:
-               risk = self.risk.calculate(
-                   entry=entry["entry"],
-                   stop_loss=entry["stop_loss"]
-        )
+            risk = self.risk.calculate(
+                entry=entry["entry"],
+                stop_loss=entry["stop_loss"]
+            )
 
         rr = None
 
@@ -196,41 +192,17 @@ class AtlasEngine:
         analysis["confluence"] = confluence
 
         signal = self.signal.generate(analysis)
+
         if signal["signal"] in ["LONG", "SHORT"] and signal["confidence"] >= 70:
 
             message = self.telegram.format_signal({
-                "symbol": data["symbol"],
+                "symbol": data.get("symbol", "UNKNOWN"),
                 "signal": signal,
                 "entry": entry,
                 "risk": risk,
                 "rr": rr,
                 "confluence": confluence
             })
+
             print(message)
-            TelegramBot().send(message)
-
-        return {
-            "pivots": self.structure_engine.pivots,
-            "structure": labels,
-            "liquidity": liquidity,
-            "orderblocks": orderblocks,
-            "mitigation": orderblocks,
-            "fvg": fvg,
-
-            "liquidity_sweep": liquidity_sweep,
-            "premium_discount": premium_discount,
-            "killzone": killzone,
-            "session": session,
-
-            "signal": signal,
-            "trend": trend,
-            "mtf": mtf,
-            "entry": entry,
-            "confirmation": confirmation,
-            "confluence": confluence,
-            "risk": risk,
-            "rr": rr,
-            "breaker": breakers,
-         }
-            
-        
+            TelegramBot().send(message)                        
