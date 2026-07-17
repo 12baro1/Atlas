@@ -1,56 +1,135 @@
 """
 confluence_engine.py
-Atlas SMC Engine
+Atlas SMC Engine v2
 """
 
 class ConfluenceEngine:
-    """
-    Combines multiple confirmations into a confidence score.
-    """
 
-    def evaluate(self, mtf, entry, confirmation,
-                 premium_discount=None,
-                 liquidity=None,
-                 killzone=None):
+    def evaluate(
+        self,
+        mtf,
+        trend,
+        entry,
+        confirmation,
+        premium_discount,
+        liquidity_sweep,
+        killzone,
+        session,
+    ):
 
         score = 0
-        reasons = []
+        checks = []
 
-        if mtf and mtf.get("valid"):
-            score += 30
-            reasons.append("MTF aligned")
+        # -------------------
+        # MTF
+        # -------------------
 
-        if entry and entry.get("valid"):
+        if mtf.get("valid", False):
             score += 20
-            reasons.append("Entry valid")
+            checks.append("✓ Multi Timeframe")
+        else:
+            checks.append("✗ Multi Timeframe")
 
-        if confirmation and confirmation.get("confirmed"):
-            score += 20
-            reasons.append("Entry confirmed")
+        # -------------------
+        # Trend
+        # -------------------
 
-        if premium_discount:
-            zone = premium_discount.get("zone")
-            direction = mtf.get("entry") if mtf else None
+        if trend == entry["direction"]:
+            score += 15
+            checks.append("✓ Trend")
+        else:
+            checks.append("✗ Trend")
 
-            if direction == "LONG" and zone == "DISCOUNT":
-                score += 15
-                reasons.append("Discount zone")
+        # -------------------
+        # Entry
+        # -------------------
 
-            elif direction == "SHORT" and zone == "PREMIUM":
-                score += 15
-                reasons.append("Premium zone")
+        if entry["valid"]:
+            score += 15
+            checks.append("✓ Entry")
+        else:
+            checks.append("✗ Entry")
 
-        if liquidity:
-            if liquidity.get("buy_side") or liquidity.get("sell_side"):
+        # -------------------
+        # Confirmation
+        # -------------------
+
+        if confirmation["confirmed"]:
+            score += 15
+            checks.append("✓ Confirmation")
+        else:
+            checks.append("✗ Confirmation")
+
+        # -------------------
+        # Premium / Discount
+        # -------------------
+
+        if entry["direction"] == "LONG":
+
+            if premium_discount["discount"]:
                 score += 10
-                reasons.append("Liquidity sweep")
+                checks.append("✓ Discount Zone")
+            else:
+                checks.append("✗ Discount Zone")
 
-        if killzone and killzone.get("active"):
+        elif entry["direction"] == "SHORT":
+
+            if premium_discount["premium"]:
+                score += 10
+                checks.append("✓ Premium Zone")
+            else:
+                checks.append("✗ Premium Zone")
+
+        # -------------------
+        # Liquidity Sweep
+        # -------------------
+
+        if len(liquidity_sweep) > 0:
+            score += 10
+            checks.append("✓ Liquidity Sweep")
+        else:
+            checks.append("✗ Liquidity Sweep")
+
+        # -------------------
+        # Kill Zone
+        # -------------------
+
+        if killzone["active"]:
+            score += 10
+            checks.append("✓ Kill Zone")
+        else:
+            checks.append("✗ Kill Zone")
+
+        # -------------------
+        # Session
+        # -------------------
+
+        if session["active"]:
             score += 5
-            reasons.append("Kill Zone")
+            checks.append("✓ Session")
+        else:
+            checks.append("✗ Session")
+
+        score = min(score, 100)
 
         return {
-            "score": min(score, 100),
-            "confidence": min(score, 100),
-            "reasons": reasons
+            "confidence": score,
+            "checks": checks,
+            "grade": self.grade(score)
         }
+
+    def grade(self, score):
+
+        if score >= 90:
+            return "A+"
+
+        if score >= 80:
+            return "A"
+
+        if score >= 70:
+            return "B"
+
+        if score >= 60:
+            return "C"
+
+        return "D"
