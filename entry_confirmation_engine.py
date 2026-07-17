@@ -1,6 +1,6 @@
 """
 entry_confirmation_engine.py
-Atlas 15M Entry Confirmation
+Atlas SMC Entry Confirmation v2
 """
 
 class EntryConfirmationEngine:
@@ -9,44 +9,55 @@ class EntryConfirmationEngine:
 
         result = {
             "confirmed": False,
-            "reason": ""
+            "score": 0,
+            "reason": "",
+            "checks": []
         }
 
-        if not mtf.get("valid", False):
-            result["reason"] = "MTF not aligned"
-            return result
+        # MTF
+        if mtf.get("valid", False):
+            result["score"] += 30
+            result["checks"].append("✓ MTF aligned")
+        else:
+            result["checks"].append("✗ MTF not aligned")
 
-        if not structure:
-            result["reason"] = "No market structure"
-            return result
+        # Structure
+        if structure:
 
-        last = structure[-1]["label"]
+            last = structure[-1]["label"]
 
-        if mtf["entry"] == "LONG":
-            if last not in ["HH", "HL"]:
-                result["reason"] = "15M bullish CHOCH missing"
-                return result
+            if mtf.get("entry") == "LONG":
 
-            if len(fvg) == 0:
-                result["reason"] = "No FVG"
-                return result
+                if last in ["HH", "HL"]:
+                    result["score"] += 30
+                    result["checks"].append("✓ Bullish Structure")
+                else:
+                    result["checks"].append("✗ Bullish Structure")
 
-            result["confirmed"] = True
-            result["reason"] = "15M LONG confirmed"
-            return result
+            elif mtf.get("entry") == "SHORT":
 
-        if mtf["entry"] == "SHORT":
-            if last not in ["LL", "LH"]:
-                result["reason"] = "15M bearish CHOCH missing"
-                return result
+                if last in ["LL", "LH"]:
+                    result["score"] += 30
+                    result["checks"].append("✓ Bearish Structure")
+                else:
+                    result["checks"].append("✗ Bearish Structure")
 
-            if len(fvg) == 0:
-                result["reason"] = "No FVG"
-                return result
+        else:
+            result["checks"].append("✗ No Structure")
 
-            result["confirmed"] = True
-            result["reason"] = "15M SHORT confirmed"
-            return result
+        # FVG
+        if len(fvg) > 0:
+            result["score"] += 40
+            result["checks"].append("✓ FVG")
+        else:
+            result["checks"].append("✗ No FVG")
 
-        result["reason"] = "No entry"
+        # Final
+        result["confirmed"] = result["score"] >= 60
+
+        if result["confirmed"]:
+            result["reason"] = "Entry confirmed"
+        else:
+            result["reason"] = "Weak confirmation"
+
         return result
