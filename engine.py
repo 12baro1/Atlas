@@ -191,6 +191,7 @@ class AtlasEngine:
             breaker=breakers,
             ote=ote,
             htf_orderblock=htf_orderblock,
+            htf_fvg=htf_fvg,
             killzone=killzone,
             session=session
         )
