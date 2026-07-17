@@ -125,7 +125,7 @@ class AtlasEngine:
         trend = self.trend.detect(
             weekly_labels,
             daily_labels,
-            labels
+            h4_labels
         )
         analysis = {
             "structure": labels,
