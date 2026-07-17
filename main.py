@@ -59,6 +59,17 @@ for symbol in markets:
         print("Entry  :", result["mtf"]["entry"])
         print("Valid  :", result["mtf"]["valid"])
 
+        if "risk" in result and result["risk"]:
+
+            print("----- RISK -----")
+            print("Side :", result["risk"]["side"])
+            print("Entry :", result["risk"]["entry"])
+            print("SL :", result["risk"]["stop_loss"])
+            print("TP1 :", result["risk"]["tp1"])
+            print("TP2 :", result["risk"]["tp2"])
+            print("TP3 :", result["risk"]["tp3"])
+            print("RR :", result["risk"]["rr"])
+
         print("--------------------------------")
 
     except Exception as e:
