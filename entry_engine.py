@@ -60,21 +60,18 @@ class EntryEngine:
             if gap["filled"]:
                 continue
 
-            if gap["type"] == "BULLISH" and direction == "LONG":
+            if direction == "LONG" and gap["type"] == "BULLISH":
                 selected_fvg = gap
                 break
 
-            if gap["type"] == "BEARISH" and direction == "SHORT":
+            if direction == "SHORT" and gap["type"] == "BEARISH":
                 selected_fvg = gap
                 break
 
         if selected_fvg:
-
             result["score"] += 25
             result["checks"].append("✓ FVG")
-
         else:
-
             result["checks"].append("✗ FVG")
 
         # -------------------------
@@ -88,50 +85,60 @@ class EntryEngine:
             if ob["mitigated"]:
                 continue
 
-            if ob["type"] == "BULLISH" and direction == "LONG":
+            if direction == "LONG" and ob["type"] == "BULLISH":
                 selected_ob = ob
                 break
 
-            if ob["type"] == "BEARISH" and direction == "SHORT":
+            if direction == "SHORT" and ob["type"] == "BEARISH":
                 selected_ob = ob
                 break
 
         if selected_ob:
-
             result["score"] += 25
             result["checks"].append("✓ Order Block")
-
         else:
-
             result["checks"].append("✗ Order Block")
 
         # -------------------------
         # Entry
         # -------------------------
 
-    if direction == "LONG":
+        if direction == "LONG":
 
-        if selected_fvg:
-            result["entry"] = selected_fvg["to"]
-        elif selected_ob:
-            result["entry"] = selected_ob["high"]
+            if selected_fvg:
+                result["entry"] = selected_fvg["to"]
+            elif selected_ob:
+                result["entry"] = selected_ob["high"]
 
-        if selected_ob:
-        result["stop_loss"] = selected_ob["low"]
-        elif selected_fvg:
-            result["stop_loss"] = selected_fvg["from"]
+            if selected_ob:
+                result["stop_loss"] = selected_ob["low"]
+            elif selected_fvg:
+                result["stop_loss"] = selected_fvg["from"]
 
-    else:
+        else:
 
-        if selected_fvg:
-            result["entry"] = selected_fvg["from"]
-        elif selected_ob:
-            result["entry"] = selected_ob["low"]
+            if selected_fvg:
+                result["entry"] = selected_fvg["from"]
+            elif selected_ob:
+                result["entry"] = selected_ob["low"]
 
-        if selected_ob:
-            result["stop_loss"] = selected_ob["high"]
-        elif selected_fvg:
-            result["stop_loss"] = selected_fvg["to"]
+            if selected_ob:
+                result["stop_loss"] = selected_ob["high"]
+            elif selected_fvg:
+                result["stop_loss"] = selected_fvg["to"]
 
         if result["entry"] is not None and result["stop_loss"] is not None:
-               result["score"] += 30
+            result["score"] += 30
+
+        result["valid"] = (
+            result["score"] >= 50
+            and result["entry"] is not None
+            and result["stop_loss"] is not None
+        )
+
+        if result["valid"]:
+            result["reason"] = "High probability setup"
+        else:
+            result["reason"] = "Weak setup"
+
+        return result
