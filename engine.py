@@ -177,7 +177,7 @@ class AtlasEngine:
         analysis["confluence"] = confluence
 
         signal = self.signal.generate(analysis)
-        if signal["signal"] in ["LONG", "SHORT"] and signal["confidence"] >= 60:
+        if signal["signal"] in ["LONG", "SHORT"] and signal["confidence"] >= 70:
 
             message = self.telegram.format_signal({
                 "signal": signal,
