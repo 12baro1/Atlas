@@ -30,9 +30,16 @@ class Config:
     MAX_SYMBOLS = 1000
 
     # Telegram
-    TELEGRAM_ENABLED = False
-    TELEGRAM_BOT_TOKEN = ""
-    TELEGRAM_CHAT_ID = ""
+    TELEGRAM_ENABLED = True
+    TELEGRAM_BOT_TOKEN = "8451423294:AAFJ8gmvKPk23ierRsh4u5sX3SRIXk2uDWY"
+    TELEGRAM_CHAT_ID = ""   # Boş bırakılacak
+
+    # Yetkilendirme
+    BOT_PASSWORD = "313131"
+    ADMIN_CHAT_ID = 6378242540
+
+    # Kullanıcı kayıt dosyası
+    CHAT_IDS_FILE = "chat_ids.json"
 
     # Backtest
     INITIAL_BALANCE = 10000
