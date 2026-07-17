@@ -23,8 +23,8 @@ class DynamicTPEngine:
                     targets.append(item["price"])
 
             for item in fvg:
-                if item["high"] > entry:
-                    targets.append(item["high"])
+                if item["to"] > entry:
+                    targets.append(item["to"])
 
             for item in orderblocks:
                 if item["high"] > entry:
@@ -39,8 +39,8 @@ class DynamicTPEngine:
                     targets.append(item["price"])
 
             for item in fvg:
-                if item["low"] < entry:
-                    targets.append(item["low"])
+                if item["from"] < entry:
+                    targets.append(item["from"])
 
             for item in orderblocks:
                 if item["low"] < entry:
