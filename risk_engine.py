@@ -1,6 +1,6 @@
 """
 risk_engine.py
-Atlas Risk Engine v2
+Atlas Risk Engine v3
 """
 
 class RiskEngine:
@@ -19,35 +19,34 @@ class RiskEngine:
 
             side = "LONG"
 
-            tp1 = entry + risk * 2
-            tp2 = entry + risk * 3
-            tp3 = entry + risk * 5
+            tp1 = entry + (risk * 1.5)
+            tp2 = entry + (risk * 2.0)
+            tp3 = entry + (risk * 3.0)
 
         else:
 
             side = "SHORT"
 
-            tp1 = entry - risk * 2
-            tp2 = entry - risk * 3
-            tp3 = entry - risk * 5
+            tp1 = entry - (risk * 1.5)
+            tp2 = entry - (risk * 2.0)
+            tp3 = entry - (risk * 3.0)
 
         return {
 
             "side": side,
 
-            "entry": entry,
+            "entry": round(entry, 8),
 
-            "stop_loss": stop_loss,
+            "stop_loss": round(stop_loss, 8),
 
-            "risk": risk,
+            "risk": round(risk, 8),
 
-            "tp1": tp1,
+            "tp1": round(tp1, 8),
 
-            "tp2": tp2,
+            "tp2": round(tp2, 8),
 
-            "tp3": tp3,
+            "tp3": round(tp3, 8),
 
-            "rr": 2.0
+            "rr": 3.0
 
         }
-        
