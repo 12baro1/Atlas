@@ -33,6 +33,7 @@ from backtest_engine import BacktestEngine
 from config import Config
 from breaker_block_engine import BreakerBlockEngine
 from ote_engine import OTEEngine
+from htf_orderblock_engine import HTFOrderBlockEngine
 
 class AtlasEngine:
 
@@ -65,6 +66,7 @@ class AtlasEngine:
         self.backtest = BacktestEngine()
         self.breaker = BreakerBlockEngine()
         self.ote = OTEEngine()
+        self.htf_orderblock = HTFOrderBlockEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -119,11 +121,19 @@ class AtlasEngine:
         daily_labels = label_swings(daily_pivots)
         daily_labels = self.bos.detect(daily_labels)
         daily_labels = self.choch.detect(daily_labels)
+        daily_orderblocks = self.orderblocks.detect(
+            daily,
+            daily_labels
+        )
 
         h4_pivots = self.structure_engine.find_pivots(h4)
         h4_labels = label_swings(h4_pivots)
         h4_labels = self.bos.detect(h4_labels)
         h4_labels = self.choch.detect(h4_labels)
+        h4_orderblocks = self.orderblocks.detect(
+            h4,
+            h4_labels
+        )
 
         mtf = self.mtf.detect(
             weekly_labels,
@@ -148,6 +158,12 @@ class AtlasEngine:
             entry["direction"]
         )
 
+        htf_orderblock = self.htf_orderblock.detect(
+            current_price,
+            daily_orderblocks,
+            h4_orderblocks
+        )
+
         confirmation = self.entry_confirmation.confirm(
             mtf,
             labels,
@@ -164,6 +180,7 @@ class AtlasEngine:
             liquidity_sweep=liquidity_sweep,
             breaker=breakers,
             ote=ote,
+            htf_orderblock=htf_orderblock,
             killzone=killzone,
             session=session
         )
@@ -183,6 +200,7 @@ class AtlasEngine:
             "killzone": killzone,
             "session": session,
             "breaker": breakers,
+            "htf_orderblock": htf_orderblock,
         }
 
         risk = None
