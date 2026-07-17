@@ -35,6 +35,7 @@ from breaker_block_engine import BreakerBlockEngine
 from ote_engine import OTEEngine
 from htf_orderblock_engine import HTFOrderBlockEngine
 from htf_fvg_engine import HTFFVGEngine
+from dynamic_tp_engine import DynamicTPEngine
 
 class AtlasEngine:
 
@@ -69,6 +70,7 @@ class AtlasEngine:
         self.ote = OTEEngine()
         self.htf_orderblock = HTFOrderBlockEngine()
         self.htf_fvg = HTFFVGEngine()
+        self.dynamic_tp = DynamicTPEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -174,6 +176,14 @@ class AtlasEngine:
             daily_fvg
         )
 
+        dynamic_tp = self.dynamic_tp.calculate(
+            direction=entry["direction"],
+            entry=entry["entry"],
+            liquidity=liquidity,
+            fvg=fvg,
+            orderblocks=orderblocks
+        )
+
         confirmation = self.entry_confirmation.confirm(
             mtf,
             labels,
@@ -213,6 +223,7 @@ class AtlasEngine:
             "breaker": breakers,
             "htf_orderblock": htf_orderblock,
             "htf_fvg": htf_fvg,
+            "dynamic_tp": dynamic_tp,
         }
 
         risk = None
@@ -240,6 +251,7 @@ class AtlasEngine:
                 "entry": entry,
                 "risk": risk,
                 "rr": rr,
+                "dynamic_tp": dynamic_tp,
                 "confluence": confluence
             })
 
