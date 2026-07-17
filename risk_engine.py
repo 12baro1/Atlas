@@ -15,11 +15,11 @@ class RiskEngine:
         if risk <= 0:
             return None
 
-        account_size = 1000.0
-        risk_percent = 1.0
-        risk_amount = account_size * (risk_percent / 100)
+        account_balance = 1000.0      # Hesap bakiyesi
+        risk_percent = 1.0            # İşlem başına %1 risk
 
-        position_size = risk_amount / risk
+        capital_at_risk = account_balance * (risk_percent / 100)
+        position_size = capital_at_risk / risk
 
         if entry > stop_loss:
 
@@ -47,7 +47,7 @@ class RiskEngine:
 
             "risk": round(risk, 8),
 
-            "risk_amount": round(risk_amount, 2),
+            "capital_at_risk": round(capital_at_risk, 2),
 
             "position_size": round(position_size, 4),
 
