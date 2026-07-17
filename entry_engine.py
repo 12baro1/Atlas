@@ -109,25 +109,29 @@ class EntryEngine:
         # Entry
         # -------------------------
 
-        if selected_fvg and selected_ob:
+    if direction == "LONG":
 
-            if direction == "LONG":
+        if selected_fvg:
+            result["entry"] = selected_fvg["to"]
+        elif selected_ob:
+            result["entry"] = selected_ob["high"]
 
-                result["entry"] = selected_fvg["to"]
-                result["stop_loss"] = selected_ob["low"]
+        if selected_ob:
+        result["stop_loss"] = selected_ob["low"]
+        elif selected_fvg:
+            result["stop_loss"] = selected_fvg["from"]
 
-            else:
+    else:
 
-                result["entry"] = selected_fvg["from"]
-                result["stop_loss"] = selected_ob["high"]
+        if selected_fvg:
+            result["entry"] = selected_fvg["from"]
+        elif selected_ob:
+            result["entry"] = selected_ob["low"]
 
-            result["score"] += 30
+        if selected_ob:
+            result["stop_loss"] = selected_ob["high"]
+        elif selected_fvg:
+            result["stop_loss"] = selected_fvg["to"]
 
-        result["valid"] = result["score"] >= 60
-
-        if result["valid"]:
-            result["reason"] = "High probability setup"
-        else:
-            result["reason"] = "Weak setup"
-
-        return result
+        if result["entry"] is not None and result["stop_loss"] is not None:
+               result["score"] += 30
