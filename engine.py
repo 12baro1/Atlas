@@ -164,12 +164,11 @@ class AtlasEngine:
 
         risk = None
 
-        if entry["entry"] is not None and 
-        entry["stop_loss"] is not None:
-            risk = self.risk.calculate(
-                entry=entry["entry"],
-                stop_loss=entry["stop_loss"]
-            )
+        if entry["entry"] is not None and entry["stop_loss"] is not None:
+               risk = self.risk.calculate(
+                   entry=entry["entry"],
+                   stop_loss=entry["stop_loss"]
+        )
 
         rr = None
 
