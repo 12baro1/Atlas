@@ -211,6 +211,7 @@ class AtlasEngine:
             "session": session,
             "breaker": breakers,
             "htf_orderblock": htf_orderblock,
+            "htf_fvg": htf_fvg,
         }
 
         risk = None
