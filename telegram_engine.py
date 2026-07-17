@@ -3,6 +3,9 @@ telegram_engine.py
 Atlas SMC Engine v2
 """
 
+import requests
+
+
 class TelegramEngine:
 
     def format_signal(self, result):
@@ -22,58 +25,54 @@ class TelegramEngine:
         msg.append(f"Grade : {signal['grade']}")
         msg.append(f"Stars : {signal['stars']}")
         msg.append(f"Confidence : {signal['confidence']}%")
-
         msg.append("")
 
         if confluence:
-
             msg.append("SMC CHECKS")
-
             for item in confluence["checks"]:
                 msg.append(item)
-
             msg.append("")
 
-        if entry["entry"] is not None:
+        msg.append(f"Direction : {entry['direction']}")
+        msg.append(f"Valid : {entry['valid']}")
 
+        if entry["entry"] is not None:
             msg.append(f"Entry : {entry['entry']}")
             msg.append(f"Stop : {entry['stop_loss']}")
 
-            msg.append("")
+        msg.append("")
 
         if risk:
-
             msg.append(f"TP1 : {risk['tp1']}")
             msg.append(f"TP2 : {risk['tp2']}")
             msg.append(f"TP3 : {risk['tp3']}")
-
             msg.append("")
 
         if rr:
-
             msg.append(f"RR : {rr['rr']}")
             msg.append(f"Quality : {rr['quality']}")
             msg.append(f"RR Score : {rr['score']}")
 
         return "\n".join(msg)
-        import requests
 
 
-        class TelegramBot:
+class TelegramBot:
 
-            def __init__(self):
+    def __init__(self):
 
-                self.token = "8451423294:AAFJ8gmvKPk23ierRsh4u5sX3SRIXk2uDWY"
-                self.chat_id = "6378242540"
+        self.token = "8451423294:AAFJ8gmvKPk23ierRsh4u5sX3SRIXk2uDWY"
 
-            def send(self, message):
 
-                url = f"https://api.telegram.org/bot{self.token}/sendMessage"
+        self.chat_id = "6378242540"
 
-                requests.post(
-                    url,
-                    data={
-                        "chat_id": self.chat_id,
-                        "text": message
-                    }
-                )
+    def send(self, message):
+
+        url = f"https://api.telegram.org/bot{self.token}/sendMessage"
+
+        requests.post(
+            url,
+            data={
+                "chat_id": self.chat_id,
+                "text": message
+            }
+        )
