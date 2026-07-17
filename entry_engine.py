@@ -1,6 +1,6 @@
 """
 entry_engine.py
-Atlas SMC Entry Engine v2
+Atlas Entry Engine v5
 """
 
 class EntryEngine:
@@ -50,14 +50,14 @@ class EntryEngine:
                     result["checks"].append("✗ Bearish Structure")
 
         # -------------------------
-        # FVG
+        # Best FVG
         # -------------------------
 
         selected_fvg = None
 
         for gap in reversed(fvg):
 
-            if gap["filled"]:
+            if gap.get("filled", False):
                 continue
 
             if direction == "LONG" and gap["type"] == "BULLISH":
@@ -70,19 +70,19 @@ class EntryEngine:
 
         if selected_fvg:
             result["score"] += 25
-            result["checks"].append("✓ FVG")
+            result["checks"].append("✓ Fresh FVG")
         else:
             result["checks"].append("✗ FVG")
 
         # -------------------------
-        # Order Block
+        # Best Order Block
         # -------------------------
 
         selected_ob = None
 
         for ob in reversed(orderblocks):
 
-            if ob["mitigated"]:
+            if ob.get("mitigated", False):
                 continue
 
             if direction == "LONG" and ob["type"] == "BULLISH":
@@ -95,7 +95,7 @@ class EntryEngine:
 
         if selected_ob:
             result["score"] += 25
-            result["checks"].append("✓ Order Block")
+            result["checks"].append("✓ Fresh Order Block")
         else:
             result["checks"].append("✗ Order Block")
 
@@ -127,11 +127,27 @@ class EntryEngine:
             elif selected_fvg:
                 result["stop_loss"] = selected_fvg["to"]
 
-        if result["entry"] is not None and result["stop_loss"] is not None:
-            result["score"] += 30
+        # -------------------------
+        # Risk Filter
+        # -------------------------
+
+        if (
+            result["entry"] is not None
+            and result["stop_loss"] is not None
+        ):
+
+            distance = abs(
+                result["entry"] -
+                result["stop_loss"]
+            )
+
+            if distance > 0:
+                result["score"] += 30
+            else:
+                result["checks"].append("✗ Invalid SL")
 
         result["valid"] = (
-            result["score"] >= 50
+            result["score"] >= 60
             and result["entry"] is not None
             and result["stop_loss"] is not None
         )
