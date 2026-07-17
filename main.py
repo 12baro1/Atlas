@@ -44,7 +44,8 @@ for symbol in markets:
         print("Checks:")
         for check in result["signal"]["checks"]:
             print("  -", check)
-        print("Trend :", result["trend"])
+        print("Trend :", result["trend"]["trend"])
+        print("Risk :", result["risk"])
 
         print("Entry :", result["entry"]["direction"])
         print("Entry Valid :", result["entry"]["valid"])
