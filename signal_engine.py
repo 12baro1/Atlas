@@ -1,47 +1,67 @@
 """
 signal_engine.py
-Atlas SMC Engine
+Atlas SMC Engine v2
 """
 
 class SignalEngine:
 
     def generate(self, analysis):
 
-        mtf = analysis["mtf"]
+        confluence = analysis["confluence"]
 
-        if not mtf["valid"]:
-            return {
-                "signal": "NONE",
-                "score": 0,
-                "reasons": ["MTF not aligned"]
-            }
+        confidence = confluence["confidence"]
 
-        if mtf["entry"] == "LONG":
-            return {
-                "signal": "LONG",
-                "score": 100,
-                "reasons": [
-                    "Weekly aligned",
-                    "Daily aligned",
-                    "H4 aligned",
-                    "LONG setup"
-                ]
-            }
+        signal = analysis["mtf"]["entry"]
 
-        if mtf["entry"] == "SHORT":
-            return {
-                "signal": "SHORT",
-                "score": -100,
-                "reasons": [
-                    "Weekly aligned",
-                    "Daily aligned",
-                    "H4 aligned",
-                    "SHORT setup"
-                ]
-            }
+        if signal not in ["LONG", "SHORT"]:
+            signal = "NONE"
+
+        if confidence >= 90:
+            stars = "★★★★★"
+            grade = "A+"
+
+        elif confidence >= 80:
+            stars = "★★★★☆"
+            grade = "A"
+
+        elif confidence >= 70:
+            stars = "★★★☆☆"
+            grade = "B"
+
+        elif confidence >= 60:
+            stars = "★★☆☆☆"
+            grade = "C"
+
+        else:
+            stars = "★☆☆☆☆"
+            grade = "D"
+
+        strength = self.strength(confidence)
 
         return {
-            "signal": "NONE",
-            "score": 0,
-            "reasons": []
+            "signal": signal,
+            "confidence": confidence,
+            "grade": grade,
+            "stars": stars,
+            "strength": strength,
+            "checks": confluence["checks"]
         }
+
+    def strength(self, confidence):
+
+        if confidence >= 90:
+            return "VERY STRONG"
+
+        if confidence >= 80:
+            return "STRONG"
+
+        if confidence >= 70:
+            return "GOOD"
+
+        if confidence >= 60:
+            return "NORMAL"
+
+        if confidence >= 40:
+            return "WEAK"
+
+        return "VERY WEAK"
