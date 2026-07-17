@@ -176,13 +176,21 @@ class AtlasEngine:
             daily_fvg
         )
 
-        dynamic_tp = self.dynamic_tp.calculate(
-            direction=entry["direction"],
-            entry=entry["entry"],
-            liquidity=liquidity,
-            fvg=fvg,
-            orderblocks=orderblocks
-        )
+        if entry["entry"] is not None:
+            dynamic_tp = self.dynamic_tp.calculate(
+                direction=entry["direction"],
+                entry=entry["entry"],
+                liquidity=liquidity,
+                fvg=fvg,
+                orderblocks=orderblocks
+            )
+        else:
+            dynamic_tp = {
+                "tp1": None,
+                "tp2": None,
+                "tp3": None
+            }
+        
 
         confirmation = self.entry_confirmation.confirm(
             mtf,
