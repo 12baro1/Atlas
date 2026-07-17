@@ -32,6 +32,7 @@ from statistics_engine import StatisticsEngine
 from backtest_engine import BacktestEngine
 from config import Config
 from breaker_block_engine import BreakerBlockEngine
+from ote_engine import OTEEngine
 
 class AtlasEngine:
 
@@ -138,6 +139,7 @@ class AtlasEngine:
             "fvg": fvg,
             "mtf": mtf,
             "trend": trend,
+            "ote": ote,
             "liquidity_sweep": liquidity_sweep,
             "premium_discount": premium_discount,
             "killzone": killzone,
@@ -150,6 +152,14 @@ class AtlasEngine:
             fvg,
             orderblocks
         )
+        
+        ote = self.ote.detect(
+            swing_high,
+            swing_low,
+            current_price,
+            entry["direction"]
+        )
+        
         confirmation = self.entry_confirmation.confirm(
             mtf,
             labels,
