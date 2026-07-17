@@ -16,6 +16,7 @@ class ConfluenceEngine:
         liquidity_sweep,
         ote,
         htf_orderblock,
+        htf_fvg,
         killzone,
         session,
         breaker=None
@@ -91,6 +92,13 @@ class ConfluenceEngine:
             checks.append("✔ HTF Order Block")
         else:
             checks.append("✘ HTF Order Block")
+
+        # HTF FVG
+        if htf_fvg["valid"]:
+            score += 8
+            checks.append("✔ HTF FVG")
+        else:
+            checks.append("✘ HTF FVG")
 
         # Killzone
         if killzone:
