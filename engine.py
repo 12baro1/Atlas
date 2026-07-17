@@ -256,4 +256,11 @@ class AtlasEngine:
             })
 
             print(message)
-            TelegramBot().send(message)                        
+            TelegramBot().send(message)     
+            return {
+                "analysis": analysis,
+                "signal": signal,
+                "risk": risk,
+                "rr": rr,
+                "dynamic_tp": dynamic_tp
+            }
