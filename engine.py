@@ -173,7 +173,9 @@ class AtlasEngine:
             entry=entry,
             confirmation=confirmation,
             premium_discount=premium_discount,
-            liquidity_sweep=liquidity_sweep,     
+            liquidity_sweep=liquidity_sweep,
+            breaker=breakers,
+            ote=ote,
             killzone=killzone,
             session=session
         )
