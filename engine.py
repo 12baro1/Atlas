@@ -148,7 +148,8 @@ class AtlasEngine:
         confirmation = self.entry_confirmation.confirm(
             mtf,
             labels,
-            fvg
+            fvg,
+            entry
         )
 
         confluence = self.confluence.evaluate(
