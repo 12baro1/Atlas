@@ -27,7 +27,7 @@ class ConfluenceEngine:
 
         # Multi Timeframe
         if mtf["valid"]:
-            score += 15
+            score += 10
             checks.append("✔ Multi Timeframe")
         else:
             checks.append("✘ Multi Timeframe")
@@ -46,21 +46,21 @@ class ConfluenceEngine:
 
         # Entry
         if entry["valid"]:
-            score += 20
+            score += 15
             checks.append("✔ Entry")
         else:
             checks.append("✘ Entry")
 
         # Confirmation
         if confirmation["confirmed"]:
-            score += 15
+            score += 10
             checks.append("✔ Confirmation")
         else:
             checks.append("✘ Confirmation")
 
         # Premium / Discount
         if premium_discount["valid"]:
-            score += 10
+            score += 8
             checks.append("✔ Premium Zone")
         else:
             checks.append("✘ Premium Zone")
@@ -74,7 +74,7 @@ class ConfluenceEngine:
 
         # OTE
         if ote["valid"]:
-            score += 10
+            score += 8
             checks.append("✔ OTE")
         else:
             checks.append("✘ OTE")
@@ -102,7 +102,7 @@ class ConfluenceEngine:
 
         # Killzone
         if killzone:
-            score += 3
+            score += 2
             checks.append("✔ Kill Zone")
         else:
             checks.append("✘ Kill Zone")
