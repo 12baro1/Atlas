@@ -5,59 +5,48 @@ Atlas SMC Entry Confirmation v2
 
 class EntryConfirmationEngine:
 
-    def confirm(self, mtf, structure, fvg):
+    def confirm(self, mtf, structure, fvg, entry):
 
         result = {
             "confirmed": False,
-            "score": 0,
-            "reason": "",
-            "checks": []
+            "reason": "Weak confirmation"
         }
 
-        # MTF
-        if mtf.get("valid", False):
-            result["score"] += 30
-            result["checks"].append("✓ MTF aligned")
-        else:
-            result["checks"].append("✗ MTF not aligned")
+        if not entry["valid"]:
+            result["reason"] = "Entry not valid"
+            return result
 
-        # Structure
-        if structure:
+        if not mtf["valid"]:
+            result["reason"] = "MTF not aligned"
+            return result
 
-            last = structure[-1]["label"]
+        if len(structure) == 0:
+            result["reason"] = "No structure"
+            return result
 
-            if mtf.get("entry") == "LONG":
+        last = structure[-1]["label"]
 
-                if last in ["HH", "HL"]:
-                    result["score"] += 30
-                    result["checks"].append("✓ Bullish Structure")
-                else:
-                    result["checks"].append("✗ Bullish Structure")
+        if entry["direction"] == "LONG":
 
-            elif mtf.get("entry") == "SHORT":
+            if last not in ["HH", "HL"]:
+                result["reason"] = "Bullish CHOCH missing"
+                return result
 
-                if last in ["LL", "LH"]:
-                    result["score"] += 30
-                    result["checks"].append("✓ Bearish Structure")
-                else:
-                    result["checks"].append("✗ Bearish Structure")
+        elif entry["direction"] == "SHORT":
+
+            if last not in ["LL", "LH"]:
+                result["reason"] = "Bearish CHOCH missing"
+                return result
 
         else:
-            result["checks"].append("✗ No Structure")
+            result["reason"] = "No direction"
+            return result
 
-        # FVG
-        if len(fvg) > 0:
-            result["score"] += 40
-            result["checks"].append("✓ FVG")
-        else:
-            result["checks"].append("✗ No FVG")
+        if len(fvg) == 0:
+            result["reason"] = "No active FVG"
+            return result
 
-        # Final
-        result["confirmed"] = result["score"] >= 60
-
-        if result["confirmed"]:
-            result["reason"] = "Entry confirmed"
-        else:
-            result["reason"] = "Weak confirmation"
+        result["confirmed"] = True
+        result["reason"] = "Entry confirmed"
 
         return result
