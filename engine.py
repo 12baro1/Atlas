@@ -31,6 +31,7 @@ from telegram_engine import TelegramEngine
 from statistics_engine import StatisticsEngine
 from backtest_engine import BacktestEngine
 from config import Config
+from breaker_block_engine import BreakerBlockEngine
 
 class AtlasEngine:
 
@@ -61,6 +62,7 @@ class AtlasEngine:
         self.telegram = TelegramEngine()
         self.statistics = StatisticsEngine()
         self.backtest = BacktestEngine()
+        self.breaker = BreakerBlockEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -84,6 +86,10 @@ class AtlasEngine:
         liquidity = self.liquidity.detect(labels)
         orderblocks = self.orderblocks.detect(candles, labels)
         orderblocks = self.mitigation.detect(candles, orderblocks)
+        breakers = self.breaker.detect(
+            candles,
+            orderblocks
+        )
         fvg = self.fvg.detect(candles)
         liquidity_sweep = self.liquidity_sweep.detect(candles)
 
@@ -136,6 +142,7 @@ class AtlasEngine:
             "premium_discount": premium_discount,
             "killzone": killzone,
             "session": session,
+            "breaker": breakers,
         }
         entry = self.entry.generate(
             mtf,
@@ -211,6 +218,7 @@ class AtlasEngine:
             "confluence": confluence,
             "risk": risk,
             "rr": rr,
+            "breaker": breakers,
          }
             
         
