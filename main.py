@@ -36,7 +36,14 @@ for symbol in markets:
         print("Mitigation :", len(result["mitigation"]))
         print("FVG :", len(result["fvg"]))
         print("Signal :", result["signal"]["signal"])
-        print("Score :", result["signal"]["score"])
+        print("Confidence :", result["signal"]["confidence"])
+        print("Grade :", result["signal"]["grade"])
+        print("Stars :", result["signal"]["stars"])
+        print("Strength :", result["signal"]["strength"])
+
+        print("Checks:")
+        for check in result["signal"]["checks"]:
+            print("  -", check)
         print("Trend :", result["trend"])
 
         print("Entry :", result["entry"]["direction"])
