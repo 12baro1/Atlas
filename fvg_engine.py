@@ -1,6 +1,6 @@
 """
 fvg_engine.py
-Atlas SMC Engine
+Atlas FVG Engine v4
 """
 
 class FVGEngine:
@@ -9,48 +9,89 @@ class FVGEngine:
 
         gaps = []
 
+        if len(candles) < 3:
+            return gaps
+
         for i in range(2, len(candles)):
 
-            c1 = candles[i - 2]
-            c3 = candles[i]
+            left = candles[i - 2]
+            mid = candles[i - 1]
+            right = candles[i]
 
+            # -------------------------
             # Bullish FVG
-            if c1.high < c3.low:
+            # -------------------------
 
-                filled = False
+            if left.high < right.low:
 
-                for c in candles[i + 1:]:
+                size = right.low - left.high
 
-                    if c.low <= c1.high:
-                        filled = True
-                        break
+                strength = 0
+
+                if size > 0:
+                    strength += 50
+
+                if mid.close > mid.open:
+                    strength += 20
+
+                if right.close > right.open:
+                    strength += 20
+
+                if right.close > mid.high:
+                    strength += 10
 
                 gaps.append({
                     "type": "BULLISH",
-                    "from": c1.high,
-                    "to": c3.low,
-                    "index": i,
-                    "filled": filled
+                    "from": left.high,
+                    "to": right.low,
+                    "size": size,
+                    "strength": strength,
+                    "filled": False,
+                    "index": i
                 })
 
+            # -------------------------
             # Bearish FVG
-            elif c1.low > c3.high:
+            # -------------------------
 
-                filled = False
+            elif left.low > right.high:
 
-                for c in candles[i + 1:]:
+                size = left.low - right.high
 
-                    if c.high >= c1.low:
-                        filled = True
-                        break
+                strength = 0
+
+                if size > 0:
+                    strength += 50
+
+                if mid.close < mid.open:
+                    strength += 20
+
+                if right.close < right.open:
+                    strength += 20
+
+                if right.close < mid.low:
+                    strength += 10
 
                 gaps.append({
                     "type": "BEARISH",
-                    "from": c3.high,
-                    "to": c1.low,
-                    "index": i,
-                    "filled": filled
+                    "from": right.high,
+                    "to": left.low,
+                    "size": size,
+                    "strength": strength,
+                    "filled": False,
+                    "index": i
                 })
 
-        # Sadece aktif FVG'leri döndür
-        return [gap for gap in gaps if not gap["filled"]]
+        # -------------------------
+        # Mitigation Check
+        # -------------------------
+
+        for gap in gaps:
+
+            for candle in candles[gap["index"] + 1:]:
+
+                if candle.high >= gap["from"] and candle.low <= gap["to"]:
+                    gap["filled"] = True
+                    break
+
+        return gaps
