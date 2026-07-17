@@ -240,6 +240,7 @@ class AtlasEngine:
             risk = self.risk.calculate(
                 entry=entry["entry"],
                 stop_loss=entry["stop_loss"]
+                dynamic_tp=dynamic_tp
             )
 
         rr = None
