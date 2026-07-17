@@ -180,6 +180,7 @@ class AtlasEngine:
         if signal["signal"] in ["LONG", "SHORT"] and signal["confidence"] >= 70:
 
             message = self.telegram.format_signal({
+                "symbol": data["symbol"],
                 "signal": signal,
                 "entry": entry,
                 "risk": risk,
