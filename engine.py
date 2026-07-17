@@ -239,7 +239,7 @@ class AtlasEngine:
         if entry["entry"] is not None and entry["stop_loss"] is not None:
             risk = self.risk.calculate(
                 entry=entry["entry"],
-                stop_loss=entry["stop_loss"]
+                stop_loss=entry["stop_loss"],
                 dynamic_tp=dynamic_tp
             )
 
