@@ -1,58 +1,92 @@
 """
 statistics_engine.py
-Atlas SMC Engine
+Atlas SMC Engine v2
 """
 
 class StatisticsEngine:
-    """
-    Tracks strategy statistics.
-    """
 
     def __init__(self):
-        self.total = 0
-        self.wins = 0
-        self.losses = 0
-        self.total_rr = 0.0
-        self.best_win_streak = 0
-        self.current_win_streak = 0
 
-    def add_trade(self, result, rr=0.0):
+        self.total = 0
+
+        self.long = 0
+        self.short = 0
+
+        self.win = 0
+        self.loss = 0
+
+        self.total_rr = 0
+
+        self.total_confidence = 0
+
+    def record(self, trade):
+
+        if trade is None:
+            return
 
         self.total += 1
 
-        if result == "WIN":
-            self.wins += 1
-            self.current_win_streak += 1
-            self.best_win_streak = max(
-                self.best_win_streak,
-                self.current_win_streak
-            )
-        else:
-            self.losses += 1
-            self.current_win_streak = 0
+        if trade["direction"] == "LONG":
+            self.long += 1
 
-        self.total_rr += rr
+        elif trade["direction"] == "SHORT":
+            self.short += 1
+
+        if trade.get("rr"):
+
+            self.total_rr += trade["rr"]["rr"]
+
+        if trade.get("signal"):
+
+            self.total_confidence += trade["signal"]["confidence"]
+
+    def record_result(self, win):
+
+        if win:
+            self.win += 1
+        else:
+            self.loss += 1
 
     def summary(self):
 
-        win_rate = 0
+        if self.total == 0:
 
-        if self.total:
-            win_rate = (self.wins / self.total) * 100
+            avg_rr = 0
+            avg_conf = 0
 
-        average_rr = 0
+        else:
 
-        if self.total:
-            average_rr = self.total_rr / self.total
+            avg_rr = self.total_rr / self.total
+            avg_conf = self.total_confidence / self.total
+
+        total_finished = self.win + self.loss
+
+        if total_finished == 0:
+            winrate = 0
+        else:
+            winrate = (self.win / total_finished) * 100
 
         return {
-            "total": self.total,
-            "wins": self.wins,
-            "losses": self.losses,
-            "win_rate": round(win_rate, 2),
-            "average_rr": round(average_rr, 2),
-            "best_win_streak": self.best_win_streak
+
+            "total_signals": self.total,
+
+            "long_signals": self.long,
+
+            "short_signals": self.short,
+
+            "wins": self.win,
+
+            "losses": self.loss,
+
+            "winrate": round(winrate,2),
+
+            "average_rr": round(avg_rr,2),
+
+            "average_confidence": round(avg_conf,2)
+
         }
 
     def reset(self):
+
         self.__init__()
+    
