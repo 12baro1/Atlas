@@ -1,103 +1,94 @@
 """
 backtest_engine.py
-Atlas SMC Engine v2
+Atlas Backtest Engine v4
 """
 
 class BacktestEngine:
 
     def __init__(self):
 
-        self.trades = []
+        self.total = 0
+        self.wins = 0
+        self.losses = 0
 
-    def record(self, symbol, trade, result):
+        self.tp1 = 0
+        self.tp2 = 0
+        self.tp3 = 0
 
-        if trade is None:
-            return
+        self.net_rr = 0.0
 
-        self.trades.append({
+        self.history = []
 
-            "symbol": symbol,
+    def record(self, trade):
 
-            "direction": trade["direction"],
+        self.total += 1
 
-            "entry": trade["entry"],
+        result = trade.get("result", "LOSS")
 
-            "stop_loss": trade["stop_loss"],
+        rr = trade.get("rr", 0)
 
-            "tp1": trade["tp1"],
+        self.net_rr += rr
 
-            "tp2": trade["tp2"],
+        if result == "WIN":
 
-            "tp3": trade["tp3"],
+            self.wins += 1
 
-            "rr": trade["rr"],
+        else:
 
-            "result": result
+            self.losses += 1
 
-        })
+        if trade.get("tp") == 1:
+            self.tp1 += 1
 
-    def summary(self):
+        elif trade.get("tp") == 2:
+            self.tp2 += 1
 
-        total = len(self.trades)
+        elif trade.get("tp") == 3:
+            self.tp3 += 1
 
-        if total == 0:
+        self.history.append(trade)
+
+    def statistics(self):
+
+        if self.total == 0:
 
             return {
                 "total": 0,
                 "wins": 0,
                 "losses": 0,
                 "winrate": 0,
-                "average_rr": 0,
-                "profit_factor": 0
+                "avg_rr": 0,
+                "tp1": 0,
+                "tp2": 0,
+                "tp3": 0
             }
-
-        wins = 0
-        losses = 0
-
-        rr_sum = 0
-
-        gross_profit = 0
-        gross_loss = 0
-
-        for trade in self.trades:
-
-            rr_sum += trade["rr"]
-
-            if trade["result"] == "WIN":
-
-                wins += 1
-                gross_profit += trade["rr"]
-
-            else:
-
-                losses += 1
-                gross_loss += 1
-
-        winrate = (wins / total) * 100
-
-        average_rr = rr_sum / total
-
-        if gross_loss == 0:
-            profit_factor = gross_profit
-        else:
-            profit_factor = gross_profit / gross_loss
 
         return {
 
-            "total": total,
+            "total": self.total,
 
-            "wins": wins,
+            "wins": self.wins,
 
-            "losses": losses,
+            "losses": self.losses,
 
-            "winrate": round(winrate,2),
+            "winrate": round(
+                (self.wins / self.total) * 100,
+                2
+            ),
 
-            "average_rr": round(average_rr,2),
+            "avg_rr": round(
+                self.net_rr / self.total,
+                2
+            ),
 
-            "profit_factor": round(profit_factor,2)
+            "tp1": self.tp1,
+
+            "tp2": self.tp2,
+
+            "tp3": self.tp3
 
         }
 
     def reset(self):
 
-        self.trades.clear()
+        self.__init__()
