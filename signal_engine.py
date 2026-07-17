@@ -3,42 +3,41 @@ signal_engine.py
 Atlas Signal Engine v2
 """
 
-
 class SignalEngine:
 
     def generate(self, analysis):
 
         confluence = analysis["confluence"]
-
         confidence = confluence["score"]
 
+        # Grade
         if confidence >= 90:
-            grade = "A+"
+            grade = "S+"
             stars = "★★★★★"
             strength = "ELITE"
 
         elif confidence >= 80:
-            grade = "A"
+            grade = "A+"
             stars = "★★★★★"
             strength = "STRONG"
 
         elif confidence >= 70:
-            grade = "B"
+            grade = "A"
             stars = "★★★★☆"
             strength = "GOOD"
 
         elif confidence >= 60:
-            grade = "C"
+            grade = "B"
             stars = "★★★☆☆"
             strength = "NORMAL"
 
-        elif confidence >= 45:
-            grade = "D"
+        elif confidence >= 50:
+            grade = "C"
             stars = "★★☆☆☆"
             strength = "WEAK"
 
         else:
-            grade = "F"
+            grade = "D"
             stars = "★☆☆☆☆"
             strength = "VERY WEAK"
 
