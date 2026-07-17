@@ -1,6 +1,6 @@
 """
 orderblock_engine.py
-Atlas SMC Engine
+Atlas Order Block Engine v4
 """
 
 class OrderBlockEngine:
@@ -19,31 +19,91 @@ class OrderBlockEngine:
             if idx <= 0 or idx >= len(candles):
                 continue
 
-            # Bullish Order Block
-            if item.get("direction") == "BULLISH":
+            prev = candles[idx - 1]
 
-                prev = candles[idx - 1]
+            # -------------------------
+            # Bullish Order Block
+            # -------------------------
+
+            if item["direction"] == "BULLISH":
 
                 if prev.close < prev.open:
+
+                    strength = 0
+
+                    body = abs(prev.close - prev.open)
+                    wick = prev.high - prev.low
+
+                    if wick > 0:
+
+                        body_ratio = body / wick
+
+                        if body_ratio >= 0.70:
+                            strength += 40
+
+                        elif body_ratio >= 0.50:
+                            strength += 30
+
+                        else:
+                            strength += 20
+
+                    strength += 20
+
+                    if item["label"] == "HH":
+                        strength += 20
+
+                    if item.get("choch"):
+                        strength += 20
+
                     blocks.append({
                         "type": "BULLISH",
                         "index": idx - 1,
                         "high": prev.high,
                         "low": prev.low,
+                        "strength": strength,
                         "mitigated": False
                     })
 
+            # -------------------------
             # Bearish Order Block
-            elif item.get("direction") == "BEARISH":
+            # -------------------------
 
-                prev = candles[idx - 1]
+            elif item["direction"] == "BEARISH":
 
                 if prev.close > prev.open:
+
+                    strength = 0
+
+                    body = abs(prev.close - prev.open)
+                    wick = prev.high - prev.low
+
+                    if wick > 0:
+
+                        body_ratio = body / wick
+
+                        if body_ratio >= 0.70:
+                            strength += 40
+
+                        elif body_ratio >= 0.50:
+                            strength += 30
+
+                        else:
+                            strength += 20
+
+                    strength += 20
+
+                    if item["label"] == "LL":
+                        strength += 20
+
+                    if item.get("choch"):
+                        strength += 20
+
                     blocks.append({
                         "type": "BEARISH",
                         "index": idx - 1,
                         "high": prev.high,
                         "low": prev.low,
+                        "strength": strength,
                         "mitigated": False
                     })
 
