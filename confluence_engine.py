@@ -32,7 +32,12 @@ class ConfluenceEngine:
             checks.append("✘ Multi Timeframe")
 
         # Trend
-        if trend["trend"] == entry["direction"]:
+        trend_ok = (
+            (trend["trend"] == "BULLISH" and entry["direction"] == "LONG") or
+            (trend["trend"] == "BEARISH" and entry["direction"] == "SHORT")
+        )
+
+        if trend_ok:
             score += 10
             checks.append("✔ Trend")
         else:
