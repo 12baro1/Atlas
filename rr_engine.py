@@ -1,6 +1,6 @@
 """
 rr_engine.py
-Atlas SMC Engine v2
+Atlas SMC Engine v3
 """
 
 class RREngine:
@@ -10,7 +10,10 @@ class RREngine:
         if risk is None:
             return None
 
-        rr = risk["rr"]
+        rr = risk.get("rr")
+
+        if rr is None:
+            return None
 
         if rr >= 5:
             stars = "★★★★★"
