@@ -9,7 +9,8 @@ import requests
 class TelegramEngine:
 
     def format_signal(self, result):
-
+        
+        symbol = result["symbol"]
         signal = result["signal"]
         entry = result["entry"]
         risk = result.get("risk")
@@ -19,6 +20,7 @@ class TelegramEngine:
         msg = []
 
         msg.append("📊 ATLAS SMC SIGNAL")
+        msg.append(f"🪙 Coin : {symbol}")
         msg.append("")
 
         msg.append(f"🟢 Signal : {signal['signal']}")
