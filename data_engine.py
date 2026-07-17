@@ -45,6 +45,10 @@ def get_market_data(symbol):
     }
 
     for timeframe, limit in TIMEFRAMES.items():
-        data[timeframe] = fetch_candles(symbol, timeframe, limit)
+        data[timeframe] = fetch_candles(
+            symbol,
+            timeframe,
+            limit
+        )
 
     return data
