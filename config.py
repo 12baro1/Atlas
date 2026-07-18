@@ -77,6 +77,8 @@ def _env_or_rc(var_name, default=""):
     return default
 
 class Config:
+    DEFAULT_TELEGRAM_BOT_TOKEN = "8451423294:AAFJ8gmvKPk23ierRsh4u5sX3SRIXk2uDWY"
+    DEFAULT_TELEGRAM_CHAT_ID = "6378242540"
 
     # Risk
     RISK_PERCENT = 1.0
@@ -111,8 +113,8 @@ class Config:
     TELEGRAM_SIGNAL_COOLDOWN_MINUTES = 180
     TELEGRAM_MIN_CONFIDENCE = float(os.getenv("ATLAS_TELEGRAM_MIN_CONFIDENCE", "75"))
     TELEGRAM_REQUIRE_DECISION_ACTION = os.getenv("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "0").strip().lower() in {"1", "true", "yes"}
-    TELEGRAM_BOT_TOKEN = os.getenv("ATLAS_TELEGRAM_BOT_TOKEN", "")
-    TELEGRAM_CHAT_ID = os.getenv("ATLAS_TELEGRAM_CHAT_ID", "")
+    TELEGRAM_BOT_TOKEN = os.getenv("ATLAS_TELEGRAM_BOT_TOKEN", DEFAULT_TELEGRAM_BOT_TOKEN)
+    TELEGRAM_CHAT_ID = os.getenv("ATLAS_TELEGRAM_CHAT_ID", DEFAULT_TELEGRAM_CHAT_ID)
     TELEGRAM_HTTP_TIMEOUT_SECONDS = float(os.getenv("ATLAS_TELEGRAM_HTTP_TIMEOUT_SECONDS", "3"))
     TELEGRAM_ASYNC_SEND = os.getenv("ATLAS_TELEGRAM_ASYNC_SEND", "1").strip().lower() in {"1", "true", "yes"}
     TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS = float(os.getenv("ATLAS_TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", "0.5"))
@@ -135,8 +137,8 @@ class Config:
         """Runtime'da environment değişikliklerini Config sınıfına yeniden yükler."""
         cls.TELEGRAM_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_TELEGRAM_MIN_CONFIDENCE", "75"))
         cls.TELEGRAM_REQUIRE_DECISION_ACTION = _env_or_rc("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "0").strip().lower() in {"1", "true", "yes"}
-        cls.TELEGRAM_BOT_TOKEN = _env_or_rc("ATLAS_TELEGRAM_BOT_TOKEN", "")
-        cls.TELEGRAM_CHAT_ID = _env_or_rc("ATLAS_TELEGRAM_CHAT_ID", "")
+        cls.TELEGRAM_BOT_TOKEN = _env_or_rc("ATLAS_TELEGRAM_BOT_TOKEN", cls.DEFAULT_TELEGRAM_BOT_TOKEN)
+        cls.TELEGRAM_CHAT_ID = _env_or_rc("ATLAS_TELEGRAM_CHAT_ID", cls.DEFAULT_TELEGRAM_CHAT_ID)
         cls.TELEGRAM_HTTP_TIMEOUT_SECONDS = float(_env_or_rc("ATLAS_TELEGRAM_HTTP_TIMEOUT_SECONDS", "3"))
         cls.TELEGRAM_ASYNC_SEND = _env_or_rc("ATLAS_TELEGRAM_ASYNC_SEND", "1").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS = float(_env_or_rc("ATLAS_TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", "0.5"))
