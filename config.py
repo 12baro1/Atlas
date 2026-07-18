@@ -41,6 +41,7 @@ class Config:
     TELEGRAM_BOT_TOKEN = os.getenv("ATLAS_TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID = os.getenv("ATLAS_TELEGRAM_CHAT_ID", "")
     TELEGRAM_HTTP_TIMEOUT_SECONDS = float(os.getenv("ATLAS_TELEGRAM_HTTP_TIMEOUT_SECONDS", "3"))
+    TELEGRAM_ASYNC_SEND = os.getenv("ATLAS_TELEGRAM_ASYNC_SEND", "1").strip().lower() in {"1", "true", "yes"}
 
     # Yetkilendirme
     BOT_PASSWORD = os.getenv("ATLAS_BOT_PASSWORD", "")

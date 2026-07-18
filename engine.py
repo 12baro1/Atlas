@@ -8,6 +8,7 @@ Kod İngilizce, açıklamalar Türkçe tutulmuştur.
 
 from importlib import import_module
 import logging
+import threading
 import time
 
 from backtest_engine import BacktestEngine
@@ -951,6 +952,27 @@ class AtlasEngine:
         )
 
         print(message)
+        if bool(getattr(self.config, "TELEGRAM_ASYNC_SEND", True)):
+            thread = threading.Thread(
+                target=self._send_telegram_safe,
+                kwargs={
+                    "telegram_module": telegram_module,
+                    "message": message,
+                    "symbol": symbol,
+                },
+                daemon=True,
+            )
+            thread.start()
+            return True
+
+        return self._send_telegram_safe(
+            telegram_module=telegram_module,
+            message=message,
+            symbol=symbol,
+        )
+
+    def _send_telegram_safe(self, telegram_module, message, symbol):
+        """Telegram gönderimini güvenli şekilde çalıştırır; analiz akışını düşürmez."""
         try:
             return telegram_module.TelegramBot().send(message)
         except Exception:
