@@ -5,8 +5,8 @@ Atlas SMC Engine v3
 
 import json
 import os
-
-import requests
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from config import Config
 from telegram_auth_store import TelegramAuthStore
@@ -21,6 +21,7 @@ class TelegramEngine:
         entry = result["entry"]
         risk = result.get("risk")
         rr = result.get("rr")
+        dynamic_tp = result.get("dynamic_tp")
         confluence = result.get("confluence")
         market_phase = result.get("market_phase")
         unicorn = result.get("unicorn")
@@ -78,6 +79,14 @@ class TelegramEngine:
             msg.append(f"TP2 : {risk['tp2']}")
             msg.append(f"TP3 : {risk['tp3']}")
             msg.append(f"RR : {risk['rr']}")
+            msg.append("")
+
+        elif dynamic_tp:
+
+            msg.append("🎯 TARGETS")
+            msg.append(f"TP1 : {dynamic_tp.get('tp1')}")
+            msg.append(f"TP2 : {dynamic_tp.get('tp2')}")
+            msg.append(f"TP3 : {dynamic_tp.get('tp3')}")
             msg.append("")
 
         if rr:
@@ -158,22 +167,35 @@ class TelegramBot:
 
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
 
-        response = requests.post(
-            url,
-            data={
+        payload = urlencode(
+            {
                 "chat_id": chat_id,
-                "text": message
-            },
-            timeout=10
-        )
+                "text": message,
+            }
+        ).encode("utf-8")
+        request = Request(url, data=payload, method="POST")
+
+        status_code = 0
+        body = ""
+        ok = False
+
+        try:
+            with urlopen(request, timeout=10) as response:
+                status_code = getattr(response, "status", 0) or 0
+                raw_body = response.read()
+                body = raw_body.decode("utf-8", errors="replace")
+                ok = 200 <= status_code < 300
+        except Exception as exc:
+            body = str(exc)
+            ok = False
 
         print("========== TELEGRAM ==========")
         print("Chat ID :", chat_id)
-        print("Status :", response.status_code)
-        print("Response :", response.text)
+        print("Status :", status_code)
+        print("Response :", body)
         print("==============================")
 
-        return response.ok
+        return ok
 
     def send(self, message):
 

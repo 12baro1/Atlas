@@ -860,7 +860,14 @@ class AtlasEngine:
         if signal.get("signal") not in ["LONG", "SHORT"]:
             return False
 
-        if signal.get("confidence", 0) < 90:
+        min_confidence = getattr(self.config, "MINIMUM_CONFIDENCE", 90)
+        if signal.get("confidence", 0) < min_confidence:
+            self.logger.info(
+                "Telegram skip: confidence=%s < min=%s for %s",
+                signal.get("confidence", 0),
+                min_confidence,
+                data.get("symbol", "UNKNOWN"),
+            )
             return False
 
         telegram_module = import_module("telegram_engine")
