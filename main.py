@@ -5,6 +5,7 @@ import sys
 import time
 
 from data_engine import get_market_data
+from config import Config
 from engine import AtlasEngine
 from universe_engine import select_symbols
 
@@ -55,9 +56,10 @@ logger.info(
     universe_stats["limited"],
 )
 
-if bool(getattr(engine.config, "TELEGRAM_ENABLED", True)):
-    token = str(getattr(engine.config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
-    chat_id = str(getattr(engine.config, "TELEGRAM_CHAT_ID", "") or "").strip()
+Config.refresh_from_env()
+if bool(getattr(Config, "TELEGRAM_ENABLED", True)):
+    token = str(getattr(Config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
+    chat_id = str(getattr(Config, "TELEGRAM_CHAT_ID", "") or "").strip()
     if not token:
         logger.warning("Telegram aktif ama bot token bos. Bildirim gonderilmeyecek.")
     if not chat_id:
@@ -155,5 +157,5 @@ logger.info(
 )
 
 engine.flush_telegram_notifications(
-    join_timeout=float(getattr(engine.config, "TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", 0.5))
+    join_timeout=float(getattr(Config, "TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", 0.5))
 )

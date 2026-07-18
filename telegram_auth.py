@@ -227,6 +227,7 @@ class TelegramAuth:
     """Telegram polling akışında auth komutlarını çalıştırır."""
 
     def __init__(self):
+        Config.refresh_from_env()
         self.token = Config.TELEGRAM_BOT_TOKEN
         self.store = TelegramAuthStore(Config.TELEGRAM_AUTH_DB_FILE)
         self.service = TelegramAuthService(

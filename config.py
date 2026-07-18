@@ -23,6 +23,7 @@ def _read_export_from_rc(var_name):
     )
 
     prefix = f"export {var_name}="
+    last_value = ""
     for path in rc_files:
         if not os.path.exists(path):
             continue
@@ -32,10 +33,10 @@ def _read_export_from_rc(var_name):
                     line = raw.strip()
                     if not line.startswith(prefix):
                         continue
-                    return _strip_shell_quotes(line[len(prefix):])
+                    last_value = _strip_shell_quotes(line[len(prefix):])
         except Exception:
             continue
-    return ""
+    return last_value
 
 
 def _env_or_rc(var_name, default=""):

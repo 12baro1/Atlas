@@ -1,9 +1,7 @@
-"""
-telegram_engine.py
-Atlas SMC Engine v3
-"""
+"""Telegram mesaj formatlama ve gonderim modulu."""
 
 import json
+import logging
 import os
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -12,8 +10,10 @@ from config import Config
 from telegram_auth_store import TelegramAuthStore
 
 
-class TelegramEngine:
+LOGGER = logging.getLogger("atlas.telegram")
 
+
+class TelegramEngine:
     @staticmethod
     def _fmt(value):
         if value is None:
@@ -30,11 +30,10 @@ class TelegramEngine:
         return text[: max_len - 3].rstrip() + "..."
 
     def format_signal(self, result):
-        
         symbol = result["symbol"]
         signal = result.get("signal") or {}
         entry = result.get("entry") or {}
-        risk = result.get("risk")
+        risk = result.get("risk") or {}
         rr = result.get("rr")
         dynamic_tp = result.get("dynamic_tp")
         confluence = result.get("confluence")
@@ -44,7 +43,6 @@ class TelegramEngine:
         decision = result.get("decision")
 
         msg = []
-
         msg.append("📊 ATLAS SMC SIGNAL")
         msg.append(f"🪙 Coin : {symbol}")
         msg.append("")
@@ -54,8 +52,7 @@ class TelegramEngine:
         msg.append(f"💪 Strength : {signal.get('strength', '-')}")
         msg.append(f"🎯 Confidence : {signal.get('confidence', 0)}%")
         msg.append("")
-        
-        # Market Phase Info
+
         if market_phase:
             msg.append("📈 MARKET PHASE")
             msg.append(f"Phase : {market_phase.get('phase', 'Unknown')}")
@@ -64,9 +61,7 @@ class TelegramEngine:
             msg.append("")
 
         if confluence:
-
             msg.append("✅ SMC CHECKS")
-
             checks = confluence.get("checks", [])
             compact_mode = bool(getattr(Config, "TELEGRAM_COMPACT_MODE", True))
 
@@ -91,7 +86,6 @@ class TelegramEngine:
         msg.append(f"Valid : {entry.get('valid', False)}")
 
         entry_is_valid = bool(entry.get("valid"))
-
         if entry_is_valid and entry.get("entry") is not None and entry.get("stop_loss") is not None:
             msg.append(f"Entry : {self._fmt(entry.get('entry'))}")
             msg.append(f"Stop Loss : {self._fmt(entry.get('stop_loss'))}")
@@ -101,21 +95,17 @@ class TelegramEngine:
         msg.append("")
 
         if entry_is_valid and risk and risk.get("risk") is not None:
-
             msg.append("💰 RISK")
             msg.append(f"Capital At Risk : {self._fmt(risk.get('capital_at_risk'))} USDT")
             msg.append(f"Position Size : {self._fmt(risk.get('position_size'))}")
             msg.append(f"Risk : {self._fmt(risk.get('risk'))}")
             msg.append("")
-
             msg.append(f"TP1 : {self._fmt(risk.get('tp1'))}")
             msg.append(f"TP2 : {self._fmt(risk.get('tp2'))}")
             msg.append(f"TP3 : {self._fmt(risk.get('tp3'))}")
             msg.append(f"RR : {self._fmt(risk.get('rr'))}")
             msg.append("")
-
         elif entry_is_valid and dynamic_tp:
-
             msg.append("🎯 TARGETS")
             msg.append(f"TP1 : {self._fmt(dynamic_tp.get('tp1'))}")
             msg.append(f"TP2 : {self._fmt(dynamic_tp.get('tp2'))}")
@@ -123,13 +113,11 @@ class TelegramEngine:
             msg.append("")
 
         if rr:
-
             msg.append("📈 RR ANALYSIS")
             msg.append(f"Quality : {rr.get('quality', '-')}")
             msg.append(f"RR Score : {rr.get('score', '-')}")
 
         if unicorn and unicorn.get("active"):
-
             best = unicorn.get("best") or {}
             msg.append("")
             msg.append("🦄 UNICORN SETUP")
@@ -143,11 +131,11 @@ class TelegramEngine:
             msg.append(f"TP3 : {self._fmt(best.get('tp3'))}")
 
         if cisd and cisd.get("active"):
+            best = cisd.get("best") or {}
             msg.append("")
             msg.append("🧭 CISD")
             msg.append(f"Direction : {cisd.get('direction', 'NONE')}")
             msg.append(f"Confidence : {cisd.get('confidence', 0)}%")
-            best = cisd.get("best") or {}
             msg.append(f"Timeframe : {best.get('timeframe', '-')}")
 
         if decision:
@@ -162,53 +150,75 @@ class TelegramEngine:
 
 
 class TelegramBot:
-
-    def __init__(self, auth_store=None):
+    def __init__(self, auth_store=None, token=None, chat_id=None):
         Config.refresh_from_env()
-
-        self.token = Config.TELEGRAM_BOT_TOKEN
-        self.chat_id = Config.TELEGRAM_CHAT_ID
-        self.admin_chat_id = Config.ADMIN_CHAT_ID
+        self.token = str(token if token is not None else Config.TELEGRAM_BOT_TOKEN).strip()
+        self.chat_id = self._normalize_chat_id(chat_id if chat_id is not None else Config.TELEGRAM_CHAT_ID)
+        self.admin_chat_id = self._normalize_chat_id(Config.ADMIN_CHAT_ID)
         self.chat_ids_file = Config.CHAT_IDS_FILE
         self.auth_store = auth_store or TelegramAuthStore(Config.TELEGRAM_AUTH_DB_FILE)
 
-    def load_chat_ids(self):
+    @staticmethod
+    def _normalize_chat_id(value):
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            return text
 
+    def _load_file_chat_ids(self):
+        if not os.path.exists(self.chat_ids_file):
+            return []
+
+        try:
+            with open(self.chat_ids_file, "r", encoding="utf-8") as handle:
+                raw = json.load(handle)
+        except Exception:
+            LOGGER.exception("Telegram chat_ids file okunamadi")
+            return []
+
+        if not isinstance(raw, list):
+            return []
+
+        normalized = []
+        for item in raw:
+            chat_id = self._normalize_chat_id(item)
+            if chat_id is not None:
+                normalized.append(chat_id)
+        return normalized
+
+    def load_chat_ids(self):
         chat_ids = []
 
-        if self.chat_id:
+        if self.chat_id is not None:
             chat_ids.append(self.chat_id)
-
-        if self.admin_chat_id:
+        if self.admin_chat_id not in [None, 0]:
             chat_ids.append(self.admin_chat_id)
 
-        db_chat_ids = self.auth_store.list_authorized_chat_ids()
-        chat_ids.extend(db_chat_ids)
+        try:
+            chat_ids.extend(self.auth_store.list_authorized_chat_ids())
+        except Exception:
+            LOGGER.exception("Telegram auth db chat id okunamadi")
 
-        if os.path.exists(self.chat_ids_file):
-            with open(self.chat_ids_file, "r") as f:
-                saved_chat_ids = json.load(f)
-
-            chat_ids.extend(saved_chat_ids)
+        chat_ids.extend(self._load_file_chat_ids())
 
         unique_chat_ids = []
-
         for chat_id in chat_ids:
             if chat_id not in unique_chat_ids:
                 unique_chat_ids.append(chat_id)
-
         return unique_chat_ids
 
     def send_to_chat(self, chat_id, message):
+        if not self.token:
+            LOGGER.warning("Telegram token missing; send_to_chat skip")
+            return False
 
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
-
-        payload = urlencode(
-            {
-                "chat_id": chat_id,
-                "text": message,
-            }
-        ).encode("utf-8")
+        payload = urlencode({"chat_id": chat_id, "text": message}).encode("utf-8")
         request = Request(url, data=payload, method="POST")
 
         status_code = 0
@@ -219,12 +229,10 @@ class TelegramBot:
             timeout_seconds = float(getattr(Config, "TELEGRAM_HTTP_TIMEOUT_SECONDS", 3))
             with urlopen(request, timeout=timeout_seconds) as response:
                 status_code = getattr(response, "status", 0) or 0
-                raw_body = response.read()
-                body = raw_body.decode("utf-8", errors="replace")
+                body = response.read().decode("utf-8", errors="replace")
                 ok = 200 <= status_code < 300
         except Exception as exc:
             body = str(exc)
-            ok = False
 
         print("========== TELEGRAM ==========")
         print("Chat ID :", chat_id)
@@ -235,22 +243,21 @@ class TelegramBot:
         return ok
 
     def send(self, message):
-
         try:
-            chat_ids = self.load_chat_ids()
+            if not self.token:
+                print("Telegram Error : Bot token yok.")
+                return False
 
+            chat_ids = self.load_chat_ids()
             if not chat_ids:
                 print("Telegram Error : Kayıtlı chat id bulunamadı.")
                 return False
 
             results = []
-
             for chat_id in chat_ids:
                 results.append(self.send_to_chat(chat_id, message))
 
             return all(results)
-
-        except Exception as e:
-
-            print("Telegram Error :", e)
+        except Exception as exc:
+            print("Telegram Error :", exc)
             return False

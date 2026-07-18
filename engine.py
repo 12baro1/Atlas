@@ -1018,11 +1018,11 @@ class AtlasEngine:
         )
 
     def _should_send_telegram_signal(self, symbol, action, entry, risk):
-        dedup_enabled = bool(getattr(self.config, "TELEGRAM_SIGNAL_DEDUP_ENABLED", True))
+        dedup_enabled = bool(getattr(Config, "TELEGRAM_SIGNAL_DEDUP_ENABLED", True))
         if not dedup_enabled:
             return True
 
-        cooldown_minutes = float(getattr(self.config, "TELEGRAM_SIGNAL_COOLDOWN_MINUTES", 180))
+        cooldown_minutes = float(getattr(Config, "TELEGRAM_SIGNAL_COOLDOWN_MINUTES", 180))
         if cooldown_minutes <= 0:
             return True
 
