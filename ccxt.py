@@ -40,11 +40,63 @@ def _load_real_ccxt_module():
 _mode = os.environ.get("ATLAS_CCXT_MODE", "auto").strip().lower()
 _prefer_real = _mode == "real" or (_mode == "auto" and not _running_under_pytest())
 _real_ccxt = _load_real_ccxt_module() if _prefer_real else None
+_is_real_backend = _real_ccxt is not None and hasattr(_real_ccxt, "bybit")
+
+if _mode == "real" and not _is_real_backend:
+    raise ImportError(
+        "ATLAS_CCXT_MODE=real set but real ccxt is unavailable. Install ccxt in the active environment."
+    )
+
+if _mode == "auto" and not _running_under_pytest() and not _is_real_backend:
+    raise ImportError(
+        "Real ccxt could not be loaded in auto mode. Install ccxt or set ATLAS_CCXT_MODE=mock explicitly."
+    )
+
+BACKEND = "real" if _is_real_backend else "mock"
 
 
-if _real_ccxt is not None and hasattr(_real_ccxt, "bybit"):
+if _is_real_backend:
     bybit = _real_ccxt.bybit
 else:
+    MOCK_SYMBOLS = [
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "SOL/USDT:USDT",
+        "XRP/USDT:USDT",
+        "BNB/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "ADA/USDT:USDT",
+        "AVAX/USDT:USDT",
+        "TRX/USDT:USDT",
+        "LINK/USDT:USDT",
+        "DOT/USDT:USDT",
+        "MATIC/USDT:USDT",
+        "LTC/USDT:USDT",
+        "BCH/USDT:USDT",
+        "UNI/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "ATOM/USDT:USDT",
+        "APT/USDT:USDT",
+        "OP/USDT:USDT",
+        "ARB/USDT:USDT",
+        "SUI/USDT:USDT",
+        "SEI/USDT:USDT",
+        "TIA/USDT:USDT",
+        "PEPE/USDT:USDT",
+        "WIF/USDT:USDT",
+        "INJ/USDT:USDT",
+        "AAVE/USDT:USDT",
+        "FIL/USDT:USDT",
+        "ETC/USDT:USDT",
+        "XLM/USDT:USDT",
+        "HBAR/USDT:USDT",
+        "IMX/USDT:USDT",
+        "RNDR/USDT:USDT",
+        "RUNE/USDT:USDT",
+        "GRT/USDT:USDT",
+        "PYTH/USDT:USDT",
+    ]
+
     class bybit:
         """Small subset of ccxt.bybit used by offline smoke tests."""
 
@@ -52,51 +104,13 @@ else:
             self.config = config or {}
 
         def load_markets(self):
-            symbols = [
-                "BTC/USDT:USDT",
-                "ETH/USDT:USDT",
-                "SOL/USDT:USDT",
-                "XRP/USDT:USDT",
-                "BNB/USDT:USDT",
-                "DOGE/USDT:USDT",
-                "ADA/USDT:USDT",
-                "AVAX/USDT:USDT",
-                "TRX/USDT:USDT",
-                "LINK/USDT:USDT",
-                "DOT/USDT:USDT",
-                "MATIC/USDT:USDT",
-                "LTC/USDT:USDT",
-                "BCH/USDT:USDT",
-                "UNI/USDT:USDT",
-                "NEAR/USDT:USDT",
-                "ATOM/USDT:USDT",
-                "APT/USDT:USDT",
-                "OP/USDT:USDT",
-                "ARB/USDT:USDT",
-                "SUI/USDT:USDT",
-                "SEI/USDT:USDT",
-                "TIA/USDT:USDT",
-                "PEPE/USDT:USDT",
-                "WIF/USDT:USDT",
-                "INJ/USDT:USDT",
-                "AAVE/USDT:USDT",
-                "FIL/USDT:USDT",
-                "ETC/USDT:USDT",
-                "XLM/USDT:USDT",
-                "HBAR/USDT:USDT",
-                "IMX/USDT:USDT",
-                "RNDR/USDT:USDT",
-                "RUNE/USDT:USDT",
-                "GRT/USDT:USDT",
-                "PYTH/USDT:USDT",
-            ]
             return {
                 symbol: {
                     "active": True,
                     "swap": True,
                     "quote": "USDT",
                 }
-                for symbol in symbols
+                for symbol in MOCK_SYMBOLS
             }
 
         def fetch_ohlcv(self, symbol, timeframe="15m", since=None, limit=100):

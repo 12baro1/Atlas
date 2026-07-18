@@ -8,6 +8,7 @@ Kod İngilizce, açıklamalar Türkçe tutulmuştur.
 
 from importlib import import_module
 import logging
+import time
 
 from backtest_engine import BacktestEngine
 from bos_engine import BOSEngine
@@ -101,6 +102,7 @@ class AtlasEngine:
         self.rr = RREngine()
         self.dynamic_tp = DynamicTPEngine()
         self.telegram = None
+        self._telegram_signal_cache = {}
 
         # Dış API uyumluluğu için korunur
         self.config = Config()
@@ -900,18 +902,30 @@ class AtlasEngine:
             )
             return False
 
+        symbol = data.get("symbol", "UNKNOWN")
+        if not self._should_send_telegram_signal(symbol, decision_action, entry, risk):
+            self.logger.info(
+                "Telegram skip: duplicate cooldown active for %s",
+                symbol,
+            )
+            return False
+
         telegram_module = import_module("telegram_engine")
         telegram_engine = self.telegram or telegram_module.TelegramEngine()
         self.telegram = telegram_engine
 
         signal_for_message = dict(signal)
         signal_for_message["signal"] = decision_action
-        signal_for_message["confidence"] = max(0, min(100, int(signal.get("confidence", 0))))
+        try:
+            confidence = int(float(signal.get("confidence", 0)))
+        except (TypeError, ValueError):
+            confidence = 0
+        signal_for_message["confidence"] = max(0, min(100, confidence))
 
         message = telegram_engine.format_signal(
             {
-                "symbol": data.get("symbol", "UNKNOWN"),
-            "signal": signal_for_message,
+                "symbol": symbol,
+                "signal": signal_for_message,
                 "entry": entry,
                 "risk": risk,
                 "rr": rr,
@@ -927,3 +941,38 @@ class AtlasEngine:
 
         print(message)
         return telegram_module.TelegramBot().send(message)
+
+    def _signal_fingerprint(self, action, entry, risk):
+        """Aynı setup tekrarlarını baskılamak için sade imza üretir."""
+        return (
+            action,
+            round(float(entry.get("entry", 0.0)), 6),
+            round(float(entry.get("stop_loss", 0.0)), 6),
+            round(float((risk or {}).get("tp3", 0.0)), 6),
+            round(float((risk or {}).get("rr", 0.0)), 2),
+        )
+
+    def _should_send_telegram_signal(self, symbol, action, entry, risk):
+        dedup_enabled = bool(getattr(self.config, "TELEGRAM_SIGNAL_DEDUP_ENABLED", True))
+        if not dedup_enabled:
+            return True
+
+        cooldown_minutes = float(getattr(self.config, "TELEGRAM_SIGNAL_COOLDOWN_MINUTES", 180))
+        if cooldown_minutes <= 0:
+            return True
+
+        now_ts = time.time()
+        cooldown_seconds = cooldown_minutes * 60.0
+        fingerprint = self._signal_fingerprint(action, entry, risk)
+
+        cached = self._telegram_signal_cache.get(symbol)
+        if cached:
+            age = now_ts - cached.get("timestamp", 0.0)
+            if cached.get("fingerprint") == fingerprint and age < cooldown_seconds:
+                return False
+
+        self._telegram_signal_cache[symbol] = {
+            "fingerprint": fingerprint,
+            "timestamp": now_ts,
+        }
+        return True

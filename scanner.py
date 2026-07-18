@@ -1,5 +1,6 @@
 import ccxt
 import logging
+from universe_engine import select_symbols
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,21 +16,20 @@ exchange = ccxt.bybit({
 })
 
 markets = exchange.load_markets()
+symbols, universe_stats = select_symbols(
+    markets=markets,
+    suffix="/USDT:USDT",
+    require_active=True,
+    require_swap=False,
+)
 
-symbols = []
-
-for symbol, meta in markets.items():
-    if not symbol.endswith("/USDT:USDT"):
-        continue
-
-    if isinstance(meta, dict) and not meta.get("active", True):
-        continue
-
-        symbols.append(symbol)
-
-symbols.sort()
-
-logger.info("Toplam Coin: %s", len(symbols))
+logger.info(
+    "Tarama havuzu | toplam=%s kalan=%s suffix_elendi=%s inactive_elendi=%s",
+    universe_stats["total_markets"],
+    universe_stats["kept"],
+    universe_stats["skipped_suffix"],
+    universe_stats["skipped_inactive"],
+)
 
 success = 0
 failed = 0

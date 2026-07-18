@@ -32,8 +32,8 @@ class TelegramEngine:
     def format_signal(self, result):
         
         symbol = result["symbol"]
-        signal = result["signal"]
-        entry = result["entry"]
+        signal = result.get("signal") or {}
+        entry = result.get("entry") or {}
         risk = result.get("risk")
         rr = result.get("rr")
         dynamic_tp = result.get("dynamic_tp")
@@ -49,10 +49,10 @@ class TelegramEngine:
         msg.append(f"🪙 Coin : {symbol}")
         msg.append("")
 
-        msg.append(f"🟢 Signal : {signal['signal']}")
-        msg.append(f"⭐ Grade : {signal['grade']}")
-        msg.append(f"💪 Strength : {signal['strength']}")
-        msg.append(f"🎯 Confidence : {signal['confidence']}%")
+        msg.append(f"🟢 Signal : {signal.get('signal', 'WAIT')}")
+        msg.append(f"⭐ Grade : {signal.get('grade', '-')}")
+        msg.append(f"💪 Strength : {signal.get('strength', '-')}")
+        msg.append(f"🎯 Confidence : {signal.get('confidence', 0)}%")
         msg.append("")
         
         # Market Phase Info
@@ -87,14 +87,14 @@ class TelegramEngine:
             msg.append("")
 
         msg.append("📍 ENTRY")
-        msg.append(f"Direction : {entry['direction']}")
-        msg.append(f"Valid : {entry['valid']}")
+        msg.append(f"Direction : {entry.get('direction', 'WAIT')}")
+        msg.append(f"Valid : {entry.get('valid', False)}")
 
         entry_is_valid = bool(entry.get("valid"))
 
-        if entry_is_valid and entry["entry"] is not None and entry.get("stop_loss") is not None:
-            msg.append(f"Entry : {self._fmt(entry['entry'])}")
-            msg.append(f"Stop Loss : {self._fmt(entry['stop_loss'])}")
+        if entry_is_valid and entry.get("entry") is not None and entry.get("stop_loss") is not None:
+            msg.append(f"Entry : {self._fmt(entry.get('entry'))}")
+            msg.append(f"Stop Loss : {self._fmt(entry.get('stop_loss'))}")
         elif not entry_is_valid:
             msg.append("Entry levels : withheld (invalid entry)")
 
@@ -103,15 +103,15 @@ class TelegramEngine:
         if entry_is_valid and risk and risk.get("risk") is not None:
 
             msg.append("💰 RISK")
-            msg.append(f"Capital At Risk : {self._fmt(risk['capital_at_risk'])} USDT")
-            msg.append(f"Position Size : {self._fmt(risk['position_size'])}")
-            msg.append(f"Risk : {self._fmt(risk['risk'])}")
+            msg.append(f"Capital At Risk : {self._fmt(risk.get('capital_at_risk'))} USDT")
+            msg.append(f"Position Size : {self._fmt(risk.get('position_size'))}")
+            msg.append(f"Risk : {self._fmt(risk.get('risk'))}")
             msg.append("")
 
-            msg.append(f"TP1 : {self._fmt(risk['tp1'])}")
-            msg.append(f"TP2 : {self._fmt(risk['tp2'])}")
-            msg.append(f"TP3 : {self._fmt(risk['tp3'])}")
-            msg.append(f"RR : {self._fmt(risk['rr'])}")
+            msg.append(f"TP1 : {self._fmt(risk.get('tp1'))}")
+            msg.append(f"TP2 : {self._fmt(risk.get('tp2'))}")
+            msg.append(f"TP3 : {self._fmt(risk.get('tp3'))}")
+            msg.append(f"RR : {self._fmt(risk.get('rr'))}")
             msg.append("")
 
         elif entry_is_valid and dynamic_tp:
@@ -125,8 +125,8 @@ class TelegramEngine:
         if rr:
 
             msg.append("📈 RR ANALYSIS")
-            msg.append(f"Quality : {rr['quality']}")
-            msg.append(f"RR Score : {rr['score']}")
+            msg.append(f"Quality : {rr.get('quality', '-')}")
+            msg.append(f"RR Score : {rr.get('score', '-')}")
 
         if unicorn and unicorn.get("active"):
 

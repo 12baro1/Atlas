@@ -148,3 +148,78 @@ def test_telegram_message_compact_mode_reduces_clutter():
     assert "Net RR (Cost Adj.)" not in message
     assert "Reason : " in message
     assert ("A" * 170) not in message
+
+
+def test_notify_if_elite_deduplicates_same_signal(monkeypatch):
+    engine = AtlasEngine()
+
+    called = {"count": 0}
+
+    class _DummyBot:
+        def send(self, _message):
+            called["count"] += 1
+            return True
+
+    class _DummyEngine:
+        def format_signal(self, _result):
+            return "dummy"
+
+    import telegram_engine as telegram_module
+    monkeypatch.setattr(telegram_module, "TelegramBot", lambda: _DummyBot())
+
+    engine.telegram = _DummyEngine()
+    engine.config.TELEGRAM_SIGNAL_DEDUP_ENABLED = True
+    engine.config.TELEGRAM_SIGNAL_COOLDOWN_MINUTES = 180
+
+    payload = {
+        "data": {"symbol": "MARA/USDT:USDT"},
+        "signal": {"signal": "SHORT", "confidence": 95, "grade": "A+", "strength": "STRONG"},
+        "entry": {"direction": "SHORT", "valid": True, "entry": 11.18, "stop_loss": 11.2},
+        "risk": {"entry": 11.18, "stop_loss": 11.2, "risk": 0.02, "tp3": 11.1, "rr": 4.0},
+        "rr": {"quality": "VERY GOOD", "score": 90},
+        "dynamic_tp": {"tp1": 11.15, "tp2": 11.13, "tp3": 11.1},
+        "confluence": {"checks": []},
+        "market_phase": {"phase": "Expansion"},
+        "unicorn": {"active": False},
+        "cisd": {"active": False},
+        "institutional": {"active": False},
+        "decision": {"action": "SHORT"},
+    }
+
+    sent_first = engine._notify_if_elite(**payload)
+    sent_second = engine._notify_if_elite(**payload)
+
+    assert sent_first is True
+    assert sent_second is False
+    assert called["count"] == 1
+
+
+def test_telegram_message_handles_partial_risk_payload():
+    message = TelegramEngine().format_signal(
+        {
+            "symbol": "ETH/USDT:USDT",
+            "signal": {
+                "signal": "LONG",
+                "grade": "A+",
+                "strength": "STRONG",
+                "confidence": 91,
+            },
+            "entry": {
+                "direction": "LONG",
+                "valid": True,
+                "entry": 3000.0,
+                "stop_loss": 2950.0,
+            },
+            "risk": {
+                "risk": 50.0,
+            },
+            "rr": {"quality": "GOOD", "score": 80},
+            "dynamic_tp": {"tp1": 3050.0, "tp2": 3100.0, "tp3": 3150.0},
+            "confluence": {"checks": []},
+            "decision": {"action": "LONG", "reason": "Test"},
+        }
+    )
+
+    assert "Capital At Risk : None USDT" in message
+    assert "Position Size : None" in message
+    assert "RR : None" in message

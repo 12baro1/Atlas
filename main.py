@@ -3,6 +3,7 @@ import logging
 
 from data_engine import get_market_data
 from engine import AtlasEngine
+from universe_engine import select_symbols
 
 engine = AtlasEngine()
 
@@ -20,19 +21,29 @@ exchange = ccxt.bybit({
 })
 
 markets = exchange.load_markets()
+symbols, universe_stats = select_symbols(
+    markets=markets,
+    suffix="/USDT:USDT",
+    require_active=True,
+    require_swap=False,
+    max_symbols=int(getattr(engine.config, "MAX_SYMBOLS", 0) or 0),
+)
 
-symbols = []
-for symbol, meta in markets.items():
-    if not symbol.endswith("/USDT:USDT"):
-        continue
+backend = getattr(ccxt, "BACKEND", "unknown")
+if backend == "mock":
+    logger.warning(
+        "ccxt mock backend aktif. Bu mod test/offline icindir ve sembol havuzu sinirli olabilir."
+    )
 
-    if isinstance(meta, dict) and not meta.get("active", True):
-        continue
-
-    symbols.append(symbol)
-
-symbols.sort()
-logger.info("Toplam aktif USDT perpetual sembol: %s", len(symbols))
+logger.info(
+    "Sembol secimi | backend=%s toplam=%s kalan=%s suffix_elendi=%s inactive_elendi=%s cap_elendi=%s",
+    backend,
+    universe_stats["total_markets"],
+    universe_stats["kept"],
+    universe_stats["skipped_suffix"],
+    universe_stats["skipped_inactive"],
+    universe_stats["limited"],
+)
 
 processed = 0
 success = 0

@@ -3,6 +3,8 @@ config.py
 Atlas SMC Engine Configuration
 """
 
+import os
+
 class Config:
 
     # Risk
@@ -34,12 +36,14 @@ class Config:
     TELEGRAM_ENABLED = True
     TELEGRAM_COMPACT_MODE = True
     TELEGRAM_MAX_DECISION_REASON_LENGTH = 140
-    TELEGRAM_BOT_TOKEN = "8451423294:AAFJ8gmvKPk23ierRsh4u5sX3SRIXk2uDWY"
-    TELEGRAM_CHAT_ID = ""   # Boş bırakılacak
+    TELEGRAM_SIGNAL_DEDUP_ENABLED = True
+    TELEGRAM_SIGNAL_COOLDOWN_MINUTES = 180
+    TELEGRAM_BOT_TOKEN = os.getenv("ATLAS_TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID = os.getenv("ATLAS_TELEGRAM_CHAT_ID", "")
 
     # Yetkilendirme
-    BOT_PASSWORD = "313131"
-    ADMIN_CHAT_ID = 6378242540
+    BOT_PASSWORD = os.getenv("ATLAS_BOT_PASSWORD", "")
+    ADMIN_CHAT_ID = int(os.getenv("ATLAS_ADMIN_CHAT_ID", "0"))
     TELEGRAM_ADMIN_IDS = [ADMIN_CHAT_ID]
     BOT_PASSWORD_HASH = ""
     TELEGRAM_AUTH_DB_FILE = "telegram_auth.db"
