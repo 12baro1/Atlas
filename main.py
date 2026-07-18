@@ -1,5 +1,6 @@
 import ccxt
 import logging
+import os
 
 from data_engine import get_market_data
 from engine import AtlasEngine
@@ -31,8 +32,14 @@ symbols, universe_stats = select_symbols(
 
 backend = getattr(ccxt, "BACKEND", "unknown")
 if backend == "mock":
+    allow_mock = os.getenv("ATLAS_ALLOW_MOCK", "0").strip().lower() in {"1", "true", "yes"}
+    if not allow_mock:
+        raise RuntimeError(
+            "ccxt mock backend aktif. Canli tarama icin pip install ccxt yapin. "
+            "Sadece test/offline icin ATLAS_ALLOW_MOCK=1 ile devam edin."
+        )
     logger.warning(
-        "ccxt mock backend aktif. Bu mod test/offline icindir ve sembol havuzu sinirli olabilir."
+        "ccxt mock backend aktif (ATLAS_ALLOW_MOCK=1). Sonuclar test/offline verisine dayanir."
     )
 
 logger.info(
