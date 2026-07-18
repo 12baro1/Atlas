@@ -39,6 +39,9 @@ class TelegramAuth:
         if chat_id not in users:
             users.append(chat_id)
             self.save_users(users)
+            return True
+
+        return False
 
     def get_updates(self, offset=None):
 
@@ -90,19 +93,26 @@ class TelegramAuth:
                             data={
                                 "chat_id": chat_id,
                                 "text": "🔐 Şifreyi gönderiniz."
-                            }
+                            },
+                            timeout=10
                         )
 
                     elif text == self.password:
 
-                        self.add_user(chat_id)
+                        added = self.add_user(chat_id)
+
+                        if added:
+                            reply = "✅ Yetkilendirildiniz. Bundan sonraki sinyal mesajları size de gönderilecek."
+                        else:
+                            reply = "✅ Zaten yetkilisiniz. Sinyal mesajları size gönderilecek."
 
                         requests.post(
                             f"https://api.telegram.org/bot{self.token}/sendMessage",
                             data={
                                 "chat_id": chat_id,
-                                "text": "✅ Yetkilendirildiniz."
-                            }
+                                "text": reply
+                            },
+                            timeout=10
                         )
 
                     else:
@@ -112,7 +122,8 @@ class TelegramAuth:
                             data={
                                 "chat_id": chat_id,
                                 "text": "❌ Hatalı şifre."
-                            }
+                            },
+                            timeout=10
                         )
 
             except Exception as e:
