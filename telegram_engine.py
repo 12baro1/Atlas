@@ -21,6 +21,7 @@ class TelegramEngine:
         risk = result.get("risk")
         rr = result.get("rr")
         confluence = result.get("confluence")
+        market_phase = result.get("market_phase")
 
         msg = []
 
@@ -32,6 +33,11 @@ class TelegramEngine:
         msg.append(f"⭐ Grade : {signal['grade']}")
         msg.append(f"💪 Strength : {signal['strength']}")
         msg.append(f"🎯 Confidence : {signal['confidence']}%")
+
+        if market_phase:
+            phase = market_phase["phase"].title()
+            msg.append(f"📈 Market Phase : {phase}")
+
         msg.append("")
 
         if confluence:

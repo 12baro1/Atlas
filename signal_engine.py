@@ -5,10 +5,30 @@ Atlas Signal Engine v2
 
 class SignalEngine:
 
+
+    def apply_market_phase(self, confidence, market_phase):
+
+        phase = market_phase.get("phase")
+
+        if phase == "EXPANSION":
+            confidence += 8
+
+        elif phase == "RETRACEMENT":
+            confidence -= 8
+
+        elif phase in ["ACCUMULATION", "DISTRIBUTION"]:
+            confidence += 3
+
+        return max(0, min(100, confidence))
+
     def generate(self, analysis):
 
         confluence = analysis["confluence"]
         confidence = confluence["score"]
+        market_phase = analysis.get("market_phase")
+
+        if market_phase:
+            confidence = self.apply_market_phase(confidence, market_phase)
 
         # Grade
         if confidence >= 90:

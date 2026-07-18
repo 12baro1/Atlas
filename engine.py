@@ -36,6 +36,7 @@ from ote_engine import OTEEngine
 from htf_orderblock_engine import HTFOrderBlockEngine
 from htf_fvg_engine import HTFFVGEngine
 from dynamic_tp_engine import DynamicTPEngine
+from market_phase_engine import MarketPhaseEngine
 
 class AtlasEngine:
 
@@ -71,6 +72,7 @@ class AtlasEngine:
         self.htf_orderblock = HTFOrderBlockEngine()
         self.htf_fvg = HTFFVGEngine()
         self.dynamic_tp = DynamicTPEngine()
+        self.market_phase = MarketPhaseEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -214,6 +216,16 @@ class AtlasEngine:
             session=session
         )
 
+        market_phase = self.market_phase.detect(
+            structure=labels,
+            trend=trend,
+            liquidity_sweep=liquidity_sweep,
+            fvg=fvg,
+            orderblocks=orderblocks,
+            premium_discount=premium_discount,
+            mtf=mtf
+        )
+
         analysis = {
             "structure": labels,
             "liquidity": liquidity,
@@ -232,6 +244,7 @@ class AtlasEngine:
             "htf_orderblock": htf_orderblock,
             "htf_fvg": htf_fvg,
             "dynamic_tp": dynamic_tp,
+            "market_phase": market_phase,
         }
 
         risk = None
@@ -261,7 +274,8 @@ class AtlasEngine:
                 "risk": risk,
                 "rr": rr,
                 "dynamic_tp": dynamic_tp,
-                "confluence": confluence
+                "confluence": confluence,
+                "market_phase": market_phase
             })
 
             print(message)
