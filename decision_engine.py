@@ -80,8 +80,12 @@ class DecisionEngine:
         if mismatch_detected:
             blockers.append("Directional mismatch detected")
 
+        hard_blocked = (not entry_valid) or (not risk_valid)
+
         if blockers and total_score < self.AVOID_SCORE_THRESHOLD:
             action = "AVOID"
+        elif hard_blocked and direction in ["LONG", "SHORT"]:
+            action = "WAIT"
         elif direction in ["LONG", "SHORT"] and total_score >= self.OPEN_SCORE_THRESHOLD and not mismatch_detected:
             action = direction
         elif direction in ["LONG", "SHORT"]:
@@ -231,7 +235,9 @@ class DecisionEngine:
         if risk is None:
             return False
         if risk.get("rr") is not None:
-            return risk.get("entry") is not False
+            entry = risk.get("entry")
+            stop_loss = risk.get("stop_loss")
+            return entry is not None and stop_loss is not None
         if risk.get("risk") is not None:
             return True
         return False
