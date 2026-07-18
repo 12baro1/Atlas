@@ -2,6 +2,7 @@ import ccxt
 import logging
 import os
 import sys
+import time
 
 from data_engine import get_market_data
 from engine import AtlasEngine
@@ -68,7 +69,10 @@ for index, symbol in enumerate(symbols, start=1):
         data = get_market_data(symbol)
         logger.info("Veri alindi: %s", data["symbol"])
 
+        analysis_started = time.perf_counter()
         result = engine.analyze(data)
+        elapsed = time.perf_counter() - analysis_started
+        logger.info("[%s/%s] Analiz tamamlandi: %s (%.2fs)", index, len(symbols), symbol, elapsed)
 
         if result is None:
             skipped += 1

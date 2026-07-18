@@ -859,6 +859,9 @@ class AtlasEngine:
         decision,
     ):
         """Yüksek güvenli sinyallerde Telegram bildirimi gönderir."""
+        if not bool(getattr(self.config, "TELEGRAM_ENABLED", True)):
+            return False
+
         if signal.get("signal") not in ["LONG", "SHORT"]:
             return False
 
@@ -910,6 +913,14 @@ class AtlasEngine:
             )
             return False
 
+        bot_token = str(getattr(self.config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
+        if not bot_token:
+            self.logger.info(
+                "Telegram skip: bot token not configured for %s",
+                symbol,
+            )
+            return False
+
         telegram_module = import_module("telegram_engine")
         telegram_engine = self.telegram or telegram_module.TelegramEngine()
         self.telegram = telegram_engine
@@ -940,7 +951,11 @@ class AtlasEngine:
         )
 
         print(message)
-        return telegram_module.TelegramBot().send(message)
+        try:
+            return telegram_module.TelegramBot().send(message)
+        except Exception:
+            self.logger.exception("Telegram send hatasi: %s", symbol)
+            return False
 
     def _signal_fingerprint(self, action, entry, risk):
         """Aynı setup tekrarlarını baskılamak için sade imza üretir."""

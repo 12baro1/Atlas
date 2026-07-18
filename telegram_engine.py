@@ -215,7 +215,8 @@ class TelegramBot:
         ok = False
 
         try:
-            with urlopen(request, timeout=10) as response:
+            timeout_seconds = float(getattr(Config, "TELEGRAM_HTTP_TIMEOUT_SECONDS", 3))
+            with urlopen(request, timeout=timeout_seconds) as response:
                 status_code = getattr(response, "status", 0) or 0
                 raw_body = response.read()
                 body = raw_body.decode("utf-8", errors="replace")
