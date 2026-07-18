@@ -3,7 +3,12 @@ telegram_engine.py
 Atlas SMC Engine v3
 """
 
+import json
+import os
+
 import requests
+
+from config import Config
 
 
 class TelegramEngine:
@@ -16,6 +21,9 @@ class TelegramEngine:
         risk = result.get("risk")
         rr = result.get("rr")
         confluence = result.get("confluence")
+        market_phase = result.get("market_phase")
+        eqh_eql = result.get("eqh_eql")
+        inducement = result.get("inducement")
 
         msg = []
 
@@ -27,6 +35,24 @@ class TelegramEngine:
         msg.append(f"⭐ Grade : {signal['grade']}")
         msg.append(f"💪 Strength : {signal['strength']}")
         msg.append(f"🎯 Confidence : {signal['confidence']}%")
+
+        if market_phase:
+            phase = market_phase["phase"].title()
+            msg.append(f"📈 Market Phase : {phase}")
+
+        if eqh_eql and eqh_eql.get("valid"):
+            zones = eqh_eql.get("zones", [])[:3]
+            zone_text = ", ".join(
+                f"{zone['type']} {zone['timeframe']} @ {round(zone['level'], 4)}"
+                for zone in zones
+            )
+            msg.append(f"📏 EQH/EQL : {zone_text}")
+
+        if inducement and inducement.get("valid"):
+            direction = inducement["direction"].title()
+            confidence = inducement["confidence"]
+            msg.append(f"IDM: ✔ {direction} (%{confidence})")
+
         msg.append("")
 
         if confluence:
@@ -75,30 +101,71 @@ class TelegramBot:
 
     def __init__(self):
 
-        self.token = "8451423294:AAFJ8gmvKPk23ierRsh4u5sX3SRIXk2uDWY"
-        self.chat_id = "6378242540"
+        self.token = Config.TELEGRAM_BOT_TOKEN
+        self.chat_id = Config.TELEGRAM_CHAT_ID
+        self.admin_chat_id = Config.ADMIN_CHAT_ID
+        self.chat_ids_file = Config.CHAT_IDS_FILE
 
-    def send(self, message):
+    def load_chat_ids(self):
+
+        chat_ids = []
+
+        if self.chat_id:
+            chat_ids.append(self.chat_id)
+
+        if self.admin_chat_id:
+            chat_ids.append(self.admin_chat_id)
+
+        if os.path.exists(self.chat_ids_file):
+            with open(self.chat_ids_file, "r") as f:
+                saved_chat_ids = json.load(f)
+
+            chat_ids.extend(saved_chat_ids)
+
+        unique_chat_ids = []
+
+        for chat_id in chat_ids:
+            if chat_id not in unique_chat_ids:
+                unique_chat_ids.append(chat_id)
+
+        return unique_chat_ids
+
+    def send_to_chat(self, chat_id, message):
 
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
 
+        response = requests.post(
+            url,
+            data={
+                "chat_id": chat_id,
+                "text": message
+            },
+            timeout=10
+        )
+
+        print("========== TELEGRAM ==========")
+        print("Chat ID :", chat_id)
+        print("Status :", response.status_code)
+        print("Response :", response.text)
+        print("==============================")
+
+        return response.ok
+
+    def send(self, message):
+
         try:
+            chat_ids = self.load_chat_ids()
 
-            response = requests.post(
-                url,
-                data={
-                    "chat_id": self.chat_id,
-                    "text": message
-                },
-                timeout=10
-            )
+            if not chat_ids:
+                print("Telegram Error : Kayıtlı chat id bulunamadı.")
+                return False
 
-            print("========== TELEGRAM ==========")
-            print("Status :", response.status_code)
-            print("Response :", response.text)
-            print("==============================")
+            results = []
 
-            return response.ok
+            for chat_id in chat_ids:
+                results.append(self.send_to_chat(chat_id, message))
+
+            return all(results)
 
         except Exception as e:
 

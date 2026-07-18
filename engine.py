@@ -3,7 +3,6 @@ engine.py
 Atlas SMC Engine v1
 """
 
-from telegram_engine import TelegramEngine, TelegramBot
 from core.market_structure_engine import MarketStructureEngine
 from utils.structure_labels import label_swings
 from bos_engine import BOSEngine
@@ -27,7 +26,7 @@ from rr_engine import RREngine
 from position_manager import PositionManager
 from trade_manager import TradeManager
 from scanner_engine import ScannerEngine
-from telegram_engine import TelegramEngine
+from telegram_engine import TelegramEngine, TelegramBot
 from statistics_engine import StatisticsEngine
 from backtest_engine import BacktestEngine
 from config import Config
@@ -36,6 +35,9 @@ from ote_engine import OTEEngine
 from htf_orderblock_engine import HTFOrderBlockEngine
 from htf_fvg_engine import HTFFVGEngine
 from dynamic_tp_engine import DynamicTPEngine
+from market_phase_engine import MarketPhaseEngine
+from eqh_eql_engine import EQHEQLEngine
+from inducement_engine import InducementEngine
 
 class AtlasEngine:
 
@@ -71,6 +73,9 @@ class AtlasEngine:
         self.htf_orderblock = HTFOrderBlockEngine()
         self.htf_fvg = HTFFVGEngine()
         self.dynamic_tp = DynamicTPEngine()
+        self.market_phase = MarketPhaseEngine()
+        self.eqh_eql = EQHEQLEngine()
+        self.inducement = InducementEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -148,6 +153,13 @@ class AtlasEngine:
 
         trend = self.trend.calculate(mtf)
 
+        eqh_eql = self.eqh_eql.detect({
+            "1w": {"structure": weekly_labels, "candles": weekly},
+            "1d": {"structure": daily_labels, "candles": daily},
+            "4h": {"structure": h4_labels, "candles": h4},
+            "15m": {"structure": labels, "candles": candles}
+        })
+
         entry = self.entry.generate(
             mtf,
             labels,
@@ -190,13 +202,53 @@ class AtlasEngine:
                 "tp2": None,
                 "tp3": None
             }
-        
+
 
         confirmation = self.entry_confirmation.confirm(
             mtf,
             labels,
             fvg,
             entry
+        )
+
+        market_phase = self.market_phase.detect(
+            structure=labels,
+            trend=trend,
+            liquidity_sweep=liquidity_sweep,
+            fvg=fvg,
+            orderblocks=orderblocks,
+            premium_discount=premium_discount,
+            mtf=mtf
+        )
+
+        inducement = self.inducement.detect(
+            timeframes={
+                "1d": {
+                    "structure": daily_labels,
+                    "candles": daily,
+                    "fvg": daily_fvg,
+                    "orderblocks": daily_orderblocks,
+                    "breaker": []
+                },
+                "4h": {
+                    "structure": h4_labels,
+                    "candles": h4,
+                    "fvg": h4_fvg,
+                    "orderblocks": h4_orderblocks,
+                    "breaker": []
+                },
+                "15m": {
+                    "structure": labels,
+                    "candles": candles,
+                    "fvg": fvg,
+                    "orderblocks": orderblocks,
+                    "breaker": breakers
+                }
+            },
+            trend=trend,
+            liquidity_sweep=liquidity_sweep,
+            eqh_eql=eqh_eql,
+            market_phase=market_phase
         )
 
         confluence = self.confluence.evaluate(
@@ -211,7 +263,9 @@ class AtlasEngine:
             htf_orderblock=htf_orderblock,
             htf_fvg=htf_fvg,
             killzone=killzone,
-            session=session
+            session=session,
+            eqh_eql=eqh_eql,
+            inducement=inducement
         )
 
         analysis = {
@@ -232,6 +286,9 @@ class AtlasEngine:
             "htf_orderblock": htf_orderblock,
             "htf_fvg": htf_fvg,
             "dynamic_tp": dynamic_tp,
+            "market_phase": market_phase,
+            "eqh_eql": eqh_eql,
+            "inducement": inducement,
         }
 
         risk = None
@@ -261,7 +318,10 @@ class AtlasEngine:
                 "risk": risk,
                 "rr": rr,
                 "dynamic_tp": dynamic_tp,
-                "confluence": confluence
+                "confluence": confluence,
+                "market_phase": market_phase,
+                "eqh_eql": eqh_eql,
+                "inducement": inducement
             })
 
             print(message)
