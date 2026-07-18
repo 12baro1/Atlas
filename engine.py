@@ -862,7 +862,9 @@ class AtlasEngine:
         decision,
     ):
         """Yüksek güvenli sinyallerde Telegram bildirimi gönderir."""
-        if not bool(getattr(self.config, "TELEGRAM_ENABLED", True)):
+        Config.refresh_from_env()
+
+        if not bool(getattr(Config, "TELEGRAM_ENABLED", True)):
             return False
 
         if signal.get("signal") not in ["LONG", "SHORT"]:
@@ -870,7 +872,7 @@ class AtlasEngine:
 
         signal_action = signal.get("signal", "WAIT")
         decision_action = (decision or {}).get("action", "WAIT")
-        require_decision_action = bool(getattr(self.config, "TELEGRAM_REQUIRE_DECISION_ACTION", False))
+        require_decision_action = bool(getattr(Config, "TELEGRAM_REQUIRE_DECISION_ACTION", False))
         if require_decision_action and decision_action not in ["LONG", "SHORT"]:
             self.logger.info(
                 "Telegram skip: decision action=%s for %s",
@@ -901,7 +903,7 @@ class AtlasEngine:
             )
             return False
 
-        min_confidence = float(getattr(self.config, "TELEGRAM_MIN_CONFIDENCE", 75))
+        min_confidence = float(getattr(Config, "TELEGRAM_MIN_CONFIDENCE", 75))
         if signal.get("confidence", 0) < min_confidence:
             self.logger.info(
                 "Telegram skip: confidence=%s < min=%s for %s",
@@ -919,7 +921,7 @@ class AtlasEngine:
             )
             return False
 
-        bot_token = str(getattr(self.config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
+        bot_token = str(getattr(Config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
         if not bot_token:
             self.logger.info(
                 "Telegram skip: bot token not configured for %s",
@@ -957,7 +959,7 @@ class AtlasEngine:
         )
 
         print(message)
-        if bool(getattr(self.config, "TELEGRAM_ASYNC_SEND", True)):
+        if bool(getattr(Config, "TELEGRAM_ASYNC_SEND", True)):
             thread = threading.Thread(
                 target=self._send_telegram_safe,
                 kwargs={
