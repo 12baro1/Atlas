@@ -3,6 +3,8 @@ volume_profile_engine.py
 Atlas Volume Profile Engine v1
 """
 
+from core.analysis_utils import clamp
+
 
 class VolumeProfileEngine:
     """Hacim dağılımından kritik işlem bölgelerini üretir."""
@@ -31,7 +33,9 @@ class VolumeProfileEngine:
             end = max(0, min(bins - 1, end))
 
             span = max(end - start + 1, 1)
-            distributed_volume = candle.volume / span
+            body = abs(candle.close - candle.open)
+            body_ratio = min(1.0, body / rng)
+            distributed_volume = (candle.volume * (0.55 + (0.45 * body_ratio))) / span
 
             for index in range(start, end + 1):
                 histogram[index] += distributed_volume
@@ -56,6 +60,7 @@ class VolumeProfileEngine:
         current_price = candles[-1].close
         profile_state = self._profile_state(current_price, vah, val, poc)
         confidence = self._confidence(histogram, poc_index, vah_index, val_index, current_price, vah, val)
+        bias = self._direction_bias(profile_state)
 
         return {
             "active": True,
@@ -66,7 +71,10 @@ class VolumeProfileEngine:
             "lvn": [round(price, 8) for price in lvn],
             "current_price": round(current_price, 8),
             "state": profile_state,
+            "direction": bias,
             "confidence": confidence,
+            "bias_strength": self._bias_strength(current_price, poc, vah, val),
+            "value_area_position": self._value_area_position(current_price, vah, val),
             "total_volume": round(total_volume, 4),
         }
 
@@ -96,9 +104,9 @@ class VolumeProfileEngine:
 
         direction = "NONE"
         if best:
-            if best["state"] in ["DISCOUNT", "VALUE_LOW"]:
+            if best["direction"] == "BULLISH":
                 direction = "BULLISH"
-            elif best["state"] in ["PREMIUM", "VALUE_HIGH"]:
+            elif best["direction"] == "BEARISH":
                 direction = "BEARISH"
 
         return {
@@ -142,12 +150,17 @@ class VolumeProfileEngine:
         return [item[0] for item in indexed[:count]]
 
     def _profile_state(self, current_price, vah, val, poc):
-        if current_price > vah:
+        if current_price >= vah:
             return "PREMIUM"
-        if current_price < val:
+        if current_price <= val:
             return "DISCOUNT"
 
         midpoint = (vah + val) / 2
+        poc_distance = abs(current_price - poc) / max(vah - val, 1e-9)
+
+        if poc_distance <= 0.10:
+            return "POC_NEAR"
+
         if current_price >= midpoint:
             return "VALUE_HIGH"
         if current_price <= midpoint:
@@ -162,14 +175,38 @@ class VolumeProfileEngine:
         poc_share = histogram[poc_index] / total
 
         in_value = val <= current_price <= vah
-        value_bonus = 10 if in_value else 4
+        value_bonus = 12 if in_value else 4
 
         spread = max(vah - val, 1e-9)
         concentration = min(40, int((poc_share * 100)))
-        distribution_quality = min(35, int((1 / spread) * 2))
+        distribution_quality = min(30, int((1 / spread) * 2))
+        proximity_bonus = max(0, int(15 - (abs(current_price - ((vah + val) / 2)) / spread) * 20))
 
-        score = 30 + concentration + distribution_quality + value_bonus
-        return max(0, min(100, score))
+        score = 28 + concentration + distribution_quality + value_bonus + proximity_bonus
+        return int(clamp(score))
+
+    def _direction_bias(self, state):
+        if state in ["DISCOUNT", "VALUE_LOW", "BELOW_POC", "POC_NEAR"]:
+            return "BULLISH"
+        if state in ["PREMIUM", "VALUE_HIGH", "ABOVE_POC"]:
+            return "BEARISH"
+        return "NONE"
+
+    def _bias_strength(self, current_price, poc, vah, val):
+        spread = max(vah - val, 1e-9)
+        distance = abs(current_price - poc) / spread
+        return int(clamp(100 - (distance * 100), 0, 100))
+
+    def _value_area_position(self, current_price, vah, val):
+        if current_price >= vah:
+            return "ABOVE_VALUE"
+        if current_price <= val:
+            return "BELOW_VALUE"
+
+        midpoint = (vah + val) / 2
+        if current_price >= midpoint:
+            return "UPPER_VALUE"
+        return "LOWER_VALUE"
 
     def _empty(self):
         return {
@@ -181,6 +218,9 @@ class VolumeProfileEngine:
             "lvn": [],
             "current_price": None,
             "state": "NONE",
+            "direction": "NONE",
             "confidence": 0,
+            "bias_strength": 0,
+            "value_area_position": "NONE",
             "total_volume": 0,
         }

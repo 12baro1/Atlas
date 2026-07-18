@@ -16,6 +16,8 @@ class BacktestEngine:
         self.tp3 = 0
 
         self.net_rr = 0.0
+        self.gross_profit_rr = 0.0
+        self.gross_loss_rr = 0.0
 
         self.history = []
 
@@ -25,17 +27,20 @@ class BacktestEngine:
 
         result = trade.get("result", "LOSS")
 
-        rr = trade.get("rr", 0)
+        rr = abs(trade.get("rr", 0))
+        signed_rr = rr if result == "WIN" else -rr
 
-        self.net_rr += rr
+        self.net_rr += signed_rr
 
         if result == "WIN":
 
             self.wins += 1
+            self.gross_profit_rr += rr
 
         else:
 
             self.losses += 1
+            self.gross_loss_rr += rr
 
         if trade.get("tp") == 1:
             self.tp1 += 1
@@ -58,10 +63,16 @@ class BacktestEngine:
                 "losses": 0,
                 "winrate": 0,
                 "avg_rr": 0,
+                "expectancy": 0,
+                "profit_factor": 0,
                 "tp1": 0,
                 "tp2": 0,
                 "tp3": 0
             }
+
+        gross_loss_rr = self.gross_loss_rr if self.gross_loss_rr > 0 else 0.0
+        profit_factor = self.gross_profit_rr / gross_loss_rr if gross_loss_rr > 0 else self.gross_profit_rr
+        expectancy = self.net_rr / self.total
 
         return {
 
@@ -80,6 +91,10 @@ class BacktestEngine:
                 self.net_rr / self.total,
                 2
             ),
+
+            "expectancy": round(expectancy, 2),
+
+            "profit_factor": round(profit_factor, 2),
 
             "tp1": self.tp1,
 

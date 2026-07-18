@@ -39,6 +39,9 @@ def test_detect_returns_key_levels():
     assert profile["vah"] is not None
     assert profile["val"] is not None
     assert profile["confidence"] >= 0
+    assert profile["direction"] in ["BULLISH", "BEARISH", "NONE"]
+    assert 0 <= profile["bias_strength"] <= 100
+    assert profile["value_area_position"] in ["ABOVE_VALUE", "BELOW_VALUE", "UPPER_VALUE", "LOWER_VALUE"]
 
 
 def test_detect_multi_returns_direction_and_best():

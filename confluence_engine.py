@@ -31,6 +31,7 @@ class ConfluenceEngine:
 
         score = 0
         checks = []
+        entry_direction = entry.get("direction", "WAIT")
 
         # Multi Timeframe
         if mtf["valid"]:
@@ -41,8 +42,8 @@ class ConfluenceEngine:
 
         # Trend
         trend_ok = (
-            (trend["trend"] == "BULLISH" and entry["direction"] == "LONG") or
-            (trend["trend"] == "BEARISH" and entry["direction"] == "SHORT")
+            (trend["trend"] == "BULLISH" and entry_direction == "LONG") or
+            (trend["trend"] == "BEARISH" and entry_direction == "SHORT")
         )
 
         if trend_ok:
@@ -50,6 +51,7 @@ class ConfluenceEngine:
             checks.append("✔ Trend")
         else:
             checks.append("✘ Trend")
+            score -= 4
 
         # Entry
         if entry["valid"]:
@@ -128,7 +130,6 @@ class ConfluenceEngine:
         # SMT Divergence
         if smt and smt.get("active"):
             smt_direction = smt.get("direction")
-            entry_direction = entry.get("direction")
 
             if (smt_direction == "BULLISH" and entry_direction == "LONG") or (
                 smt_direction == "BEARISH" and entry_direction == "SHORT"
@@ -136,7 +137,7 @@ class ConfluenceEngine:
                 score += 12
                 checks.append(f"✔ SMT {smt_direction} ({smt.get('confidence', 0)}%)")
             else:
-                score += 4
+                score -= 4
                 checks.append(f"◐ SMT {smt_direction} ({smt.get('confidence', 0)}%)")
         else:
             checks.append("✘ SMT")
@@ -164,13 +165,13 @@ class ConfluenceEngine:
 
             best = unicorn.get("best") or {}
             direction = best.get("direction")
-            entry_direction = entry.get("direction")
             if (direction == "BULLISH" and entry_direction == "LONG") or (
                 direction == "BEARISH" and entry_direction == "SHORT"
             ):
                 score += 6
                 checks.append("✔ Unicorn Direction Match")
             else:
+                score -= 6
                 checks.append("◐ Unicorn Direction Mismatch")
         else:
             checks.append("✘ Unicorn")
@@ -178,7 +179,6 @@ class ConfluenceEngine:
         # CISD
         if cisd and cisd.get("active"):
             cisd_direction = cisd.get("direction")
-            entry_direction = entry.get("direction")
             cisd_confidence = cisd.get("confidence", 0)
 
             if (cisd_direction == "BULLISH" and entry_direction == "LONG") or (
@@ -187,7 +187,7 @@ class ConfluenceEngine:
                 score += min(16, int(cisd_confidence / 6))
                 checks.append(f"✔ CISD {cisd_direction} ({cisd_confidence}%)")
             else:
-                score += 3
+                score -= 3
                 checks.append(f"◐ CISD {cisd_direction} ({cisd_confidence}%)")
         else:
             checks.append("✘ CISD")
@@ -196,7 +196,6 @@ class ConfluenceEngine:
         if volume_profile and volume_profile.get("active"):
             vp_direction = volume_profile.get("direction", "NONE")
             vp_confidence = volume_profile.get("confidence", 0)
-            entry_direction = entry.get("direction")
 
             if (vp_direction == "BULLISH" and entry_direction == "LONG") or (
                 vp_direction == "BEARISH" and entry_direction == "SHORT"
@@ -204,7 +203,7 @@ class ConfluenceEngine:
                 score += min(14, int(vp_confidence / 7))
                 checks.append(f"✔ Volume Profile {vp_direction} ({vp_confidence}%)")
             else:
-                score += 2
+                score -= 5
                 checks.append(f"◐ Volume Profile {vp_direction} ({vp_confidence}%)")
         else:
             checks.append("✘ Volume Profile")
