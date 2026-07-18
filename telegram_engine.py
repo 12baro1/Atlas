@@ -24,6 +24,8 @@ class TelegramEngine:
         confluence = result.get("confluence")
         market_phase = result.get("market_phase")
         unicorn = result.get("unicorn")
+        cisd = result.get("cisd")
+        decision = result.get("decision")
 
         msg = []
 
@@ -97,6 +99,20 @@ class TelegramEngine:
             msg.append(f"TP1 : {best.get('tp1')}")
             msg.append(f"TP2 : {best.get('tp2')}")
             msg.append(f"TP3 : {best.get('tp3')}")
+
+        if cisd and cisd.get("active"):
+            msg.append("")
+            msg.append("🧭 CISD")
+            msg.append(f"Direction : {cisd.get('direction', 'NONE')}")
+            msg.append(f"Confidence : {cisd.get('confidence', 0)}%")
+            best = cisd.get("best") or {}
+            msg.append(f"Timeframe : {best.get('timeframe', '-')}")
+
+        if decision:
+            msg.append("")
+            msg.append("🧠 DECISION")
+            msg.append(f"Action : {decision.get('action', 'WAIT')}")
+            msg.append(f"Reason : {decision.get('reason', '-')}")
 
         return "\n".join(msg)
 

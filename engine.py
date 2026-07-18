@@ -15,6 +15,8 @@ from choch_engine import CHOCHEngine
 from config import Config
 from confluence_engine import ConfluenceEngine
 from core.market_structure_engine import MarketStructureEngine
+from cisd_engine import CISDEngine
+from decision_engine import DecisionEngine
 from dynamic_tp_engine import DynamicTPEngine
 from entry_confirmation_engine import EntryConfirmationEngine
 from entry_engine import EntryEngine
@@ -51,6 +53,7 @@ class AtlasEngine:
     SWEEP_TIMEFRAMES = ("15m", "1h", "4h", "1d")
     SMT_TIMEFRAMES = ("15m", "1h", "4h", "1d")
     UNICORN_TIMEFRAMES = ("15m", "1h", "4h", "1d")
+    CISD_TIMEFRAMES = ("15m", "1h", "4h", "1d")
 
     def __init__(self, structure_engine_cls=None):
         # Testlerde sahte sınıf enjekte edebilmek için sınıf referansı tutulur.
@@ -78,6 +81,8 @@ class AtlasEngine:
         self.htf_fvg = HTFFVGEngine()
         self.smt = SMTDivergenceEngine()
         self.unicorn = UnicornEngine()
+        self.cisd = CISDEngine()
+        self.decision = DecisionEngine()
 
         # Sinyal, risk ve operasyon motorları
         self.entry = EntryEngine()
@@ -163,6 +168,13 @@ class AtlasEngine:
             smt_state=smt_state,
         )
 
+        cisd_state = self._build_cisd_state(
+            data=data,
+            tf_analysis=tf_analysis,
+            context_state=context_state,
+            smt_state=smt_state,
+        )
+
         execution_state = self._build_execution_state(
             entry_structure=structure_state["structure"],
             mtf=context_state["mtf"],
@@ -181,6 +193,15 @@ class AtlasEngine:
             liquidity=structure_state["liquidity"],
             smt=smt_state,
             unicorn=unicorn_state,
+            cisd=cisd_state,
+        )
+
+        decision_state = self.decision.decide(
+            signal=execution_state["signal"],
+            confluence=execution_state["confluence"],
+            entry=execution_state["entry"],
+            risk=execution_state["risk"],
+            cisd=cisd_state,
         )
 
         analysis = self._compose_analysis(
@@ -189,6 +210,8 @@ class AtlasEngine:
             execution_state=execution_state,
             smt_state=smt_state,
             unicorn_state=unicorn_state,
+            cisd_state=cisd_state,
+            decision_state=decision_state,
         )
 
         self._notify_if_elite(
@@ -201,6 +224,8 @@ class AtlasEngine:
             confluence=execution_state["confluence"],
             market_phase=context_state["market_phase"],
             unicorn=unicorn_state,
+            cisd=cisd_state,
+            decision=decision_state,
         )
 
         return {
@@ -209,6 +234,7 @@ class AtlasEngine:
             "risk": execution_state["risk"],
             "rr": execution_state["rr"],
             "dynamic_tp": execution_state["dynamic_tp"],
+            "decision": decision_state,
         }
 
     def _analyze_timeframe(self, candles):
@@ -395,6 +421,7 @@ class AtlasEngine:
         liquidity,
         smt,
         unicorn,
+        cisd,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(mtf, entry_structure, fvg, orderblocks)
@@ -418,6 +445,7 @@ class AtlasEngine:
             fvg=fvg,
             market_phase=market_phase,
             unicorn=unicorn,
+            cisd=cisd,
         )
 
         dynamic_tp = self._calculate_dynamic_tp(entry, liquidity, fvg, orderblocks)
@@ -431,6 +459,7 @@ class AtlasEngine:
             "liquidity_sweep": liquidity_sweep,
             "smt": smt,
             "unicorn": unicorn,
+            "cisd": cisd,
         }
         signal = self.signal.generate(analysis_for_signal)
 
@@ -451,6 +480,8 @@ class AtlasEngine:
         execution_state,
         smt_state,
         unicorn_state=None,
+        cisd_state=None,
+        decision_state=None,
     ):
         """Dış API'de beklenen analysis sözlüğünü oluşturur."""
         return {
@@ -498,7 +529,55 @@ class AtlasEngine:
                 "setups": [],
                 "timeframes": {},
             },
+            "cisd": cisd_state or {
+                "active": False,
+                "direction": "NONE",
+                "confidence": 0,
+                "best": None,
+                "timeframes": {},
+                "events": [],
+            },
+            "decision": decision_state or {
+                "action": "WAIT",
+                "reason": "No decision",
+            },
         }
+
+    def _build_cisd_state(self, data, tf_analysis, context_state, smt_state):
+        """CISD için MTF payload oluşturur ve sonucu döndürür."""
+        timeframe_to_structure_key = {
+            "15m": "entry",
+            "1h": "h1",
+            "4h": "h4",
+            "1d": "daily",
+        }
+
+        payload = {}
+
+        for timeframe in self.CISD_TIMEFRAMES:
+            candles = data.get(timeframe) or data.get(timeframe.upper())
+            if not candles:
+                continue
+
+            key = timeframe_to_structure_key[timeframe]
+            structure = tf_analysis.get(key, {}).get("structure", [])
+            liquidity_layers = self.liquidity.detect_layers(structure, candles)
+            liquidity_sweep = self.liquidity_sweep.detect(
+                candles=candles,
+                structure=structure,
+                liquidity_layers=liquidity_layers,
+                timeframe=timeframe,
+            )
+
+            payload[timeframe] = {
+                "candles": candles,
+                "structure": structure,
+                "liquidity_sweep": liquidity_sweep,
+                "market_phase": context_state["market_phase"],
+                "smt": smt_state,
+            }
+
+        return self.cisd.detect_multi(payload)
 
     def _build_unicorn_state(self, data, tf_analysis, context_state, structure_state, smt_state):
         """Unicorn setup tespiti için MTF payload üretir ve sonucu döndürür."""
@@ -658,7 +737,20 @@ class AtlasEngine:
             dynamic_tp=dynamic_tp,
         )
 
-    def _notify_if_elite(self, data, signal, entry, risk, rr, dynamic_tp, confluence, market_phase, unicorn):
+    def _notify_if_elite(
+        self,
+        data,
+        signal,
+        entry,
+        risk,
+        rr,
+        dynamic_tp,
+        confluence,
+        market_phase,
+        unicorn,
+        cisd,
+        decision,
+    ):
         """Yüksek güvenli sinyallerde Telegram bildirimi gönderir."""
         if signal.get("signal") not in ["LONG", "SHORT"]:
             return False
@@ -681,6 +773,8 @@ class AtlasEngine:
                 "confluence": confluence,
                 "market_phase": market_phase,
                 "unicorn": unicorn,
+                "cisd": cisd,
+                "decision": decision,
             }
         )
 

@@ -25,6 +25,7 @@ class ConfluenceEngine:
         fvg=None,
         market_phase=None,
         unicorn=None,
+        cisd=None,
     ):
 
         score = 0
@@ -172,6 +173,23 @@ class ConfluenceEngine:
                 checks.append("◐ Unicorn Direction Mismatch")
         else:
             checks.append("✘ Unicorn")
+
+        # CISD
+        if cisd and cisd.get("active"):
+            cisd_direction = cisd.get("direction")
+            entry_direction = entry.get("direction")
+            cisd_confidence = cisd.get("confidence", 0)
+
+            if (cisd_direction == "BULLISH" and entry_direction == "LONG") or (
+                cisd_direction == "BEARISH" and entry_direction == "SHORT"
+            ):
+                score += min(16, int(cisd_confidence / 6))
+                checks.append(f"✔ CISD {cisd_direction} ({cisd_confidence}%)")
+            else:
+                score += 3
+                checks.append(f"◐ CISD {cisd_direction} ({cisd_confidence}%)")
+        else:
+            checks.append("✘ CISD")
 
         return {
             "score": score,

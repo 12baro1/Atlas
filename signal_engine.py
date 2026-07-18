@@ -14,6 +14,7 @@ class SignalEngine:
         liquidity_sweep = analysis.get("liquidity_sweep", {})
         smt = analysis.get("smt", {})
         unicorn = analysis.get("unicorn", {})
+        cisd = analysis.get("cisd", {})
         
         # Market phase adjustment
         market_phase = analysis.get("market_phase", {})
@@ -34,6 +35,7 @@ class SignalEngine:
             liquidity_sweep=liquidity_sweep,
             smt=smt,
             unicorn=unicorn,
+            cisd=cisd,
         )
 
         # Grade
@@ -85,6 +87,9 @@ class SignalEngine:
             "smt_confidence": smt.get("confidence", 0),
             "unicorn_confidence": unicorn.get("confidence", 0),
             "unicorn_active": unicorn.get("active", False),
+            "cisd_confidence": cisd.get("confidence", 0),
+            "cisd_active": cisd.get("active", False),
+            "cisd_direction": cisd.get("direction", "NONE"),
         }
 
     def _adjust_confidence_by_phase(self, base_confidence, phase, phase_score, mtf_alignment):
@@ -116,8 +121,8 @@ class SignalEngine:
         adjusted = base_confidence + adjustment
         return max(0, min(100, adjusted))
 
-    def _adjust_confidence_by_liquidity_and_smt(self, base_confidence, liquidity_sweep, smt, unicorn):
-        """Sweep, SMT ve unicorn kalitesine göre güven puanını günceller."""
+    def _adjust_confidence_by_liquidity_and_smt(self, base_confidence, liquidity_sweep, smt, unicorn, cisd):
+        """Sweep, SMT, Unicorn ve CISD kalitesine göre güven puanını günceller."""
         adjusted = base_confidence
 
         if liquidity_sweep.get("is_sweep"):
@@ -137,5 +142,12 @@ class SignalEngine:
                 adjusted += 2
             elif direction == "BEARISH":
                 adjusted += 2
+
+        if cisd.get("active"):
+            adjusted += min(9, cisd.get("confidence", 0) / 11)
+
+            cisd_direction = cisd.get("direction")
+            if cisd_direction in ["BULLISH", "BEARISH"]:
+                adjusted += 1
 
         return max(0, min(100, adjusted))
