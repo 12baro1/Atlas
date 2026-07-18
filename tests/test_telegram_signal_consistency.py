@@ -170,6 +170,7 @@ def test_notify_if_elite_deduplicates_same_signal(monkeypatch):
     engine.telegram = _DummyEngine()
     engine.config.TELEGRAM_SIGNAL_DEDUP_ENABLED = True
     engine.config.TELEGRAM_SIGNAL_COOLDOWN_MINUTES = 180
+    engine.config.TELEGRAM_BOT_TOKEN = "dummy-token"
 
     payload = {
         "data": {"symbol": "MARA/USDT:USDT"},

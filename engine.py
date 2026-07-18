@@ -866,14 +866,17 @@ class AtlasEngine:
         if signal.get("signal") not in ["LONG", "SHORT"]:
             return False
 
+        signal_action = signal.get("signal", "WAIT")
         decision_action = (decision or {}).get("action", "WAIT")
-        if decision_action not in ["LONG", "SHORT"]:
+        require_decision_action = bool(getattr(self.config, "TELEGRAM_REQUIRE_DECISION_ACTION", False))
+        if require_decision_action and decision_action not in ["LONG", "SHORT"]:
             self.logger.info(
                 "Telegram skip: decision action=%s for %s",
                 decision_action,
                 data.get("symbol", "UNKNOWN"),
             )
             return False
+        action_for_message = decision_action if decision_action in ["LONG", "SHORT"] else signal_action
 
         if not entry.get("valid", False):
             self.logger.info(
@@ -896,7 +899,7 @@ class AtlasEngine:
             )
             return False
 
-        min_confidence = getattr(self.config, "MINIMUM_CONFIDENCE", 90)
+        min_confidence = float(getattr(self.config, "TELEGRAM_MIN_CONFIDENCE", 75))
         if signal.get("confidence", 0) < min_confidence:
             self.logger.info(
                 "Telegram skip: confidence=%s < min=%s for %s",
@@ -907,7 +910,7 @@ class AtlasEngine:
             return False
 
         symbol = data.get("symbol", "UNKNOWN")
-        if not self._should_send_telegram_signal(symbol, decision_action, entry, risk):
+        if not self._should_send_telegram_signal(symbol, action_for_message, entry, risk):
             self.logger.info(
                 "Telegram skip: duplicate cooldown active for %s",
                 symbol,
@@ -927,7 +930,7 @@ class AtlasEngine:
         self.telegram = telegram_engine
 
         signal_for_message = dict(signal)
-        signal_for_message["signal"] = decision_action
+        signal_for_message["signal"] = action_for_message
         try:
             confidence = int(float(signal.get("confidence", 0)))
         except (TypeError, ValueError):

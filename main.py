@@ -55,6 +55,14 @@ logger.info(
     universe_stats["limited"],
 )
 
+if bool(getattr(engine.config, "TELEGRAM_ENABLED", True)):
+    token = str(getattr(engine.config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
+    chat_id = str(getattr(engine.config, "TELEGRAM_CHAT_ID", "") or "").strip()
+    if not token:
+        logger.warning("Telegram aktif ama bot token bos. Bildirim gonderilmeyecek.")
+    if not chat_id:
+        logger.warning("Telegram chat id bos. Auth db/chat_ids yoksa bildirim gonderilmeyecek.")
+
 processed = 0
 success = 0
 failed = 0
