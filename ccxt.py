@@ -7,6 +7,7 @@ Test/çevrimdışı senaryolarda mock implementasyona düşer.
 import importlib
 import os
 import sys
+import warnings
 from pathlib import Path
 
 
@@ -48,8 +49,10 @@ if _mode == "real" and not _is_real_backend:
     )
 
 if _mode == "auto" and not _running_under_pytest() and not _is_real_backend:
-    raise ImportError(
-        "Real ccxt could not be loaded in auto mode. Install ccxt or set ATLAS_CCXT_MODE=mock explicitly."
+    warnings.warn(
+        "Real ccxt could not be loaded in auto mode; falling back to mock backend. "
+        "Install ccxt for live markets or set ATLAS_CCXT_MODE=mock explicitly.",
+        RuntimeWarning,
     )
 
 BACKEND = "real" if _is_real_backend else "mock"
