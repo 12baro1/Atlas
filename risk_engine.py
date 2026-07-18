@@ -4,6 +4,7 @@ Atlas Risk Engine v4
 """
 
 from core.analysis_utils import clamp
+from config import Config
 
 class RiskEngine:
 
@@ -17,21 +18,20 @@ class RiskEngine:
         if risk <= 0:
             return None
 
-        account_balance = 1000.0
-        risk_percent = 1.0
-
-        capital_at_risk = account_balance * (risk_percent / 100)
-        position_size = capital_at_risk / risk
-
         side = "LONG" if entry > stop_loss else "SHORT"
         vp_factor = self._volume_profile_position_factor(volume_profile, side=side)
         institutional_factor = self._institutional_position_factor(institutional, side=side)
-        adjusted_position_size = position_size * vp_factor * institutional_factor
+
+        account_balance = float(getattr(Config, "INITIAL_BALANCE", 1000.0))
+        base_risk_percent = float(getattr(Config, "RISK_PERCENT", 1.0))
+        round_trip_cost_rate = float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.0012))
+        minimum_rr = float(getattr(Config, "MINIMUM_RR", 2.0))
 
         tp1 = None
         tp2 = None
         tp3 = None
         rr = None
+        net_rr = None
 
         if dynamic_tp is not None:
 
@@ -41,6 +41,25 @@ class RiskEngine:
 
             if tp3 is not None:
                 rr = round(abs(tp3 - entry) / risk, 2)
+
+                gross_reward = abs(tp3 - entry)
+                transaction_cost = entry * round_trip_cost_rate
+                net_reward = max(0.0, gross_reward - transaction_cost)
+                net_rr = round(net_reward / risk, 2)
+
+        risk_reduction_factor = 1.0
+        if net_rr is not None and minimum_rr > 0 and net_rr < minimum_rr:
+            risk_reduction_factor = clamp(net_rr / minimum_rr, 0.35, 1.0)
+
+        effective_risk_percent = max(0.0, base_risk_percent * risk_reduction_factor)
+
+        target_capital_at_risk = account_balance * (effective_risk_percent / 100)
+        position_size = target_capital_at_risk / risk
+
+        raw_sizing_factor = vp_factor * institutional_factor
+        capped_sizing_factor = clamp(raw_sizing_factor, 0.65, 1.0)
+        adjusted_position_size = position_size * capped_sizing_factor
+        effective_capital_at_risk = adjusted_position_size * risk
 
         return {
 
@@ -52,7 +71,13 @@ class RiskEngine:
 
             "risk": round(risk, 8),
 
-            "capital_at_risk": round(capital_at_risk, 2),
+            "capital_at_risk": round(effective_capital_at_risk, 2),
+
+            "capital_at_risk_target": round(target_capital_at_risk, 2),
+
+            "risk_percent": round(effective_risk_percent, 4),
+
+            "risk_percent_base": round(base_risk_percent, 4),
 
             "position_size": round(adjusted_position_size, 4),
 
@@ -61,6 +86,10 @@ class RiskEngine:
             "volume_profile_factor": round(vp_factor, 4),
 
             "institutional_factor": round(institutional_factor, 4),
+
+            "sizing_factor": round(capped_sizing_factor, 4),
+
+            "sizing_factor_raw": round(raw_sizing_factor, 4),
 
             "portfolio_risk": (institutional or {}).get("portfolio_risk", {}),
 
@@ -72,7 +101,15 @@ class RiskEngine:
 
             "tp3": tp3,
 
-            "rr": rr
+            "rr": rr,
+
+            "net_rr": net_rr,
+
+            "round_trip_cost_rate": round_trip_cost_rate,
+
+            "minimum_rr": minimum_rr,
+
+            "risk_reduction_factor": round(risk_reduction_factor, 4),
 
         }
 

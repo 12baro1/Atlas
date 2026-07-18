@@ -22,6 +22,13 @@ class TelegramEngine:
             return f"{value:.8f}".rstrip("0").rstrip(".")
         return str(value)
 
+    @staticmethod
+    def _truncate(value, max_len):
+        text = str(value)
+        if max_len <= 3 or len(text) <= max_len:
+            return text
+        return text[: max_len - 3].rstrip() + "..."
+
     def format_signal(self, result):
         
         symbol = result["symbol"]
@@ -60,8 +67,22 @@ class TelegramEngine:
 
             msg.append("✅ SMC CHECKS")
 
-            for item in confluence["checks"]:
-                msg.append(item)
+            checks = confluence.get("checks", [])
+            compact_mode = bool(getattr(Config, "TELEGRAM_COMPACT_MODE", True))
+
+            if compact_mode:
+                passed = [item for item in checks if isinstance(item, str) and item.startswith("✔")]
+                partial = [item for item in checks if isinstance(item, str) and item.startswith("◐")]
+                failed = [item for item in checks if isinstance(item, str) and item.startswith("✘")]
+
+                msg.append(f"Passed: {len(passed)} | Partial: {len(partial)} | Failed: {len(failed)}")
+                for item in partial[:2]:
+                    msg.append(item)
+                for item in failed[:4]:
+                    msg.append(item)
+            else:
+                for item in checks:
+                    msg.append(item)
 
             msg.append("")
 
@@ -133,7 +154,9 @@ class TelegramEngine:
             msg.append("")
             msg.append("🧠 DECISION")
             msg.append(f"Action : {decision.get('action', 'WAIT')}")
-            msg.append(f"Reason : {decision.get('reason', '-')}")
+            max_len = int(getattr(Config, "TELEGRAM_MAX_DECISION_REASON_LENGTH", 140))
+            reason = self._truncate(decision.get("reason", "-"), max_len)
+            msg.append(f"Reason : {reason}")
 
         return "\n".join(msg)
 

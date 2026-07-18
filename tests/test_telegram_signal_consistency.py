@@ -93,3 +93,58 @@ def test_notify_if_elite_skips_invalid_entry_before_sending(monkeypatch):
 
     assert sent is False
     assert called["count"] == 0
+
+
+def test_telegram_message_compact_mode_reduces_clutter():
+    checks = [
+        "✔ Multi Timeframe",
+        "✔ Trend",
+        "✔ Entry",
+        "◐ Liquidity Breakout",
+        "✘ OTE",
+        "✘ SMT",
+        "✘ Unicorn",
+        "✘ Stack Confluence",
+    ]
+
+    message = TelegramEngine().format_signal(
+        {
+            "symbol": "MARA/USDT:USDT",
+            "signal": {
+                "signal": "SHORT",
+                "grade": "S+",
+                "strength": "ELITE",
+                "confidence": 100,
+            },
+            "entry": {
+                "direction": "SHORT",
+                "valid": True,
+                "entry": 11.18,
+                "stop_loss": 11.2,
+            },
+            "risk": {
+                "capital_at_risk": 10,
+                "capital_at_risk_target": 10,
+                "risk_percent": 1,
+                "position_size": 500,
+                "risk": 0.02,
+                "tp1": 11.15,
+                "tp2": 11.13,
+                "tp3": 11.10,
+                "rr": 4,
+                "net_rr": 3.7,
+            },
+            "rr": {"quality": "VERY GOOD", "score": 90},
+            "dynamic_tp": {"tp1": 11.15, "tp2": 11.13, "tp3": 11.10},
+            "confluence": {"checks": checks},
+            "market_phase": {"phase": "Expansion", "phase_confidence": 85, "mtf_alignment": 100},
+            "decision": {"action": "SHORT", "reason": "A" * 250},
+        }
+    )
+
+    assert "Passed: 3 | Partial: 1 | Failed: 4" in message
+    assert "Target Risk Capital" not in message
+    assert "Risk %" not in message
+    assert "Net RR (Cost Adj.)" not in message
+    assert "Reason : " in message
+    assert ("A" * 170) not in message

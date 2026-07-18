@@ -8,6 +8,7 @@ class Config:
     # Risk
     RISK_PERCENT = 1.0
     MINIMUM_RR = 3.0
+    ROUND_TRIP_COST_RATE = 0.0020
 
     # Confidence
     MINIMUM_CONFIDENCE = 80
@@ -31,6 +32,8 @@ class Config:
 
     # Telegram
     TELEGRAM_ENABLED = True
+    TELEGRAM_COMPACT_MODE = True
+    TELEGRAM_MAX_DECISION_REASON_LENGTH = 140
     TELEGRAM_BOT_TOKEN = "8451423294:AAFJ8gmvKPk23ierRsh4u5sX3SRIXk2uDWY"
     TELEGRAM_CHAT_ID = ""   # Boş bırakılacak
 
