@@ -19,7 +19,8 @@ class ConfluenceEngine:
         htf_fvg,
         killzone,
         session,
-        breaker=None
+        breaker=None,
+        eqh_eql=None
     ):
 
         score = 0
@@ -66,7 +67,17 @@ class ConfluenceEngine:
             checks.append("✘ Premium Zone")
 
         # Liquidity Sweep
-        if liquidity_sweep:
+        liquidity_sweep_valid = False
+
+        if isinstance(liquidity_sweep, dict):
+            liquidity_sweep_valid = (
+                liquidity_sweep.get("buy_side")
+                or liquidity_sweep.get("sell_side")
+            )
+        else:
+            liquidity_sweep_valid = bool(liquidity_sweep)
+
+        if liquidity_sweep_valid:
             score += 10
             checks.append("✔ Liquidity Sweep")
         else:
@@ -99,6 +110,13 @@ class ConfluenceEngine:
             checks.append("✔ HTF FVG")
         else:
             checks.append("✘ HTF FVG")
+
+        # Equal High / Equal Low
+        if eqh_eql and eqh_eql.get("valid"):
+            score += 6
+            checks.append("✔ EQH/EQL Liquidity")
+        else:
+            checks.append("✘ EQH/EQL Liquidity")
 
         # Killzone
         if killzone:

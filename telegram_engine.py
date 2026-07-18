@@ -22,6 +22,7 @@ class TelegramEngine:
         rr = result.get("rr")
         confluence = result.get("confluence")
         market_phase = result.get("market_phase")
+        eqh_eql = result.get("eqh_eql")
 
         msg = []
 
@@ -37,6 +38,14 @@ class TelegramEngine:
         if market_phase:
             phase = market_phase["phase"].title()
             msg.append(f"📈 Market Phase : {phase}")
+
+        if eqh_eql and eqh_eql.get("valid"):
+            zones = eqh_eql.get("zones", [])[:3]
+            zone_text = ", ".join(
+                f"{zone['type']} {zone['timeframe']} @ {round(zone['level'], 4)}"
+                for zone in zones
+            )
+            msg.append(f"📏 EQH/EQL : {zone_text}")
 
         msg.append("")
 

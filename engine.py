@@ -37,6 +37,7 @@ from htf_orderblock_engine import HTFOrderBlockEngine
 from htf_fvg_engine import HTFFVGEngine
 from dynamic_tp_engine import DynamicTPEngine
 from market_phase_engine import MarketPhaseEngine
+from eqh_eql_engine import EQHEQLEngine
 
 class AtlasEngine:
 
@@ -73,6 +74,7 @@ class AtlasEngine:
         self.htf_fvg = HTFFVGEngine()
         self.dynamic_tp = DynamicTPEngine()
         self.market_phase = MarketPhaseEngine()
+        self.eqh_eql = EQHEQLEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -150,6 +152,13 @@ class AtlasEngine:
 
         trend = self.trend.calculate(mtf)
 
+        eqh_eql = self.eqh_eql.detect({
+            "1w": {"structure": weekly_labels, "candles": weekly},
+            "1d": {"structure": daily_labels, "candles": daily},
+            "4h": {"structure": h4_labels, "candles": h4},
+            "15m": {"structure": labels, "candles": candles}
+        })
+
         entry = self.entry.generate(
             mtf,
             labels,
@@ -213,7 +222,8 @@ class AtlasEngine:
             htf_orderblock=htf_orderblock,
             htf_fvg=htf_fvg,
             killzone=killzone,
-            session=session
+            session=session,
+            eqh_eql=eqh_eql
         )
 
         market_phase = self.market_phase.detect(
@@ -245,6 +255,7 @@ class AtlasEngine:
             "htf_fvg": htf_fvg,
             "dynamic_tp": dynamic_tp,
             "market_phase": market_phase,
+            "eqh_eql": eqh_eql,
         }
 
         risk = None
@@ -275,7 +286,8 @@ class AtlasEngine:
                 "rr": rr,
                 "dynamic_tp": dynamic_tp,
                 "confluence": confluence,
-                "market_phase": market_phase
+                "market_phase": market_phase,
+                "eqh_eql": eqh_eql
             })
 
             print(message)
