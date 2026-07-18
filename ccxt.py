@@ -8,20 +8,70 @@ class bybit:
         self.config = config or {}
 
     def load_markets(self):
+        # Offline test ortamında yalnızca BTC/ETH ile sınırlamamak için
+        # tipik USDT perpetual sembollerinin deterministik bir listesini döndür.
+        symbols = [
+            "BTC/USDT:USDT",
+            "ETH/USDT:USDT",
+            "SOL/USDT:USDT",
+            "XRP/USDT:USDT",
+            "BNB/USDT:USDT",
+            "DOGE/USDT:USDT",
+            "ADA/USDT:USDT",
+            "AVAX/USDT:USDT",
+            "TRX/USDT:USDT",
+            "LINK/USDT:USDT",
+            "DOT/USDT:USDT",
+            "MATIC/USDT:USDT",
+            "LTC/USDT:USDT",
+            "BCH/USDT:USDT",
+            "UNI/USDT:USDT",
+            "NEAR/USDT:USDT",
+            "ATOM/USDT:USDT",
+            "APT/USDT:USDT",
+            "OP/USDT:USDT",
+            "ARB/USDT:USDT",
+            "SUI/USDT:USDT",
+            "SEI/USDT:USDT",
+            "TIA/USDT:USDT",
+            "PEPE/USDT:USDT",
+            "WIF/USDT:USDT",
+            "INJ/USDT:USDT",
+            "AAVE/USDT:USDT",
+            "FIL/USDT:USDT",
+            "ETC/USDT:USDT",
+            "XLM/USDT:USDT",
+            "HBAR/USDT:USDT",
+            "IMX/USDT:USDT",
+            "RNDR/USDT:USDT",
+            "RUNE/USDT:USDT",
+            "GRT/USDT:USDT",
+            "PYTH/USDT:USDT",
+        ]
         return {
-            "BTC/USDT:USDT": {},
-            "ETH/USDT:USDT": {},
+            symbol: {
+                "active": True,
+                "swap": True,
+                "quote": "USDT",
+            }
+            for symbol in symbols
         }
 
     def fetch_ohlcv(self, symbol, timeframe="15m", since=None, limit=100):
         base_time = 1_700_000_000_000
         step_ms = self._timeframe_to_ms(timeframe)
-        base_price = 100_000.0 if symbol.startswith("BTC") else 3_000.0
+        symbol_seed = sum(ord(char) for char in symbol)
+        if symbol.startswith("BTC"):
+            base_price = 100_000.0
+        elif symbol.startswith("ETH"):
+            base_price = 3_000.0
+        else:
+            base_price = 50.0 + float(symbol_seed % 4_000)
         rows = []
 
         for i in range(limit or 100):
             wave = (i % 20) - 10
-            trend = i * 3.5
+            trend = i * (1.8 + ((symbol_seed % 17) / 20))
             open_price = base_price + trend + (wave * 12)
             close_price = open_price + (18 if i % 2 == 0 else -14)
             high = max(open_price, close_price) + 35 + (i % 5)

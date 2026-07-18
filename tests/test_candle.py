@@ -10,7 +10,10 @@ exchange=ccxt.bybit({
     "enableRateLimit":True
 })
 
-raw=exchange.fetch_ohlcv("BTC/USDT:USDT","15m",limit=3)
+markets = exchange.load_markets()
+symbol = next((item for item in markets if item.endswith("/USDT:USDT")), "BTC/USDT:USDT")
+
+raw=exchange.fetch_ohlcv(symbol,"15m",limit=3)
 
 candles=convert(raw)
 

@@ -1,9 +1,16 @@
 import ccxt
+import logging
 
 from data_engine import get_market_data
 from engine import AtlasEngine
 
 engine = AtlasEngine()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+logger = logging.getLogger("atlas.scanner")
 
 exchange = ccxt.bybit({
     "options": {
@@ -14,20 +21,41 @@ exchange = ccxt.bybit({
 
 markets = exchange.load_markets()
 
-for symbol in markets:
-
+symbols = []
+for symbol, meta in markets.items():
     if not symbol.endswith("/USDT:USDT"):
         continue
 
+    if isinstance(meta, dict) and not meta.get("active", True):
+        continue
+
+    symbols.append(symbol)
+
+symbols.sort()
+logger.info("Toplam aktif USDT perpetual sembol: %s", len(symbols))
+
+processed = 0
+success = 0
+failed = 0
+skipped = 0
+
+for index, symbol in enumerate(symbols, start=1):
+
     try:
+        processed += 1
+        logger.info("[%s/%s] Analiz basliyor: %s", index, len(symbols), symbol)
 
         data = get_market_data(symbol)
-        print(data["symbol"])
+        logger.info("Veri alindi: %s", data["symbol"])
 
         result = engine.analyze(data)
 
         if result is None:
+            skipped += 1
+            logger.warning("[%s/%s] Sonuc yok, atlandi: %s", index, len(symbols), symbol)
             continue
+
+        success += 1
 
         analysis = result["analysis"]
 
@@ -83,5 +111,13 @@ for symbol in markets:
         print("--------------------------------")
 
     except Exception:
-        import traceback
-        traceback.print_exc()
+        failed += 1
+        logger.exception("[%s/%s] Analiz hatasi: %s", index, len(symbols), symbol)
+
+logger.info(
+    "Tarama bitti | islenen=%s basarili=%s atlanan=%s hatali=%s",
+    processed,
+    success,
+    skipped,
+    failed,
+)

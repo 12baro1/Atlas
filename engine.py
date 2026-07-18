@@ -7,6 +7,7 @@ Kod İngilizce, açıklamalar Türkçe tutulmuştur.
 """
 
 from importlib import import_module
+import logging
 
 from backtest_engine import BacktestEngine
 from bos_engine import BOSEngine
@@ -62,6 +63,7 @@ class AtlasEngine:
     def __init__(self, structure_engine_cls=None):
         # Testlerde sahte sınıf enjekte edebilmek için sınıf referansı tutulur.
         self.structure_engine_cls = structure_engine_cls or MarketStructureEngine
+        self.logger = logging.getLogger("atlas.engine")
 
         # Structure ve seviye motorları
         self.bos = BOSEngine()
@@ -813,13 +815,18 @@ class AtlasEngine:
         if entry.get("entry") is None:
             return {"tp1": None, "tp2": None, "tp3": None}
 
-        return self.dynamic_tp.calculate(
-            direction=entry["direction"],
-            entry=entry["entry"],
-            liquidity=liquidity,
-            fvg=fvg,
-            orderblocks=orderblocks,
-        )
+        try:
+            return self.dynamic_tp.calculate(
+                direction=entry["direction"],
+                entry=entry["entry"],
+                stop_loss=entry.get("stop_loss"),
+                liquidity=liquidity,
+                fvg=fvg,
+                orderblocks=orderblocks,
+            )
+        except Exception:
+            self.logger.exception("Dynamic TP hesaplama hatasi")
+            return {"tp1": None, "tp2": None, "tp3": None}
 
     def _calculate_risk(self, entry, dynamic_tp, volume_profile=None, institutional=None):
         """Geçerli entry/SL için risk çıktısını hesaplar."""

@@ -5,6 +5,32 @@ Atlas Entry Engine v5
 
 class EntryEngine:
 
+    def _structure_fallback_levels(self, direction, structure):
+        """FVG/OB yoksa son swinglerden entry ve stop_loss üretir."""
+        highs = [item["price"] for item in structure if item.get("kind") == "HIGH"]
+        lows = [item["price"] for item in structure if item.get("kind") == "LOW"]
+
+        if direction == "LONG":
+            if not lows:
+                return None, None
+
+            stop_loss = lows[-1]
+            reference_high = highs[-1] if highs else stop_loss * 1.01
+            entry = (reference_high + stop_loss) / 2
+            if entry <= stop_loss:
+                entry = stop_loss * 1.002
+            return entry, stop_loss
+
+        if not highs:
+            return None, None
+
+        stop_loss = highs[-1]
+        reference_low = lows[-1] if lows else stop_loss * 0.99
+        entry = (reference_low + stop_loss) / 2
+        if entry >= stop_loss:
+            entry = stop_loss * 0.998
+        return entry, stop_loss
+
     def generate(self, mtf, structure, fvg, orderblocks):
 
         result = {
@@ -126,6 +152,16 @@ class EntryEngine:
                 result["stop_loss"] = selected_ob["high"]
             elif selected_fvg:
                 result["stop_loss"] = selected_fvg["to"]
+
+        if result["entry"] is None or result["stop_loss"] is None:
+            fallback_entry, fallback_sl = self._structure_fallback_levels(direction, structure)
+            if fallback_entry is not None and fallback_sl is not None:
+                result["entry"] = fallback_entry
+                result["stop_loss"] = fallback_sl
+                result["score"] += 15
+                result["checks"].append("✓ Structure Fallback Levels")
+            else:
+                result["checks"].append("✗ Structure Fallback Levels")
 
         # -------------------------
         # Risk Filter

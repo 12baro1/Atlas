@@ -9,6 +9,7 @@ class DynamicTPEngine:
         self,
         direction,
         entry,
+        stop_loss,
         liquidity,
         fvg,
         orderblocks
@@ -46,6 +47,21 @@ class DynamicTPEngine:
                 if item["low"] < entry:
                     targets.append(item["low"])
 
+            targets = sorted(set(targets), reverse=True)
+
+        # Likidite/FVG/OB hedefi yetersiz kaldığında RR tabanlı fallback üret.
+        if stop_loss is not None:
+            risk = abs(entry - stop_loss)
+            if risk > 0:
+                rr_targets = [1.5, 2.5, 4.0]
+                for rr in rr_targets:
+                    level = entry + (risk * rr) if direction == "LONG" else entry - (risk * rr)
+                    targets.append(level)
+
+        # Girdi kaynakları tekrar edebileceği için sıralamadan sonra tekilleştir.
+        if direction == "LONG":
+            targets = sorted(set(targets))
+        else:
             targets = sorted(set(targets), reverse=True)
 
         while len(targets) < 3:

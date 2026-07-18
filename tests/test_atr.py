@@ -12,8 +12,11 @@ exchange = ccxt.bybit({
     "enableRateLimit":True
 })
 
+markets = exchange.load_markets()
+symbol = next((item for item in markets if item.endswith("/USDT:USDT")), "BTC/USDT:USDT")
+
 raw = exchange.fetch_ohlcv(
-    "BTC/USDT:USDT",
+    symbol,
     "15m",
     limit=100
 )
