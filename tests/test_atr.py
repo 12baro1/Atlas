@@ -1,11 +1,21 @@
-import ccxt
+import os
 
-from candle import convert
-from atr import atr
+import pytest
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ATLAS_RUN_LIVE_CCXT_TESTS") != "1",
+    reason="Live ccxt tests are disabled; set ATLAS_RUN_LIVE_CCXT_TESTS=1 to run them.",
+)
+
+ccxt = pytest.importorskip("ccxt")
+
+from core.candle import convert
+from utils.atr import atr
 
 exchange = ccxt.bybit({
-    "options":{"defaultType":"swap"},
-    "enableRateLimit":True
+    "options": {"defaultType": "swap"},
+    "enableRateLimit": True
 })
 
 raw = exchange.fetch_ohlcv(
@@ -18,5 +28,4 @@ candles = convert(raw)
 
 print()
 
-print("ATR =", round(atr(candles),2))
-
+print("ATR =", round(atr(candles), 2))

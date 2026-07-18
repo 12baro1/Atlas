@@ -1,23 +1,33 @@
-import ccxt
-from candle import convert
+import os
 
-exchange=ccxt.bybit({
-    "options":{"defaultType":"swap"},
-    "enableRateLimit":True
+import pytest
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ATLAS_RUN_LIVE_CCXT_TESTS") != "1",
+    reason="Live ccxt tests are disabled; set ATLAS_RUN_LIVE_CCXT_TESTS=1 to run them.",
+)
+
+ccxt = pytest.importorskip("ccxt")
+
+from core.candle import convert
+
+exchange = ccxt.bybit({
+    "options": {"defaultType": "swap"},
+    "enableRateLimit": True
 })
 
-raw=exchange.fetch_ohlcv("BTC/USDT:USDT","15m",limit=3)
+raw = exchange.fetch_ohlcv("BTC/USDT:USDT", "15m", limit=3)
 
-candles=convert(raw)
+candles = convert(raw)
 
 for c in candles:
 
-    print("="*40)
+    print("=" * 40)
     print(c.date)
-    print("Bull :",c.bullish)
-    print("Bear :",c.bearish)
-    print("Body :",round(c.body,2))
-    print("Range:",round(c.range,2))
-    print("Upper:",round(c.upper_wick,2))
-    print("Lower:",round(c.lower_wick,2))
-
+    print("Bull :", c.bullish)
+    print("Bear :", c.bearish)
+    print("Body :", round(c.body, 2))
+    print("Range:", round(c.range, 2))
+    print("Upper:", round(c.upper_wick, 2))
+    print("Lower:", round(c.lower_wick, 2))
