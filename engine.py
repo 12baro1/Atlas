@@ -42,6 +42,7 @@ from signal_engine import SignalEngine
 from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
 from trade_manager import TradeManager
+from trade_journal import TradeJournal
 from trend_engine import TrendEngine
 from unicorn_engine import UnicornEngine
 from volume_profile_engine import VolumeProfileEngine
@@ -103,6 +104,7 @@ class AtlasEngine:
         self.config = Config()
         self.position = PositionManager()
         self.trade = TradeManager()
+        self.trade_journal = TradeJournal()
         self.scanner = ScannerEngine()
         self.statistics = StatisticsEngine()
         self.backtest = BacktestEngine()
@@ -236,6 +238,18 @@ class AtlasEngine:
             volume_profile_state=volume_profile_state,
         )
 
+        journal_snapshot = self.trade_journal.record_analysis(
+            analysis=analysis,
+            symbol=data.get("symbol", "UNKNOWN"),
+            timeframe="multi",
+            metadata={
+                "decision": decision_state.get("action"),
+                "signal": execution_state["signal"].get("signal"),
+                "confidence": execution_state["signal"].get("confidence", 0),
+            },
+        )
+        analysis["journal"] = journal_snapshot
+
         self._notify_if_elite(
             data=data,
             signal=execution_state["signal"],
@@ -257,6 +271,7 @@ class AtlasEngine:
             "risk": execution_state["risk"],
             "rr": execution_state["rr"],
             "dynamic_tp": execution_state["dynamic_tp"],
+            "journal": journal_snapshot,
             "decision": decision_state,
         }
 

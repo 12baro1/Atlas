@@ -216,3 +216,22 @@ class BacktestEngine:
             "winrate": round(winrate, 2),
             "avg_rr": round(avg_rr, 2),
         }
+
+    def ingest_journal(self, journal_summary):
+        """Trade Journal performans raporunu backtest görünümüne dönüştürür."""
+        if not journal_summary:
+            return self.statistics()
+
+        summary = journal_summary.get("summary", {})
+        return {
+            "total": summary.get("total_trades", 0),
+            "wins": summary.get("wins", 0),
+            "losses": summary.get("losses", 0),
+            "winrate": summary.get("winrate", 0),
+            "avg_rr": summary.get("average_r", 0),
+            "expectancy": summary.get("expectancy", 0),
+            "profit_factor": summary.get("profit_factor", 0),
+            "tp1": summary.get("tp_sl_analysis", {}).get("tp1_hit_rate", 0),
+            "tp2": summary.get("tp_sl_analysis", {}).get("tp2_hit_rate", 0),
+            "tp3": summary.get("tp_sl_analysis", {}).get("tp3_hit_rate", 0),
+        }

@@ -12,6 +12,8 @@ class TradeManager:
         confirmation,
         confluence=None,
         risk=None,
+        analysis=None,
+        journal=None,
     ):
 
         score = 0
@@ -69,7 +71,7 @@ class TradeManager:
             stars = "★☆☆☆☆"
             grade = "D"
 
-        return {
+        trade = {
             "valid": entry["valid"],
             "score": score,
             "grade": grade,
@@ -80,3 +82,21 @@ class TradeManager:
             "confirmation": confirmation,
             "risk": risk,
         }
+
+        if journal is not None:
+            journal.register_trade(
+                trade={
+                    "side": signal["signal"],
+                    "entry": entry.get("entry"),
+                    "stop_loss": entry.get("stop_loss"),
+                    "tp1": risk.get("tp1") if risk else None,
+                    "tp2": risk.get("tp2") if risk else None,
+                    "tp3": risk.get("tp3") if risk else None,
+                    "rr": risk.get("rr") if risk else None,
+                    "confluence_score": confluence.get("score", 0) if confluence else 0,
+                    "confidence": signal.get("confidence", 0),
+                },
+                analysis=analysis,
+            )
+
+        return trade

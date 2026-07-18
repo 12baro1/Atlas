@@ -89,4 +89,20 @@ class StatisticsEngine:
     def reset(self):
 
         self.__init__()
+
+    def ingest_journal(self, journal_summary):
+        """Trade Journal çıktısını StatisticsEngine formatına dönüştürür."""
+        if not journal_summary:
+            return self.summary()
+
+        return {
+            "total_signals": journal_summary.get("summary", {}).get("total_trades", 0),
+            "long_signals": journal_summary.get("setup_statistics", {}).get("LONG", {}).get("total", 0),
+            "short_signals": journal_summary.get("setup_statistics", {}).get("SHORT", {}).get("total", 0),
+            "wins": journal_summary.get("summary", {}).get("wins", 0),
+            "losses": journal_summary.get("summary", {}).get("losses", 0),
+            "winrate": journal_summary.get("summary", {}).get("winrate", 0),
+            "average_rr": journal_summary.get("summary", {}).get("average_r", 0),
+            "average_confidence": journal_summary.get("confidence_quality", {}).get("calibration_gap", 0),
+        }
     
