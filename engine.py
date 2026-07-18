@@ -38,6 +38,7 @@ from htf_fvg_engine import HTFFVGEngine
 from dynamic_tp_engine import DynamicTPEngine
 from market_phase_engine import MarketPhaseEngine
 from eqh_eql_engine import EQHEQLEngine
+from inducement_engine import InducementEngine
 
 class AtlasEngine:
 
@@ -75,6 +76,7 @@ class AtlasEngine:
         self.dynamic_tp = DynamicTPEngine()
         self.market_phase = MarketPhaseEngine()
         self.eqh_eql = EQHEQLEngine()
+        self.inducement = InducementEngine()
 
     def analyze(self, data):
         weekly = data["1w"]
@@ -210,6 +212,46 @@ class AtlasEngine:
             entry
         )
 
+        market_phase = self.market_phase.detect(
+            structure=labels,
+            trend=trend,
+            liquidity_sweep=liquidity_sweep,
+            fvg=fvg,
+            orderblocks=orderblocks,
+            premium_discount=premium_discount,
+            mtf=mtf
+        )
+
+        inducement = self.inducement.detect(
+            timeframes={
+                "1d": {
+                    "structure": daily_labels,
+                    "candles": daily,
+                    "fvg": daily_fvg,
+                    "orderblocks": daily_orderblocks,
+                    "breaker": []
+                },
+                "4h": {
+                    "structure": h4_labels,
+                    "candles": h4,
+                    "fvg": h4_fvg,
+                    "orderblocks": h4_orderblocks,
+                    "breaker": []
+                },
+                "15m": {
+                    "structure": labels,
+                    "candles": candles,
+                    "fvg": fvg,
+                    "orderblocks": orderblocks,
+                    "breaker": breakers
+                }
+            },
+            trend=trend,
+            liquidity_sweep=liquidity_sweep,
+            eqh_eql=eqh_eql,
+            market_phase=market_phase
+        )
+
         confluence = self.confluence.evaluate(
             mtf=mtf,
             trend=trend,
@@ -223,17 +265,8 @@ class AtlasEngine:
             htf_fvg=htf_fvg,
             killzone=killzone,
             session=session,
-            eqh_eql=eqh_eql
-        )
-
-        market_phase = self.market_phase.detect(
-            structure=labels,
-            trend=trend,
-            liquidity_sweep=liquidity_sweep,
-            fvg=fvg,
-            orderblocks=orderblocks,
-            premium_discount=premium_discount,
-            mtf=mtf
+            eqh_eql=eqh_eql,
+            inducement=inducement
         )
 
         analysis = {
@@ -256,6 +289,7 @@ class AtlasEngine:
             "dynamic_tp": dynamic_tp,
             "market_phase": market_phase,
             "eqh_eql": eqh_eql,
+            "inducement": inducement,
         }
 
         risk = None
@@ -287,7 +321,8 @@ class AtlasEngine:
                 "dynamic_tp": dynamic_tp,
                 "confluence": confluence,
                 "market_phase": market_phase,
-                "eqh_eql": eqh_eql
+                "eqh_eql": eqh_eql,
+                "inducement": inducement
             })
 
             print(message)

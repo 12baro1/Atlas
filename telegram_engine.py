@@ -23,6 +23,7 @@ class TelegramEngine:
         confluence = result.get("confluence")
         market_phase = result.get("market_phase")
         eqh_eql = result.get("eqh_eql")
+        inducement = result.get("inducement")
 
         msg = []
 
@@ -46,6 +47,11 @@ class TelegramEngine:
                 for zone in zones
             )
             msg.append(f"📏 EQH/EQL : {zone_text}")
+
+        if inducement and inducement.get("valid"):
+            direction = inducement["direction"].title()
+            confidence = inducement["confidence"]
+            msg.append(f"IDM: ✔ {direction} (%{confidence})")
 
         msg.append("")
 

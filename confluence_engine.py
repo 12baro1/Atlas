@@ -20,7 +20,8 @@ class ConfluenceEngine:
         killzone,
         session,
         breaker=None,
-        eqh_eql=None
+        eqh_eql=None,
+        inducement=None
     ):
 
         score = 0
@@ -117,6 +118,13 @@ class ConfluenceEngine:
             checks.append("✔ EQH/EQL Liquidity")
         else:
             checks.append("✘ EQH/EQL Liquidity")
+
+        # Inducement
+        if inducement and inducement.get("valid"):
+            score += 7
+            checks.append("✔ Inducement")
+        else:
+            checks.append("✘ Inducement")
 
         # Killzone
         if killzone:
