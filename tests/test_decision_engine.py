@@ -13,7 +13,7 @@ def test_decision_long_when_cisd_aligned():
         signal={"signal": "LONG", "confidence": 82},
         confluence={"score": 90},
         entry={"valid": True},
-        risk={"risk": 1.2},
+        risk={"entry": 100.0, "stop_loss": 99.0, "rr": 3.2, "risk": 1.2},
         cisd={"active": True, "direction": "BULLISH", "confidence": 78},
     )
 
@@ -28,7 +28,7 @@ def test_decision_wait_on_cisd_mismatch():
         signal={"signal": "LONG", "confidence": 85},
         confluence={"score": 88},
         entry={"valid": True},
-        risk={"risk": 1.0},
+        risk={"entry": 100.0, "stop_loss": 99.0, "rr": 3.0, "risk": 1.0},
         cisd={"active": True, "direction": "BEARISH", "confidence": 80},
     )
 
@@ -68,3 +68,20 @@ def test_decision_wait_when_risk_rr_exists_but_levels_missing():
     assert result["risk_valid"] is False
     assert result["action"] == "WAIT"
     assert "Risk is not valid" in result["reason"]
+
+
+def test_decision_wait_when_rr_below_minimum_threshold():
+    engine = DecisionEngine()
+
+    result = engine.decide(
+        signal={"signal": "SHORT", "confidence": 100},
+        confluence={"score": 100},
+        entry={"valid": True},
+        risk={"entry": 0.03089, "stop_loss": 0.03098, "rr": 0.67, "risk": 0.00009, "position_size": 140147.9424},
+        cisd={"active": True, "direction": "BEARISH", "confidence": 86},
+        volume_profile={"active": True, "direction": "BEARISH", "confidence": 91},
+        institutional={"active": True, "direction": "SHORT", "confidence": 63},
+    )
+
+    assert result["action"] == "WAIT"
+    assert "RR below threshold" in result["reason"]

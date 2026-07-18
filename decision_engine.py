@@ -3,6 +3,8 @@ decision_engine.py
 Atlas Decision Engine v2
 """
 
+from config import Config
+
 
 class DecisionEngine:
     """Atlas içindeki tüm modülleri birleştirerek nihai işlem kararını üretir."""
@@ -34,6 +36,8 @@ class DecisionEngine:
         confluence_score = confluence.get("score", 0)
         entry_valid = bool(entry.get("valid", False))
         risk_valid = self._is_risk_valid(risk)
+        rr_value = risk.get("rr") if isinstance(risk, dict) else None
+        minimum_rr = getattr(Config, "MINIMUM_RR", 2.0)
 
         module_scores = {}
         reasons = []
@@ -73,6 +77,10 @@ class DecisionEngine:
             blockers.append("Entry is not valid")
         if not risk_valid:
             blockers.append("Risk is not valid")
+        if rr_value is None:
+            blockers.append("RR is missing")
+        elif rr_value < minimum_rr:
+            blockers.append(f"RR below threshold: {rr_value} < {minimum_rr}")
 
         action = "WAIT"
         mismatch_detected = self._has_direction_conflict(cisd, volume_profile, institutional, unicorn, smt, direction)
@@ -80,7 +88,7 @@ class DecisionEngine:
         if mismatch_detected:
             blockers.append("Directional mismatch detected")
 
-        hard_blocked = (not entry_valid) or (not risk_valid)
+        hard_blocked = (not entry_valid) or (not risk_valid) or (rr_value is None) or (rr_value < minimum_rr)
 
         if blockers and total_score < self.AVOID_SCORE_THRESHOLD:
             action = "AVOID"
@@ -110,6 +118,8 @@ class DecisionEngine:
             "confluence_score": confluence_score,
             "entry_valid": entry_valid,
             "risk_valid": risk_valid,
+            "rr": rr_value,
+            "minimum_rr": minimum_rr,
             "cisd_active": bool(cisd.get("active", False)),
             "cisd_direction": cisd.get("direction", "NONE"),
             "cisd_match": self._match_direction(cisd, direction),
