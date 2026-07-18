@@ -37,6 +37,9 @@ class Config:
     # Yetkilendirme
     BOT_PASSWORD = "313131"
     ADMIN_CHAT_ID = 6378242540
+    TELEGRAM_ADMIN_IDS = [ADMIN_CHAT_ID]
+    BOT_PASSWORD_HASH = ""
+    TELEGRAM_AUTH_DB_FILE = "telegram_auth.db"
 
     # Kullanıcı kayıt dosyası
     CHAT_IDS_FILE = "chat_ids.json"

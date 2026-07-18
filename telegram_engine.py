@@ -9,6 +9,7 @@ import os
 import requests
 
 from config import Config
+from telegram_auth_store import TelegramAuthStore
 
 
 class TelegramEngine:
@@ -102,12 +103,13 @@ class TelegramEngine:
 
 class TelegramBot:
 
-    def __init__(self):
+    def __init__(self, auth_store=None):
 
         self.token = Config.TELEGRAM_BOT_TOKEN
         self.chat_id = Config.TELEGRAM_CHAT_ID
         self.admin_chat_id = Config.ADMIN_CHAT_ID
         self.chat_ids_file = Config.CHAT_IDS_FILE
+        self.auth_store = auth_store or TelegramAuthStore(Config.TELEGRAM_AUTH_DB_FILE)
 
     def load_chat_ids(self):
 
@@ -118,6 +120,9 @@ class TelegramBot:
 
         if self.admin_chat_id:
             chat_ids.append(self.admin_chat_id)
+
+        db_chat_ids = self.auth_store.list_authorized_chat_ids()
+        chat_ids.extend(db_chat_ids)
 
         if os.path.exists(self.chat_ids_file):
             with open(self.chat_ids_file, "r") as f:
