@@ -10,6 +10,9 @@ class SignalEngine:
 
         confluence = analysis["confluence"]
         confidence = confluence["score"]
+
+        liquidity_sweep = analysis.get("liquidity_sweep", {})
+        smt = analysis.get("smt", {})
         
         # Market phase adjustment
         market_phase = analysis.get("market_phase", {})
@@ -23,6 +26,12 @@ class SignalEngine:
             phase=phase_name,
             phase_score=phase_score,
             mtf_alignment=market_phase.get("mtf_alignment", 0)
+        )
+
+        confidence_adjusted = self._adjust_confidence_by_liquidity_and_smt(
+            base_confidence=confidence_adjusted,
+            liquidity_sweep=liquidity_sweep,
+            smt=smt,
         )
 
         # Grade
@@ -70,6 +79,8 @@ class SignalEngine:
             "checks": confluence["checks"],
             "market_phase": phase_name,
             "phase_quality": phase_confidence,
+            "liquidity_strength": liquidity_sweep.get("strength_score", 0),
+            "smt_confidence": smt.get("confidence", 0),
         }
 
     def _adjust_confidence_by_phase(self, base_confidence, phase, phase_score, mtf_alignment):
@@ -99,4 +110,18 @@ class SignalEngine:
         adjustment += (phase_score / 100) * 5
         
         adjusted = base_confidence + adjustment
+        return max(0, min(100, adjusted))
+
+    def _adjust_confidence_by_liquidity_and_smt(self, base_confidence, liquidity_sweep, smt):
+        """Sweep strength ve SMT kalitesine göre güven puanını günceller."""
+        adjusted = base_confidence
+
+        if liquidity_sweep.get("is_sweep"):
+            adjusted += min(10, liquidity_sweep.get("strength_score", 0) / 10)
+            if liquidity_sweep.get("post_structure", {}).get("confirmed"):
+                adjusted += 4
+
+        if smt.get("active"):
+            adjusted += min(8, smt.get("confidence", 0) / 12)
+
         return max(0, min(100, adjusted))

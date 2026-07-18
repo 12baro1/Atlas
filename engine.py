@@ -47,6 +47,7 @@ class AtlasEngine:
     """Atlas'ın tüm analiz motorlarını yöneten ana sınıf."""
 
     REQUIRED_TIMEFRAMES = ("1w", "1d", "4h", "15m")
+    SWEEP_TIMEFRAMES = ("15m", "1h", "4h", "1d")
     SMT_TIMEFRAMES = ("15m", "1h", "4h", "1d")
 
     def __init__(self, structure_engine_cls=None):
@@ -98,6 +99,7 @@ class AtlasEngine:
         self._validate_market_data(data)
 
         candles = data["15m"]
+        h1 = data.get("1h") or data.get("1H")
         weekly = data["1w"]
         daily = data["1d"]
         h4 = data["4h"]
@@ -107,6 +109,7 @@ class AtlasEngine:
             "weekly": self._analyze_timeframe(weekly),
             "daily": self._analyze_timeframe(daily),
             "h4": self._analyze_timeframe(h4),
+            "h1": self._analyze_timeframe(h1) if h1 else {"pivots": [], "structure": []},
         }
 
         smt_state = self._build_smt_state(data)
@@ -114,6 +117,24 @@ class AtlasEngine:
         structure_state = self._build_structure_state(
             candles=candles,
             structure=tf_analysis["entry"]["structure"],
+            timeframe_data={
+                "15m": {
+                    "candles": candles,
+                    "structure": tf_analysis["entry"]["structure"],
+                },
+                "1h": {
+                    "candles": h1 or [],
+                    "structure": tf_analysis["h1"]["structure"],
+                },
+                "4h": {
+                    "candles": h4,
+                    "structure": tf_analysis["h4"]["structure"],
+                },
+                "1d": {
+                    "candles": daily,
+                    "structure": tf_analysis["daily"]["structure"],
+                },
+            },
         )
 
         context_state = self._build_context_state(
@@ -193,9 +214,10 @@ class AtlasEngine:
             "structure": structure,
         }
 
-    def _build_structure_state(self, candles, structure):
+    def _build_structure_state(self, candles, structure, timeframe_data):
         """BOS/CHoCH sonrası seviye ve likidite katmanını üretir."""
-        liquidity = self.liquidity.detect(structure)
+        liquidity_layers = self.liquidity.detect_layers(structure, candles)
+        liquidity = liquidity_layers["all"]
         eqh_eql = self._detect_eqh_eql(liquidity)
 
         raw_orderblocks = self.orderblocks.detect(candles, structure)
@@ -203,7 +225,22 @@ class AtlasEngine:
         breaker = self.breaker.detect(candles, orderblocks)
 
         fvg = self.fvg.detect(candles)
-        liquidity_sweep = self.liquidity_sweep.detect(candles)
+        liquidity_sweep = self.liquidity_sweep.detect(
+            candles=candles,
+            structure=structure,
+            liquidity_layers=liquidity_layers,
+            timeframe="15m",
+        )
+
+        mtf_sweep = self._detect_mtf_liquidity_sweep(timeframe_data)
+        liquidity_sweep["mtf"] = mtf_sweep
+
+        if mtf_sweep.get("best"):
+            liquidity_sweep["strength_score"] = max(
+                liquidity_sweep.get("strength_score", 0),
+                mtf_sweep["best"].get("strength_score", 0),
+            )
+
         inducement = self._detect_inducement(structure, liquidity_sweep, eqh_eql)
 
         return {
@@ -211,6 +248,7 @@ class AtlasEngine:
             "bos": [item for item in structure if item.get("bos")],
             "choch": [item for item in structure if item.get("choch")],
             "liquidity": liquidity,
+            "liquidity_layers": liquidity_layers,
             "eqh_eql": eqh_eql,
             "orderblocks": orderblocks,
             "fvg": fvg,
@@ -218,6 +256,26 @@ class AtlasEngine:
             "inducement": inducement,
             "breaker": breaker,
         }
+
+    def _detect_mtf_liquidity_sweep(self, timeframe_data):
+        """15m/1h/4h/1d için MTF liquidity sweep analizi üretir."""
+        payload = {}
+
+        for timeframe in self.SWEEP_TIMEFRAMES:
+            data = timeframe_data.get(timeframe) or {}
+            candles = data.get("candles") or []
+            structure = data.get("structure") or []
+
+            if not candles:
+                continue
+
+            payload[timeframe] = {
+                "candles": candles,
+                "structure": structure,
+                "liquidity_layers": self.liquidity.detect_layers(structure, candles),
+            }
+
+        return self.liquidity_sweep.detect_multi(payload)
 
     def _build_context_state(
         self,
@@ -341,6 +399,9 @@ class AtlasEngine:
             killzone=killzone,
             session=session,
             smt=smt,
+            orderblocks=orderblocks,
+            fvg=fvg,
+            market_phase=market_phase,
         )
 
         dynamic_tp = self._calculate_dynamic_tp(entry, liquidity, fvg, orderblocks)
@@ -351,6 +412,8 @@ class AtlasEngine:
             "entry": entry,
             "confluence": confluence,
             "market_phase": market_phase,
+            "liquidity_sweep": liquidity_sweep,
+            "smt": smt,
         }
         signal = self.signal.generate(analysis_for_signal)
 
@@ -371,6 +434,18 @@ class AtlasEngine:
             "bos": structure_state["bos"],
             "choch": structure_state["choch"],
             "liquidity": structure_state["liquidity"],
+            "liquidity_layers": structure_state.get(
+                "liquidity_layers",
+                {
+                    "swing": [],
+                    "internal": [],
+                    "all": structure_state.get("liquidity", []),
+                    "bsl": [],
+                    "ssl": [],
+                    "eqh": [],
+                    "eql": [],
+                },
+            ),
             "eqh_eql": structure_state["eqh_eql"],
             "orderblocks": structure_state["orderblocks"],
             "fvg": structure_state["fvg"],

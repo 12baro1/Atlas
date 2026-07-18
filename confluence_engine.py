@@ -21,6 +21,9 @@ class ConfluenceEngine:
         session,
         breaker=None,
         smt=None,
+        orderblocks=None,
+        fvg=None,
+        market_phase=None,
     ):
 
         score = 0
@@ -67,9 +70,13 @@ class ConfluenceEngine:
             checks.append("✘ Premium Zone")
 
         # Liquidity Sweep
-        if liquidity_sweep:
-            score += 10
-            checks.append("✔ Liquidity Sweep")
+        if liquidity_sweep.get("is_sweep"):
+            sweep_score = min(15, int(liquidity_sweep.get("strength_score", 0) / 8))
+            score += sweep_score
+            checks.append(f"✔ Liquidity Sweep ({liquidity_sweep.get('strength_score', 0)}%)")
+        elif liquidity_sweep.get("is_breakout"):
+            score += 2
+            checks.append("◐ Liquidity Breakout")
         else:
             checks.append("✘ Liquidity Sweep")
 
@@ -130,6 +137,21 @@ class ConfluenceEngine:
                 checks.append(f"◐ SMT {smt_direction} ({smt.get('confidence', 0)}%)")
         else:
             checks.append("✘ SMT")
+
+        # Stack Confluence: Sweep + OB + FVG + SMT + Market Phase
+        stack_ok = (
+            liquidity_sweep.get("is_sweep")
+            and bool(orderblocks)
+            and bool(fvg)
+            and bool(smt and smt.get("active"))
+            and bool(market_phase and market_phase.get("phase") in ["Expansion", "Trending", "Reversal"])
+        )
+
+        if stack_ok:
+            score += 18
+            checks.append("✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)")
+        else:
+            checks.append("✘ Stack Confluence")
 
         return {
             "score": score,
