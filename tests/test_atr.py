@@ -1,7 +1,11 @@
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import ccxt
 
-from candle import convert
-from atr import atr
+from core.candle import convert
+from utils.atr import atr
 
 exchange = ccxt.bybit({
     "options":{"defaultType":"swap"},

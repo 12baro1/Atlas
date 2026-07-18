@@ -1,7 +1,11 @@
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import ccxt
 
-from candle import convert
-from market_structure_engine import MarketStructureEngine
+from core.candle import convert
+from core.market_structure_engine import MarketStructureEngine
 
 exchange=ccxt.bybit({
     "options":{"defaultType":"swap"},

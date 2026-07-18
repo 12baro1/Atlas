@@ -14,6 +14,7 @@ from signal_engine import SignalEngine
 from mitigation_engine import MitigationEngine
 from fvg_engine import FVGEngine
 from trend_engine import TrendEngine
+from market_phase_engine import MarketPhaseEngine
 from mtf_engine import MTFEngine
 from entry_engine import EntryEngine
 from entry_confirmation_engine import EntryConfirmationEngine
@@ -49,6 +50,7 @@ class AtlasEngine:
         self.mitigation = MitigationEngine()
         self.fvg = FVGEngine()
         self.trend = TrendEngine()
+        self.market_phase = MarketPhaseEngine()
         self.mtf = MTFEngine()
         self.entry = EntryEngine()
         self.entry_confirmation = EntryConfirmationEngine()
@@ -214,6 +216,16 @@ class AtlasEngine:
             session=session
         )
 
+        market_phase = self.market_phase.detect(
+            structure=labels,
+            trend=trend,
+            liquidity_sweep=liquidity_sweep,
+            fvg=fvg,
+            orderblocks=orderblocks,
+            premium_discount=premium_discount,
+            mtf=mtf
+        )
+
         analysis = {
             "structure": labels,
             "liquidity": liquidity,
@@ -232,6 +244,7 @@ class AtlasEngine:
             "htf_orderblock": htf_orderblock,
             "htf_fvg": htf_fvg,
             "dynamic_tp": dynamic_tp,
+            "market_phase": market_phase,
         }
 
         risk = None
