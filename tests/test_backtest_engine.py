@@ -31,3 +31,26 @@ def test_backtest_reset_clears_state():
 
     assert stats["total"] == 0
     assert stats["winrate"] == 0
+
+
+def test_backtest_monte_carlo_and_walk_forward_outputs():
+    engine = BacktestEngine()
+
+    for index in range(12):
+        engine.record(
+            {
+                "result": "WIN" if index % 3 != 0 else "LOSS",
+                "rr": 1.0 + (index % 4) * 0.5,
+                "tp": (index % 3) + 1,
+                "side": "LONG" if index % 2 == 0 else "SHORT",
+            }
+        )
+
+    monte_carlo = engine.monte_carlo(iterations=64, sample_size=6)
+    walk_forward = engine.walk_forward(window=6, step=3)
+    analytics = engine.trade_analytics()
+
+    assert monte_carlo["iterations"] > 0
+    assert walk_forward["windows"]
+    assert analytics["total"] == 12
+    assert analytics["profit_factor"] >= 0

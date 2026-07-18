@@ -7,7 +7,7 @@ from core.analysis_utils import clamp
 
 class RiskEngine:
 
-    def calculate(self, entry, stop_loss, dynamic_tp=None, volume_profile=None):
+    def calculate(self, entry, stop_loss, dynamic_tp=None, volume_profile=None, institutional=None):
 
         if entry is None or stop_loss is None:
             return None
@@ -25,7 +25,8 @@ class RiskEngine:
 
         side = "LONG" if entry > stop_loss else "SHORT"
         vp_factor = self._volume_profile_position_factor(volume_profile, side=side)
-        adjusted_position_size = position_size * vp_factor
+        institutional_factor = self._institutional_position_factor(institutional, side=side)
+        adjusted_position_size = position_size * vp_factor * institutional_factor
 
         tp1 = None
         tp2 = None
@@ -58,6 +59,12 @@ class RiskEngine:
             "position_size_raw": round(position_size, 4),
 
             "volume_profile_factor": round(vp_factor, 4),
+
+            "institutional_factor": round(institutional_factor, 4),
+
+            "portfolio_risk": (institutional or {}).get("portfolio_risk", {}),
+
+            "adaptive_position_sizing": (institutional or {}).get("adaptive_position_sizing", {}),
 
             "tp1": tp1,
 
@@ -93,3 +100,26 @@ class RiskEngine:
 
         state_penalty = 0.05 if vp_state not in ["NONE", ""] else 0.0
         return clamp(1.0 - (vp_confidence / 300) - state_penalty, 0.65, 1.0)
+
+    def _institutional_position_factor(self, institutional, side):
+        """Kurumsal akış ve risk koşullarına göre pozisyon boyutunu ayarlar."""
+        if not institutional or not institutional.get("active"):
+            return 1.0
+
+        factor = 1.0
+        flow_direction = institutional.get("direction", "NONE")
+        flow_confidence = institutional.get("confidence", 0)
+        execution_score = institutional.get("execution_quality", {}).get("score", 0)
+        portfolio_score = institutional.get("portfolio_risk", {}).get("score", 100)
+        adaptive_factor = institutional.get("adaptive_position_sizing", {}).get("factor", 1.0)
+
+        if (side == "LONG" and flow_direction == "LONG") or (side == "SHORT" and flow_direction == "SHORT"):
+            factor += min(0.12, flow_confidence / 900)
+        elif flow_direction in ["LONG", "SHORT"]:
+            factor -= min(0.18, flow_confidence / 650)
+
+        factor += (execution_score - 50) / 1000
+        factor += (portfolio_score - 50) / 1200
+        factor += (adaptive_factor - 1.0) / 2
+
+        return clamp(factor, 0.65, 1.25)

@@ -107,3 +107,112 @@ class BacktestEngine:
     def reset(self):
 
         self.__init__()
+
+    def monte_carlo(self, iterations=1000, sample_size=None):
+        """Geçmiş RR dağılımına göre Monte Carlo simülasyonu üretir."""
+        if not self.history:
+            return {
+                "iterations": 0,
+                "sample_size": 0,
+                "expected_rr": 0,
+                "worst_case_rr": 0,
+                "best_case_rr": 0,
+            }
+
+        outcomes = [abs(trade.get("rr", 0)) if trade.get("result") == "WIN" else -abs(trade.get("rr", 0)) for trade in self.history]
+        sample_size = sample_size or min(20, len(outcomes))
+        sample_size = max(1, min(sample_size, len(outcomes)))
+
+        simulations = []
+        for index in range(min(iterations, 5000)):
+            start = (index * sample_size) % len(outcomes)
+            sample = outcomes[start:start + sample_size]
+            if len(sample) < sample_size:
+                sample = sample + outcomes[: sample_size - len(sample)]
+            simulations.append(sum(sample))
+
+        return {
+            "iterations": len(simulations),
+            "sample_size": sample_size,
+            "expected_rr": round(sum(simulations) / len(simulations), 2),
+            "worst_case_rr": round(min(simulations), 2),
+            "best_case_rr": round(max(simulations), 2),
+        }
+
+    def walk_forward(self, window=20, step=10):
+        """Kaydırmalı pencere ile walk-forward performansı hesaplar."""
+        if not self.history:
+            return {"windows": [], "average_rr": 0, "average_winrate": 0}
+
+        window = max(5, window)
+        step = max(1, step)
+        windows = []
+
+        for start in range(0, len(self.history) - window + 1, step):
+            chunk = self.history[start:start + window]
+            stats = self._chunk_stats(chunk)
+            stats["start"] = start
+            stats["end"] = start + window
+            windows.append(stats)
+
+        if not windows:
+            windows = [self._chunk_stats(self.history)]
+
+        average_rr = sum(item["avg_rr"] for item in windows) / len(windows)
+        average_winrate = sum(item["winrate"] for item in windows) / len(windows)
+
+        return {
+            "windows": windows,
+            "average_rr": round(average_rr, 2),
+            "average_winrate": round(average_winrate, 2),
+        }
+
+    def trade_analytics(self):
+        """Trade geçmişinden kalite ve dağılım analitiği üretir."""
+        if not self.history:
+            return {
+                "total": 0,
+                "long_trades": 0,
+                "short_trades": 0,
+                "winrate": 0,
+                "avg_rr": 0,
+                "median_rr": 0,
+                "expectancy": 0,
+            }
+
+        rr_values = [abs(trade.get("rr", 0)) if trade.get("result") == "WIN" else -abs(trade.get("rr", 0)) for trade in self.history]
+        long_trades = len([trade for trade in self.history if trade.get("side") == "LONG"])
+        short_trades = len([trade for trade in self.history if trade.get("side") == "SHORT"])
+        ordered_rr = sorted(rr_values)
+        middle = len(ordered_rr) // 2
+        if len(ordered_rr) % 2 == 0:
+            median_rr = (ordered_rr[middle - 1] + ordered_rr[middle]) / 2
+        else:
+            median_rr = ordered_rr[middle]
+
+        stats = self.statistics()
+        return {
+            "total": len(self.history),
+            "long_trades": long_trades,
+            "short_trades": short_trades,
+            "winrate": stats["winrate"],
+            "avg_rr": stats["avg_rr"],
+            "median_rr": round(median_rr, 2),
+            "expectancy": stats["expectancy"],
+            "profit_factor": stats["profit_factor"],
+        }
+
+    def _chunk_stats(self, chunk):
+        total = len(chunk)
+        wins = len([trade for trade in chunk if trade.get("result") == "WIN"])
+        losses = total - wins
+        rr_values = [abs(trade.get("rr", 0)) if trade.get("result") == "WIN" else -abs(trade.get("rr", 0)) for trade in chunk]
+        avg_rr = sum(rr_values) / total if total else 0
+        winrate = (wins / total) * 100 if total else 0
+        return {
+            "total": total,
+            "wins": wins,
+            "losses": losses,
+            "winrate": round(winrate, 2),
+            "avg_rr": round(avg_rr, 2),
+        }

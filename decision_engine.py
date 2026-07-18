@@ -22,6 +22,7 @@ class DecisionEngine:
         risk = context["risk"]
         cisd = context["cisd"]
         volume_profile = context["volume_profile"]
+        institutional = context["institutional"]
         unicorn = context["unicorn"]
         smt = context["smt"]
         market_phase = context["market_phase"]
@@ -51,6 +52,7 @@ class DecisionEngine:
         core_score += self._score_liquidity_sweep(liquidity_sweep, direction)
         core_score += self._score_alignment_gate(cisd, direction)
         core_score += self._score_alignment_gate(volume_profile, direction)
+        core_score += self._score_alignment_gate(institutional, direction)
         core_score += self._score_alignment_gate(unicorn, direction)
         core_score += self._score_alignment_gate(smt, direction)
 
@@ -73,7 +75,7 @@ class DecisionEngine:
             blockers.append("Risk is not valid")
 
         action = "WAIT"
-        mismatch_detected = self._has_direction_conflict(cisd, volume_profile, unicorn, smt, direction)
+        mismatch_detected = self._has_direction_conflict(cisd, volume_profile, institutional, unicorn, smt, direction)
 
         if mismatch_detected:
             blockers.append("Directional mismatch detected")
@@ -110,6 +112,9 @@ class DecisionEngine:
             "volume_profile_active": bool(volume_profile.get("active", False)),
             "volume_profile_direction": volume_profile.get("direction", "NONE"),
             "volume_profile_match": self._match_direction(volume_profile, direction),
+            "institutional_active": bool(institutional.get("active", False)),
+            "institutional_direction": institutional.get("direction", "NONE"),
+            "institutional_match": self._match_direction(institutional, direction),
             "unicorn_active": bool(unicorn.get("active", False)),
             "unicorn_direction": unicorn.get("direction", unicorn.get("best", {}).get("direction", "NONE")),
             "smt_active": bool(smt.get("active", False)),
@@ -136,6 +141,7 @@ class DecisionEngine:
         risk = bundle.get("risk")
         cisd = bundle.get("cisd") or {}
         volume_profile = bundle.get("volume_profile") or {}
+        institutional = bundle.get("institutional") or {}
         unicorn = bundle.get("unicorn") or {}
         smt = bundle.get("smt") or {}
         market_phase = bundle.get("market_phase") or {}
@@ -150,6 +156,7 @@ class DecisionEngine:
             "risk": risk,
             "cisd": cisd,
             "volume_profile": volume_profile,
+            "institutional": institutional,
             "unicorn": unicorn,
             "smt": smt,
             "market_phase": market_phase,
@@ -361,8 +368,8 @@ class DecisionEngine:
             or (module_direction in ["BEARISH", "SHORT"] and direction == "SHORT")
         )
 
-    def _has_direction_conflict(self, cisd, volume_profile, unicorn, smt, direction):
-        modules = [cisd, volume_profile, unicorn, smt]
+    def _has_direction_conflict(self, cisd, volume_profile, institutional, unicorn, smt, direction):
+        modules = [cisd, volume_profile, institutional, unicorn, smt]
         for module in modules:
             if not isinstance(module, dict) or not module.get("active"):
                 continue

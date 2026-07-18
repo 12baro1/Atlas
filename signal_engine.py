@@ -18,6 +18,7 @@ class SignalEngine:
         unicorn = analysis.get("unicorn", {})
         cisd = analysis.get("cisd", {})
         volume_profile = analysis.get("volume_profile", {})
+        institutional = analysis.get("institutional", {})
 
         market_phase = analysis.get("market_phase", {})
         phase_name = market_phase.get("phase", "Ranging")
@@ -42,6 +43,7 @@ class SignalEngine:
             unicorn=unicorn,
             cisd=cisd,
             volume_profile=volume_profile,
+            institutional=institutional,
         )
 
         confidence_adjusted = clamp(confidence_adjusted)
@@ -89,6 +91,8 @@ class SignalEngine:
             "cisd_direction": cisd.get("direction", "NONE"),
             "volume_profile_confidence": volume_profile.get("confidence", 0),
             "volume_profile_direction": volume_profile.get("direction", "NONE"),
+            "institutional_confidence": institutional.get("confidence", 0),
+            "institutional_direction": institutional.get("direction", "NONE"),
             "alignment_conflicts": self._alignment_conflicts(direction, liquidity_sweep, smt, unicorn, cisd, volume_profile),
         }
 
@@ -117,10 +121,10 @@ class SignalEngine:
         adjusted = base_confidence + adjustment
         return clamp(adjusted)
 
-    def _adjust_confidence_by_liquidity_and_smt(self, base_confidence, signal_direction, liquidity_sweep, smt, unicorn, cisd, volume_profile):
+    def _adjust_confidence_by_liquidity_and_smt(self, base_confidence, signal_direction, liquidity_sweep, smt, unicorn, cisd, volume_profile, institutional):
         """Sweep, SMT, Unicorn, CISD ve Volume Profile kalitesine göre güven puanını günceller."""
         adjusted = base_confidence
-        active_modules = [liquidity_sweep, smt, unicorn, cisd, volume_profile]
+        active_modules = [liquidity_sweep, smt, unicorn, cisd, volume_profile, institutional]
 
         if liquidity_sweep.get("is_sweep"):
             adjusted += min(10, liquidity_sweep.get("strength_score", 0) / 10)
@@ -143,6 +147,18 @@ class SignalEngine:
 
         if is_active(volume_profile):
             adjusted += min(8, extract_confidence(volume_profile) / 12)
+
+        if is_active(institutional):
+            adjusted += min(12, extract_confidence(institutional) / 9)
+            institutional_direction = extract_direction(institutional)
+            if direction_matches(institutional_direction, signal_direction):
+                adjusted += 4
+            if institutional.get("execution_quality", {}).get("score", 0) >= 70:
+                adjusted += 3
+            if institutional.get("macro_filter", {}).get("active") and institutional.get("macro_filter", {}).get("confidence", 100) < 50:
+                adjusted -= 5
+            if institutional.get("news_filter", {}).get("active") and institutional.get("news_filter", {}).get("confidence", 100) < 50:
+                adjusted -= 4
 
         adjusted -= self._alignment_conflicts(signal_direction, *active_modules)
 

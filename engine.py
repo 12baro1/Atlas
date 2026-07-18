@@ -26,6 +26,7 @@ from htf_orderblock_engine import HTFOrderBlockEngine
 from killzone_engine import KillZoneEngine
 from liquidity_engine import LiquidityEngine
 from liquidity_sweep_engine import LiquiditySweepEngine
+from institutional_engine import InstitutionalAnalysisEngine
 from market_phase_engine import MarketPhaseEngine
 from mitigation_engine import MitigationEngine
 from mtf_engine import MTFEngine
@@ -85,6 +86,7 @@ class AtlasEngine:
         self.unicorn = UnicornEngine()
         self.cisd = CISDEngine()
         self.volume_profile = VolumeProfileEngine()
+        self.institutional = InstitutionalAnalysisEngine()
         self.decision = DecisionEngine()
 
         # Sinyal, risk ve operasyon motorları
@@ -179,6 +181,15 @@ class AtlasEngine:
         )
 
         volume_profile_state = self._build_volume_profile_state(data)
+        institutional_state = self._build_institutional_state(
+            data=data,
+            context_state=context_state,
+            structure_state=structure_state,
+            volume_profile_state=volume_profile_state,
+            smt_state=smt_state,
+            unicorn_state=unicorn_state,
+            cisd_state=cisd_state,
+        )
 
         execution_state = self._build_execution_state(
             entry_structure=structure_state["structure"],
@@ -200,6 +211,7 @@ class AtlasEngine:
             unicorn=unicorn_state,
             cisd=cisd_state,
             volume_profile=volume_profile_state,
+            institutional=institutional_state,
         )
 
         decision_state = self.decision.decide(
@@ -209,6 +221,7 @@ class AtlasEngine:
             risk=execution_state["risk"],
             cisd=cisd_state,
             volume_profile=volume_profile_state,
+            institutional=institutional_state,
         )
 
         analysis = self._compose_analysis(
@@ -218,6 +231,7 @@ class AtlasEngine:
             smt_state=smt_state,
             unicorn_state=unicorn_state,
             cisd_state=cisd_state,
+            institutional_state=institutional_state,
             decision_state=decision_state,
             volume_profile_state=volume_profile_state,
         )
@@ -233,6 +247,7 @@ class AtlasEngine:
             market_phase=context_state["market_phase"],
             unicorn=unicorn_state,
             cisd=cisd_state,
+            institutional=institutional_state,
             decision=decision_state,
         )
 
@@ -431,6 +446,7 @@ class AtlasEngine:
         unicorn,
         cisd,
         volume_profile,
+        institutional,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(mtf, entry_structure, fvg, orderblocks)
@@ -456,10 +472,11 @@ class AtlasEngine:
             unicorn=unicorn,
             cisd=cisd,
             volume_profile=volume_profile,
+            institutional=institutional,
         )
 
         dynamic_tp = self._calculate_dynamic_tp(entry, liquidity, fvg, orderblocks)
-        risk = self._calculate_risk(entry, dynamic_tp, volume_profile)
+        risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional)
         rr = self.rr.evaluate(risk) if risk is not None else None
 
         analysis_for_signal = {
@@ -471,6 +488,7 @@ class AtlasEngine:
             "unicorn": unicorn,
             "cisd": cisd,
             "volume_profile": volume_profile,
+            "institutional": institutional,
         }
         signal = self.signal.generate(analysis_for_signal)
 
@@ -492,6 +510,7 @@ class AtlasEngine:
         smt_state,
         unicorn_state=None,
         cisd_state=None,
+        institutional_state=None,
         decision_state=None,
         volume_profile_state=None,
     ):
@@ -556,6 +575,13 @@ class AtlasEngine:
                 "timeframes": {},
                 "events": [],
             },
+            "institutional": institutional_state or {
+                "active": False,
+                "direction": "NONE",
+                "confidence": 0,
+                "score": 0,
+                "best": None,
+            },
             "decision": decision_state or {
                 "action": "WAIT",
                 "reason": "No decision",
@@ -568,9 +594,23 @@ class AtlasEngine:
                 "unicorn": unicorn_state or {},
                 "cisd": cisd_state or {},
                 "volume_profile": volume_profile_state or {},
+                "institutional": institutional_state or {},
                 "decision": decision_state or {},
             },
         }
+
+    def _build_institutional_state(self, data, context_state, structure_state, volume_profile_state, smt_state, unicorn_state, cisd_state):
+        """Kurumsal akış, VWAP ve regime katmanını üretir."""
+        payload = dict(data)
+        payload["session"] = context_state.get("session", {})
+        payload["market_phase"] = context_state.get("market_phase", {})
+        payload["volume_profile"] = volume_profile_state or {}
+        payload["smt"] = smt_state or {}
+        payload["unicorn"] = unicorn_state or {}
+        payload["cisd"] = cisd_state or {}
+        payload["liquidity_sweep"] = structure_state.get("liquidity_sweep", {})
+
+        return self.institutional.analyze(payload)
 
     def _build_volume_profile_state(self, data):
         """Çoklu zaman diliminde volume profile durumunu üretir."""
@@ -766,7 +806,7 @@ class AtlasEngine:
             orderblocks=orderblocks,
         )
 
-    def _calculate_risk(self, entry, dynamic_tp, volume_profile=None):
+    def _calculate_risk(self, entry, dynamic_tp, volume_profile=None, institutional=None):
         """Geçerli entry/SL için risk çıktısını hesaplar."""
         if entry.get("entry") is None or entry.get("stop_loss") is None:
             return None
@@ -776,6 +816,7 @@ class AtlasEngine:
             stop_loss=entry["stop_loss"],
             dynamic_tp=dynamic_tp,
             volume_profile=volume_profile,
+            institutional=institutional,
         )
 
     def _notify_if_elite(
@@ -790,6 +831,7 @@ class AtlasEngine:
         market_phase,
         unicorn,
         cisd,
+        institutional,
         decision,
     ):
         """Yüksek güvenli sinyallerde Telegram bildirimi gönderir."""
@@ -815,6 +857,7 @@ class AtlasEngine:
                 "market_phase": market_phase,
                 "unicorn": unicorn,
                 "cisd": cisd,
+                "institutional": institutional,
                 "decision": decision,
             }
         )

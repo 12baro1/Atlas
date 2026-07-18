@@ -27,6 +27,7 @@ class ConfluenceEngine:
         unicorn=None,
         cisd=None,
         volume_profile=None,
+        institutional=None,
     ):
 
         score = 0
@@ -207,6 +208,22 @@ class ConfluenceEngine:
                 checks.append(f"◐ Volume Profile {vp_direction} ({vp_confidence}%)")
         else:
             checks.append("✘ Volume Profile")
+
+        # Institutional Flow
+        if institutional and institutional.get("active"):
+            institutional_direction = institutional.get("direction", "NONE")
+            institutional_confidence = institutional.get("confidence", 0)
+
+            if (institutional_direction == "LONG" and entry_direction == "LONG") or (
+                institutional_direction == "SHORT" and entry_direction == "SHORT"
+            ):
+                score += min(18, int(institutional_confidence / 5))
+                checks.append(f"✔ Institutional Flow {institutional_direction} ({institutional_confidence}%)")
+            else:
+                score -= 6
+                checks.append(f"◐ Institutional Flow {institutional_direction} ({institutional_confidence}%)")
+        else:
+            checks.append("✘ Institutional Flow")
 
         return {
             "score": score,
