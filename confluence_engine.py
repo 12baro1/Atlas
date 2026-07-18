@@ -19,7 +19,8 @@ class ConfluenceEngine:
         htf_fvg,
         killzone,
         session,
-        breaker=None
+        breaker=None,
+        smt=None,
     ):
 
         score = 0
@@ -113,6 +114,22 @@ class ConfluenceEngine:
             checks.append("✔ Session")
         else:
             checks.append("✘ Session")
+
+        # SMT Divergence
+        if smt and smt.get("active"):
+            smt_direction = smt.get("direction")
+            entry_direction = entry.get("direction")
+
+            if (smt_direction == "BULLISH" and entry_direction == "LONG") or (
+                smt_direction == "BEARISH" and entry_direction == "SHORT"
+            ):
+                score += 12
+                checks.append(f"✔ SMT {smt_direction} ({smt.get('confidence', 0)}%)")
+            else:
+                score += 4
+                checks.append(f"◐ SMT {smt_direction} ({smt.get('confidence', 0)}%)")
+        else:
+            checks.append("✘ SMT")
 
         return {
             "score": score,

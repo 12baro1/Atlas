@@ -1,54 +1,59 @@
 """
 engine.py
-Atlas SMC Engine v2
+Atlas SMC Engine v3
 
-Ana orkestrasyon katmanı: alt motorları tek bir analiz akışında modüler,
-test edilebilir ve mevcut import yapısıyla geriye uyumlu şekilde birleştirir.
+Ana orkestrasyon katmanı: alt motorları modüler bir akışta birleştirir.
+Kod İngilizce, açıklamalar Türkçe tutulmuştur.
 """
 
 from importlib import import_module
-from core.market_structure_engine import MarketStructureEngine
-from utils.structure_labels import label_swings
+
+from backtest_engine import BacktestEngine
 from bos_engine import BOSEngine
+from breaker_block_engine import BreakerBlockEngine
 from choch_engine import CHOCHEngine
-from liquidity_engine import LiquidityEngine
-from orderblock_engine import OrderBlockEngine
-from signal_engine import SignalEngine
-from mitigation_engine import MitigationEngine
-from fvg_engine import FVGEngine
-from trend_engine import TrendEngine
-from market_phase_engine import MarketPhaseEngine
-from mtf_engine import MTFEngine
-from entry_engine import EntryEngine
-from entry_confirmation_engine import EntryConfirmationEngine
-from premium_discount_engine import PremiumDiscountEngine
-from killzone_engine import KillZoneEngine
-from session_filter import SessionFilter
-from liquidity_sweep_engine import LiquiditySweepEngine
+from config import Config
 from confluence_engine import ConfluenceEngine
+from core.market_structure_engine import MarketStructureEngine
+from dynamic_tp_engine import DynamicTPEngine
+from entry_confirmation_engine import EntryConfirmationEngine
+from entry_engine import EntryEngine
+from fvg_engine import FVGEngine
+from htf_fvg_engine import HTFFVGEngine
+from htf_orderblock_engine import HTFOrderBlockEngine
+from killzone_engine import KillZoneEngine
+from liquidity_engine import LiquidityEngine
+from liquidity_sweep_engine import LiquiditySweepEngine
+from market_phase_engine import MarketPhaseEngine
+from mitigation_engine import MitigationEngine
+from mtf_engine import MTFEngine
+from orderblock_engine import OrderBlockEngine
+from ote_engine import OTEEngine
+from position_manager import PositionManager
+from premium_discount_engine import PremiumDiscountEngine
 from risk_engine import RiskEngine
 from rr_engine import RREngine
-from position_manager import PositionManager
-from trade_manager import TradeManager
 from scanner_engine import ScannerEngine
+from session_filter import SessionFilter
+from signal_engine import SignalEngine
+from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
-from backtest_engine import BacktestEngine
-from config import Config
-from breaker_block_engine import BreakerBlockEngine
-from ote_engine import OTEEngine
-from htf_orderblock_engine import HTFOrderBlockEngine
-from htf_fvg_engine import HTFFVGEngine
-from dynamic_tp_engine import DynamicTPEngine
+from trade_manager import TradeManager
+from trend_engine import TrendEngine
+from utils.structure_labels import label_swings
 
 
 class AtlasEngine:
-    """Atlas'ın tüm SMC analiz motorlarını yöneten ana sınıf."""
+    """Atlas'ın tüm analiz motorlarını yöneten ana sınıf."""
 
     REQUIRED_TIMEFRAMES = ("1w", "1d", "4h", "15m")
+    SMT_TIMEFRAMES = ("15m", "1h", "4h", "1d")
 
-    def __init__(self):
-        # Çekirdek yapı motorları
-        self.structure_engine = MarketStructureEngine()
+    def __init__(self, structure_engine_cls=None):
+        # Testlerde sahte sınıf enjekte edebilmek için sınıf referansı tutulur.
+        self.structure_engine_cls = structure_engine_cls or MarketStructureEngine
+
+        # Structure ve seviye motorları
         self.bos = BOSEngine()
         self.choch = CHOCHEngine()
         self.liquidity = LiquidityEngine()
@@ -56,18 +61,19 @@ class AtlasEngine:
         self.mitigation = MitigationEngine()
         self.fvg = FVGEngine()
         self.liquidity_sweep = LiquiditySweepEngine()
+        self.breaker = BreakerBlockEngine()
 
-        # Bağlam ve faz motorları
+        # Faz, bağlam ve MTF motorları
         self.trend = TrendEngine()
         self.market_phase = MarketPhaseEngine()
         self.mtf = MTFEngine()
         self.premium_discount = PremiumDiscountEngine()
         self.killzone = KillZoneEngine()
         self.session = SessionFilter()
-        self.breaker = BreakerBlockEngine()
         self.ote = OTEEngine()
         self.htf_orderblock = HTFOrderBlockEngine()
         self.htf_fvg = HTFFVGEngine()
+        self.smt = SMTDivergenceEngine()
 
         # Sinyal, risk ve operasyon motorları
         self.entry = EntryEngine()
@@ -79,7 +85,7 @@ class AtlasEngine:
         self.dynamic_tp = DynamicTPEngine()
         self.telegram = None
 
-        # Mevcut dış API uyumluluğu için korunan yardımcılar
+        # Dış API uyumluluğu için korunur
         self.config = Config()
         self.position = PositionManager()
         self.trade = TradeManager()
@@ -87,9 +93,8 @@ class AtlasEngine:
         self.statistics = StatisticsEngine()
         self.backtest = BacktestEngine()
 
-
     def analyze(self, data):
-        """Çoklu zaman dilimi verisini analiz eder ve birleşik sonuç döndürür."""
+        """Çoklu zaman dilimi verisini analiz eder ve birleşik çıktı üretir."""
         self._validate_market_data(data)
 
         candles = data["15m"]
@@ -97,24 +102,141 @@ class AtlasEngine:
         daily = data["1d"]
         h4 = data["4h"]
 
-        entry_tf = self._analyze_timeframe(candles)
-        weekly_tf = self._analyze_timeframe(weekly)
-        daily_tf = self._analyze_timeframe(daily)
-        h4_tf = self._analyze_timeframe(h4)
+        tf_analysis = {
+            "entry": self._analyze_timeframe(candles),
+            "weekly": self._analyze_timeframe(weekly),
+            "daily": self._analyze_timeframe(daily),
+            "h4": self._analyze_timeframe(h4),
+        }
 
-        labels = entry_tf["structure"]
-        liquidity = self.liquidity.detect(labels)
-        eqh_eql = self._detect_eqh_eql(liquidity)
-        orderblocks = self.mitigation.detect(
-            candles,
-            self.orderblocks.detect(candles, labels),
+        smt_state = self._build_smt_state(data)
+
+        structure_state = self._build_structure_state(
+            candles=candles,
+            structure=tf_analysis["entry"]["structure"],
         )
-        breakers = self.breaker.detect(candles, orderblocks)
+
+        context_state = self._build_context_state(
+            candles=candles,
+            daily=daily,
+            h4=h4,
+            weekly_structure=tf_analysis["weekly"]["structure"],
+            daily_structure=tf_analysis["daily"]["structure"],
+            h4_structure=tf_analysis["h4"]["structure"],
+            entry_structure=structure_state["structure"],
+            liquidity=structure_state["liquidity"],
+            fvg=structure_state["fvg"],
+            orderblocks=structure_state["orderblocks"],
+            liquidity_sweep=structure_state["liquidity_sweep"],
+            breakers=structure_state["breaker"],
+        )
+
+        execution_state = self._build_execution_state(
+            entry_structure=structure_state["structure"],
+            mtf=context_state["mtf"],
+            trend=context_state["trend"],
+            fvg=structure_state["fvg"],
+            orderblocks=structure_state["orderblocks"],
+            premium_discount=context_state["premium_discount"],
+            liquidity_sweep=structure_state["liquidity_sweep"],
+            breaker=structure_state["breaker"],
+            ote=context_state["ote"],
+            htf_orderblock=context_state["htf_orderblock"],
+            htf_fvg=context_state["htf_fvg"],
+            killzone=context_state["killzone"],
+            session=context_state["session"],
+            market_phase=context_state["market_phase"],
+            liquidity=structure_state["liquidity"],
+            smt=smt_state,
+        )
+
+        analysis = self._compose_analysis(
+            structure_state=structure_state,
+            context_state=context_state,
+            execution_state=execution_state,
+            smt_state=smt_state,
+        )
+
+        self._notify_if_elite(
+            data=data,
+            signal=execution_state["signal"],
+            entry=execution_state["entry"],
+            risk=execution_state["risk"],
+            rr=execution_state["rr"],
+            dynamic_tp=execution_state["dynamic_tp"],
+            confluence=execution_state["confluence"],
+            market_phase=context_state["market_phase"],
+        )
+
+        return {
+            "analysis": analysis,
+            "signal": execution_state["signal"],
+            "risk": execution_state["risk"],
+            "rr": execution_state["rr"],
+            "dynamic_tp": execution_state["dynamic_tp"],
+        }
+
+    def _analyze_timeframe(self, candles):
+        """Tek zaman dilimi için pivot, etiket, BOS ve CHoCH üretir."""
+        engine = self.structure_engine_cls()
+
+        engine.find_pivots(candles)
+        engine.calculate_strength(candles)
+        engine.merge_pivots()
+        engine.filter_noise()
+
+        pivots = engine.validate_sequence()
+        structure = self.choch.detect(self.bos.detect(label_swings(pivots)))
+
+        return {
+            "pivots": pivots,
+            "structure": structure,
+        }
+
+    def _build_structure_state(self, candles, structure):
+        """BOS/CHoCH sonrası seviye ve likidite katmanını üretir."""
+        liquidity = self.liquidity.detect(structure)
+        eqh_eql = self._detect_eqh_eql(liquidity)
+
+        raw_orderblocks = self.orderblocks.detect(candles, structure)
+        orderblocks = self.mitigation.detect(candles, raw_orderblocks)
+        breaker = self.breaker.detect(candles, orderblocks)
+
         fvg = self.fvg.detect(candles)
         liquidity_sweep = self.liquidity_sweep.detect(candles)
-        inducement = self._detect_inducement(labels, liquidity_sweep, eqh_eql)
+        inducement = self._detect_inducement(structure, liquidity_sweep, eqh_eql)
 
+        return {
+            "structure": structure,
+            "bos": [item for item in structure if item.get("bos")],
+            "choch": [item for item in structure if item.get("choch")],
+            "liquidity": liquidity,
+            "eqh_eql": eqh_eql,
+            "orderblocks": orderblocks,
+            "fvg": fvg,
+            "liquidity_sweep": liquidity_sweep,
+            "inducement": inducement,
+            "breaker": breaker,
+        }
+
+    def _build_context_state(
+        self,
+        candles,
+        daily,
+        h4,
+        weekly_structure,
+        daily_structure,
+        h4_structure,
+        entry_structure,
+        liquidity,
+        fvg,
+        orderblocks,
+        liquidity_sweep,
+        breakers,
+    ):
+        """MTF, trend, premium/discount, OTE ve market phase katmanını üretir."""
         swing_high, swing_low, current_price = self._price_context(candles)
+
         premium_discount = self.premium_discount.calculate(
             swing_high,
             swing_low,
@@ -125,44 +247,33 @@ class AtlasEngine:
         killzone = self.killzone.detect(timestamp)
         session = self.session.check(timestamp)
 
-        daily_orderblocks = self.orderblocks.detect(daily, daily_tf["structure"])
-        h4_orderblocks = self.orderblocks.detect(h4, h4_tf["structure"])
-
         mtf = self.mtf.detect(
-            weekly_tf["structure"],
-            daily_tf["structure"],
-            h4_tf["structure"],
-            labels,
+            weekly_structure,
+            daily_structure,
+            h4_structure,
+            entry_structure,
         )
         trend = self.trend.calculate(mtf)
-        entry = self.entry.generate(mtf, labels, fvg, orderblocks)
-        ote = self.ote.detect(swing_high, swing_low, current_price, entry["direction"])
+
+        daily_orderblocks = self.orderblocks.detect(daily, daily_structure)
+        h4_orderblocks = self.orderblocks.detect(h4, h4_structure)
+
+        ote = self.ote.detect(
+            swing_high,
+            swing_low,
+            current_price,
+            mtf.get("entry", "NONE"),
+        )
+
         htf_orderblock = self.htf_orderblock.detect(
             current_price,
             daily_orderblocks,
             h4_orderblocks,
         )
         htf_fvg = self.htf_fvg.detect(self.fvg.detect(h4), self.fvg.detect(daily))
-        dynamic_tp = self._calculate_dynamic_tp(entry, liquidity, fvg, orderblocks)
-        confirmation = self.entry_confirmation.confirm(mtf, labels, fvg, entry)
-
-        confluence = self.confluence.evaluate(
-            mtf=mtf,
-            trend=trend,
-            entry=entry,
-            confirmation=confirmation,
-            premium_discount=premium_discount,
-            liquidity_sweep=liquidity_sweep,
-            breaker=breakers,
-            ote=ote,
-            htf_orderblock=htf_orderblock,
-            htf_fvg=htf_fvg,
-            killzone=killzone,
-            session=session,
-        )
 
         market_phase = self.market_phase.detect(
-            structure=labels,
+            structure=entry_structure,
             trend=trend,
             liquidity_sweep=liquidity_sweep,
             fvg=fvg,
@@ -172,59 +283,145 @@ class AtlasEngine:
             candles=candles,
         )
 
-        analysis = {
-            "structure": labels,
-            "bos": [item for item in labels if item.get("bos")],
-            "choch": [item for item in labels if item.get("choch")],
-            "liquidity": liquidity,
-            "eqh_eql": eqh_eql,
-            "orderblocks": orderblocks,
-            "fvg": fvg,
-            "liquidity_sweep": liquidity_sweep,
-            "inducement": inducement,
+        return {
             "mtf": mtf,
             "trend": trend,
-            "entry": entry,
-            "confirmation": confirmation,
-            "ote": ote,
             "premium_discount": premium_discount,
             "killzone": killzone,
             "session": session,
-            "breaker": breakers,
+            "ote": ote,
             "htf_orderblock": htf_orderblock,
             "htf_fvg": htf_fvg,
-            "dynamic_tp": dynamic_tp,
+            "market_phase": market_phase,
+            "price": {
+                "swing_high": swing_high,
+                "swing_low": swing_low,
+                "current_price": current_price,
+            },
+            "daily_orderblocks": daily_orderblocks,
+            "h4_orderblocks": h4_orderblocks,
+            "breaker": breakers,
+            "liquidity": liquidity,
+        }
+
+    def _build_execution_state(
+        self,
+        entry_structure,
+        mtf,
+        trend,
+        fvg,
+        orderblocks,
+        premium_discount,
+        liquidity_sweep,
+        breaker,
+        ote,
+        htf_orderblock,
+        htf_fvg,
+        killzone,
+        session,
+        market_phase,
+        liquidity,
+        smt,
+    ):
+        """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
+        entry = self.entry.generate(mtf, entry_structure, fvg, orderblocks)
+        confirmation = self.entry_confirmation.confirm(mtf, entry_structure, fvg, entry)
+
+        confluence = self.confluence.evaluate(
+            mtf=mtf,
+            trend=trend,
+            entry=entry,
+            confirmation=confirmation,
+            premium_discount=premium_discount,
+            liquidity_sweep=liquidity_sweep,
+            breaker=breaker,
+            ote=ote,
+            htf_orderblock=htf_orderblock,
+            htf_fvg=htf_fvg,
+            killzone=killzone,
+            session=session,
+            smt=smt,
+        )
+
+        dynamic_tp = self._calculate_dynamic_tp(entry, liquidity, fvg, orderblocks)
+        risk = self._calculate_risk(entry, dynamic_tp)
+        rr = self.rr.evaluate(risk) if risk is not None else None
+
+        analysis_for_signal = {
+            "entry": entry,
             "confluence": confluence,
             "market_phase": market_phase,
         }
-
-        risk = self._calculate_risk(entry, dynamic_tp)
-        rr = self.rr.evaluate(risk) if risk is not None else None
-        signal = self.signal.generate(analysis)
-        self._notify_if_elite(data, signal, entry, risk, rr, dynamic_tp, confluence, market_phase)
+        signal = self.signal.generate(analysis_for_signal)
 
         return {
-            "analysis": analysis,
-            "signal": signal,
+            "entry": entry,
+            "confirmation": confirmation,
+            "confluence": confluence,
+            "dynamic_tp": dynamic_tp,
             "risk": risk,
             "rr": rr,
-            "dynamic_tp": dynamic_tp,
+            "signal": signal,
         }
 
-    def _analyze_timeframe(self, candles):
-        """Tek zaman dilimi için pivot, etiket, BOS ve CHoCH üretir."""
-        engine = MarketStructureEngine()
-        pivots = engine.find_pivots(candles)
-        engine.calculate_strength(candles)
-        engine.merge_pivots()
-        engine.filter_noise()
-        pivots = engine.validate_sequence()
-        structure = self.choch.detect(self.bos.detect(label_swings(pivots)))
-        return {"pivots": pivots, "structure": structure}
+    def _compose_analysis(self, structure_state, context_state, execution_state, smt_state):
+        """Dış API'de beklenen analysis sözlüğünü oluşturur."""
+        return {
+            "structure": structure_state["structure"],
+            "bos": structure_state["bos"],
+            "choch": structure_state["choch"],
+            "liquidity": structure_state["liquidity"],
+            "eqh_eql": structure_state["eqh_eql"],
+            "orderblocks": structure_state["orderblocks"],
+            "fvg": structure_state["fvg"],
+            "liquidity_sweep": structure_state["liquidity_sweep"],
+            "inducement": structure_state["inducement"],
+            "mtf": context_state["mtf"],
+            "trend": context_state["trend"],
+            "entry": execution_state["entry"],
+            "confirmation": execution_state["confirmation"],
+            "ote": context_state["ote"],
+            "premium_discount": context_state["premium_discount"],
+            "killzone": context_state["killzone"],
+            "session": context_state["session"],
+            "breaker": structure_state["breaker"],
+            "htf_orderblock": context_state["htf_orderblock"],
+            "htf_fvg": context_state["htf_fvg"],
+            "dynamic_tp": execution_state["dynamic_tp"],
+            "confluence": execution_state["confluence"],
+            "market_phase": context_state["market_phase"],
+            "smt": smt_state,
+        }
+
+    def _build_smt_state(self, data):
+        """BTC, ETH ve seçili altcoin verileriyle SMT divergence üretir."""
+        primary_symbol = data.get("symbol", "UNKNOWN")
+
+        primary_timeframes = {
+            "15m": data.get("15m"),
+            "1h": data.get("1h") or data.get("1H"),
+            "4h": data.get("4h"),
+            "1d": data.get("1d"),
+        }
+
+        smt_universe = data.get("smt_universe") or {}
+        selected_altcoins = data.get("selected_altcoins") or []
+
+        if primary_symbol not in smt_universe:
+            smt_universe = dict(smt_universe)
+            smt_universe[primary_symbol] = primary_timeframes
+
+        return self.smt.detect(
+            primary_symbol=primary_symbol,
+            primary_timeframes=primary_timeframes,
+            smt_universe=smt_universe,
+            selected_symbols=selected_altcoins,
+            timeframes=self.SMT_TIMEFRAMES,
+        )
 
     def _validate_market_data(self, data):
         """Gerekli veri setlerinin varlığını ve boş olmadığını doğrular."""
-        missing = [timeframe for timeframe in self.REQUIRED_TIMEFRAMES if not data.get(timeframe)]
+        missing = [tf for tf in self.REQUIRED_TIMEFRAMES if not data.get(tf)]
         if missing:
             raise ValueError(f"Missing or empty market data timeframes: {', '.join(missing)}")
 
@@ -239,6 +436,7 @@ class AtlasEngine:
         """Liquidity bölgelerini EQH/EQL çıktısına çevirir."""
         equal_highs = [level for level in liquidity if level.get("type") == "BUY_SIDE"]
         equal_lows = [level for level in liquidity if level.get("type") == "SELL_SIDE"]
+
         return {
             "eqh": equal_highs,
             "eql": equal_lows,
@@ -246,24 +444,24 @@ class AtlasEngine:
         }
 
     def _detect_inducement(self, structure, liquidity_sweep, eqh_eql):
-        """Süpürme ve yakın eşit likiditeye göre basit inducement bağlamı üretir."""
+        """Liquidity sweep ve EQH/EQL bağlamından inducement sinyali üretir."""
         direction = None
+
         if liquidity_sweep.get("sell_side"):
             direction = "LONG"
         elif liquidity_sweep.get("buy_side"):
             direction = "SHORT"
 
-        recent_structure = structure[-3:] if structure else []
         return {
             "active": direction is not None and eqh_eql.get("active", False),
             "direction": direction,
             "reason": "Liquidity sweep after equal highs/lows" if direction else "No inducement",
-            "recent_structure": recent_structure,
+            "recent_structure": structure[-3:] if structure else [],
         }
 
     def _calculate_dynamic_tp(self, entry, liquidity, fvg, orderblocks):
         """Entry yoksa boş TP şablonu, varsa dinamik hedefler döndürür."""
-        if entry["entry"] is None:
+        if entry.get("entry") is None:
             return {"tp1": None, "tp2": None, "tp3": None}
 
         return self.dynamic_tp.calculate(
@@ -276,7 +474,7 @@ class AtlasEngine:
 
     def _calculate_risk(self, entry, dynamic_tp):
         """Geçerli entry/SL için risk çıktısını hesaplar."""
-        if entry["entry"] is None or entry["stop_loss"] is None:
+        if entry.get("entry") is None or entry.get("stop_loss") is None:
             return None
 
         return self.risk.calculate(
@@ -286,24 +484,29 @@ class AtlasEngine:
         )
 
     def _notify_if_elite(self, data, signal, entry, risk, rr, dynamic_tp, confluence, market_phase):
-        """Sadece yüksek güvenli sinyallerde Telegram bildirimi gönderir."""
-        if signal["signal"] not in ["LONG", "SHORT"] or signal["confidence"] < 90:
+        """Yüksek güvenli sinyallerde Telegram bildirimi gönderir."""
+        if signal.get("signal") not in ["LONG", "SHORT"]:
+            return False
+
+        if signal.get("confidence", 0) < 90:
             return False
 
         telegram_module = import_module("telegram_engine")
         telegram_engine = self.telegram or telegram_module.TelegramEngine()
         self.telegram = telegram_engine
 
-        message = telegram_engine.format_signal({
-            "symbol": data.get("symbol", "UNKNOWN"),
-            "signal": signal,
-            "entry": entry,
-            "risk": risk,
-            "rr": rr,
-            "dynamic_tp": dynamic_tp,
-            "confluence": confluence,
-            "market_phase": market_phase,
-        })
+        message = telegram_engine.format_signal(
+            {
+                "symbol": data.get("symbol", "UNKNOWN"),
+                "signal": signal,
+                "entry": entry,
+                "risk": risk,
+                "rr": rr,
+                "dynamic_tp": dynamic_tp,
+                "confluence": confluence,
+                "market_phase": market_phase,
+            }
+        )
 
         print(message)
         return telegram_module.TelegramBot().send(message)
