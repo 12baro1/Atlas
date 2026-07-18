@@ -40,6 +40,7 @@ from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
 from trade_manager import TradeManager
 from trend_engine import TrendEngine
+from unicorn_engine import UnicornEngine
 from utils.structure_labels import label_swings
 
 
@@ -49,6 +50,7 @@ class AtlasEngine:
     REQUIRED_TIMEFRAMES = ("1w", "1d", "4h", "15m")
     SWEEP_TIMEFRAMES = ("15m", "1h", "4h", "1d")
     SMT_TIMEFRAMES = ("15m", "1h", "4h", "1d")
+    UNICORN_TIMEFRAMES = ("15m", "1h", "4h", "1d")
 
     def __init__(self, structure_engine_cls=None):
         # Testlerde sahte sınıf enjekte edebilmek için sınıf referansı tutulur.
@@ -75,6 +77,7 @@ class AtlasEngine:
         self.htf_orderblock = HTFOrderBlockEngine()
         self.htf_fvg = HTFFVGEngine()
         self.smt = SMTDivergenceEngine()
+        self.unicorn = UnicornEngine()
 
         # Sinyal, risk ve operasyon motorları
         self.entry = EntryEngine()
@@ -152,6 +155,14 @@ class AtlasEngine:
             breakers=structure_state["breaker"],
         )
 
+        unicorn_state = self._build_unicorn_state(
+            data=data,
+            tf_analysis=tf_analysis,
+            context_state=context_state,
+            structure_state=structure_state,
+            smt_state=smt_state,
+        )
+
         execution_state = self._build_execution_state(
             entry_structure=structure_state["structure"],
             mtf=context_state["mtf"],
@@ -169,6 +180,7 @@ class AtlasEngine:
             market_phase=context_state["market_phase"],
             liquidity=structure_state["liquidity"],
             smt=smt_state,
+            unicorn=unicorn_state,
         )
 
         analysis = self._compose_analysis(
@@ -176,6 +188,7 @@ class AtlasEngine:
             context_state=context_state,
             execution_state=execution_state,
             smt_state=smt_state,
+            unicorn_state=unicorn_state,
         )
 
         self._notify_if_elite(
@@ -187,6 +200,7 @@ class AtlasEngine:
             dynamic_tp=execution_state["dynamic_tp"],
             confluence=execution_state["confluence"],
             market_phase=context_state["market_phase"],
+            unicorn=unicorn_state,
         )
 
         return {
@@ -380,6 +394,7 @@ class AtlasEngine:
         market_phase,
         liquidity,
         smt,
+        unicorn,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(mtf, entry_structure, fvg, orderblocks)
@@ -402,6 +417,7 @@ class AtlasEngine:
             orderblocks=orderblocks,
             fvg=fvg,
             market_phase=market_phase,
+            unicorn=unicorn,
         )
 
         dynamic_tp = self._calculate_dynamic_tp(entry, liquidity, fvg, orderblocks)
@@ -414,6 +430,7 @@ class AtlasEngine:
             "market_phase": market_phase,
             "liquidity_sweep": liquidity_sweep,
             "smt": smt,
+            "unicorn": unicorn,
         }
         signal = self.signal.generate(analysis_for_signal)
 
@@ -427,7 +444,14 @@ class AtlasEngine:
             "signal": signal,
         }
 
-    def _compose_analysis(self, structure_state, context_state, execution_state, smt_state):
+    def _compose_analysis(
+        self,
+        structure_state,
+        context_state,
+        execution_state,
+        smt_state,
+        unicorn_state=None,
+    ):
         """Dış API'de beklenen analysis sözlüğünü oluşturur."""
         return {
             "structure": structure_state["structure"],
@@ -466,7 +490,83 @@ class AtlasEngine:
             "confluence": execution_state["confluence"],
             "market_phase": context_state["market_phase"],
             "smt": smt_state,
+            "unicorn": unicorn_state or {
+                "active": False,
+                "direction": "NONE",
+                "confidence": 0,
+                "best": None,
+                "setups": [],
+                "timeframes": {},
+            },
         }
+
+    def _build_unicorn_state(self, data, tf_analysis, context_state, structure_state, smt_state):
+        """Unicorn setup tespiti için MTF payload üretir ve sonucu döndürür."""
+        mtf_direction = context_state["mtf"].get("entry", "NONE")
+        timeframe_to_structure_key = {
+            "15m": "entry",
+            "1h": "h1",
+            "4h": "h4",
+            "1d": "daily",
+        }
+
+        payload = {}
+
+        for timeframe in self.UNICORN_TIMEFRAMES:
+            candles = data.get(timeframe) or data.get(timeframe.upper())
+            if not candles:
+                continue
+
+            key = timeframe_to_structure_key[timeframe]
+            structure = tf_analysis.get(key, {}).get("structure", [])
+
+            liquidity_layers = self.liquidity.detect_layers(structure, candles)
+            liquidity = liquidity_layers["all"]
+            eqh_eql = self._detect_eqh_eql(liquidity)
+
+            raw_orderblocks = self.orderblocks.detect(candles, structure)
+            orderblocks = self.mitigation.detect(candles, raw_orderblocks)
+            breaker = self.breaker.detect(candles, orderblocks)
+            fvg = self.fvg.detect(candles)
+
+            liquidity_sweep = self.liquidity_sweep.detect(
+                candles=candles,
+                structure=structure,
+                liquidity_layers=liquidity_layers,
+                timeframe=timeframe,
+            )
+            inducement = self._detect_inducement(structure, liquidity_sweep, eqh_eql)
+
+            swing_high, swing_low, current_price = self._price_context(candles)
+            ote = self.ote.detect(
+                swing_high=swing_high,
+                swing_low=swing_low,
+                current_price=current_price,
+                direction=mtf_direction,
+            )
+
+            payload[timeframe] = {
+                "structure": structure,
+                "breaker": breaker,
+                "fvg": fvg,
+                "market_phase": context_state["market_phase"],
+                "liquidity_sweep": liquidity_sweep,
+                "smt": smt_state,
+                "orderblocks": orderblocks,
+                "eqh_eql": eqh_eql,
+                "inducement": inducement,
+                "ote": ote,
+                "liquidity_layers": liquidity_layers,
+                "liquidity": liquidity,
+            }
+
+        unicorn = self.unicorn.detect(payload)
+
+        # 15m için zaten hesaplanan katmanı tekrar kullan.
+        if "15m" in unicorn.get("timeframes", {}):
+            unicorn["timeframes"]["15m"]["liquidity_sweep"] = structure_state["liquidity_sweep"]
+
+        return unicorn
 
     def _build_smt_state(self, data):
         """BTC, ETH ve seçili altcoin verileriyle SMT divergence üretir."""
@@ -558,7 +658,7 @@ class AtlasEngine:
             dynamic_tp=dynamic_tp,
         )
 
-    def _notify_if_elite(self, data, signal, entry, risk, rr, dynamic_tp, confluence, market_phase):
+    def _notify_if_elite(self, data, signal, entry, risk, rr, dynamic_tp, confluence, market_phase, unicorn):
         """Yüksek güvenli sinyallerde Telegram bildirimi gönderir."""
         if signal.get("signal") not in ["LONG", "SHORT"]:
             return False
@@ -580,6 +680,7 @@ class AtlasEngine:
                 "dynamic_tp": dynamic_tp,
                 "confluence": confluence,
                 "market_phase": market_phase,
+                "unicorn": unicorn,
             }
         )
 

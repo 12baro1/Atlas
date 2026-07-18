@@ -13,6 +13,7 @@ class SignalEngine:
 
         liquidity_sweep = analysis.get("liquidity_sweep", {})
         smt = analysis.get("smt", {})
+        unicorn = analysis.get("unicorn", {})
         
         # Market phase adjustment
         market_phase = analysis.get("market_phase", {})
@@ -32,6 +33,7 @@ class SignalEngine:
             base_confidence=confidence_adjusted,
             liquidity_sweep=liquidity_sweep,
             smt=smt,
+            unicorn=unicorn,
         )
 
         # Grade
@@ -81,6 +83,8 @@ class SignalEngine:
             "phase_quality": phase_confidence,
             "liquidity_strength": liquidity_sweep.get("strength_score", 0),
             "smt_confidence": smt.get("confidence", 0),
+            "unicorn_confidence": unicorn.get("confidence", 0),
+            "unicorn_active": unicorn.get("active", False),
         }
 
     def _adjust_confidence_by_phase(self, base_confidence, phase, phase_score, mtf_alignment):
@@ -112,8 +116,8 @@ class SignalEngine:
         adjusted = base_confidence + adjustment
         return max(0, min(100, adjusted))
 
-    def _adjust_confidence_by_liquidity_and_smt(self, base_confidence, liquidity_sweep, smt):
-        """Sweep strength ve SMT kalitesine göre güven puanını günceller."""
+    def _adjust_confidence_by_liquidity_and_smt(self, base_confidence, liquidity_sweep, smt, unicorn):
+        """Sweep, SMT ve unicorn kalitesine göre güven puanını günceller."""
         adjusted = base_confidence
 
         if liquidity_sweep.get("is_sweep"):
@@ -123,5 +127,15 @@ class SignalEngine:
 
         if smt.get("active"):
             adjusted += min(8, smt.get("confidence", 0) / 12)
+
+        if unicorn.get("active"):
+            adjusted += min(10, unicorn.get("confidence", 0) / 10)
+
+            best = unicorn.get("best") or {}
+            direction = best.get("direction")
+            if direction == "BULLISH":
+                adjusted += 2
+            elif direction == "BEARISH":
+                adjusted += 2
 
         return max(0, min(100, adjusted))

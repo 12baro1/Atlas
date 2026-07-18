@@ -22,6 +22,7 @@ class TelegramEngine:
         rr = result.get("rr")
         confluence = result.get("confluence")
         market_phase = result.get("market_phase")
+        unicorn = result.get("unicorn")
 
         msg = []
 
@@ -81,6 +82,20 @@ class TelegramEngine:
             msg.append("📈 RR ANALYSIS")
             msg.append(f"Quality : {rr['quality']}")
             msg.append(f"RR Score : {rr['score']}")
+
+        if unicorn and unicorn.get("active"):
+
+            best = unicorn.get("best") or {}
+            msg.append("")
+            msg.append("🦄 UNICORN SETUP")
+            msg.append(f"Direction : {best.get('direction', 'NONE')}")
+            msg.append(f"Timeframe : {best.get('timeframe', '-')}")
+            msg.append(f"Confidence : {unicorn.get('confidence', 0)}%")
+            msg.append(f"Entry : {best.get('entry')}")
+            msg.append(f"Stop Loss : {best.get('stop_loss')}")
+            msg.append(f"TP1 : {best.get('tp1')}")
+            msg.append(f"TP2 : {best.get('tp2')}")
+            msg.append(f"TP3 : {best.get('tp3')}")
 
         return "\n".join(msg)
 

@@ -24,6 +24,7 @@ class ConfluenceEngine:
         orderblocks=None,
         fvg=None,
         market_phase=None,
+        unicorn=None,
     ):
 
         score = 0
@@ -152,6 +153,25 @@ class ConfluenceEngine:
             checks.append("✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)")
         else:
             checks.append("✘ Stack Confluence")
+
+        # Unicorn Setup
+        if unicorn and unicorn.get("active"):
+            unicorn_confidence = unicorn.get("confidence", 0)
+            score += min(20, int(unicorn_confidence / 5))
+            checks.append(f"✔ Unicorn ({unicorn_confidence}%)")
+
+            best = unicorn.get("best") or {}
+            direction = best.get("direction")
+            entry_direction = entry.get("direction")
+            if (direction == "BULLISH" and entry_direction == "LONG") or (
+                direction == "BEARISH" and entry_direction == "SHORT"
+            ):
+                score += 6
+                checks.append("✔ Unicorn Direction Match")
+            else:
+                checks.append("◐ Unicorn Direction Mismatch")
+        else:
+            checks.append("✘ Unicorn")
 
         return {
             "score": score,
