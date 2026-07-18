@@ -869,6 +869,27 @@ class AtlasEngine:
             )
             return False
 
+        if not entry.get("valid", False):
+            self.logger.info(
+                "Telegram skip: entry invalid for %s",
+                data.get("symbol", "UNKNOWN"),
+            )
+            return False
+
+        if entry.get("entry") is None or entry.get("stop_loss") is None:
+            self.logger.info(
+                "Telegram skip: incomplete entry levels for %s",
+                data.get("symbol", "UNKNOWN"),
+            )
+            return False
+
+        if not risk or risk.get("risk") is None or risk.get("risk") <= 0:
+            self.logger.info(
+                "Telegram skip: invalid risk payload for %s",
+                data.get("symbol", "UNKNOWN"),
+            )
+            return False
+
         min_confidence = getattr(self.config, "MINIMUM_CONFIDENCE", 90)
         if signal.get("confidence", 0) < min_confidence:
             self.logger.info(
@@ -883,10 +904,14 @@ class AtlasEngine:
         telegram_engine = self.telegram or telegram_module.TelegramEngine()
         self.telegram = telegram_engine
 
+        signal_for_message = dict(signal)
+        signal_for_message["signal"] = decision_action
+        signal_for_message["confidence"] = max(0, min(100, int(signal.get("confidence", 0))))
+
         message = telegram_engine.format_signal(
             {
                 "symbol": data.get("symbol", "UNKNOWN"),
-                "signal": signal,
+            "signal": signal_for_message,
                 "entry": entry,
                 "risk": risk,
                 "rr": rr,

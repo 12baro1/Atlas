@@ -69,13 +69,17 @@ class TelegramEngine:
         msg.append(f"Direction : {entry['direction']}")
         msg.append(f"Valid : {entry['valid']}")
 
-        if entry["entry"] is not None:
+        entry_is_valid = bool(entry.get("valid"))
+
+        if entry_is_valid and entry["entry"] is not None and entry.get("stop_loss") is not None:
             msg.append(f"Entry : {self._fmt(entry['entry'])}")
             msg.append(f"Stop Loss : {self._fmt(entry['stop_loss'])}")
+        elif not entry_is_valid:
+            msg.append("Entry levels : withheld (invalid entry)")
 
         msg.append("")
 
-        if risk:
+        if entry_is_valid and risk and risk.get("risk") is not None:
 
             msg.append("💰 RISK")
             msg.append(f"Capital At Risk : {self._fmt(risk['capital_at_risk'])} USDT")
@@ -89,7 +93,7 @@ class TelegramEngine:
             msg.append(f"RR : {self._fmt(risk['rr'])}")
             msg.append("")
 
-        elif dynamic_tp:
+        elif entry_is_valid and dynamic_tp:
 
             msg.append("🎯 TARGETS")
             msg.append(f"TP1 : {self._fmt(dynamic_tp.get('tp1'))}")
