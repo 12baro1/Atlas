@@ -14,6 +14,14 @@ from telegram_auth_store import TelegramAuthStore
 
 class TelegramEngine:
 
+    @staticmethod
+    def _fmt(value):
+        if value is None:
+            return "None"
+        if isinstance(value, float):
+            return f"{value:.8f}".rstrip("0").rstrip(".")
+        return str(value)
+
     def format_signal(self, result):
         
         symbol = result["symbol"]
@@ -62,31 +70,31 @@ class TelegramEngine:
         msg.append(f"Valid : {entry['valid']}")
 
         if entry["entry"] is not None:
-            msg.append(f"Entry : {entry['entry']}")
-            msg.append(f"Stop Loss : {entry['stop_loss']}")
+            msg.append(f"Entry : {self._fmt(entry['entry'])}")
+            msg.append(f"Stop Loss : {self._fmt(entry['stop_loss'])}")
 
         msg.append("")
 
         if risk:
 
             msg.append("💰 RISK")
-            msg.append(f"Capital At Risk : {risk['capital_at_risk']} USDT")
-            msg.append(f"Position Size : {risk['position_size']}")
-            msg.append(f"Risk : {risk['risk']}")
+            msg.append(f"Capital At Risk : {self._fmt(risk['capital_at_risk'])} USDT")
+            msg.append(f"Position Size : {self._fmt(risk['position_size'])}")
+            msg.append(f"Risk : {self._fmt(risk['risk'])}")
             msg.append("")
 
-            msg.append(f"TP1 : {risk['tp1']}")
-            msg.append(f"TP2 : {risk['tp2']}")
-            msg.append(f"TP3 : {risk['tp3']}")
-            msg.append(f"RR : {risk['rr']}")
+            msg.append(f"TP1 : {self._fmt(risk['tp1'])}")
+            msg.append(f"TP2 : {self._fmt(risk['tp2'])}")
+            msg.append(f"TP3 : {self._fmt(risk['tp3'])}")
+            msg.append(f"RR : {self._fmt(risk['rr'])}")
             msg.append("")
 
         elif dynamic_tp:
 
             msg.append("🎯 TARGETS")
-            msg.append(f"TP1 : {dynamic_tp.get('tp1')}")
-            msg.append(f"TP2 : {dynamic_tp.get('tp2')}")
-            msg.append(f"TP3 : {dynamic_tp.get('tp3')}")
+            msg.append(f"TP1 : {self._fmt(dynamic_tp.get('tp1'))}")
+            msg.append(f"TP2 : {self._fmt(dynamic_tp.get('tp2'))}")
+            msg.append(f"TP3 : {self._fmt(dynamic_tp.get('tp3'))}")
             msg.append("")
 
         if rr:
@@ -103,11 +111,11 @@ class TelegramEngine:
             msg.append(f"Direction : {best.get('direction', 'NONE')}")
             msg.append(f"Timeframe : {best.get('timeframe', '-')}")
             msg.append(f"Confidence : {unicorn.get('confidence', 0)}%")
-            msg.append(f"Entry : {best.get('entry')}")
-            msg.append(f"Stop Loss : {best.get('stop_loss')}")
-            msg.append(f"TP1 : {best.get('tp1')}")
-            msg.append(f"TP2 : {best.get('tp2')}")
-            msg.append(f"TP3 : {best.get('tp3')}")
+            msg.append(f"Entry : {self._fmt(best.get('entry'))}")
+            msg.append(f"Stop Loss : {self._fmt(best.get('stop_loss'))}")
+            msg.append(f"TP1 : {self._fmt(best.get('tp1'))}")
+            msg.append(f"TP2 : {self._fmt(best.get('tp2'))}")
+            msg.append(f"TP3 : {self._fmt(best.get('tp3'))}")
 
         if cisd and cisd.get("active"):
             msg.append("")

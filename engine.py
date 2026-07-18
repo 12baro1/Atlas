@@ -860,6 +860,15 @@ class AtlasEngine:
         if signal.get("signal") not in ["LONG", "SHORT"]:
             return False
 
+        decision_action = (decision or {}).get("action", "WAIT")
+        if decision_action not in ["LONG", "SHORT"]:
+            self.logger.info(
+                "Telegram skip: decision action=%s for %s",
+                decision_action,
+                data.get("symbol", "UNKNOWN"),
+            )
+            return False
+
         min_confidence = getattr(self.config, "MINIMUM_CONFIDENCE", 90)
         if signal.get("confidence", 0) < min_confidence:
             self.logger.info(
