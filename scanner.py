@@ -1,6 +1,7 @@
 import ccxt
 import logging
 import os
+import sys
 from universe_engine import select_symbols
 
 logging.basicConfig(
@@ -28,10 +29,11 @@ backend = getattr(ccxt, "BACKEND", "unknown")
 if backend == "mock":
     allow_mock = os.getenv("ATLAS_ALLOW_MOCK", "0").strip().lower() in {"1", "true", "yes"}
     if not allow_mock:
-        raise RuntimeError(
-            "ccxt mock backend aktif. Canli tarama icin pip install ccxt yapin. "
-            "Sadece test/offline icin ATLAS_ALLOW_MOCK=1 ile devam edin."
+        logger.error(
+            "ccxt mock backend aktif. Canli tarama icin once `python3 -m pip install ccxt` calistirin. "
+            "Sadece test/offline icin `ATLAS_ALLOW_MOCK=1 python3 scanner.py` kullanin."
         )
+        sys.exit(2)
     logger.warning(
         "ccxt mock backend aktif (ATLAS_ALLOW_MOCK=1). Sonuclar test/offline verisine dayanir."
     )
