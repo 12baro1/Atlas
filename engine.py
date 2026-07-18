@@ -560,6 +560,16 @@ class AtlasEngine:
                 "action": "WAIT",
                 "reason": "No decision",
             },
+            "modules": {
+                "structure": structure_state,
+                "context": context_state,
+                "execution": execution_state,
+                "smt": smt_state,
+                "unicorn": unicorn_state or {},
+                "cisd": cisd_state or {},
+                "volume_profile": volume_profile_state or {},
+                "decision": decision_state or {},
+            },
         }
 
     def _build_volume_profile_state(self, data):
