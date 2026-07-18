@@ -18,3 +18,9 @@ env/
 *~
 .cache/
 .pytest_cache/
+
+# Runtime Telegram state
+telegram_auth.db
+telegram_auth.db-shm
+telegram_auth.db-wal
+chat_ids.json
