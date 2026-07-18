@@ -39,10 +39,38 @@ def _read_export_from_rc(var_name):
     return last_value
 
 
+def _read_from_dotenv(var_name):
+    """Proje .env dosyasindan anahtar deger okur."""
+    candidates = [
+        os.path.join(os.getcwd(), ".env"),
+        os.path.join(os.path.dirname(__file__), ".env"),
+    ]
+
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                for raw in handle:
+                    line = raw.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    if key.strip() != var_name:
+                        continue
+                    return _strip_shell_quotes(value)
+        except Exception:
+            continue
+    return ""
+
+
 def _env_or_rc(var_name, default=""):
     value = os.getenv(var_name, "")
     if value:
         return value
+    dotenv_value = _read_from_dotenv(var_name)
+    if dotenv_value:
+        return dotenv_value
     fallback = _read_export_from_rc(var_name)
     if fallback:
         return fallback
