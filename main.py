@@ -153,3 +153,7 @@ logger.info(
     skipped,
     failed,
 )
+
+engine.flush_telegram_notifications(
+    join_timeout=float(getattr(engine.config, "TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", 0.5))
+)

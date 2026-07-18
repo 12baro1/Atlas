@@ -104,6 +104,7 @@ class AtlasEngine:
         self.dynamic_tp = DynamicTPEngine()
         self.telegram = None
         self._telegram_signal_cache = {}
+        self._telegram_threads = []
 
         # Dış API uyumluluğu için korunur
         self.config = Config()
@@ -963,9 +964,10 @@ class AtlasEngine:
                     "message": message,
                     "symbol": symbol,
                 },
-                daemon=True,
+                daemon=False,
             )
             thread.start()
+            self._telegram_threads.append(thread)
             return True
 
         return self._send_telegram_safe(
@@ -977,10 +979,30 @@ class AtlasEngine:
     def _send_telegram_safe(self, telegram_module, message, symbol):
         """Telegram gönderimini güvenli şekilde çalıştırır; analiz akışını düşürmez."""
         try:
-            return telegram_module.TelegramBot().send(message)
+            sent = telegram_module.TelegramBot().send(message)
+            if not sent:
+                self.logger.warning("Telegram send failed: %s", symbol)
+            return sent
         except Exception:
             self.logger.exception("Telegram send hatasi: %s", symbol)
             return False
+
+    def flush_telegram_notifications(self, join_timeout=0.5):
+        """Kuyruktaki async Telegram gönderimlerini bitmesini bekler."""
+        if not self._telegram_threads:
+            return
+
+        alive_threads = []
+        for thread in self._telegram_threads:
+            if thread.is_alive():
+                thread.join(timeout=join_timeout)
+            if thread.is_alive():
+                alive_threads.append(thread)
+
+        pending = len(alive_threads)
+        self._telegram_threads = alive_threads
+        if pending:
+            self.logger.warning("Telegram flush timeout: pending_threads=%s", pending)
 
     def _signal_fingerprint(self, action, entry, risk):
         """Aynı setup tekrarlarını baskılamak için sade imza üretir."""
