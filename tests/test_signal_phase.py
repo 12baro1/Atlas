@@ -44,7 +44,7 @@ print("\n✅ Signal generation with market phase working correctly!")
 mock_analysis["market_phase"]["phase"] = "Distribution"
 signal2 = engine.generate(mock_analysis)
 
-print(f"\n✅ Distribution Phase Test:")
+print("\n✅ Distribution Phase Test:")
 print(f"  Signal: {signal2['signal']}")
 print(f"  Confidence: {signal2['confidence']}% (reduced due to Distribution phase)")
 print(f"  Grade: {signal2['grade']}")
