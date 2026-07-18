@@ -5,7 +5,7 @@ Atlas Risk Engine v4
 
 class RiskEngine:
 
-    def calculate(self, entry, stop_loss, dynamic_tp=None):
+    def calculate(self, entry, stop_loss, dynamic_tp=None, volume_profile=None):
 
         if entry is None or stop_loss is None:
             return None
@@ -20,6 +20,9 @@ class RiskEngine:
 
         capital_at_risk = account_balance * (risk_percent / 100)
         position_size = capital_at_risk / risk
+
+        vp_factor = self._volume_profile_position_factor(volume_profile, side="LONG" if entry > stop_loss else "SHORT")
+        adjusted_position_size = position_size * vp_factor
 
         side = "LONG" if entry > stop_loss else "SHORT"
 
@@ -49,7 +52,11 @@ class RiskEngine:
 
             "capital_at_risk": round(capital_at_risk, 2),
 
-            "position_size": round(position_size, 4),
+            "position_size": round(adjusted_position_size, 4),
+
+            "position_size_raw": round(position_size, 4),
+
+            "volume_profile_factor": round(vp_factor, 4),
 
             "tp1": tp1,
 
@@ -60,3 +67,21 @@ class RiskEngine:
             "rr": rr
 
         }
+
+    def _volume_profile_position_factor(self, volume_profile, side):
+        """Volume profile güveni ve yön uyumuna göre pozisyon boyut çarpanı döndürür."""
+        if not volume_profile or not volume_profile.get("active"):
+            return 1.0
+
+        vp_direction = volume_profile.get("direction", "NONE")
+        vp_confidence = volume_profile.get("confidence", 0)
+
+        direction_match = (
+            (side == "LONG" and vp_direction == "BULLISH")
+            or (side == "SHORT" and vp_direction == "BEARISH")
+        )
+
+        if direction_match:
+            return min(1.2, 1.0 + (vp_confidence / 500))
+
+        return max(0.7, 1.0 - (vp_confidence / 350))

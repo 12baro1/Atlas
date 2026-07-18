@@ -43,6 +43,7 @@ from statistics_engine import StatisticsEngine
 from trade_manager import TradeManager
 from trend_engine import TrendEngine
 from unicorn_engine import UnicornEngine
+from volume_profile_engine import VolumeProfileEngine
 from utils.structure_labels import label_swings
 
 
@@ -54,6 +55,7 @@ class AtlasEngine:
     SMT_TIMEFRAMES = ("15m", "1h", "4h", "1d")
     UNICORN_TIMEFRAMES = ("15m", "1h", "4h", "1d")
     CISD_TIMEFRAMES = ("15m", "1h", "4h", "1d")
+    VOLUME_PROFILE_TIMEFRAMES = ("15m", "1h", "4h", "1d")
 
     def __init__(self, structure_engine_cls=None):
         # Testlerde sahte sınıf enjekte edebilmek için sınıf referansı tutulur.
@@ -82,6 +84,7 @@ class AtlasEngine:
         self.smt = SMTDivergenceEngine()
         self.unicorn = UnicornEngine()
         self.cisd = CISDEngine()
+        self.volume_profile = VolumeProfileEngine()
         self.decision = DecisionEngine()
 
         # Sinyal, risk ve operasyon motorları
@@ -175,6 +178,8 @@ class AtlasEngine:
             smt_state=smt_state,
         )
 
+        volume_profile_state = self._build_volume_profile_state(data)
+
         execution_state = self._build_execution_state(
             entry_structure=structure_state["structure"],
             mtf=context_state["mtf"],
@@ -194,6 +199,7 @@ class AtlasEngine:
             smt=smt_state,
             unicorn=unicorn_state,
             cisd=cisd_state,
+            volume_profile=volume_profile_state,
         )
 
         decision_state = self.decision.decide(
@@ -202,6 +208,7 @@ class AtlasEngine:
             entry=execution_state["entry"],
             risk=execution_state["risk"],
             cisd=cisd_state,
+            volume_profile=volume_profile_state,
         )
 
         analysis = self._compose_analysis(
@@ -212,6 +219,7 @@ class AtlasEngine:
             unicorn_state=unicorn_state,
             cisd_state=cisd_state,
             decision_state=decision_state,
+            volume_profile_state=volume_profile_state,
         )
 
         self._notify_if_elite(
@@ -422,6 +430,7 @@ class AtlasEngine:
         smt,
         unicorn,
         cisd,
+        volume_profile,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(mtf, entry_structure, fvg, orderblocks)
@@ -446,10 +455,11 @@ class AtlasEngine:
             market_phase=market_phase,
             unicorn=unicorn,
             cisd=cisd,
+            volume_profile=volume_profile,
         )
 
         dynamic_tp = self._calculate_dynamic_tp(entry, liquidity, fvg, orderblocks)
-        risk = self._calculate_risk(entry, dynamic_tp)
+        risk = self._calculate_risk(entry, dynamic_tp, volume_profile)
         rr = self.rr.evaluate(risk) if risk is not None else None
 
         analysis_for_signal = {
@@ -460,6 +470,7 @@ class AtlasEngine:
             "smt": smt,
             "unicorn": unicorn,
             "cisd": cisd,
+            "volume_profile": volume_profile,
         }
         signal = self.signal.generate(analysis_for_signal)
 
@@ -482,6 +493,7 @@ class AtlasEngine:
         unicorn_state=None,
         cisd_state=None,
         decision_state=None,
+        volume_profile_state=None,
     ):
         """Dış API'de beklenen analysis sözlüğünü oluşturur."""
         return {
@@ -521,6 +533,13 @@ class AtlasEngine:
             "confluence": execution_state["confluence"],
             "market_phase": context_state["market_phase"],
             "smt": smt_state,
+            "volume_profile": volume_profile_state or {
+                "active": False,
+                "direction": "NONE",
+                "confidence": 0,
+                "best": None,
+                "timeframes": {},
+            },
             "unicorn": unicorn_state or {
                 "active": False,
                 "direction": "NONE",
@@ -542,6 +561,17 @@ class AtlasEngine:
                 "reason": "No decision",
             },
         }
+
+    def _build_volume_profile_state(self, data):
+        """Çoklu zaman diliminde volume profile durumunu üretir."""
+        payload = {}
+
+        for timeframe in self.VOLUME_PROFILE_TIMEFRAMES:
+            candles = data.get(timeframe) or data.get(timeframe.upper())
+            if candles:
+                payload[timeframe] = candles
+
+        return self.volume_profile.detect_multi(payload)
 
     def _build_cisd_state(self, data, tf_analysis, context_state, smt_state):
         """CISD için MTF payload oluşturur ve sonucu döndürür."""
@@ -726,7 +756,7 @@ class AtlasEngine:
             orderblocks=orderblocks,
         )
 
-    def _calculate_risk(self, entry, dynamic_tp):
+    def _calculate_risk(self, entry, dynamic_tp, volume_profile=None):
         """Geçerli entry/SL için risk çıktısını hesaplar."""
         if entry.get("entry") is None or entry.get("stop_loss") is None:
             return None
@@ -735,6 +765,7 @@ class AtlasEngine:
             entry=entry["entry"],
             stop_loss=entry["stop_loss"],
             dynamic_tp=dynamic_tp,
+            volume_profile=volume_profile,
         )
 
     def _notify_if_elite(

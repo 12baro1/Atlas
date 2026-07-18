@@ -15,6 +15,7 @@ class SignalEngine:
         smt = analysis.get("smt", {})
         unicorn = analysis.get("unicorn", {})
         cisd = analysis.get("cisd", {})
+        volume_profile = analysis.get("volume_profile", {})
         
         # Market phase adjustment
         market_phase = analysis.get("market_phase", {})
@@ -36,6 +37,7 @@ class SignalEngine:
             smt=smt,
             unicorn=unicorn,
             cisd=cisd,
+            volume_profile=volume_profile,
         )
 
         # Grade
@@ -90,6 +92,8 @@ class SignalEngine:
             "cisd_confidence": cisd.get("confidence", 0),
             "cisd_active": cisd.get("active", False),
             "cisd_direction": cisd.get("direction", "NONE"),
+            "volume_profile_confidence": volume_profile.get("confidence", 0),
+            "volume_profile_direction": volume_profile.get("direction", "NONE"),
         }
 
     def _adjust_confidence_by_phase(self, base_confidence, phase, phase_score, mtf_alignment):
@@ -121,8 +125,8 @@ class SignalEngine:
         adjusted = base_confidence + adjustment
         return max(0, min(100, adjusted))
 
-    def _adjust_confidence_by_liquidity_and_smt(self, base_confidence, liquidity_sweep, smt, unicorn, cisd):
-        """Sweep, SMT, Unicorn ve CISD kalitesine göre güven puanını günceller."""
+    def _adjust_confidence_by_liquidity_and_smt(self, base_confidence, liquidity_sweep, smt, unicorn, cisd, volume_profile):
+        """Sweep, SMT, Unicorn, CISD ve Volume Profile kalitesine göre güven puanını günceller."""
         adjusted = base_confidence
 
         if liquidity_sweep.get("is_sweep"):
@@ -149,5 +153,8 @@ class SignalEngine:
             cisd_direction = cisd.get("direction")
             if cisd_direction in ["BULLISH", "BEARISH"]:
                 adjusted += 1
+
+        if volume_profile.get("active"):
+            adjusted += min(8, volume_profile.get("confidence", 0) / 12)
 
         return max(0, min(100, adjusted))

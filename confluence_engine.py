@@ -26,6 +26,7 @@ class ConfluenceEngine:
         market_phase=None,
         unicorn=None,
         cisd=None,
+        volume_profile=None,
     ):
 
         score = 0
@@ -190,6 +191,23 @@ class ConfluenceEngine:
                 checks.append(f"◐ CISD {cisd_direction} ({cisd_confidence}%)")
         else:
             checks.append("✘ CISD")
+
+        # Volume Profile
+        if volume_profile and volume_profile.get("active"):
+            vp_direction = volume_profile.get("direction", "NONE")
+            vp_confidence = volume_profile.get("confidence", 0)
+            entry_direction = entry.get("direction")
+
+            if (vp_direction == "BULLISH" and entry_direction == "LONG") or (
+                vp_direction == "BEARISH" and entry_direction == "SHORT"
+            ):
+                score += min(14, int(vp_confidence / 7))
+                checks.append(f"✔ Volume Profile {vp_direction} ({vp_confidence}%)")
+            else:
+                score += 2
+                checks.append(f"◐ Volume Profile {vp_direction} ({vp_confidence}%)")
+        else:
+            checks.append("✘ Volume Profile")
 
         return {
             "score": score,
