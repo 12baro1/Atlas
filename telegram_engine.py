@@ -21,6 +21,7 @@ class TelegramEngine:
         risk = result.get("risk")
         rr = result.get("rr")
         confluence = result.get("confluence")
+        market_phase = result.get("market_phase")
 
         msg = []
 
@@ -33,6 +34,14 @@ class TelegramEngine:
         msg.append(f"💪 Strength : {signal['strength']}")
         msg.append(f"🎯 Confidence : {signal['confidence']}%")
         msg.append("")
+        
+        # Market Phase Info
+        if market_phase:
+            msg.append("📈 MARKET PHASE")
+            msg.append(f"Phase : {market_phase.get('phase', 'Unknown')}")
+            msg.append(f"Phase Quality : {market_phase.get('phase_confidence', 0)}%")
+            msg.append(f"MTF Alignment : {market_phase.get('mtf_alignment', 0)}%")
+            msg.append("")
 
         if confluence:
 

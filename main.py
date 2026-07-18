@@ -56,7 +56,12 @@ for symbol in markets:
         print("Confirmed :", analysis["confirmation"]["confirmed"])
         print("Confirm Reason :", analysis["confirmation"]["reason"])
 
-        print("Market Phase :", analysis["market_phase"]["phase"])
+        print("\nMarket Phase Analysis:")
+        print("  Phase :", analysis["market_phase"]["phase"])
+        print("  Confidence :", analysis["market_phase"]["phase_confidence"], "%")
+        print("  Strength :", analysis["market_phase"]["phase_strength"])
+        print("  Score :", analysis["market_phase"]["phase_score"])
+        print("  MTF Alignment :", analysis["market_phase"]["mtf_alignment"], "%")
 
         print("Weekly :", analysis["mtf"]["weekly"])
         print("Daily :", analysis["mtf"]["daily"])

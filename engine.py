@@ -223,7 +223,8 @@ class AtlasEngine:
             fvg=fvg,
             orderblocks=orderblocks,
             premium_discount=premium_discount,
-            mtf=mtf
+            mtf=mtf,
+            candles=candles
         )
 
         analysis = {
@@ -274,7 +275,8 @@ class AtlasEngine:
                 "risk": risk,
                 "rr": rr,
                 "dynamic_tp": dynamic_tp,
-                "confluence": confluence
+                "confluence": confluence,
+                "market_phase": market_phase
             })
 
             print(message)
