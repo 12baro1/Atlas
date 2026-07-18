@@ -58,3 +58,17 @@ class Config:
 
     # Backtest
     INITIAL_BALANCE = 10000
+
+    @classmethod
+    def refresh_from_env(cls):
+        """Runtime'da environment değişikliklerini Config sınıfına yeniden yükler."""
+        cls.TELEGRAM_MIN_CONFIDENCE = float(os.getenv("ATLAS_TELEGRAM_MIN_CONFIDENCE", "75"))
+        cls.TELEGRAM_REQUIRE_DECISION_ACTION = os.getenv("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "0").strip().lower() in {"1", "true", "yes"}
+        cls.TELEGRAM_BOT_TOKEN = os.getenv("ATLAS_TELEGRAM_BOT_TOKEN", "")
+        cls.TELEGRAM_CHAT_ID = os.getenv("ATLAS_TELEGRAM_CHAT_ID", "")
+        cls.TELEGRAM_HTTP_TIMEOUT_SECONDS = float(os.getenv("ATLAS_TELEGRAM_HTTP_TIMEOUT_SECONDS", "3"))
+        cls.TELEGRAM_ASYNC_SEND = os.getenv("ATLAS_TELEGRAM_ASYNC_SEND", "1").strip().lower() in {"1", "true", "yes"}
+        cls.TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS = float(os.getenv("ATLAS_TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", "0.5"))
+        cls.BOT_PASSWORD = os.getenv("ATLAS_BOT_PASSWORD", "")
+        cls.ADMIN_CHAT_ID = int(os.getenv("ATLAS_ADMIN_CHAT_ID", "0"))
+        cls.TELEGRAM_ADMIN_IDS = [cls.ADMIN_CHAT_ID]

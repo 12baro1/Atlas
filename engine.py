@@ -63,6 +63,7 @@ class AtlasEngine:
     VOLUME_PROFILE_TIMEFRAMES = ("15m", "1h", "4h", "1d")
 
     def __init__(self, structure_engine_cls=None):
+        Config.refresh_from_env()
         # Testlerde sahte sınıf enjekte edebilmek için sınıf referansı tutulur.
         self.structure_engine_cls = structure_engine_cls or MarketStructureEngine
         self.logger = logging.getLogger("atlas.engine")

@@ -164,6 +164,7 @@ class TelegramEngine:
 class TelegramBot:
 
     def __init__(self, auth_store=None):
+        Config.refresh_from_env()
 
         self.token = Config.TELEGRAM_BOT_TOKEN
         self.chat_id = Config.TELEGRAM_CHAT_ID
