@@ -211,6 +211,25 @@ def test_risk_engine_rejects_too_tight_stop_by_default(monkeypatch):
     assert risk["risk_setup_reason"] == "Stop distance below minimum"
 
 
+def test_risk_engine_uses_inferred_tick_for_micro_price_symbols(monkeypatch):
+    monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", False)
+    monkeypatch.setattr(Config, "MIN_TICK_DISTANCE_FALLBACK", 0.01)
+
+    risk = RiskEngine().calculate(
+        entry=0.02756,
+        stop_loss=0.02758,
+        dynamic_tp={"tp1": 0.0274, "tp2": 0.0273, "tp3": 0.02718},
+        atr_value=0.0,
+        spread=0.0,
+        slippage=0.0,
+    )
+
+    assert risk is not None
+    # Inferred precision from price should dominate configured 0.01 fallback.
+    assert risk["tick_size"] == pytest.approx(0.00001)
+    assert risk["minimum_stop_distance"] < 0.001
+
+
 def test_risk_engine_caps_position_size_to_config_limit(monkeypatch):
     monkeypatch.setattr(Config, "MAX_POSITION_SIZE", 50.0)
 

@@ -59,7 +59,7 @@ class RiskEngine:
         resolved_tick_size = self._resolve_tick_size(tick_size, inferred_tick_size, min_tick_fallback)
 
         atr_snapshot = self._resolve_atr(atr_value=atr_value, candles=candles, atr_period=atr_period)
-        minimum_tick_distance = max(resolved_tick_size, min_tick_fallback)
+        minimum_tick_distance = max(resolved_tick_size, 1e-12)
         percent_floor_distance = max(abs(entry) * min_stop_percent, minimum_tick_distance)
         atr_floor_distance = max(atr_snapshot * min_stop_atr_multiplier, percent_floor_distance)
         spread_buffer = self._resolve_buffer(spread, entry, spread_rate, minimum_tick_distance)
@@ -302,9 +302,22 @@ class RiskEngine:
         return 0.0
 
     def _resolve_tick_size(self, tick_size, inferred_tick_size, minimum_fallback):
-        candidates = [value for value in [tick_size, inferred_tick_size, minimum_fallback] if value is not None]
-        resolved = min(candidates) if tick_size is not None else max(candidates)
-        return max(minimum_fallback, float(resolved))
+        """Resolve tick size without inflating micro-priced symbols.
+
+        Priority:
+        1) explicit exchange tick_size
+        2) inferred precision from prices
+        3) configured fallback
+        """
+        for candidate in (tick_size, inferred_tick_size, minimum_fallback):
+            try:
+                numeric = float(candidate)
+            except (TypeError, ValueError):
+                continue
+            if numeric > 0:
+                return numeric
+
+        return 1e-12
 
     def _resolve_buffer(self, buffer_value, entry, rate, minimum_tick_distance):
         if buffer_value is None:
@@ -332,7 +345,7 @@ class RiskEngine:
                 precision = max(precision, len(text.split(".")[1]))
 
         if precision <= 0:
-            return float(getattr(Config, "MIN_TICK_DISTANCE_FALLBACK", 0.01))
+            return None
 
         return 10 ** (-precision)
 
