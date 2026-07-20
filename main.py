@@ -4,6 +4,7 @@ import os
 import sys
 import time
 
+from bybit_execution_engine import BybitExecutionEngine
 from data_engine import get_market_data
 from config import Config
 from engine import AtlasEngine
@@ -57,6 +58,7 @@ logger.info(
 )
 
 Config.refresh_from_env()
+execution_engine = BybitExecutionEngine()
 if bool(getattr(Config, "TELEGRAM_ENABLED", True)):
     token = str(getattr(Config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
     chat_id = str(getattr(Config, "TELEGRAM_CHAT_ID", "") or "").strip()
@@ -134,6 +136,14 @@ for index, symbol in enumerate(symbols, start=1):
         print("TP1 :", result["dynamic_tp"]["tp1"])
         print("TP2 :", result["dynamic_tp"]["tp2"])
         print("TP3 :", result["dynamic_tp"]["tp3"])
+
+        execution_result = execution_engine.process(symbol=symbol, result=result)
+        logger.info(
+            "Execution | symbol=%s executed=%s reason=%s",
+            symbol,
+            execution_result.get("executed"),
+            execution_result.get("reason"),
+        )
 
         if result["risk"]:
 
