@@ -22,7 +22,9 @@ def test_risk_engine_uses_config_balance_and_percent():
 
     assert risk is not None
     assert risk["capital_at_risk_target"] == round(expected_target_capital, 2)
-    assert risk["position_size"] == round(expected_target_capital, 4)
+    assert risk["position_size"] > 0
+    assert risk["position_size"] < round(expected_target_capital, 4)
+    assert risk["effective_risk_per_unit"] > 1.0
     assert risk["rr"] == 4.0
     assert risk["selected_tp"] == "tp3"
     assert risk["selected_rr"] == 4.0
@@ -171,7 +173,9 @@ def test_rr_engine_recomputes_when_rr_is_zero():
     assert rr["selected_rr"] == pytest.approx(3.33, abs=0.01)
 
 
-def test_risk_engine_expands_too_tight_stop_using_atr_floor():
+def test_risk_engine_expands_too_tight_stop_using_atr_floor(monkeypatch):
+    # Sıkı stopları reddetme modu kapalıyken auto-expand davranışı korunur.
+    monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", False)
     risk = RiskEngine().calculate(
         entry=79.00,
         stop_loss=79.01,
@@ -188,6 +192,23 @@ def test_risk_engine_expands_too_tight_stop_using_atr_floor():
     assert risk["stop_loss"] == pytest.approx(79.50)
     assert risk["risk"] == pytest.approx(0.5)
     assert risk["rr"] == pytest.approx(3.0)
+
+
+def test_risk_engine_rejects_too_tight_stop_by_default(monkeypatch):
+    monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
+    risk = RiskEngine().calculate(
+        entry=79.00,
+        stop_loss=79.01,
+        dynamic_tp={"tp1": 78.5, "tp2": 78.0, "tp3": 77.5},
+        atr_value=2.0,
+        tick_size=0.01,
+        spread=0.0,
+        slippage=0.0,
+    )
+
+    assert risk is not None
+    assert risk["risk_setup_valid"] is False
+    assert risk["risk_setup_reason"] == "Stop distance below minimum"
 
 
 def test_risk_engine_caps_position_size_to_config_limit(monkeypatch):
@@ -212,6 +233,7 @@ def test_risk_engine_caps_position_size_to_config_limit(monkeypatch):
 
 def test_risk_engine_marks_invalid_setup_when_auto_expand_disabled(monkeypatch):
     monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", False)
+    monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
 
     risk = RiskEngine().calculate(
         entry=79.00,

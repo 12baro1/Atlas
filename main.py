@@ -4,6 +4,7 @@ import os
 import sys
 import time
 
+from bybit import create_public_swap_exchange
 from bybit_execution_engine import BybitExecutionEngine
 from data_engine import get_market_data
 from config import Config
@@ -18,12 +19,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("atlas.scanner")
 
-exchange = ccxt.bybit({
-    "options": {
-        "defaultType": "swap"
-    },
-    "enableRateLimit": True
-})
+exchange = create_public_swap_exchange(enable_rate_limit=True)
 
 markets = exchange.load_markets()
 symbols, universe_stats = select_symbols(

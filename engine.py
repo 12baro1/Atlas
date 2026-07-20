@@ -517,12 +517,20 @@ class AtlasEngine:
             institutional=institutional,
         )
 
-        dynamic_tp = self._calculate_dynamic_tp(entry, liquidity, fvg, orderblocks)
+        dynamic_tp = self._calculate_dynamic_tp(
+            entry=entry,
+            liquidity=liquidity,
+            fvg=fvg,
+            orderblocks=orderblocks,
+            candles=candles,
+            structure=entry_structure,
+        )
         risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles)
         rr = self.rr.evaluate(risk) if risk is not None else None
 
         analysis_for_signal = {
             "entry": entry,
+            "confirmation": confirmation,
             "confluence": confluence,
             "market_phase": market_phase,
             "liquidity_sweep": liquidity_sweep,
@@ -533,6 +541,15 @@ class AtlasEngine:
             "institutional": institutional,
         }
         signal = self.signal.generate(analysis_for_signal)
+
+        if not entry.get("valid"):
+            self.logger.info("Entry rejected | reason=%s", entry.get("reason", "unknown"))
+        if not confirmation.get("confirmed"):
+            self.logger.info("Confirmation rejected | reason=%s", confirmation.get("reason", "unknown"))
+        if isinstance(risk, dict) and risk.get("risk_setup_valid") is False:
+            self.logger.info("Risk rejected | reason=%s", risk.get("risk_setup_reason", "Invalid Risk Setup"))
+        if signal.get("signal") == "WAIT":
+            self.logger.info("Signal WAIT | reason=%s", signal.get("wait_reason", "unknown"))
 
         return {
             "entry": entry,
@@ -835,20 +852,31 @@ class AtlasEngine:
             "recent_structure": structure[-3:] if structure else [],
         }
 
-    def _calculate_dynamic_tp(self, entry, liquidity, fvg, orderblocks):
+    def _calculate_dynamic_tp(self, entry, liquidity, fvg, orderblocks, candles=None, structure=None):
         """Entry yoksa boş TP şablonu, varsa dinamik hedefler döndürür."""
         if entry.get("entry") is None:
             return {"tp1": None, "tp2": None, "tp3": None}
 
         try:
-            return self.dynamic_tp.calculate(
+            payload = self.dynamic_tp.calculate(
                 direction=entry["direction"],
                 entry=entry["entry"],
                 stop_loss=entry.get("stop_loss"),
                 liquidity=liquidity,
                 fvg=fvg,
                 orderblocks=orderblocks,
+                structure=structure,
+                candles=candles,
             )
+            self.logger.info(
+                "TP calculated | direction=%s tp1=%s tp2=%s tp3=%s reason=%s",
+                entry.get("direction"),
+                payload.get("tp1"),
+                payload.get("tp2"),
+                payload.get("tp3"),
+                payload.get("reason"),
+            )
+            return payload
         except Exception:
             self.logger.exception("Dynamic TP hesaplama hatasi")
             return {"tp1": None, "tp2": None, "tp3": None}
@@ -858,7 +886,7 @@ class AtlasEngine:
         if entry.get("entry") is None or entry.get("stop_loss") is None:
             return None
 
-        return self.risk.calculate(
+        risk_payload = self.risk.calculate(
             entry=entry["entry"],
             stop_loss=entry["stop_loss"],
             dynamic_tp=dynamic_tp,
@@ -866,6 +894,16 @@ class AtlasEngine:
             institutional=institutional,
             candles=candles,
         )
+
+        if isinstance(risk_payload, dict) and risk_payload.get("risk_setup_valid") is False:
+            self.logger.info(
+                "Risk invalid | reason=%s requested_risk=%s min_stop=%s",
+                risk_payload.get("risk_setup_reason"),
+                risk_payload.get("requested_risk"),
+                risk_payload.get("minimum_stop_distance"),
+            )
+
+        return risk_payload
 
     def _notify_if_elite(
         self,
@@ -1039,16 +1077,18 @@ class AtlasEngine:
             self.logger.warning("Telegram flush timeout: pending_threads=%s", pending)
 
     def _apply_decision_to_signal(self, signal, decision):
-        """Karar EXECUTE degilse sinyal yonunu WAIT'e cekerek yalanci pozitifleri azaltir."""
+        """Decision sonucunu sinyal metadatasina isler; yonu bozmaz."""
         action = (decision or {}).get("action")
         if action in ["EXECUTE", "EXECUTE_WITH_CAUTION"]:
-            return signal
+            enriched = dict(signal or {})
+            enriched["gated_by_decision"] = False
+            enriched["decision_action"] = action
+            return enriched
 
-        gated = dict(signal or {})
-        gated["signal"] = "WAIT"
-        gated["gated_by_decision"] = True
-        gated["decision_action"] = action or "WAIT"
-        return gated
+        enriched = dict(signal or {})
+        enriched["gated_by_decision"] = True
+        enriched["decision_action"] = action or "WAIT"
+        return enriched
 
     def _resolve_trade_direction_from_decision(self, signal_action, decision_action):
         """Yeni/legacy decision aksiyonlarini LONG/SHORT/WAIT formatina normalize eder."""

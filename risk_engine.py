@@ -3,6 +3,7 @@ risk_engine.py
 Atlas Risk Engine v4
 """
 
+import logging
 import math
 
 from core.analysis_utils import clamp
@@ -14,6 +15,7 @@ class RiskEngine:
 
     def __init__(self):
         self.rr_engine = RREngine()
+        self.logger = logging.getLogger("atlas.risk")
 
     def calculate(
         self,
@@ -43,6 +45,8 @@ class RiskEngine:
         spread_rate = float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002))
         slippage_rate = float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003))
         max_position_size_limit = float(getattr(Config, "MAX_POSITION_SIZE", 1000.0))
+        min_stop_percent = float(getattr(Config, "MIN_STOP_PERCENT", 0.0005))
+        reject_tight_stops = bool(getattr(Config, "REJECT_TIGHT_STOPS", True))
         should_auto_expand = bool(getattr(Config, "AUTO_EXPAND_TIGHT_STOPS", True) if auto_expand_stop is None else auto_expand_stop)
 
         inferred_tick_size = self._infer_tick_size(
@@ -56,7 +60,8 @@ class RiskEngine:
 
         atr_snapshot = self._resolve_atr(atr_value=atr_value, candles=candles, atr_period=atr_period)
         minimum_tick_distance = max(resolved_tick_size, min_tick_fallback)
-        atr_floor_distance = max(atr_snapshot * min_stop_atr_multiplier, minimum_tick_distance)
+        percent_floor_distance = max(abs(entry) * min_stop_percent, minimum_tick_distance)
+        atr_floor_distance = max(atr_snapshot * min_stop_atr_multiplier, percent_floor_distance)
         spread_buffer = self._resolve_buffer(spread, entry, spread_rate, minimum_tick_distance)
         slippage_buffer = self._resolve_buffer(slippage, entry, slippage_rate, minimum_tick_distance)
         minimum_stop_distance = atr_floor_distance + spread_buffer + slippage_buffer
@@ -71,6 +76,13 @@ class RiskEngine:
                 adjusted_stop_loss = self._expand_stop(entry, side, minimum_stop_distance, resolved_tick_size)
                 stop_adjusted = True
             else:
+                self.logger.info(
+                    "Risk rejected: stop too tight | entry=%s stop=%s requested=%s min=%s",
+                    entry,
+                    stop_loss,
+                    requested_risk,
+                    minimum_stop_distance,
+                )
                 return self._invalid_risk_setup(
                     entry,
                     stop_loss,
@@ -84,6 +96,29 @@ class RiskEngine:
                     requested_risk=requested_risk,
                     stop_adjusted=False,
                 )
+
+        if stop_adjusted and reject_tight_stops:
+            self.logger.info(
+                "Risk rejected: stop required expansion | entry=%s stop=%s adjusted_stop=%s requested=%s min=%s",
+                entry,
+                stop_loss,
+                adjusted_stop_loss,
+                requested_risk,
+                minimum_stop_distance,
+            )
+            return self._invalid_risk_setup(
+                entry,
+                adjusted_stop_loss,
+                side=side,
+                reason="Stop distance below minimum",
+                atr=atr_snapshot,
+                minimum_stop_distance=minimum_stop_distance,
+                tick_size=resolved_tick_size,
+                spread_buffer=spread_buffer,
+                slippage_buffer=slippage_buffer,
+                requested_risk=requested_risk,
+                stop_adjusted=True,
+            )
 
         risk = abs(entry - adjusted_stop_loss)
 
@@ -139,7 +174,9 @@ class RiskEngine:
         effective_risk_percent = max(0.0, base_risk_percent * risk_reduction_factor)
 
         target_capital_at_risk = account_balance * (effective_risk_percent / 100)
-        position_size_raw = target_capital_at_risk / risk
+        execution_cost_per_unit = abs(entry) * round_trip_cost_rate
+        effective_risk_per_unit = max(risk + spread_buffer + slippage_buffer + execution_cost_per_unit, minimum_tick_distance)
+        position_size_raw = target_capital_at_risk / effective_risk_per_unit
 
         raw_sizing_factor = vp_factor * institutional_factor
         capped_sizing_factor = clamp(raw_sizing_factor, 0.65, 1.0)
@@ -174,6 +211,8 @@ class RiskEngine:
             "minimum_tick_distance": round(minimum_tick_distance, 8),
 
             "minimum_stop_distance": round(minimum_stop_distance, 8),
+
+            "minimum_stop_percent": round(min_stop_percent, 8),
 
             "spread_buffer": round(spread_buffer, 8),
 
@@ -242,6 +281,8 @@ class RiskEngine:
             "risk_reduction_factor": round(risk_reduction_factor, 4),
 
             "requested_risk": round(requested_risk, 8),
+
+            "effective_risk_per_unit": round(effective_risk_per_unit, 8),
 
         }
 
@@ -341,6 +382,7 @@ class RiskEngine:
             "tick_size": round(tick_size, 8),
             "minimum_tick_distance": round(max(tick_size, 0.0), 8),
             "minimum_stop_distance": round(minimum_stop_distance, 8),
+            "minimum_stop_percent": float(getattr(Config, "MIN_STOP_PERCENT", 0.0005)),
             "spread_buffer": round(spread_buffer, 8),
             "slippage_buffer": round(slippage_buffer, 8),
             "risk": None,
@@ -368,6 +410,7 @@ class RiskEngine:
             "minimum_rr": float(getattr(Config, "MINIMUM_RR", 3.0)),
             "risk_reduction_factor": None,
             "requested_risk": round(requested_risk, 8),
+            "effective_risk_per_unit": None,
         }
 
     def _volume_profile_position_factor(self, volume_profile, side):

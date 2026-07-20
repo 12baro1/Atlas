@@ -4,10 +4,15 @@ Atlas Signal Engine v4
 Market phase aware signal generation.
 """
 
+import logging
+
 from core.analysis_utils import clamp, direction_matches, extract_confidence, extract_direction, is_active, normalize_direction
 
 
 class SignalEngine:
+
+    def __init__(self):
+        self.logger = logging.getLogger("atlas.signal")
 
     def generate(self, analysis):
         confluence = analysis["confluence"]
@@ -26,7 +31,17 @@ class SignalEngine:
         phase_score = market_phase.get("phase_score", 0)
         mtf_alignment = market_phase.get("mtf_alignment", 0)
 
-        direction = normalize_direction(analysis["entry"].get("direction"), default="WAIT")
+        entry = analysis.get("entry", {})
+        confirmation = analysis.get("confirmation", {})
+        inferred_entry_valid = normalize_direction(entry.get("direction"), default="WAIT") in {"LONG", "SHORT"}
+        entry_valid = bool(entry.get("valid", inferred_entry_valid))
+        confirmed = bool(confirmation.get("confirmed", True))
+
+        direction, signal_reason, wait_reason = self._resolve_signal_direction(
+            raw_direction=entry.get("direction"),
+            entry_valid=entry_valid,
+            confirmed=confirmed,
+        )
 
         confidence_adjusted = self._adjust_confidence_by_phase(
             base_confidence=base_confidence,
@@ -73,12 +88,14 @@ class SignalEngine:
             stars = "★☆☆☆☆"
             strength = "VERY WEAK"
 
-        return {
+        payload = {
             "signal": direction,
             "confidence": int(confidence_adjusted),
             "grade": grade,
             "stars": stars,
             "strength": strength,
+            "signal_reason": signal_reason,
+            "wait_reason": wait_reason,
             "checks": confluence["checks"],
             "market_phase": phase_name,
             "phase_quality": phase_confidence,
@@ -95,6 +112,39 @@ class SignalEngine:
             "institutional_direction": institutional.get("direction", "NONE"),
             "alignment_conflicts": self._alignment_conflicts(direction, liquidity_sweep, smt, unicorn, cisd, volume_profile),
         }
+
+        if direction == "WAIT":
+            self.logger.info(
+                "Signal WAIT | reason=%s entry_valid=%s confirmed=%s raw_direction=%s",
+                wait_reason,
+                entry_valid,
+                confirmed,
+                entry.get("direction"),
+            )
+        else:
+            self.logger.info(
+                "Signal %s | reason=%s confidence=%s grade=%s",
+                direction,
+                signal_reason,
+                payload["confidence"],
+                grade,
+            )
+
+        return payload
+
+    def _resolve_signal_direction(self, raw_direction, entry_valid, confirmed):
+        normalized = normalize_direction(raw_direction, default="WAIT")
+
+        if not entry_valid:
+            return "WAIT", "Entry invalid", "entry_invalid"
+
+        if not confirmed:
+            return "WAIT", "Entry not confirmed", "entry_not_confirmed"
+
+        if normalized in {"LONG", "SHORT"}:
+            return normalized, "Entry valid and confirmed", None
+
+        return "WAIT", "Direction unresolved", "direction_unresolved"
 
     def _adjust_confidence_by_phase(self, base_confidence, phase, phase_score, mtf_alignment):
         """Adjust signal confidence based on market phase quality."""

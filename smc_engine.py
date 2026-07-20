@@ -3,7 +3,7 @@ smc_engine.py
 Atlas SMC Compatibility Engine
 """
 
-import ccxt
+from bybit import create_public_swap_exchange
 
 from core.market_structure_engine import MarketStructureEngine
 from fvg_engine import FVGEngine
@@ -17,12 +17,7 @@ class SMCEngine:
     """Geriye dönük uyumluluk için temel SMC yüzeyini korur."""
 
     def __init__(self, exchange=None):
-        self.exchange = exchange or ccxt.bybit(
-            {
-                "options": {"defaultType": "swap"},
-                "enableRateLimit": True,
-            }
-        )
+        self.exchange = exchange or create_public_swap_exchange(enable_rate_limit=True)
         self.structure_engine = MarketStructureEngine()
         self.liquidity_engine = LiquidityEngine()
         self.orderblock_engine = OrderBlockEngine()

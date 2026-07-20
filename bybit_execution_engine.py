@@ -11,7 +11,7 @@ Env flags (read via Config.refresh_from_env):
 import logging
 from typing import Any, Dict, Optional
 
-import ccxt
+from bybit import create_private_swap_exchange
 
 from config import Config
 
@@ -27,6 +27,8 @@ class BybitExecutionEngine:
         self.api_secret = str(getattr(Config, "BYBIT_API_SECRET", "") or "").strip()
         self.min_confidence = float(getattr(Config, "AUTO_TRADING_MIN_CONFIDENCE", 85.0))
         self.allow_execute_with_caution = bool(getattr(Config, "AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION", False))
+        self.position_mode = str(getattr(Config, "BYBIT_POSITION_MODE", "one_way") or "one_way").strip().lower()
+        self.log_http = bool(getattr(Config, "BYBIT_LOG_HTTP", False))
 
         self.exchange = None
         if self.enabled:
@@ -37,19 +39,35 @@ class BybitExecutionEngine:
             self.logger.error("Auto trading aktif fakat Bybit API key/secret tanimli degil.")
             return None
 
-        exchange = ccxt.bybit(
-            {
-                "apiKey": self.api_key,
-                "secret": self.api_secret,
-                "options": {"defaultType": "swap"},
-                "enableRateLimit": True,
-            }
+        exchange = create_private_swap_exchange(
+            api_key=self.api_key,
+            api_secret=self.api_secret,
+            testnet=self.testnet,
+            enable_rate_limit=True,
         )
-        if hasattr(exchange, "set_sandbox_mode"):
-            exchange.set_sandbox_mode(self.testnet)
+        exchange.verbose = self.log_http
 
-        self.logger.info("Bybit execution hazir | testnet=%s", self.testnet)
+        self.logger.info(
+            "Bybit execution hazir | testnet=%s position_mode=%s log_http=%s",
+            self.testnet,
+            self.position_mode,
+            self.log_http,
+        )
+        self._preflight_exchange(exchange)
         return exchange
+
+    def _preflight_exchange(self, exchange):
+        try:
+            exchange.load_markets()
+            self.logger.info("Bybit preflight OK | markets loaded")
+        except Exception as exc:
+            self._log_exchange_exception("Bybit preflight market load hatasi", exc)
+
+        try:
+            exchange.fetch_balance()
+            self.logger.info("Bybit preflight OK | balance fetched")
+        except Exception as exc:
+            self._log_exchange_exception("Bybit preflight balance hatasi (izin/key kontrol edin)", exc)
 
     def _decision_allows_execution(self, result: Dict[str, Any]) -> bool:
         decision = (result or {}).get("decision") or {}
@@ -71,16 +89,12 @@ class BybitExecutionEngine:
 
     def _extract_amount(self, result: Dict[str, Any]) -> Optional[float]:
         risk = (result or {}).get("risk") or {}
-        entry_data = ((result or {}).get("analysis") or {}).get("entry") or {}
 
         position_size = risk.get("position_size")
-        entry_price = entry_data.get("entry")
         if not isinstance(position_size, (int, float)) or position_size <= 0:
             return None
-        if not isinstance(entry_price, (int, float)) or entry_price <= 0:
-            return None
 
-        amount = float(position_size) / float(entry_price)
+        amount = float(position_size)
         if amount <= 0:
             return None
         return amount
@@ -120,18 +134,25 @@ class BybitExecutionEngine:
             return False
 
         close_side = "sell" if current_side == "long" else "buy"
+        params = {"reduceOnly": True}
+        position_idx = self._resolve_position_idx(close_side)
+        if position_idx is not None:
+            params["positionIdx"] = position_idx
+
+        request_payload = {
+            "symbol": symbol,
+            "type": "market",
+            "side": close_side,
+            "amount": contracts,
+            "params": params,
+        }
         try:
-            self.exchange.create_order(
-                symbol=symbol,
-                type="market",
-                side=close_side,
-                amount=contracts,
-                params={"reduceOnly": True},
-            )
-            self.logger.info("Pozisyon kapatildi | symbol=%s side=%s amount=%s", symbol, close_side, contracts)
+            self.logger.info("Bybit close request | payload=%s", request_payload)
+            response = self.exchange.create_order(**request_payload)
+            self.logger.info("Pozisyon kapatildi | symbol=%s side=%s amount=%s response=%s", symbol, close_side, contracts, response)
             return True
         except Exception as exc:
-            self.logger.error("Pozisyon kapatma hatasi | symbol=%s err=%s", symbol, exc)
+            self._log_exchange_exception("Pozisyon kapatma hatasi", exc, context={"symbol": symbol, "payload": request_payload})
             return False
 
     def _entry_confidence_ok(self, result: Dict[str, Any]) -> bool:
@@ -142,19 +163,36 @@ class BybitExecutionEngine:
     def process(self, symbol: str, result: Dict[str, Any]) -> Dict[str, Any]:
         """Evaluates analysis result and executes trade if rules match."""
         if not self.enabled:
+            self.logger.warning(
+                "Execution skipped | reason=auto_trading_disabled env_ATLAS_AUTO_TRADING_ENABLED=%s",
+                getattr(Config, "AUTO_TRADING_ENABLED", False),
+            )
             return {"executed": False, "reason": "auto_trading_disabled"}
         if self.exchange is None:
+            self.logger.error("Execution skipped | reason=exchange_not_ready testnet=%s key_set=%s secret_set=%s", self.testnet, bool(self.api_key), bool(self.api_secret))
             return {"executed": False, "reason": "exchange_not_ready"}
         if not self._decision_allows_execution(result):
+            decision = (result or {}).get("decision") or {}
+            self.logger.info("Execution skipped | reason=decision_blocked action=%s", decision.get("action"))
             return {"executed": False, "reason": "decision_blocked"}
         if not self._entry_confidence_ok(result):
+            confidence = ((result or {}).get("signal") or {}).get("confidence")
+            self.logger.info("Execution skipped | reason=low_confidence confidence=%s min=%s", confidence, self.min_confidence)
             return {"executed": False, "reason": "low_confidence"}
+
+        risk = (result or {}).get("risk") or {}
+        if risk.get("risk_setup_valid") is False:
+            reason = risk.get("risk_setup_reason", "Invalid Risk Setup")
+            self.logger.info("Execution skipped | reason=risk_blocked risk_reason=%s", reason)
+            return {"executed": False, "reason": "risk_blocked", "risk_reason": reason}
 
         side = self._extract_side(result)
         amount = self._extract_amount(result)
         if side is None:
+            self.logger.info("Execution skipped | reason=invalid_signal")
             return {"executed": False, "reason": "invalid_signal"}
         if amount is None:
+            self.logger.info("Execution skipped | reason=invalid_amount")
             return {"executed": False, "reason": "invalid_amount"}
 
         open_pos = self._extract_symbol_position(symbol)
@@ -169,27 +207,74 @@ class BybitExecutionEngine:
         take_profit = dynamic_tp.get("tp3")
 
         params: Dict[str, Any] = {}
+        position_idx = self._resolve_position_idx(side)
+        if position_idx is not None:
+            params["positionIdx"] = position_idx
         if isinstance(stop_loss, (int, float)) and stop_loss > 0:
             params["stopLoss"] = stop_loss
         if isinstance(take_profit, (int, float)) and take_profit > 0:
             params["takeProfit"] = take_profit
 
+        request_payload = {
+            "symbol": symbol,
+            "type": "market",
+            "side": side,
+            "amount": amount,
+            "params": params,
+        }
+
         try:
-            order = self.exchange.create_order(
-                symbol=symbol,
-                type="market",
-                side=side,
-                amount=amount,
-                params=params,
+            self.logger.info("Bybit order request | payload=%s", request_payload)
+            order = self.exchange.create_order(**request_payload)
+            avg_price = None
+            if isinstance(order, dict):
+                avg_price = order.get("average") or order.get("price")
+            self.logger.info(
+                "Emir acildi | symbol=%s side=%s amount=%.8f order_id=%s price=%s response=%s",
+                symbol,
+                side,
+                amount,
+                order.get("id") if isinstance(order, dict) else None,
+                avg_price,
+                order,
             )
-            self.logger.info("Emir acildi | symbol=%s side=%s amount=%.8f", symbol, side, amount)
             return {
                 "executed": True,
                 "reason": "order_opened",
                 "side": side,
                 "amount": amount,
                 "order_id": order.get("id") if isinstance(order, dict) else None,
+                "price": avg_price,
             }
         except Exception as exc:
-            self.logger.error("Emir acma hatasi | symbol=%s err=%s", symbol, exc)
-            return {"executed": False, "reason": "order_failed", "error": str(exc)}
+            details = self._log_exchange_exception(
+                "Emir acma hatasi",
+                exc,
+                context={"symbol": symbol, "payload": request_payload},
+            )
+            return {"executed": False, "reason": "order_failed", "error": str(exc), "exchange_error": details}
+
+    def _resolve_position_idx(self, side: str) -> Optional[int]:
+        if self.position_mode != "hedge":
+            return None
+
+        if side == "buy":
+            return 1
+        if side == "sell":
+            return 2
+        return None
+
+    def _log_exchange_exception(self, prefix: str, exc: Exception, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        details: Dict[str, Any] = {
+            "type": type(exc).__name__,
+            "message": str(exc),
+            "context": context or {},
+        }
+
+        for attr in ("code", "status", "http_status", "reason", "body", "response"):
+            value = getattr(exc, attr, None)
+            if value is not None:
+                details[attr] = value
+
+        self.logger.exception("%s | details=%s", prefix, details)
+        return details

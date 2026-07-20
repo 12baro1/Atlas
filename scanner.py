@@ -2,6 +2,7 @@ import ccxt
 import logging
 import os
 import sys
+from bybit import create_public_swap_exchange
 from universe_engine import select_symbols
 
 logging.basicConfig(
@@ -10,12 +11,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("atlas.raw_scanner")
 
-exchange = ccxt.bybit({
-    "options": {
-        "defaultType": "swap"
-    },
-    "enableRateLimit": True
-})
+exchange = create_public_swap_exchange(enable_rate_limit=True)
 
 markets = exchange.load_markets()
 symbols, universe_stats = select_symbols(

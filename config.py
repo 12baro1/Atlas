@@ -86,10 +86,12 @@ class Config:
     ROUND_TRIP_COST_RATE = 0.0020
     ATR_PERIOD = 14
     MIN_STOP_ATR_MULTIPLIER = 0.25
+    MIN_STOP_PERCENT = 0.0005
     MIN_TICK_DISTANCE_FALLBACK = 0.01
     STOP_SPREAD_BUFFER_RATE = 0.0002
     STOP_SLIPPAGE_BUFFER_RATE = 0.0003
     AUTO_EXPAND_TIGHT_STOPS = True
+    REJECT_TIGHT_STOPS = True
     MAX_POSITION_SIZE = 1000.0
 
     # Confidence
@@ -164,6 +166,8 @@ class Config:
     BYBIT_TESTNET = os.getenv("ATLAS_BYBIT_TESTNET", "1").strip().lower() in {"1", "true", "yes"}
     BYBIT_API_KEY = _env_or_rc("ATLAS_BYBIT_API_KEY", "")
     BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "")
+    BYBIT_POSITION_MODE = _env_or_rc("ATLAS_BYBIT_POSITION_MODE", "one_way").strip().lower()
+    BYBIT_LOG_HTTP = _env_or_rc("ATLAS_BYBIT_LOG_HTTP", "0").strip().lower() in {"1", "true", "yes"}
 
     # Telegram
     TELEGRAM_ENABLED = True
@@ -196,12 +200,16 @@ class Config:
     @classmethod
     def refresh_from_env(cls):
         """Runtime'da environment değişikliklerini Config sınıfına yeniden yükler."""
+        cls.MIN_STOP_PERCENT = float(_env_or_rc("ATLAS_MIN_STOP_PERCENT", str(cls.MIN_STOP_PERCENT)))
+        cls.REJECT_TIGHT_STOPS = _env_or_rc("ATLAS_REJECT_TIGHT_STOPS", "1").strip().lower() in {"1", "true", "yes"}
         cls.AUTO_TRADING_ENABLED = _env_or_rc("ATLAS_AUTO_TRADING_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
         cls.AUTO_TRADING_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_AUTO_TRADING_MIN_CONFIDENCE", "85"))
         cls.AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION = _env_or_rc("ATLAS_AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION", "0").strip().lower() in {"1", "true", "yes"}
         cls.BYBIT_TESTNET = _env_or_rc("ATLAS_BYBIT_TESTNET", "1").strip().lower() in {"1", "true", "yes"}
         cls.BYBIT_API_KEY = _env_or_rc("ATLAS_BYBIT_API_KEY", "")
         cls.BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "")
+        cls.BYBIT_POSITION_MODE = _env_or_rc("ATLAS_BYBIT_POSITION_MODE", "one_way").strip().lower()
+        cls.BYBIT_LOG_HTTP = _env_or_rc("ATLAS_BYBIT_LOG_HTTP", "0").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_TELEGRAM_MIN_CONFIDENCE", "75"))
         cls.TELEGRAM_REQUIRE_DECISION_ACTION = _env_or_rc("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "0").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_MINIMAL_LAYOUT = _env_or_rc("ATLAS_TELEGRAM_MINIMAL_LAYOUT", "1").strip().lower() in {"1", "true", "yes"}
