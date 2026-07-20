@@ -1,6 +1,8 @@
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from decision_engine import DecisionEngine
@@ -96,6 +98,36 @@ def test_decision_skips_when_rr_below_minimum_threshold():
 
     assert result["action"] == "SKIP"
     assert "RR below minimum RR" in result["reason"]
+
+
+def test_decision_recovers_from_zero_rr_using_tp_breakdown():
+    engine = DecisionEngine()
+
+    result = engine.decide(
+        **_supportive_context(
+            signal={"signal": "LONG", "confidence": 100, "grade": "S+", "strength": "ELITE"},
+            confluence={"score": 100, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
+            risk={
+                "entry": 0.012642,
+                "stop_loss": 0.012623,
+                "tp1": 0.012664,
+                "tp2": 0.012680,
+                "tp3": 0.012699,
+                "rr": 0,
+                "rr_by_tp": {"tp1": 1.16, "tp2": 2.0, "tp3": 3.0},
+                "selected_tp": "tp3",
+                "selected_rr": 3.0,
+                "risk": 0.000019,
+                "position_size": 1.0,
+            },
+            cisd={"active": True, "direction": "BULLISH", "confidence": 86},
+            volume_profile={"active": True, "direction": "BULLISH", "confidence": 91},
+            institutional={"active": True, "direction": "LONG", "confidence": 63},
+        )
+    )
+
+    assert result["rr"] == pytest.approx(3.0)
+    assert result["action"] == "EXECUTE"
 
 
 def test_decision_override_executes_despite_single_mismatch_on_elite_setup():

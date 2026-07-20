@@ -224,3 +224,47 @@ def test_telegram_message_handles_partial_risk_payload():
     assert "Capital At Risk : None USDT" in message
     assert "Position Size : None" in message
     assert "RR : None" in message
+
+
+def test_telegram_message_shows_rr_breakdown_and_selected_rr():
+    message = TelegramEngine().format_signal(
+        {
+            "symbol": "BTC/USDT:USDT",
+            "signal": {
+                "signal": "LONG",
+                "grade": "S+",
+                "strength": "ELITE",
+                "confidence": 100,
+            },
+            "entry": {
+                "direction": "LONG",
+                "valid": True,
+                "entry": 0.012642,
+                "stop_loss": 0.012623,
+            },
+            "risk": {
+                "capital_at_risk": 10,
+                "position_size": 1.0,
+                "risk": 0.000019,
+                "tp1": 0.012664,
+                "tp2": 0.012680,
+                "tp3": 0.012699,
+                "rr1": 1.16,
+                "rr2": 2.0,
+                "rr3": 3.0,
+                "selected_tp": "tp3",
+                "selected_rr": 3.0,
+                "rr": 3.0,
+            },
+            "rr": {"quality": "GOOD", "score": 80},
+            "dynamic_tp": {"tp1": 0.012664, "tp2": 0.012680, "tp3": 0.012699},
+            "confluence": {"checks": []},
+            "decision": {"action": "EXECUTE", "reason": "ok"},
+        }
+    )
+
+    assert "RR1 : 1.16" in message
+    assert "RR2 : 2" in message
+    assert "RR3 : 3" in message
+    assert "Selected TP : tp3" in message
+    assert "Selected RR : 3" in message

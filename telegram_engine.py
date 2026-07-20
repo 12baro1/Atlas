@@ -103,6 +103,11 @@ class TelegramEngine:
             msg.append(f"TP1 : {self._fmt(risk.get('tp1'))}")
             msg.append(f"TP2 : {self._fmt(risk.get('tp2'))}")
             msg.append(f"TP3 : {self._fmt(risk.get('tp3'))}")
+            msg.append(f"RR1 : {self._fmt(risk.get('rr1'))}")
+            msg.append(f"RR2 : {self._fmt(risk.get('rr2'))}")
+            msg.append(f"RR3 : {self._fmt(risk.get('rr3'))}")
+            msg.append(f"Selected TP : {self._fmt(risk.get('selected_tp'))}")
+            msg.append(f"Selected RR : {self._fmt(risk.get('selected_rr', risk.get('rr')))}")
             msg.append(f"RR : {self._fmt(risk.get('rr'))}")
             msg.append("")
         elif entry_is_valid and dynamic_tp:

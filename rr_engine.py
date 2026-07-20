@@ -83,9 +83,10 @@ class RREngine:
         rr = risk.get("rr")
         rr_by_tp = risk.get("rr_by_tp") if isinstance(risk, dict) else None
         selected_tp = risk.get("selected_tp") if isinstance(risk, dict) else None
+        selected_rr = risk.get("selected_rr") if isinstance(risk, dict) else None
         selection_rule = risk.get("rr_selection_rule") if isinstance(risk, dict) else None
 
-        if rr is None and isinstance(risk, dict):
+        if (rr is None or rr <= 0) and isinstance(risk, dict):
             breakdown = self.calculate_breakdown(
                 risk.get("entry"),
                 risk.get("stop_loss"),
@@ -99,6 +100,7 @@ class RREngine:
                 rr = breakdown["selected_rr"]
                 rr_by_tp = breakdown["rr_by_tp"]
                 selected_tp = breakdown["selected_tp"]
+                selected_rr = breakdown["selected_rr"]
                 selection_rule = breakdown["selection_rule"]
 
         if rr is not None:
@@ -146,9 +148,15 @@ class RREngine:
 
             "selected_tp": selected_tp,
 
-            "selected_rr": rr,
+            "selected_rr": selected_rr if selected_rr is not None else rr,
 
             "rr_by_tp": rr_by_tp,
+
+            "rr1": (rr_by_tp or {}).get("tp1"),
+
+            "rr2": (rr_by_tp or {}).get("tp2"),
+
+            "rr3": (rr_by_tp or {}).get("tp3"),
 
             "rr_selection_rule": selection_rule,
 

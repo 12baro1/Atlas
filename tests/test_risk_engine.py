@@ -25,9 +25,13 @@ def test_risk_engine_uses_config_balance_and_percent():
     assert risk["position_size"] == round(expected_target_capital, 4)
     assert risk["rr"] == 4.0
     assert risk["selected_tp"] == "tp3"
+    assert risk["selected_rr"] == 4.0
     assert risk["rr_by_tp"]["tp1"] == 1.5
     assert risk["rr_by_tp"]["tp2"] == 2.5
     assert risk["rr_by_tp"]["tp3"] == 4.0
+    assert risk["rr1"] == 1.5
+    assert risk["rr2"] == 2.5
+    assert risk["rr3"] == 4.0
 
 
 def test_risk_engine_reduces_risk_when_net_rr_is_weak():
@@ -111,6 +115,7 @@ def test_rr_engine_derives_rr_from_tp3_when_missing():
     assert rr is not None
     assert rr["rr"] == pytest.approx(3.0)
     assert rr["selected_tp"] == "tp3"
+    assert rr["selected_rr"] == pytest.approx(3.0)
     assert rr["rr_by_tp"]["tp3"] == pytest.approx(3.0)
 
 
@@ -128,6 +133,40 @@ def test_rr_engine_uses_directional_formula_for_short_trade():
     assert rr["rr_by_tp"]["tp1"] == pytest.approx(1.11, abs=0.01)
     assert rr["rr_by_tp"]["tp2"] == pytest.approx(2.22, abs=0.01)
     assert rr["rr_by_tp"]["tp3"] == pytest.approx(3.33, abs=0.01)
+    assert rr["selected_tp"] == "tp3"
+    assert rr["selected_rr"] == pytest.approx(3.33, abs=0.01)
+
+
+def test_rr_engine_handles_real_long_example():
+    rr = RREngine().calculate_breakdown(
+        entry=0.012642,
+        stop_loss=0.012623,
+        tp1=0.012664,
+        tp2=0.012680,
+        tp3=0.012699,
+    )
+
+    assert rr is not None
+    assert rr["direction"] == "LONG"
+    assert rr["rr_by_tp"]["tp1"] == pytest.approx(1.16, abs=0.01)
+    assert rr["rr_by_tp"]["tp2"] == pytest.approx(2.00, abs=0.01)
+    assert rr["rr_by_tp"]["tp3"] == pytest.approx(3.00, abs=0.01)
+    assert rr["selected_tp"] == "tp3"
+    assert rr["selected_rr"] == pytest.approx(3.00, abs=0.01)
+
+
+def test_rr_engine_recomputes_when_rr_is_zero():
+    rr = RREngine().evaluate({
+        "entry": 0.03089,
+        "stop_loss": 0.03098,
+        "tp1": 0.03079,
+        "tp2": 0.03069,
+        "tp3": 0.03059,
+        "rr": 0,
+    })
+
+    assert rr is not None
+    assert rr["rr"] == pytest.approx(3.33, abs=0.01)
     assert rr["selected_tp"] == "tp3"
     assert rr["selected_rr"] == pytest.approx(3.33, abs=0.01)
 

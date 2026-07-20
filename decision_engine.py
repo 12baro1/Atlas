@@ -4,6 +4,7 @@ Atlas Decision Engine v3
 """
 
 from config import Config
+from rr_engine import RREngine
 
 
 class DecisionEngine:
@@ -13,6 +14,9 @@ class DecisionEngine:
     ACTION_EXECUTE_WITH_CAUTION = "EXECUTE_WITH_CAUTION"
     ACTION_WAIT = "WAIT"
     ACTION_SKIP = "SKIP"
+
+    def __init__(self):
+        self.rr_engine = RREngine()
 
     def decide(self, analysis=None, **kwargs):
         """Bundle tabanlı karar üretir; eski kwargs tabanlı çağrıları da destekler."""
@@ -46,7 +50,7 @@ class DecisionEngine:
         caution_threshold = float(getattr(Config, "DECISION_SCORE_EXECUTE_WITH_CAUTION", 75))
         wait_threshold = float(getattr(Config, "DECISION_SCORE_WAIT", 60))
 
-        rr_value = self._safe_number(risk.get("rr") if isinstance(risk, dict) else None, None)
+        rr_value = self._resolve_rr_value(risk)
         position_size = self._safe_number(risk.get("position_size") if isinstance(risk, dict) else None, None)
 
         risk_blockers, risk_valid = self._collect_risk_blockers(
@@ -131,6 +135,9 @@ class DecisionEngine:
             "entry_valid": entry_valid,
             "risk_valid": risk_valid,
             "rr": rr_value,
+            "selected_rr": self._safe_number(risk.get("selected_rr") if isinstance(risk, dict) else None, rr_value),
+            "selected_tp": risk.get("selected_tp") if isinstance(risk, dict) else None,
+            "rr_by_tp": risk.get("rr_by_tp") if isinstance(risk, dict) else None,
             "minimum_rr": minimum_rr,
             "critical_blockers": critical_blockers,
             "soft_blockers": soft_blockers,
@@ -258,6 +265,38 @@ class DecisionEngine:
             )
 
         return blockers, len(blockers) == 0
+
+    def _resolve_rr_value(self, risk):
+        if not isinstance(risk, dict):
+            return None
+
+        selected_rr = self._safe_number(risk.get("selected_rr"), None)
+        if selected_rr is not None and selected_rr > 0:
+            return selected_rr
+
+        rr = self._safe_number(risk.get("rr"), None)
+        if rr is not None and rr > 0:
+            return rr
+
+        rr_by_tp = risk.get("rr_by_tp")
+        if isinstance(rr_by_tp, dict):
+            positive_rrs = [self._safe_number(value, None) for value in rr_by_tp.values()]
+            positive_rrs = [value for value in positive_rrs if value is not None and value > 0]
+            if positive_rrs:
+                return max(positive_rrs)
+
+        breakdown = self.rr_engine.calculate_breakdown(
+            risk.get("entry"),
+            risk.get("stop_loss"),
+            tp1=risk.get("tp1"),
+            tp2=risk.get("tp2"),
+            tp3=risk.get("tp3"),
+            selection_rule=risk.get("rr_selection_rule") or "max_rr",
+        )
+        if breakdown is None:
+            return None
+
+        return self._safe_number(breakdown.get("selected_rr"), None)
 
     def _collect_adjustments(
         self,

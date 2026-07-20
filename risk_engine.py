@@ -217,9 +217,17 @@ class RiskEngine:
 
             "tp3": tp3,
 
+            "rr1": rr_breakdown.get("rr_by_tp", {}).get("tp1") if rr_breakdown else None,
+
+            "rr2": rr_breakdown.get("rr_by_tp", {}).get("tp2") if rr_breakdown else None,
+
+            "rr3": rr_breakdown.get("rr_by_tp", {}).get("tp3") if rr_breakdown else None,
+
             "rr_by_tp": rr_breakdown.get("rr_by_tp") if rr_breakdown else None,
 
             "selected_tp": rr_breakdown.get("selected_tp") if rr_breakdown else None,
+
+            "selected_rr": rr_breakdown.get("selected_rr") if rr_breakdown else rr,
 
             "rr_selection_rule": rr_selection_rule,
 
