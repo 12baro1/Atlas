@@ -6,10 +6,14 @@ Atlas Risk Engine v4
 import math
 
 from core.analysis_utils import clamp
+from rr_engine import RREngine
 from utils.atr import atr as calculate_atr
 from config import Config
 
 class RiskEngine:
+
+    def __init__(self):
+        self.rr_engine = RREngine()
 
     def calculate(
         self,
@@ -99,6 +103,8 @@ class RiskEngine:
         tp3 = None
         rr = None
         net_rr = None
+        rr_breakdown = None
+        rr_selection_rule = "max_rr"
 
         if dynamic_tp is not None:
 
@@ -106,13 +112,25 @@ class RiskEngine:
             tp2 = dynamic_tp.get("tp2")
             tp3 = dynamic_tp.get("tp3")
 
-            if tp3 is not None:
-                rr = round(abs(tp3 - entry) / risk, 2)
+            rr_breakdown = self.rr_engine.calculate_breakdown(
+                entry=entry,
+                stop_loss=adjusted_stop_loss,
+                tp1=tp1,
+                tp2=tp2,
+                tp3=tp3,
+                selection_rule=rr_selection_rule,
+            )
 
-                gross_reward = abs(tp3 - entry)
-                transaction_cost = entry * round_trip_cost_rate
-                net_reward = max(0.0, gross_reward - transaction_cost)
-                net_rr = round(net_reward / risk, 2)
+            if rr_breakdown is not None:
+                rr = rr_breakdown["selected_rr"]
+                selected_tp = rr_breakdown["selected_tp"]
+                selected_tp_value = dynamic_tp.get(selected_tp) if selected_tp else None
+
+                if selected_tp_value is not None:
+                    gross_reward = abs(selected_tp_value - entry)
+                    transaction_cost = entry * round_trip_cost_rate
+                    net_reward = max(0.0, gross_reward - transaction_cost)
+                    net_rr = round(net_reward / risk, 2)
 
         risk_reduction_factor = 1.0
         if net_rr is not None and minimum_rr > 0 and net_rr < minimum_rr:
@@ -198,6 +216,12 @@ class RiskEngine:
             "tp2": tp2,
 
             "tp3": tp3,
+
+            "rr_by_tp": rr_breakdown.get("rr_by_tp") if rr_breakdown else None,
+
+            "selected_tp": rr_breakdown.get("selected_tp") if rr_breakdown else None,
+
+            "rr_selection_rule": rr_selection_rule,
 
             "rr": rr,
 

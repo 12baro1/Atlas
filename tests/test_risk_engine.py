@@ -1,5 +1,6 @@
-import sys
 import os
+import sys
+
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,6 +24,10 @@ def test_risk_engine_uses_config_balance_and_percent():
     assert risk["capital_at_risk_target"] == round(expected_target_capital, 2)
     assert risk["position_size"] == round(expected_target_capital, 4)
     assert risk["rr"] == 4.0
+    assert risk["selected_tp"] == "tp3"
+    assert risk["rr_by_tp"]["tp1"] == 1.5
+    assert risk["rr_by_tp"]["tp2"] == 2.5
+    assert risk["rr_by_tp"]["tp3"] == 4.0
 
 
 def test_risk_engine_reduces_risk_when_net_rr_is_weak():
@@ -105,6 +110,26 @@ def test_rr_engine_derives_rr_from_tp3_when_missing():
 
     assert rr is not None
     assert rr["rr"] == pytest.approx(3.0)
+    assert rr["selected_tp"] == "tp3"
+    assert rr["rr_by_tp"]["tp3"] == pytest.approx(3.0)
+
+
+def test_rr_engine_uses_directional_formula_for_short_trade():
+    rr = RREngine().calculate_breakdown(
+        entry=0.03089,
+        stop_loss=0.03098,
+        tp1=0.03079,
+        tp2=0.03069,
+        tp3=0.03059,
+    )
+
+    assert rr is not None
+    assert rr["direction"] == "SHORT"
+    assert rr["rr_by_tp"]["tp1"] == pytest.approx(1.11, abs=0.01)
+    assert rr["rr_by_tp"]["tp2"] == pytest.approx(2.22, abs=0.01)
+    assert rr["rr_by_tp"]["tp3"] == pytest.approx(3.33, abs=0.01)
+    assert rr["selected_tp"] == "tp3"
+    assert rr["selected_rr"] == pytest.approx(3.33, abs=0.01)
 
 
 def test_risk_engine_expands_too_tight_stop_using_atr_floor():
@@ -163,4 +188,3 @@ def test_risk_engine_marks_invalid_setup_when_auto_expand_disabled(monkeypatch):
     assert risk["risk_setup_valid"] is False
     assert risk["risk_setup_reason"] == "Invalid Risk Setup"
     assert risk["rr"] is None
-
