@@ -245,6 +245,12 @@ class AtlasEngine:
             signal=execution_state["signal"],
             decision=decision_state,
         )
+        if execution_state["signal"].get("gated_by_decision"):
+            self.logger.info(
+                "Signal gated by decision | symbol=%s action=%s",
+                data.get("symbol", "UNKNOWN"),
+                execution_state["signal"].get("decision_action", "WAIT"),
+            )
 
         analysis = self._compose_analysis(
             structure_state=structure_state,
@@ -883,6 +889,12 @@ class AtlasEngine:
             return False
 
         if signal.get("signal") not in ["LONG", "SHORT"]:
+            self.logger.info(
+                "Telegram skip: signal direction=%s decision_action=%s for %s",
+                signal.get("signal", "WAIT"),
+                (decision or {}).get("action", "WAIT"),
+                data.get("symbol", "UNKNOWN"),
+            )
             return False
 
         signal_action = signal.get("signal", "WAIT")

@@ -11,7 +11,7 @@ class SignalEngine:
 
     def generate(self, analysis):
         confluence = analysis["confluence"]
-        base_confidence = confluence["score"]
+        base_confidence = self._normalize_confluence_score(confluence.get("score", 0))
 
         liquidity_sweep = analysis.get("liquidity_sweep", {})
         smt = analysis.get("smt", {})
@@ -48,23 +48,23 @@ class SignalEngine:
 
         confidence_adjusted = clamp(confidence_adjusted)
 
-        if confidence_adjusted >= 90:
+        if confidence_adjusted >= 96:
             grade = "S+"
             stars = "★★★★★"
             strength = "ELITE"
-        elif confidence_adjusted >= 80:
+        elif confidence_adjusted >= 90:
             grade = "A+"
             stars = "★★★★★"
             strength = "STRONG"
-        elif confidence_adjusted >= 70:
+        elif confidence_adjusted >= 82:
             grade = "A"
             stars = "★★★★☆"
             strength = "GOOD"
-        elif confidence_adjusted >= 60:
+        elif confidence_adjusted >= 72:
             grade = "B"
             stars = "★★★☆☆"
             strength = "NORMAL"
-        elif confidence_adjusted >= 50:
+        elif confidence_adjusted >= 60:
             grade = "C"
             stars = "★★☆☆☆"
             strength = "WEAK"
@@ -99,24 +99,24 @@ class SignalEngine:
     def _adjust_confidence_by_phase(self, base_confidence, phase, phase_score, mtf_alignment):
         """Adjust signal confidence based on market phase quality."""
         phase_adjustment = {
-            "Expansion": 10,
-            "Trending": 8,
-            "Accumulation": 5,
-            "Distribution": -12,
-            "Consolidation": -5,
-            "Manipulation": -15,
-            "Reversal": 4,
-            "Ranging": -8,
+            "Expansion": 4,
+            "Trending": 3,
+            "Accumulation": 1,
+            "Distribution": -8,
+            "Consolidation": -3,
+            "Manipulation": -10,
+            "Reversal": 2,
+            "Ranging": -5,
         }
 
         adjustment = phase_adjustment.get(phase, 0)
 
         if mtf_alignment >= 100:
-            adjustment += 5
+            adjustment += 2
         elif mtf_alignment >= 75:
-            adjustment += 3
+            adjustment += 1
 
-        adjustment += (phase_score / 100) * 5
+        adjustment += (phase_score / 100) * 2
 
         adjusted = base_confidence + adjustment
         return clamp(adjusted)
@@ -125,44 +125,65 @@ class SignalEngine:
         """Sweep, SMT, Unicorn, CISD ve Volume Profile kalitesine göre güven puanını günceller."""
         adjusted = base_confidence
         active_modules = [liquidity_sweep, smt, unicorn, cisd, volume_profile, institutional]
+        raw_delta = 0.0
 
         if liquidity_sweep.get("is_sweep"):
-            adjusted += min(10, liquidity_sweep.get("strength_score", 0) / 10)
+            raw_delta += min(5, liquidity_sweep.get("strength_score", 0) / 20)
             if liquidity_sweep.get("post_structure", {}).get("confirmed"):
-                adjusted += 4
+                raw_delta += 2
 
         if is_active(smt):
-            adjusted += min(8, extract_confidence(smt) / 12)
+            raw_delta += min(4, extract_confidence(smt) / 25)
 
         if is_active(unicorn):
-            adjusted += min(10, extract_confidence(unicorn) / 10)
+            raw_delta += min(5, extract_confidence(unicorn) / 20)
             best_direction = extract_direction(unicorn)
             if direction_matches(best_direction, signal_direction):
-                adjusted += 2
+                raw_delta += 1
 
         if is_active(cisd):
-            adjusted += min(9, extract_confidence(cisd) / 11)
+            raw_delta += min(4, extract_confidence(cisd) / 22)
             if direction_matches(extract_direction(cisd), signal_direction):
-                adjusted += 2
+                raw_delta += 1
 
         if is_active(volume_profile):
-            adjusted += min(8, extract_confidence(volume_profile) / 12)
+            raw_delta += min(3, extract_confidence(volume_profile) / 30)
 
         if is_active(institutional):
-            adjusted += min(12, extract_confidence(institutional) / 9)
+            raw_delta += min(6, extract_confidence(institutional) / 15)
             institutional_direction = extract_direction(institutional)
             if direction_matches(institutional_direction, signal_direction):
-                adjusted += 4
+                raw_delta += 2
             if institutional.get("execution_quality", {}).get("score", 0) >= 70:
-                adjusted += 3
+                raw_delta += 1
             if institutional.get("macro_filter", {}).get("active") and institutional.get("macro_filter", {}).get("confidence", 100) < 50:
-                adjusted -= 5
+                raw_delta -= 4
             if institutional.get("news_filter", {}).get("active") and institutional.get("news_filter", {}).get("confidence", 100) < 50:
-                adjusted -= 4
+                raw_delta -= 3
 
-        adjusted -= self._alignment_conflicts(signal_direction, *active_modules)
+        raw_delta -= self._alignment_conflicts(signal_direction, *active_modules)
+
+        # Modül etkisini yarıya yakın ölçekleyerek grade enflasyonunu düşürür.
+        adjusted += raw_delta * 0.6
 
         return clamp(adjusted)
+
+    def _normalize_confluence_score(self, raw_score):
+        """Confluence skorunu 0-100 confidence aralığına kalibre eder."""
+        score = float(raw_score or 0)
+
+        if score <= 60:
+            normalized = score * 0.7
+        elif score <= 100:
+            normalized = 42 + ((score - 60) * 0.45)
+        elif score <= 140:
+            normalized = 60 + ((score - 100) * 0.35)
+        elif score <= 180:
+            normalized = 74 + ((score - 140) * 0.25)
+        else:
+            normalized = 84 + ((score - 180) * 0.1)
+
+        return clamp(normalized, 0, 95)
 
     def _alignment_conflicts(self, signal_direction, *modules):
         if signal_direction not in ["LONG", "SHORT"]:

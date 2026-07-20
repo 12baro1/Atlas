@@ -44,4 +44,5 @@ def test_stack_confluence_bonus_and_signal_transfer():
 
     assert signal["liquidity_strength"] == 88
     assert signal["smt_confidence"] == 82
-    assert signal["confidence"] >= 85
+    assert signal["confidence"] >= 78
+    assert signal["grade"] in ["A", "A+", "S+"]

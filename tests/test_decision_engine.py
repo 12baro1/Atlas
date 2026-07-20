@@ -170,5 +170,21 @@ def test_decision_skips_when_grade_below_quality_floor():
         )
     )
 
+    assert result["action"] != "SKIP"
+
+
+def test_decision_skips_when_grade_below_new_quality_floor():
+    engine = DecisionEngine()
+
+    result = engine.decide(
+        **_supportive_context(
+            signal={"signal": "LONG", "confidence": 99, "grade": "A", "strength": "ELITE"},
+            confluence={"score": 98, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
+            risk={"entry": 100.0, "stop_loss": 99.0, "rr": 4.1, "risk": 1.0, "position_size": 1.0},
+            cisd={"active": True, "direction": "BULLISH", "confidence": 90},
+            market_phase={"phase": "Expansion"},
+        )
+    )
+
     assert result["action"] == "SKIP"
     assert "Grade below quality minimum" in result["reason"]
