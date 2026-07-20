@@ -228,9 +228,16 @@ class AtlasEngine:
             confluence=execution_state["confluence"],
             entry=execution_state["entry"],
             risk=execution_state["risk"],
+            mtf=context_state.get("mtf"),
+            ote=context_state.get("ote"),
+            htf_orderblock=context_state.get("htf_orderblock"),
+            liquidity_sweep=structure_state.get("liquidity_sweep"),
+            market_phase=context_state.get("market_phase"),
             cisd=cisd_state,
             volume_profile=volume_profile_state,
             institutional=institutional_state,
+            unicorn=unicorn_state,
+            smt=smt_state,
         )
 
         analysis = self._compose_analysis(

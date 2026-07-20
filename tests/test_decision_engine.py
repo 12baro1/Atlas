@@ -1,87 +1,117 @@
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from decision_engine import DecisionEngine
 
 
-def test_decision_long_when_cisd_aligned():
+def _supportive_context(**overrides):
+    context = {
+        "signal": {"signal": "LONG", "confidence": 96, "grade": "S+", "strength": "ELITE"},
+        "confluence": {"score": 82, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
+        "entry": {"valid": True},
+        "risk": {"entry": 100.0, "stop_loss": 99.0, "rr": 3.5, "risk": 1.0, "position_size": 1.0},
+        "mtf": {"valid": True, "entry": "LONG"},
+        "ote": {"valid": True},
+        "htf_orderblock": {"valid": True},
+        "liquidity_sweep": {"is_sweep": True, "strength_score": 80},
+        "market_phase": {"phase": "Expansion"},
+        "cisd": {"active": True, "direction": "BULLISH", "confidence": 80},
+        "volume_profile": {"active": True, "direction": "BULLISH", "confidence": 80},
+        "institutional": {"active": False, "direction": "NONE", "confidence": 0},
+        "unicorn": {"active": True, "direction": "BULLISH", "best": {"direction": "BULLISH"}, "confidence": 80},
+        "smt": {"active": True, "direction": "LONG", "confidence": 80},
+    }
+    context.update(overrides)
+    return context
+
+
+def test_decision_executes_for_strong_quality_setup():
+    engine = DecisionEngine()
+
+    result = engine.decide(**_supportive_context())
+
+    assert result["action"] == "EXECUTE"
+    assert "Decision Score:" in result["reason"]
+    assert "+10 Grade S+" in result["reason"]
+    assert "+10 ELITE" in result["reason"]
+    assert "+10 Confidence >=95" in result["reason"]
+    assert "+10 RR >=3" in result["reason"]
+    assert "Final Action: EXECUTE" in result["reason"]
+
+
+def test_decision_executes_with_caution_when_one_soft_blocker_remains():
     engine = DecisionEngine()
 
     result = engine.decide(
-        signal={"signal": "LONG", "confidence": 82},
-        confluence={"score": 90},
-        entry={"valid": True},
-        risk={"entry": 100.0, "stop_loss": 99.0, "rr": 3.2, "risk": 1.2},
-        cisd={"active": True, "direction": "BULLISH", "confidence": 78},
+        **_supportive_context(
+            signal={"signal": "LONG", "confidence": 90, "grade": "A+", "strength": "STRONG"},
+            confluence={"score": 83, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
+            risk={"entry": 100.0, "stop_loss": 99.0, "rr": 3.2, "risk": 1.0, "position_size": 1.0},
+            cisd={"active": True, "direction": "BEARISH", "confidence": 80},
+            volume_profile={"active": False, "direction": "NONE", "confidence": 0},
+            unicorn={"active": False, "direction": "NONE", "best": None, "confidence": 0},
+            liquidity_sweep={"is_sweep": False, "strength_score": 0},
+        )
     )
 
-    assert result["action"] == "LONG"
-    assert result["cisd_match"] is True
+    assert result["action"] == "EXECUTE_WITH_CAUTION"
+    assert "-10 CISD mismatch" in result["reason"]
+    assert "Final Action: EXECUTE_WITH_CAUTION" in result["reason"]
 
 
-def test_decision_wait_on_cisd_mismatch():
+def test_decision_skips_when_entry_invalid_even_if_score_high():
     engine = DecisionEngine()
 
     result = engine.decide(
-        signal={"signal": "LONG", "confidence": 85},
-        confluence={"score": 88},
-        entry={"valid": True},
-        risk={"entry": 100.0, "stop_loss": 99.0, "rr": 3.0, "risk": 1.0},
-        cisd={"active": True, "direction": "BEARISH", "confidence": 80},
-    )
-
-    assert result["action"] == "WAIT"
-    assert "mismatch" in result["reason"].lower()
-
-
-def test_decision_wait_when_entry_invalid_even_if_score_high():
-    engine = DecisionEngine()
-
-    result = engine.decide(
-        signal={"signal": "SHORT", "confidence": 100},
-        confluence={"score": 100},
-        entry={"valid": False},
-        risk={"entry": 1.0, "stop_loss": 1.1, "rr": 3.2, "risk": 0.1},
-        cisd={"active": True, "direction": "BEARISH", "confidence": 90},
-        volume_profile={"active": True, "direction": "BEARISH", "confidence": 90},
-        institutional={"active": True, "direction": "SHORT", "confidence": 90},
+        **_supportive_context(
+            entry={"valid": False},
+            signal={"signal": "SHORT", "confidence": 100, "grade": "S+", "strength": "ELITE"},
+            cisd={"active": True, "direction": "BEARISH", "confidence": 90},
+            volume_profile={"active": True, "direction": "BEARISH", "confidence": 90},
+            unicorn={"active": True, "direction": "BEARISH", "best": {"direction": "BEARISH"}, "confidence": 90},
+            smt={"active": True, "direction": "SHORT", "confidence": 90},
+        )
     )
 
     assert result["entry_valid"] is False
-    assert result["action"] == "WAIT"
-    assert "Entry is not valid" in result["reason"]
+    assert result["action"] == "SKIP"
+    assert "Entry invalid" in result["reason"]
 
 
-def test_decision_wait_when_risk_rr_exists_but_levels_missing():
+def test_decision_skips_when_rr_below_minimum_threshold():
     engine = DecisionEngine()
 
     result = engine.decide(
-        signal={"signal": "LONG", "confidence": 95},
-        confluence={"score": 95},
-        entry={"valid": True},
-        risk={"rr": 2.8},
-        cisd={"active": True, "direction": "BULLISH", "confidence": 80},
+        **_supportive_context(
+            signal={"signal": "SHORT", "confidence": 100, "grade": "S+", "strength": "ELITE"},
+            confluence={"score": 100, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
+            risk={"entry": 0.03089, "stop_loss": 0.03098, "rr": 0.67, "risk": 0.00009, "position_size": 140147.9424},
+            cisd={"active": True, "direction": "BEARISH", "confidence": 86},
+            volume_profile={"active": True, "direction": "BEARISH", "confidence": 91},
+            institutional={"active": True, "direction": "SHORT", "confidence": 63},
+        )
     )
 
-    assert result["risk_valid"] is False
-    assert result["action"] == "WAIT"
-    assert "Risk is not valid" in result["reason"]
+    assert result["action"] == "SKIP"
+    assert "RR below minimum RR" in result["reason"]
 
 
-def test_decision_wait_when_rr_below_minimum_threshold():
+def test_decision_override_executes_despite_single_mismatch_on_elite_setup():
     engine = DecisionEngine()
 
     result = engine.decide(
-        signal={"signal": "SHORT", "confidence": 100},
-        confluence={"score": 100},
-        entry={"valid": True},
-        risk={"entry": 0.03089, "stop_loss": 0.03098, "rr": 0.67, "risk": 0.00009, "position_size": 140147.9424},
-        cisd={"active": True, "direction": "BEARISH", "confidence": 86},
-        volume_profile={"active": True, "direction": "BEARISH", "confidence": 91},
-        institutional={"active": True, "direction": "SHORT", "confidence": 63},
+        **_supportive_context(
+            signal={"signal": "LONG", "confidence": 100, "grade": "S+", "strength": "ELITE"},
+            confluence={"score": 84, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
+            risk={"entry": 100.0, "stop_loss": 99.0, "rr": 3.4, "risk": 1.0, "position_size": 1.0},
+            unicorn={"active": True, "direction": "BEARISH", "best": {"direction": "BEARISH"}, "confidence": 92},
+            cisd={"active": False, "direction": "NONE", "confidence": 0},
+            volume_profile={"active": True, "direction": "LONG", "confidence": 88},
+        )
     )
 
-    assert result["action"] == "WAIT"
-    assert "RR below threshold" in result["reason"]
+    assert result["action"] == "EXECUTE"
+    assert "Override: high-quality mismatch exception met" in result["reason"]
+    assert "-10 Unicorn mismatch" in result["reason"]
