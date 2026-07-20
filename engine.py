@@ -201,6 +201,7 @@ class AtlasEngine:
         )
 
         execution_state = self._build_execution_state(
+            candles=candles,
             entry_structure=structure_state["structure"],
             mtf=context_state["mtf"],
             trend=context_state["trend"],
@@ -456,6 +457,7 @@ class AtlasEngine:
 
     def _build_execution_state(
         self,
+        candles,
         entry_structure,
         mtf,
         trend,
