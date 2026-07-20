@@ -161,8 +161,11 @@ class Config:
 
     # Bybit / Auto Trading
     AUTO_TRADING_ENABLED = os.getenv("ATLAS_AUTO_TRADING_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
+    AUTO_TRADING_AUTO_ENABLE_WITH_KEYS = os.getenv("ATLAS_AUTO_TRADING_AUTO_ENABLE_WITH_KEYS", "1").strip().lower() in {"1", "true", "yes"}
     AUTO_TRADING_MIN_CONFIDENCE = float(os.getenv("ATLAS_AUTO_TRADING_MIN_CONFIDENCE", "85"))
     AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION = os.getenv("ATLAS_AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION", "0").strip().lower() in {"1", "true", "yes"}
+    AUTO_TRADING_MIN_LEVERAGE = int(float(os.getenv("ATLAS_AUTO_TRADING_MIN_LEVERAGE", "1")))
+    AUTO_TRADING_MAX_LEVERAGE = int(float(os.getenv("ATLAS_AUTO_TRADING_MAX_LEVERAGE", "20")))
     BYBIT_TESTNET = os.getenv("ATLAS_BYBIT_TESTNET", "1").strip().lower() in {"1", "true", "yes"}
     BYBIT_API_KEY = _env_or_rc("ATLAS_BYBIT_API_KEY", "")
     BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "")
@@ -203,8 +206,11 @@ class Config:
         cls.MIN_STOP_PERCENT = float(_env_or_rc("ATLAS_MIN_STOP_PERCENT", str(cls.MIN_STOP_PERCENT)))
         cls.REJECT_TIGHT_STOPS = _env_or_rc("ATLAS_REJECT_TIGHT_STOPS", "1").strip().lower() in {"1", "true", "yes"}
         cls.AUTO_TRADING_ENABLED = _env_or_rc("ATLAS_AUTO_TRADING_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
+        cls.AUTO_TRADING_AUTO_ENABLE_WITH_KEYS = _env_or_rc("ATLAS_AUTO_TRADING_AUTO_ENABLE_WITH_KEYS", "1").strip().lower() in {"1", "true", "yes"}
         cls.AUTO_TRADING_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_AUTO_TRADING_MIN_CONFIDENCE", "85"))
         cls.AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION = _env_or_rc("ATLAS_AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION", "0").strip().lower() in {"1", "true", "yes"}
+        cls.AUTO_TRADING_MIN_LEVERAGE = int(float(_env_or_rc("ATLAS_AUTO_TRADING_MIN_LEVERAGE", "1")))
+        cls.AUTO_TRADING_MAX_LEVERAGE = int(float(_env_or_rc("ATLAS_AUTO_TRADING_MAX_LEVERAGE", "20")))
         cls.BYBIT_TESTNET = _env_or_rc("ATLAS_BYBIT_TESTNET", "1").strip().lower() in {"1", "true", "yes"}
         cls.BYBIT_API_KEY = _env_or_rc("ATLAS_BYBIT_API_KEY", "")
         cls.BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "")
