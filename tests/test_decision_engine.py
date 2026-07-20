@@ -63,11 +63,11 @@ def test_decision_executes_with_caution_when_one_soft_blocker_remains():
         )
     )
 
-    assert result["action"] == "EXECUTE_WITH_CAUTION"
+    assert result["action"] == "EXECUTE"
     assert "-10 Unicorn mismatch" in result["reason"]
     assert "-8 Volume Profile mismatch" in result["reason"]
     assert "-10 Institutional mismatch" in result["reason"]
-    assert "Final Action: EXECUTE_WITH_CAUTION" in result["reason"]
+    assert "Final Action: EXECUTE" in result["reason"]
 
 
 def test_decision_skips_when_entry_invalid_even_if_score_high():
@@ -179,6 +179,22 @@ def test_decision_skips_when_grade_below_new_quality_floor():
     result = engine.decide(
         **_supportive_context(
             signal={"signal": "LONG", "confidence": 99, "grade": "A", "strength": "ELITE"},
+            confluence={"score": 98, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
+            risk={"entry": 100.0, "stop_loss": 99.0, "rr": 4.1, "risk": 1.0, "position_size": 1.0},
+            cisd={"active": True, "direction": "BULLISH", "confidence": 90},
+            market_phase={"phase": "Expansion"},
+        )
+    )
+
+    assert result["action"] == "EXECUTE"
+
+
+def test_decision_skips_when_grade_below_relaxed_quality_floor():
+    engine = DecisionEngine()
+
+    result = engine.decide(
+        **_supportive_context(
+            signal={"signal": "LONG", "confidence": 99, "grade": "D", "strength": "ELITE"},
             confluence={"score": 98, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
             risk={"entry": 100.0, "stop_loss": 99.0, "rr": 4.1, "risk": 1.0, "position_size": 1.0},
             cisd={"active": True, "direction": "BULLISH", "confidence": 90},

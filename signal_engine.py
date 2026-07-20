@@ -64,7 +64,7 @@ class SignalEngine:
             grade = "B"
             stars = "★★★☆☆"
             strength = "NORMAL"
-        elif confidence_adjusted >= 60:
+        elif confidence_adjusted >= 55:
             grade = "C"
             stars = "★★☆☆☆"
             strength = "WEAK"
@@ -173,17 +173,17 @@ class SignalEngine:
         score = float(raw_score or 0)
 
         if score <= 60:
-            normalized = score * 0.7
+            normalized = score * 0.9
         elif score <= 100:
-            normalized = 42 + ((score - 60) * 0.45)
+            normalized = 54 + ((score - 60) * 0.75)
         elif score <= 140:
-            normalized = 60 + ((score - 100) * 0.35)
+            normalized = 84 + ((score - 100) * 0.30)
         elif score <= 180:
-            normalized = 74 + ((score - 140) * 0.25)
+            normalized = 96 + ((score - 140) * 0.10)
         else:
-            normalized = 84 + ((score - 180) * 0.1)
+            normalized = 100
 
-        return clamp(normalized, 0, 95)
+        return clamp(normalized, 0, 100)
 
     def _alignment_conflicts(self, signal_direction, *modules):
         if signal_direction not in ["LONG", "SHORT"]:

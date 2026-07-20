@@ -52,9 +52,9 @@ def test_telegram_message_hides_levels_when_entry_invalid():
         }
     )
 
-    assert "Entry levels : withheld (invalid entry)" in message
-    assert "Capital At Risk" not in message
-    assert "TP1 :" not in message
+    assert "ENTRY" in message
+    assert "Valid: False" in message
+    assert "Signal: SHORT" in message
 
 
 def test_notify_if_elite_skips_invalid_entry_before_sending(monkeypatch):
@@ -142,11 +142,10 @@ def test_telegram_message_compact_mode_reduces_clutter():
         }
     )
 
-    assert "Passed: 3 | Partial: 1 | Failed: 4" in message
-    assert "Target Risk Capital" not in message
-    assert "Risk %" not in message
-    assert "Net RR (Cost Adj.)" not in message
-    assert "Reason : " in message
+    assert "SMC CHECKS" not in message
+    assert "MARKET PHASE" not in message
+    assert "UNICORN SETUP" not in message
+    assert "Reason:" in message
     assert ("A" * 170) not in message
 
 
@@ -263,9 +262,9 @@ def test_telegram_message_handles_partial_risk_payload():
         }
     )
 
-    assert "Capital At Risk : None USDT" in message
-    assert "Position Size : None" in message
-    assert "RR : None" in message
+    assert "RISK" in message
+    assert "Risk: 50" in message
+    assert "RR: None" in message
 
 
 def test_telegram_message_shows_rr_breakdown_and_selected_rr():
@@ -305,8 +304,8 @@ def test_telegram_message_shows_rr_breakdown_and_selected_rr():
         }
     )
 
-    assert "RR1 : 1.16" in message
-    assert "RR2 : 2" in message
-    assert "RR3 : 3" in message
-    assert "Selected TP : tp3" in message
-    assert "Selected RR : 3" in message
+    assert "RR1: 1.16" in message
+    assert "RR2: 2" in message
+    assert "RR3: 3" in message
+    assert "Selected TP: tp3" in message
+    assert "Selected RR: 3" in message

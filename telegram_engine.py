@@ -29,7 +29,63 @@ class TelegramEngine:
             return text
         return text[: max_len - 3].rstrip() + "..."
 
+    def _format_signal_minimal(self, result):
+        symbol = result["symbol"]
+        signal = result.get("signal") or {}
+        entry = result.get("entry") or {}
+        risk = result.get("risk") or {}
+        dynamic_tp = result.get("dynamic_tp") or {}
+        decision = result.get("decision") or {}
+
+        msg = []
+        msg.append("ATLAS SIGNAL")
+        msg.append(f"Coin: {symbol}")
+        msg.append(f"Signal: {signal.get('signal', 'WAIT')}")
+        msg.append(f"Confidence: {signal.get('confidence', 0)}%")
+        msg.append("")
+
+        msg.append("ENTRY")
+        msg.append(f"Valid: {entry.get('valid', False)}")
+        msg.append(f"Entry: {self._fmt(entry.get('entry'))}")
+        msg.append(f"Stop Loss: {self._fmt(entry.get('stop_loss'))}")
+        msg.append("")
+
+        entry_is_valid = bool(entry.get("valid"))
+        if entry_is_valid and risk and risk.get("risk") is not None:
+            display_rr = risk.get("selected_rr") if risk.get("selected_rr") is not None else risk.get("rr")
+            msg.append("RISK")
+            msg.append(f"Risk: {self._fmt(risk.get('risk'))}")
+            msg.append(f"TP1: {self._fmt(risk.get('tp1'))}")
+            msg.append(f"TP2: {self._fmt(risk.get('tp2'))}")
+            msg.append(f"TP3: {self._fmt(risk.get('tp3'))}")
+            msg.append(f"RR1: {self._fmt(risk.get('rr1'))}")
+            msg.append(f"RR2: {self._fmt(risk.get('rr2'))}")
+            msg.append(f"RR3: {self._fmt(risk.get('rr3'))}")
+            msg.append(f"Selected TP: {self._fmt(risk.get('selected_tp'))}")
+            msg.append(f"Selected RR: {self._fmt(display_rr)}")
+            msg.append(f"RR: {self._fmt(display_rr)}")
+            msg.append("")
+        elif entry_is_valid:
+            msg.append("RISK")
+            msg.append(f"Risk: {self._fmt(risk.get('risk'))}")
+            msg.append(f"TP1: {self._fmt(dynamic_tp.get('tp1'))}")
+            msg.append(f"TP2: {self._fmt(dynamic_tp.get('tp2'))}")
+            msg.append(f"TP3: {self._fmt(dynamic_tp.get('tp3'))}")
+            msg.append(f"RR: {self._fmt(risk.get('rr'))}")
+            msg.append("")
+
+        msg.append("DECISION")
+        msg.append(f"Action: {decision.get('action', 'WAIT')}")
+        max_len = int(getattr(Config, "TELEGRAM_MAX_DECISION_REASON_LENGTH", 140))
+        reason = self._truncate(decision.get("reason", "-"), max_len)
+        msg.append(f"Reason: {reason}")
+
+        return "\n".join(msg)
+
     def format_signal(self, result):
+        if bool(getattr(Config, "TELEGRAM_MINIMAL_LAYOUT", True)):
+            return self._format_signal_minimal(result)
+
         symbol = result["symbol"]
         signal = result.get("signal") or {}
         entry = result.get("entry") or {}

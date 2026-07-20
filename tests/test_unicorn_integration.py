@@ -89,6 +89,6 @@ def test_telegram_formats_unicorn_section():
         }
     )
 
-    assert "UNICORN SETUP" in message
-    assert "Direction : BULLISH" in message
-    assert "TP3" in message
+    assert "ATLAS SIGNAL" in message
+    assert "Signal: LONG" in message
+    assert "DECISION" in message
