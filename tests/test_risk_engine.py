@@ -105,3 +105,62 @@ def test_rr_engine_derives_rr_from_tp3_when_missing():
 
     assert rr is not None
     assert rr["rr"] == pytest.approx(3.0)
+
+
+def test_risk_engine_expands_too_tight_stop_using_atr_floor():
+    risk = RiskEngine().calculate(
+        entry=79.00,
+        stop_loss=79.01,
+        dynamic_tp={"tp1": 78.5, "tp2": 78.0, "tp3": 77.5},
+        atr_value=2.0,
+        tick_size=0.01,
+        spread=0.0,
+        slippage=0.0,
+    )
+
+    assert risk is not None
+    assert risk["risk_setup_valid"] is True
+    assert risk["stop_adjusted"] is True
+    assert risk["stop_loss"] == pytest.approx(79.50)
+    assert risk["risk"] == pytest.approx(0.5)
+    assert risk["rr"] == pytest.approx(3.0)
+
+
+def test_risk_engine_caps_position_size_to_config_limit(monkeypatch):
+    monkeypatch.setattr(Config, "MAX_POSITION_SIZE", 50.0)
+
+    risk = RiskEngine().calculate(
+        entry=100.0,
+        stop_loss=99.0,
+        dynamic_tp={"tp1": 101.5, "tp2": 102.5, "tp3": 104.0},
+        atr_value=1.0,
+        tick_size=0.01,
+        spread=0.0,
+        slippage=0.0,
+    )
+
+    assert risk is not None
+    assert risk["position_size_raw"] > 50.0
+    assert risk["position_size"] == pytest.approx(50.0)
+    assert risk["position_size_capped"] is True
+    assert risk["capital_at_risk"] == pytest.approx(50.0)
+
+
+def test_risk_engine_marks_invalid_setup_when_auto_expand_disabled(monkeypatch):
+    monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", False)
+
+    risk = RiskEngine().calculate(
+        entry=79.00,
+        stop_loss=79.01,
+        dynamic_tp={"tp1": 78.5, "tp2": 78.0, "tp3": 77.5},
+        atr_value=2.0,
+        tick_size=0.01,
+        spread=0.0,
+        slippage=0.0,
+    )
+
+    assert risk is not None
+    assert risk["risk_setup_valid"] is False
+    assert risk["risk_setup_reason"] == "Invalid Risk Setup"
+    assert risk["rr"] is None
+

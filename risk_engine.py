@@ -3,22 +3,89 @@ risk_engine.py
 Atlas Risk Engine v4
 """
 
+import math
+
 from core.analysis_utils import clamp
+from utils.atr import atr as calculate_atr
 from config import Config
 
 class RiskEngine:
 
-    def calculate(self, entry, stop_loss, dynamic_tp=None, volume_profile=None, institutional=None):
+    def calculate(
+        self,
+        entry,
+        stop_loss,
+        dynamic_tp=None,
+        volume_profile=None,
+        institutional=None,
+        candles=None,
+        atr_value=None,
+        tick_size=None,
+        spread=None,
+        slippage=None,
+        auto_expand_stop=None,
+    ):
 
         if entry is None or stop_loss is None:
             return None
 
-        risk = abs(entry - stop_loss)
+        side = "LONG" if entry > stop_loss else "SHORT"
+        if entry == stop_loss:
+            return self._invalid_risk_setup(entry, stop_loss, side=side, reason="Stop Loss invalid")
+
+        atr_period = int(getattr(Config, "ATR_PERIOD", 14))
+        min_stop_atr_multiplier = float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.25))
+        min_tick_fallback = float(getattr(Config, "MIN_TICK_DISTANCE_FALLBACK", 0.01))
+        spread_rate = float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002))
+        slippage_rate = float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003))
+        max_position_size_limit = float(getattr(Config, "MAX_POSITION_SIZE", 1000.0))
+        should_auto_expand = bool(getattr(Config, "AUTO_EXPAND_TIGHT_STOPS", True) if auto_expand_stop is None else auto_expand_stop)
+
+        inferred_tick_size = self._infer_tick_size(
+            entry,
+            stop_loss,
+            (dynamic_tp or {}).get("tp1") if isinstance(dynamic_tp, dict) else None,
+            (dynamic_tp or {}).get("tp2") if isinstance(dynamic_tp, dict) else None,
+            (dynamic_tp or {}).get("tp3") if isinstance(dynamic_tp, dict) else None,
+        )
+        resolved_tick_size = self._resolve_tick_size(tick_size, inferred_tick_size, min_tick_fallback)
+
+        atr_snapshot = self._resolve_atr(atr_value=atr_value, candles=candles, atr_period=atr_period)
+        minimum_tick_distance = max(resolved_tick_size, min_tick_fallback)
+        atr_floor_distance = max(atr_snapshot * min_stop_atr_multiplier, minimum_tick_distance)
+        spread_buffer = self._resolve_buffer(spread, entry, spread_rate, minimum_tick_distance)
+        slippage_buffer = self._resolve_buffer(slippage, entry, slippage_rate, minimum_tick_distance)
+        minimum_stop_distance = atr_floor_distance + spread_buffer + slippage_buffer
+
+        requested_risk = abs(entry - stop_loss)
+        stop_too_tight = requested_risk < minimum_stop_distance
+        adjusted_stop_loss = stop_loss
+        stop_adjusted = False
+
+        if stop_too_tight:
+            if should_auto_expand:
+                adjusted_stop_loss = self._expand_stop(entry, side, minimum_stop_distance, resolved_tick_size)
+                stop_adjusted = True
+            else:
+                return self._invalid_risk_setup(
+                    entry,
+                    stop_loss,
+                    side=side,
+                    reason="Invalid Risk Setup",
+                    atr=atr_snapshot,
+                    minimum_stop_distance=minimum_stop_distance,
+                    tick_size=resolved_tick_size,
+                    spread_buffer=spread_buffer,
+                    slippage_buffer=slippage_buffer,
+                    requested_risk=requested_risk,
+                    stop_adjusted=False,
+                )
+
+        risk = abs(entry - adjusted_stop_loss)
 
         if risk <= 0:
-            return None
+            return self._invalid_risk_setup(entry, adjusted_stop_loss, side=side, reason="Stop Loss invalid")
 
-        side = "LONG" if entry > stop_loss else "SHORT"
         vp_factor = self._volume_profile_position_factor(volume_profile, side=side)
         institutional_factor = self._institutional_position_factor(institutional, side=side)
 
@@ -54,12 +121,15 @@ class RiskEngine:
         effective_risk_percent = max(0.0, base_risk_percent * risk_reduction_factor)
 
         target_capital_at_risk = account_balance * (effective_risk_percent / 100)
-        position_size = target_capital_at_risk / risk
+        position_size_raw = target_capital_at_risk / risk
 
         raw_sizing_factor = vp_factor * institutional_factor
         capped_sizing_factor = clamp(raw_sizing_factor, 0.65, 1.0)
-        adjusted_position_size = position_size * capped_sizing_factor
+        adjusted_position_size = position_size_raw * capped_sizing_factor
+        capped_position_size = min(adjusted_position_size, max_position_size_limit)
+        position_size_capped = capped_position_size < adjusted_position_size
         effective_capital_at_risk = adjusted_position_size * risk
+        capped_capital_at_risk = capped_position_size * risk
 
         return {
 
@@ -67,11 +137,33 @@ class RiskEngine:
 
             "entry": round(entry, 8),
 
-            "stop_loss": round(stop_loss, 8),
+            "requested_stop_loss": round(stop_loss, 8),
+
+            "stop_loss": round(adjusted_stop_loss, 8),
+
+            "original_stop_loss": round(stop_loss, 8),
+
+            "stop_adjusted": stop_adjusted,
+
+            "risk_setup_valid": True,
+
+            "risk_setup_reason": "Auto-expanded stop" if stop_adjusted else "OK",
+
+            "atr": round(atr_snapshot, 8),
+
+            "tick_size": round(resolved_tick_size, 8),
+
+            "minimum_tick_distance": round(minimum_tick_distance, 8),
+
+            "minimum_stop_distance": round(minimum_stop_distance, 8),
+
+            "spread_buffer": round(spread_buffer, 8),
+
+            "slippage_buffer": round(slippage_buffer, 8),
 
             "risk": round(risk, 8),
 
-            "capital_at_risk": round(effective_capital_at_risk, 2),
+            "capital_at_risk": round(capped_capital_at_risk, 2),
 
             "capital_at_risk_target": round(target_capital_at_risk, 2),
 
@@ -79,9 +171,15 @@ class RiskEngine:
 
             "risk_percent_base": round(base_risk_percent, 4),
 
-            "position_size": round(adjusted_position_size, 4),
+            "position_size": round(capped_position_size, 4),
 
-            "position_size_raw": round(position_size, 4),
+            "position_size_raw": round(position_size_raw, 4),
+
+            "position_size_pre_cap": round(adjusted_position_size, 4),
+
+            "position_size_limit": round(max_position_size_limit, 4),
+
+            "position_size_capped": position_size_capped,
 
             "volume_profile_factor": round(vp_factor, 4),
 
@@ -111,6 +209,133 @@ class RiskEngine:
 
             "risk_reduction_factor": round(risk_reduction_factor, 4),
 
+            "requested_risk": round(requested_risk, 8),
+
+        }
+
+    def _resolve_atr(self, atr_value=None, candles=None, atr_period=14):
+        if atr_value is not None:
+            try:
+                return max(0.0, float(atr_value))
+            except (TypeError, ValueError):
+                return 0.0
+
+        if candles:
+            try:
+                return max(0.0, float(calculate_atr(candles, period=atr_period)))
+            except Exception:
+                return 0.0
+
+        return 0.0
+
+    def _resolve_tick_size(self, tick_size, inferred_tick_size, minimum_fallback):
+        candidates = [value for value in [tick_size, inferred_tick_size, minimum_fallback] if value is not None]
+        resolved = min(candidates) if tick_size is not None else max(candidates)
+        return max(minimum_fallback, float(resolved))
+
+    def _resolve_buffer(self, buffer_value, entry, rate, minimum_tick_distance):
+        if buffer_value is None:
+            resolved = abs(entry) * rate
+        else:
+            try:
+                resolved = abs(float(buffer_value))
+            except (TypeError, ValueError):
+                resolved = abs(entry) * rate
+
+        return max(resolved, minimum_tick_distance if resolved > 0 else 0.0)
+
+    def _infer_tick_size(self, *prices):
+        precision = 0
+        for price in prices:
+            if price is None:
+                continue
+            try:
+                numeric = float(price)
+            except (TypeError, ValueError):
+                continue
+
+            text = f"{numeric:.10f}".rstrip("0").rstrip(".")
+            if "." in text:
+                precision = max(precision, len(text.split(".")[1]))
+
+        if precision <= 0:
+            return float(getattr(Config, "MIN_TICK_DISTANCE_FALLBACK", 0.01))
+
+        return 10 ** (-precision)
+
+    def _expand_stop(self, entry, side, minimum_stop_distance, tick_size):
+        if side == "LONG":
+            candidate = entry - minimum_stop_distance
+            return self._snap_to_tick(candidate, tick_size, "down")
+
+        candidate = entry + minimum_stop_distance
+        return self._snap_to_tick(candidate, tick_size, "up")
+
+    def _snap_to_tick(self, price, tick_size, direction):
+        if tick_size is None or tick_size <= 0:
+            return round(price, 8)
+
+        scaled = price / tick_size
+        if direction == "down":
+            snapped = math.floor(scaled) * tick_size
+        else:
+            snapped = math.ceil(scaled) * tick_size
+        return round(snapped, 8)
+
+    def _invalid_risk_setup(
+        self,
+        entry,
+        stop_loss,
+        side,
+        reason,
+        atr=0.0,
+        minimum_stop_distance=0.0,
+        tick_size=0.0,
+        spread_buffer=0.0,
+        slippage_buffer=0.0,
+        requested_risk=0.0,
+        stop_adjusted=False,
+    ):
+        return {
+            "side": side,
+            "entry": round(entry, 8),
+            "requested_stop_loss": round(stop_loss, 8),
+            "stop_loss": round(stop_loss, 8),
+            "original_stop_loss": round(stop_loss, 8),
+            "stop_adjusted": stop_adjusted,
+            "risk_setup_valid": False,
+            "risk_setup_reason": reason,
+            "atr": round(atr, 8),
+            "tick_size": round(tick_size, 8),
+            "minimum_tick_distance": round(max(tick_size, 0.0), 8),
+            "minimum_stop_distance": round(minimum_stop_distance, 8),
+            "spread_buffer": round(spread_buffer, 8),
+            "slippage_buffer": round(slippage_buffer, 8),
+            "risk": None,
+            "capital_at_risk": None,
+            "capital_at_risk_target": None,
+            "risk_percent": None,
+            "risk_percent_base": None,
+            "position_size": None,
+            "position_size_raw": None,
+            "position_size_pre_cap": None,
+            "position_size_limit": float(getattr(Config, "MAX_POSITION_SIZE", 1000.0)),
+            "position_size_capped": False,
+            "volume_profile_factor": None,
+            "institutional_factor": None,
+            "sizing_factor": None,
+            "sizing_factor_raw": None,
+            "portfolio_risk": {},
+            "adaptive_position_sizing": {},
+            "tp1": None,
+            "tp2": None,
+            "tp3": None,
+            "rr": None,
+            "net_rr": None,
+            "round_trip_cost_rate": float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.0020)),
+            "minimum_rr": float(getattr(Config, "MINIMUM_RR", 3.0)),
+            "risk_reduction_factor": None,
+            "requested_risk": round(requested_risk, 8),
         }
 
     def _volume_profile_position_factor(self, volume_profile, side):

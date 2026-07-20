@@ -505,7 +505,7 @@ class AtlasEngine:
         )
 
         dynamic_tp = self._calculate_dynamic_tp(entry, liquidity, fvg, orderblocks)
-        risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional)
+        risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles)
         rr = self.rr.evaluate(risk) if risk is not None else None
 
         analysis_for_signal = {
@@ -840,7 +840,7 @@ class AtlasEngine:
             self.logger.exception("Dynamic TP hesaplama hatasi")
             return {"tp1": None, "tp2": None, "tp3": None}
 
-    def _calculate_risk(self, entry, dynamic_tp, volume_profile=None, institutional=None):
+    def _calculate_risk(self, entry, dynamic_tp, volume_profile=None, institutional=None, candles=None):
         """Geçerli entry/SL için risk çıktısını hesaplar."""
         if entry.get("entry") is None or entry.get("stop_loss") is None:
             return None
@@ -851,6 +851,7 @@ class AtlasEngine:
             dynamic_tp=dynamic_tp,
             volume_profile=volume_profile,
             institutional=institutional,
+            candles=candles,
         )
 
     def _notify_if_elite(

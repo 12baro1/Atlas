@@ -233,6 +233,10 @@ class DecisionEngine:
         if risk is None:
             return ["Risk cannot be calculated", "Stop Loss invalid", "Position size invalid"], False
 
+        if risk.get("risk_setup_valid") is False:
+            self._append_unique(blockers, risk.get("risk_setup_reason") or "Invalid Risk Setup")
+            return blockers, False
+
         risk_amount = self._safe_number(risk.get("risk"), None)
         stop_loss = self._safe_number(risk.get("stop_loss"), None)
 
