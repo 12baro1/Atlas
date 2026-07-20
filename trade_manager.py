@@ -20,7 +20,7 @@ class TradeManager:
         reasons = []
 
         # Signal
-        if signal["signal"] != "NONE":
+        if signal.get("signal") in ["LONG", "SHORT"]:
             score += 20
             reasons.append("Signal")
 

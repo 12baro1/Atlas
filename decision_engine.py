@@ -60,6 +60,18 @@ class DecisionEngine:
             position_size=position_size,
         )
 
+        quality_blockers = self._collect_quality_blockers(
+            signal_grade=signal_grade,
+            signal_confidence=signal_confidence,
+            rr_value=rr_value,
+            minimum_rr=minimum_rr,
+            direction=signal_dir,
+            mtf=mtf,
+            cisd=cisd,
+            market_phase=market_phase,
+            confluence=confluence,
+        )
+
         critical_blockers = []
         self._append_unique(critical_blockers, "Signal direction invalid" if signal_dir not in ["LONG", "SHORT"] else None)
         self._append_unique(critical_blockers, "Entry invalid" if not entry_valid else None)
@@ -70,6 +82,8 @@ class DecisionEngine:
             else None,
         )
         for blocker in risk_blockers:
+            self._append_unique(critical_blockers, blocker)
+        for blocker in quality_blockers:
             self._append_unique(critical_blockers, blocker)
 
         adjustments = self._collect_adjustments(
@@ -89,6 +103,7 @@ class DecisionEngine:
             ote=ote,
             htf_orderblock=htf_orderblock,
             confluence=confluence,
+            market_phase=market_phase,
         )
 
         total_score = self._clamp_score(confluence_score + sum(item["delta"] for item in adjustments))
@@ -139,6 +154,8 @@ class DecisionEngine:
             "selected_tp": risk.get("selected_tp") if isinstance(risk, dict) else None,
             "rr_by_tp": risk.get("rr_by_tp") if isinstance(risk, dict) else None,
             "minimum_rr": minimum_rr,
+            "quality_filters_enabled": bool(getattr(Config, "QUALITY_FILTERS_ENABLED", True)),
+            "quality_blockers": quality_blockers,
             "critical_blockers": critical_blockers,
             "soft_blockers": soft_blockers,
             "bonuses": bonuses,
@@ -316,6 +333,7 @@ class DecisionEngine:
         ote,
         htf_orderblock,
         confluence,
+        market_phase,
     ):
         adjustments = []
 
@@ -340,6 +358,14 @@ class DecisionEngine:
         self._apply_directional_adjustment(adjustments, unicorn, direction, "Unicorn", Config.DECISION_BONUS_UNICORN_ALIGNMENT, Config.DECISION_PENALTY_UNICORN_MISMATCH)
         self._apply_directional_adjustment(adjustments, cisd, direction, "CISD", Config.DECISION_BONUS_CISD_ALIGNMENT, Config.DECISION_PENALTY_CISD_MISMATCH)
         self._apply_directional_adjustment(adjustments, volume_profile, direction, "Volume Profile", Config.DECISION_BONUS_VOLUME_PROFILE_ALIGNMENT, Config.DECISION_PENALTY_VOLUME_PROFILE_MISMATCH)
+        self._apply_directional_adjustment(adjustments, institutional, direction, "Institutional", Config.DECISION_BONUS_INSTITUTIONAL_ALIGNMENT, Config.DECISION_PENALTY_INSTITUTIONAL_MISMATCH)
+
+        phase = str((market_phase or {}).get("phase", "")).strip()
+        allowed_phases = set(getattr(Config, "QUALITY_ALLOWED_MARKET_PHASES", ("Expansion", "Trending", "Reversal")))
+        if phase in allowed_phases:
+            self._add_adjustment(adjustments, Config.DECISION_BONUS_MARKET_PHASE_FRIENDLY, f"Market Phase {phase}")
+        else:
+            self._add_adjustment(adjustments, Config.DECISION_PENALTY_MARKET_PHASE_UNFRIENDLY, f"Market Phase {phase or 'Unknown'}")
 
         if not ote or not ote.get("valid", False):
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_OTE_MISSING, "OTE missing")
@@ -408,6 +434,78 @@ class DecisionEngine:
             return False
 
         return any("mismatch" in item["label"].lower() for item in soft_blockers)
+
+    def _collect_quality_blockers(
+        self,
+        signal_grade,
+        signal_confidence,
+        rr_value,
+        minimum_rr,
+        direction,
+        mtf,
+        cisd,
+        market_phase,
+        confluence,
+    ):
+        if not bool(getattr(Config, "QUALITY_FILTERS_ENABLED", True)):
+            return []
+
+        blockers = []
+
+        min_grade = str(getattr(Config, "QUALITY_MIN_GRADE", "S")).strip().upper()
+        if not self._grade_at_least(signal_grade, min_grade):
+            self._append_unique(blockers, f"Grade below quality minimum: {signal_grade or 'NONE'} < {min_grade}")
+
+        min_confidence = float(getattr(Config, "QUALITY_MIN_CONFIDENCE", 95))
+        if signal_confidence < min_confidence:
+            self._append_unique(
+                blockers,
+                f"Confidence below quality minimum: {self._fmt_number(signal_confidence)} < {self._fmt_number(min_confidence)}",
+            )
+
+        quality_min_rr = max(float(getattr(Config, "QUALITY_MIN_RR", 3.0)), float(minimum_rr))
+        if rr_value is None or rr_value < quality_min_rr:
+            self._append_unique(
+                blockers,
+                f"RR below quality minimum: {self._fmt_number(rr_value)} < {self._fmt_number(quality_min_rr)}",
+            )
+
+        min_confluence_score = float(getattr(Config, "QUALITY_MIN_CONFLUENCE_SCORE", 80))
+        confluence_score = self._safe_number((confluence or {}).get("score"), 0.0)
+        if confluence_score < min_confluence_score:
+            self._append_unique(
+                blockers,
+                f"Confluence below quality minimum: {self._fmt_number(confluence_score)} < {self._fmt_number(min_confluence_score)}",
+            )
+
+        if bool(getattr(Config, "QUALITY_REQUIRE_MTF_ALIGNMENT", True)) and not self._is_alignment_bonus(mtf, direction):
+            self._append_unique(blockers, "HTF + LTF alignment missing")
+
+        if bool(getattr(Config, "QUALITY_REQUIRE_CISD_ALIGNMENT", True)):
+            if not (cisd and cisd.get("active") and self._match_direction(cisd, direction)):
+                self._append_unique(blockers, "CISD alignment missing")
+
+        if bool(getattr(Config, "QUALITY_REQUIRE_STACK_CONFLUENCE", True)) and not self._has_stack_confluence(confluence):
+            self._append_unique(blockers, "Stack Confluence missing")
+
+        phase = str((market_phase or {}).get("phase", "")).strip()
+        allowed_phases = set(getattr(Config, "QUALITY_ALLOWED_MARKET_PHASES", ("Expansion", "Trending", "Reversal")))
+        if phase not in allowed_phases:
+            self._append_unique(blockers, f"Market phase not tradeable: {phase or 'Unknown'}")
+
+        return blockers
+
+    def _grade_at_least(self, grade, minimum_grade):
+        rank = {
+            "D": 1,
+            "C": 2,
+            "B": 3,
+            "A": 4,
+            "A+": 5,
+            "S": 6,
+            "S+": 7,
+        }
+        return rank.get(str(grade or "").strip().upper(), 0) >= rank.get(str(minimum_grade or "").strip().upper(), 0)
 
     def _build_decision_reason(self, score, bonuses, soft_blockers, critical_blockers, action, override_applies):
         lines = [f"Decision Score: {self._fmt_number(score, force_int=True)}"]

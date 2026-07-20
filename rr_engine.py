@@ -8,7 +8,11 @@ import math
 class RREngine:
 
     def calculate_rr(self, entry, stop_loss, tp):
-        """Tek bir TP seviyesi için yön bazlı RR hesaplar."""
+        """Tek bir TP seviyesi için RR hesaplar.
+
+        Not: Reward mutlak mesafe ile hesaplanir. Bu, LONG/SHORT tarafinda
+        ayni matematik ile stabil RR uretimi saglar.
+        """
         if entry is None or stop_loss is None or tp is None:
             return None
 
@@ -16,13 +20,7 @@ class RREngine:
         if risk <= 0:
             return None
 
-        direction = self._resolve_direction(entry, stop_loss)
-        if direction == "LONG":
-            reward = tp - entry
-        elif direction == "SHORT":
-            reward = entry - tp
-        else:
-            return None
+        reward = abs(tp - entry)
 
         rr = reward / risk
         if not math.isfinite(rr):

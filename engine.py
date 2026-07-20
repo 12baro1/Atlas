@@ -241,6 +241,11 @@ class AtlasEngine:
             smt=smt_state,
         )
 
+        execution_state["signal"] = self._apply_decision_to_signal(
+            signal=execution_state["signal"],
+            decision=decision_state,
+        )
+
         analysis = self._compose_analysis(
             structure_state=structure_state,
             context_state=context_state,
@@ -882,15 +887,19 @@ class AtlasEngine:
 
         signal_action = signal.get("signal", "WAIT")
         decision_action = (decision or {}).get("action", "WAIT")
+        decision_trade_direction = self._resolve_trade_direction_from_decision(
+            signal_action=signal_action,
+            decision_action=decision_action,
+        )
         require_decision_action = bool(getattr(Config, "TELEGRAM_REQUIRE_DECISION_ACTION", False))
-        if require_decision_action and decision_action not in ["LONG", "SHORT"]:
+        if require_decision_action and decision_trade_direction not in ["LONG", "SHORT"]:
             self.logger.info(
                 "Telegram skip: decision action=%s for %s",
                 decision_action,
                 data.get("symbol", "UNKNOWN"),
             )
             return False
-        action_for_message = decision_action if decision_action in ["LONG", "SHORT"] else signal_action
+        action_for_message = decision_trade_direction if decision_trade_direction in ["LONG", "SHORT"] else signal_action
 
         if not entry.get("valid", False):
             self.logger.info(
@@ -1016,6 +1025,28 @@ class AtlasEngine:
         self._telegram_threads = alive_threads
         if pending:
             self.logger.warning("Telegram flush timeout: pending_threads=%s", pending)
+
+    def _apply_decision_to_signal(self, signal, decision):
+        """Karar EXECUTE degilse sinyal yonunu WAIT'e cekerek yalanci pozitifleri azaltir."""
+        action = (decision or {}).get("action")
+        if action in ["EXECUTE", "EXECUTE_WITH_CAUTION"]:
+            return signal
+
+        gated = dict(signal or {})
+        gated["signal"] = "WAIT"
+        gated["gated_by_decision"] = True
+        gated["decision_action"] = action or "WAIT"
+        return gated
+
+    def _resolve_trade_direction_from_decision(self, signal_action, decision_action):
+        """Yeni/legacy decision aksiyonlarini LONG/SHORT/WAIT formatina normalize eder."""
+        if decision_action in ["LONG", "SHORT"]:
+            return decision_action
+
+        if decision_action in ["EXECUTE", "EXECUTE_WITH_CAUTION"] and signal_action in ["LONG", "SHORT"]:
+            return signal_action
+
+        return "WAIT"
 
     def _signal_fingerprint(self, action, entry, risk):
         """Aynı setup tekrarlarını baskılamak için sade imza üretir."""

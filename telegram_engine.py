@@ -95,6 +95,10 @@ class TelegramEngine:
         msg.append("")
 
         if entry_is_valid and risk and risk.get("risk") is not None:
+            display_rr = risk.get("selected_rr")
+            if display_rr is None:
+                display_rr = risk.get("rr")
+
             msg.append("💰 RISK")
             msg.append(f"Capital At Risk : {self._fmt(risk.get('capital_at_risk'))} USDT")
             msg.append(f"Position Size : {self._fmt(risk.get('position_size'))}")
@@ -107,8 +111,8 @@ class TelegramEngine:
             msg.append(f"RR2 : {self._fmt(risk.get('rr2'))}")
             msg.append(f"RR3 : {self._fmt(risk.get('rr3'))}")
             msg.append(f"Selected TP : {self._fmt(risk.get('selected_tp'))}")
-            msg.append(f"Selected RR : {self._fmt(risk.get('selected_rr', risk.get('rr')))}")
-            msg.append(f"RR : {self._fmt(risk.get('rr'))}")
+            msg.append(f"Selected RR : {self._fmt(display_rr)}")
+            msg.append(f"RR : {self._fmt(display_rr)}")
             msg.append("")
         elif entry_is_valid and dynamic_tp:
             msg.append("🎯 TARGETS")

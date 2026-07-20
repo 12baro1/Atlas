@@ -195,6 +195,48 @@ def test_notify_if_elite_deduplicates_same_signal(monkeypatch):
     assert called["count"] == 1
 
 
+def test_notify_if_elite_accepts_execute_action_when_decision_required(monkeypatch):
+    engine = AtlasEngine()
+
+    called = {"count": 0}
+
+    class _DummyBot:
+        def send(self, _message):
+            called["count"] += 1
+            return True
+
+    class _DummyEngine:
+        def format_signal(self, _result):
+            return "dummy"
+
+    import telegram_engine as telegram_module
+    monkeypatch.setattr(telegram_module, "TelegramBot", lambda: _DummyBot())
+
+    import engine as engine_module
+    monkeypatch.setattr(engine_module.Config, "TELEGRAM_REQUIRE_DECISION_ACTION", True)
+    monkeypatch.setattr(engine_module.Config, "TELEGRAM_BOT_TOKEN", "dummy-token")
+
+    engine.telegram = _DummyEngine()
+
+    sent = engine._notify_if_elite(
+        data={"symbol": "BTC/USDT:USDT"},
+        signal={"signal": "LONG", "confidence": 99, "grade": "S+", "strength": "ELITE"},
+        entry={"direction": "LONG", "valid": True, "entry": 1.0, "stop_loss": 0.9},
+        risk={"entry": 1.0, "stop_loss": 0.9, "risk": 0.1, "rr": 3.0, "tp3": 1.3},
+        rr={"quality": "GOOD", "score": 80},
+        dynamic_tp={"tp1": 1.1, "tp2": 1.2, "tp3": 1.3},
+        confluence={"checks": []},
+        market_phase={"phase": "Expansion"},
+        unicorn={"active": False},
+        cisd={"active": False},
+        institutional={"active": False},
+        decision={"action": "EXECUTE", "reason": "ok"},
+    )
+
+    assert sent is True
+    assert called["count"] == 1
+
+
 def test_telegram_message_handles_partial_risk_payload():
     message = TelegramEngine().format_signal(
         {

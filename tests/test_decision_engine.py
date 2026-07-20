@@ -48,18 +48,25 @@ def test_decision_executes_with_caution_when_one_soft_blocker_remains():
 
     result = engine.decide(
         **_supportive_context(
-            signal={"signal": "LONG", "confidence": 90, "grade": "A+", "strength": "STRONG"},
-            confluence={"score": 83, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
-            risk={"entry": 100.0, "stop_loss": 99.0, "rr": 3.2, "risk": 1.0, "position_size": 1.0},
-            cisd={"active": True, "direction": "BEARISH", "confidence": 80},
-            volume_profile={"active": False, "direction": "NONE", "confidence": 0},
-            unicorn={"active": False, "direction": "NONE", "best": None, "confidence": 0},
+            signal={"signal": "LONG", "confidence": 95, "grade": "S+", "strength": "STRONG"},
+            confluence={"score": 80, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
+            risk={"entry": 100.0, "stop_loss": 99.0, "rr": 3.0, "risk": 1.0, "position_size": 1.0},
+            cisd={"active": True, "direction": "BULLISH", "confidence": 80},
+            volume_profile={"active": True, "direction": "BEARISH", "confidence": 85},
+            institutional={"active": True, "direction": "SHORT", "confidence": 80},
+            unicorn={"active": True, "direction": "BEARISH", "best": {"direction": "BEARISH"}, "confidence": 80},
+            ote={"valid": False},
+            htf_orderblock={"valid": False},
+            smt={"active": False, "direction": "NONE", "confidence": 0},
             liquidity_sweep={"is_sweep": False, "strength_score": 0},
+            market_phase={"phase": "Expansion"},
         )
     )
 
     assert result["action"] == "EXECUTE_WITH_CAUTION"
-    assert "-10 CISD mismatch" in result["reason"]
+    assert "-10 Unicorn mismatch" in result["reason"]
+    assert "-8 Volume Profile mismatch" in result["reason"]
+    assert "-10 Institutional mismatch" in result["reason"]
     assert "Final Action: EXECUTE_WITH_CAUTION" in result["reason"]
 
 
@@ -139,11 +146,29 @@ def test_decision_override_executes_despite_single_mismatch_on_elite_setup():
             confluence={"score": 84, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
             risk={"entry": 100.0, "stop_loss": 99.0, "rr": 3.4, "risk": 1.0, "position_size": 1.0},
             unicorn={"active": True, "direction": "BEARISH", "best": {"direction": "BEARISH"}, "confidence": 92},
-            cisd={"active": False, "direction": "NONE", "confidence": 0},
+            cisd={"active": True, "direction": "BULLISH", "confidence": 85},
             volume_profile={"active": True, "direction": "LONG", "confidence": 88},
+            market_phase={"phase": "Expansion"},
         )
     )
 
     assert result["action"] == "EXECUTE"
     assert "Override: high-quality mismatch exception met" in result["reason"]
     assert "-10 Unicorn mismatch" in result["reason"]
+
+
+def test_decision_skips_when_grade_below_quality_floor():
+    engine = DecisionEngine()
+
+    result = engine.decide(
+        **_supportive_context(
+            signal={"signal": "LONG", "confidence": 99, "grade": "A+", "strength": "ELITE"},
+            confluence={"score": 98, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
+            risk={"entry": 100.0, "stop_loss": 99.0, "rr": 4.1, "risk": 1.0, "position_size": 1.0},
+            cisd={"active": True, "direction": "BULLISH", "confidence": 90},
+            market_phase={"phase": "Expansion"},
+        )
+    )
+
+    assert result["action"] == "SKIP"
+    assert "Grade below quality minimum" in result["reason"]
