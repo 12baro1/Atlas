@@ -16,7 +16,8 @@ python3 -m pip install ccxt
 
 ```env
 ATLAS_CCXT_MODE=real
-ATLAS_BYBIT_TESTNET=1
+ATLAS_BYBIT_TESTNET=0
+ATLAS_BYBIT_DEMO_TRADING=1
 ATLAS_AUTO_TRADING_ENABLED=1
 ATLAS_AUTO_TRADING_AUTO_ENABLE_WITH_KEYS=1
 ATLAS_AUTO_TRADING_MIN_CONFIDENCE=85
@@ -38,5 +39,8 @@ python3 main.py
 
 ## Guvenlik
 
-- API key/secret degerlerini kod icine yazma; sadece `.env` veya shell env kullan.
-- Demo disinda calismak icin `ATLAS_BYBIT_TESTNET=0` yapmadan once kucuk miktarla test et.
+- API key/secret degerlerini kod icine yazma; sadece proje kokundeki `.env` veya shell env kullan. `.env.example` sadece sablondur ve otomatik okunmaz.
+- Anahtar adlari olarak `ATLAS_BYBIT_API_KEY`/`ATLAS_BYBIT_API_SECRET` onerilir; eski `.env` dosyalarindaki `BYBIT_API_KEY`, `BYBIT_SECRET_KEY` veya `ATLAS_BYBIT_SECRET_KEY` de okunur.
+- Bybit Demo Trading hesabi kullanirken `ATLAS_BYBIT_DEMO_TRADING=1` yap; demo hesap testnet/sandbox degildir.
+- Testnet API key kullanacaksan `ATLAS_BYBIT_DEMO_TRADING=0` ve `ATLAS_BYBIT_TESTNET=1` kullan.
+- Gercek hesapta calismak icin `ATLAS_BYBIT_DEMO_TRADING=0` ve `ATLAS_BYBIT_TESTNET=0` yapmadan once kucuk miktarla test et.

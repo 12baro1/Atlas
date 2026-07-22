@@ -4,6 +4,7 @@ Bybit execution engine for Atlas.
 Env flags (read via Config.refresh_from_env):
 - ATLAS_AUTO_TRADING_ENABLED=1
 - ATLAS_BYBIT_TESTNET=1
+- ATLAS_BYBIT_DEMO_TRADING=1  # Bybit Demo Trading hesabi icin
 - ATLAS_BYBIT_API_KEY=...
 - ATLAS_BYBIT_API_SECRET=...
 """
@@ -26,6 +27,7 @@ class BybitExecutionEngine:
         self.enabled = bool(getattr(Config, "AUTO_TRADING_ENABLED", False))
         self.auto_enable_with_keys = bool(getattr(Config, "AUTO_TRADING_AUTO_ENABLE_WITH_KEYS", True))
         self.testnet = bool(getattr(Config, "BYBIT_TESTNET", True))
+        self.demo_trading = bool(getattr(Config, "BYBIT_DEMO_TRADING", False))
         self.api_key = str(getattr(Config, "BYBIT_API_KEY", "") or "").strip()
         self.api_secret = str(getattr(Config, "BYBIT_API_SECRET", "") or "").strip()
         self.min_confidence = float(getattr(Config, "AUTO_TRADING_MIN_CONFIDENCE", 85.0))
@@ -60,12 +62,14 @@ class BybitExecutionEngine:
             api_secret=self.api_secret,
             testnet=self.testnet,
             enable_rate_limit=True,
+            demo_trading=self.demo_trading,
         )
         exchange.verbose = self.log_http
 
         self.logger.info(
-            "Bybit execution hazir | testnet=%s position_mode=%s leverage_range=%sx-%sx log_http=%s",
+            "Bybit execution hazir | testnet=%s demo_trading=%s position_mode=%s leverage_range=%sx-%sx log_http=%s",
             self.testnet,
+            self.demo_trading,
             self.position_mode,
             self.min_leverage,
             self.max_leverage,
@@ -73,6 +77,28 @@ class BybitExecutionEngine:
         )
         self._preflight_exchange(exchange)
         return exchange
+
+
+    def _execution_context(self) -> Dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "testnet": self.testnet,
+            "demo_trading": self.demo_trading,
+            "key_set": bool(self.api_key),
+            "secret_set": bool(self.api_secret),
+            "min_confidence": self.min_confidence,
+            "allow_execute_with_caution": self.allow_execute_with_caution,
+            "preflight_ok": bool(self.preflight_status.get("ok", False)),
+        }
+
+    def _skip(self, reason: str, **details: Any) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "executed": False,
+            "reason": reason,
+            "execution_context": self._execution_context(),
+        }
+        payload.update(details)
+        return payload
 
     def _preflight_exchange(self, exchange):
         steps = self.preflight_status["steps"]
@@ -284,54 +310,54 @@ class BybitExecutionEngine:
                 "Execution skipped | reason=auto_trading_disabled env_ATLAS_AUTO_TRADING_ENABLED=%s",
                 getattr(Config, "AUTO_TRADING_ENABLED", False),
             )
-            return {"executed": False, "reason": "auto_trading_disabled"}
+            return self._skip("auto_trading_disabled")
         if self.exchange is None:
-            self.logger.error("Execution skipped | reason=exchange_not_ready testnet=%s key_set=%s secret_set=%s", self.testnet, bool(self.api_key), bool(self.api_secret))
-            return {"executed": False, "reason": "exchange_not_ready"}
+            self.logger.error("Execution skipped | reason=exchange_not_ready testnet=%s demo_trading=%s key_set=%s secret_set=%s", self.testnet, self.demo_trading, bool(self.api_key), bool(self.api_secret))
+            return self._skip("exchange_not_ready")
         if not self.preflight_status.get("ok", False):
             self.logger.error("Execution skipped | reason=preflight_failed status=%s", self.preflight_status)
-            return {"executed": False, "reason": "preflight_failed", "details": self.preflight_status}
+            return self._skip("preflight_failed", details=self.preflight_status)
         if not self._decision_allows_execution(result):
             decision = (result or {}).get("decision") or {}
             self.logger.info("Execution skipped | reason=decision_blocked action=%s", decision.get("action"))
-            return {"executed": False, "reason": "decision_blocked"}
+            return self._skip("decision_blocked", decision_action=decision.get("action"), decision_reason=decision.get("reason"))
         if not self._entry_confidence_ok(result):
             confidence = ((result or {}).get("signal") or {}).get("confidence")
             self.logger.info("Execution skipped | reason=low_confidence confidence=%s min=%s", confidence, self.min_confidence)
-            return {"executed": False, "reason": "low_confidence"}
+            return self._skip("low_confidence", confidence=confidence, required_confidence=self.min_confidence)
 
         risk = (result or {}).get("risk") or {}
         if risk.get("risk_setup_valid") is False:
             reason = risk.get("risk_setup_reason", "Invalid Risk Setup")
             self.logger.info("Execution skipped | reason=risk_blocked risk_reason=%s", reason)
-            return {"executed": False, "reason": "risk_blocked", "risk_reason": reason}
+            return self._skip("risk_blocked", risk_reason=reason)
 
         side = self._extract_side(result)
         amount = self._extract_amount(result)
         if side is None:
             self.logger.info("Execution skipped | reason=invalid_signal")
-            return {"executed": False, "reason": "invalid_signal"}
+            return self._skip("invalid_signal", signal=((result or {}).get("signal") or {}).get("signal"))
         if amount is None:
             self.logger.info("Execution skipped | reason=invalid_amount")
-            return {"executed": False, "reason": "invalid_amount"}
+            return self._skip("invalid_amount", position_size=((result or {}).get("risk") or {}).get("position_size"))
 
         amount, lot_error = self._format_amount_for_market(symbol, amount)
         if amount is None:
             self.logger.info("Execution skipped | reason=min_lot_check_failed detail=%s", lot_error)
-            return {"executed": False, "reason": "min_lot_check_failed", "details": lot_error}
+            return self._skip("min_lot_check_failed", details=lot_error)
 
         leverage = self._resolve_leverage(result)
         leverage_applied = self._apply_leverage(symbol=symbol, side=side, leverage=leverage)
         position_mode_synced = self._sync_position_mode(symbol)
         balance = self._balance_snapshot()
         if balance.get("ok") is not True:
-            return {"executed": False, "reason": "balance_check_failed", "details": balance}
+            return self._skip("balance_check_failed", details=balance)
 
         open_pos = self._extract_symbol_position(symbol)
         if open_pos:
             closed = self._close_position_if_needed(symbol, side, open_pos)
             if not closed and ((open_pos.get("side") == "long" and side == "buy") or (open_pos.get("side") == "short" and side == "sell")):
-                return {"executed": False, "reason": "same_side_position_exists"}
+                return self._skip("same_side_position_exists", open_position=open_pos)
 
         entry = ((result or {}).get("analysis") or {}).get("entry") or {}
         dynamic_tp = (result or {}).get("dynamic_tp") or {}
@@ -393,7 +419,7 @@ class BybitExecutionEngine:
                 exc,
                 context={"symbol": symbol, "payload": request_payload},
             )
-            return {"executed": False, "reason": "order_failed", "error": str(exc), "exchange_error": details}
+            return self._skip("order_failed", error=str(exc), exchange_error=details)
 
     def _resolve_leverage(self, result: Dict[str, Any]) -> int:
         signal = (result or {}).get("signal") or {}

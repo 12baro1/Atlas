@@ -135,11 +135,22 @@ for index, symbol in enumerate(symbols, start=1):
 
         execution_result = execution_engine.process(symbol=symbol, result=result)
         logger.info(
-            "Execution | symbol=%s executed=%s reason=%s",
+            "Execution | symbol=%s executed=%s reason=%s details=%s",
             symbol,
             execution_result.get("executed"),
             execution_result.get("reason"),
+            execution_result,
         )
+        print("Execution :", "OPENED" if execution_result.get("executed") else "SKIPPED")
+        print("Execution Reason :", execution_result.get("reason"))
+        if execution_result.get("decision_action"):
+            print("Decision Action :", execution_result.get("decision_action"))
+        if execution_result.get("decision_reason"):
+            print("Decision Reason :", execution_result.get("decision_reason"))
+        if execution_result.get("required_confidence") is not None:
+            print("Required Confidence :", execution_result.get("required_confidence"))
+        if execution_result.get("order_id"):
+            print("Order ID :", execution_result.get("order_id"))
 
         if result["risk"]:
 
