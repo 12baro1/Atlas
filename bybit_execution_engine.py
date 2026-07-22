@@ -4,6 +4,7 @@ Bybit execution engine for Atlas.
 Env flags (read via Config.refresh_from_env):
 - ATLAS_AUTO_TRADING_ENABLED=1
 - ATLAS_BYBIT_TESTNET=1
+- ATLAS_BYBIT_DEMO_TRADING=1  # Bybit Demo Trading hesabi icin
 - ATLAS_BYBIT_API_KEY=...
 - ATLAS_BYBIT_API_SECRET=...
 """
@@ -26,6 +27,7 @@ class BybitExecutionEngine:
         self.enabled = bool(getattr(Config, "AUTO_TRADING_ENABLED", False))
         self.auto_enable_with_keys = bool(getattr(Config, "AUTO_TRADING_AUTO_ENABLE_WITH_KEYS", True))
         self.testnet = bool(getattr(Config, "BYBIT_TESTNET", True))
+        self.demo_trading = bool(getattr(Config, "BYBIT_DEMO_TRADING", False))
         self.api_key = str(getattr(Config, "BYBIT_API_KEY", "") or "").strip()
         self.api_secret = str(getattr(Config, "BYBIT_API_SECRET", "") or "").strip()
         self.min_confidence = float(getattr(Config, "AUTO_TRADING_MIN_CONFIDENCE", 85.0))
@@ -60,12 +62,14 @@ class BybitExecutionEngine:
             api_secret=self.api_secret,
             testnet=self.testnet,
             enable_rate_limit=True,
+            demo_trading=self.demo_trading,
         )
         exchange.verbose = self.log_http
 
         self.logger.info(
-            "Bybit execution hazir | testnet=%s position_mode=%s leverage_range=%sx-%sx log_http=%s",
+            "Bybit execution hazir | testnet=%s demo_trading=%s position_mode=%s leverage_range=%sx-%sx log_http=%s",
             self.testnet,
+            self.demo_trading,
             self.position_mode,
             self.min_leverage,
             self.max_leverage,
@@ -286,7 +290,7 @@ class BybitExecutionEngine:
             )
             return {"executed": False, "reason": "auto_trading_disabled"}
         if self.exchange is None:
-            self.logger.error("Execution skipped | reason=exchange_not_ready testnet=%s key_set=%s secret_set=%s", self.testnet, bool(self.api_key), bool(self.api_secret))
+            self.logger.error("Execution skipped | reason=exchange_not_ready testnet=%s demo_trading=%s key_set=%s secret_set=%s", self.testnet, self.demo_trading, bool(self.api_key), bool(self.api_secret))
             return {"executed": False, "reason": "exchange_not_ready"}
         if not self.preflight_status.get("ok", False):
             self.logger.error("Execution skipped | reason=preflight_failed status=%s", self.preflight_status)
