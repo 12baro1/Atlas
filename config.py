@@ -39,6 +39,20 @@ def _read_export_from_rc(var_name):
     return last_value
 
 
+def _clean_env_key(key):
+    key = (key or "").strip()
+    if key.startswith("export "):
+        key = key[len("export "):].strip()
+    return key
+
+
+def _clean_env_value(value):
+    text = _strip_shell_quotes(value)
+    if "#" in text and not (text.startswith("'") or text.startswith('"')):
+        text = text.split("#", 1)[0].strip()
+    return _strip_shell_quotes(text)
+
+
 def _read_from_dotenv(var_name):
     """Proje .env dosyasindan anahtar deger okur."""
     candidates = [
@@ -46,7 +60,7 @@ def _read_from_dotenv(var_name):
         os.path.join(os.path.dirname(__file__), ".env"),
     ]
 
-    for path in candidates:
+    for path in dict.fromkeys(candidates):
         if not os.path.exists(path):
             continue
         try:
@@ -56,25 +70,33 @@ def _read_from_dotenv(var_name):
                     if not line or line.startswith("#") or "=" not in line:
                         continue
                     key, value = line.split("=", 1)
-                    if key.strip() != var_name:
+                    if _clean_env_key(key) != var_name:
                         continue
-                    return _strip_shell_quotes(value)
+                    return _clean_env_value(value)
         except Exception:
             continue
     return ""
 
 
-def _env_or_rc(var_name, default=""):
-    value = os.getenv(var_name, "")
-    if value:
-        return value
-    dotenv_value = _read_from_dotenv(var_name)
-    if dotenv_value:
-        return dotenv_value
-    fallback = _read_export_from_rc(var_name)
-    if fallback:
-        return fallback
+def _env_or_rc(var_name, default="", aliases=()):
+    for candidate in (var_name, *aliases):
+        value = os.getenv(candidate, "")
+        if value:
+            return value
+    for candidate in (var_name, *aliases):
+        dotenv_value = _read_from_dotenv(candidate)
+        if dotenv_value:
+            return dotenv_value
+    for candidate in (var_name, *aliases):
+        fallback = _read_export_from_rc(candidate)
+        if fallback:
+            return fallback
     return default
+
+
+def _env_bool(var_name, default="0", aliases=()):
+    return _env_or_rc(var_name, default, aliases).strip().lower() in {"1", "true", "yes", "on"}
+
 
 class Config:
     DEFAULT_TELEGRAM_BOT_TOKEN = "8451423294:AAFJ8gmvKPk23ierRsh4u5sX3SRIXk2uDWY"
@@ -160,18 +182,18 @@ class Config:
     MAX_SYMBOLS = 1000
 
     # Bybit / Auto Trading
-    AUTO_TRADING_ENABLED = os.getenv("ATLAS_AUTO_TRADING_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
-    AUTO_TRADING_AUTO_ENABLE_WITH_KEYS = os.getenv("ATLAS_AUTO_TRADING_AUTO_ENABLE_WITH_KEYS", "1").strip().lower() in {"1", "true", "yes"}
-    AUTO_TRADING_MIN_CONFIDENCE = float(os.getenv("ATLAS_AUTO_TRADING_MIN_CONFIDENCE", "85"))
-    AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION = os.getenv("ATLAS_AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION", "0").strip().lower() in {"1", "true", "yes"}
-    AUTO_TRADING_MIN_LEVERAGE = int(float(os.getenv("ATLAS_AUTO_TRADING_MIN_LEVERAGE", "1")))
-    AUTO_TRADING_MAX_LEVERAGE = int(float(os.getenv("ATLAS_AUTO_TRADING_MAX_LEVERAGE", "20")))
-    BYBIT_TESTNET = os.getenv("ATLAS_BYBIT_TESTNET", "1").strip().lower() in {"1", "true", "yes"}
-    BYBIT_DEMO_TRADING = os.getenv("ATLAS_BYBIT_DEMO_TRADING", "0").strip().lower() in {"1", "true", "yes"}
-    BYBIT_API_KEY = _env_or_rc("ATLAS_BYBIT_API_KEY", "")
-    BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "")
+    AUTO_TRADING_ENABLED = _env_bool("ATLAS_AUTO_TRADING_ENABLED", "0")
+    AUTO_TRADING_AUTO_ENABLE_WITH_KEYS = _env_bool("ATLAS_AUTO_TRADING_AUTO_ENABLE_WITH_KEYS", "1")
+    AUTO_TRADING_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_AUTO_TRADING_MIN_CONFIDENCE", "85"))
+    AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION = _env_bool("ATLAS_AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION", "0")
+    AUTO_TRADING_MIN_LEVERAGE = int(float(_env_or_rc("ATLAS_AUTO_TRADING_MIN_LEVERAGE", "1")))
+    AUTO_TRADING_MAX_LEVERAGE = int(float(_env_or_rc("ATLAS_AUTO_TRADING_MAX_LEVERAGE", "20")))
+    BYBIT_TESTNET = _env_bool("ATLAS_BYBIT_TESTNET", "1")
+    BYBIT_DEMO_TRADING = _env_bool("ATLAS_BYBIT_DEMO_TRADING", "0", aliases=("BYBIT_DEMO_TRADING",))
+    BYBIT_API_KEY = _env_or_rc("ATLAS_BYBIT_API_KEY", "", aliases=("BYBIT_API_KEY", "API_KEY"))
+    BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "", aliases=("ATLAS_BYBIT_SECRET_KEY", "BYBIT_API_SECRET", "BYBIT_SECRET_KEY", "SECRET_KEY"))
     BYBIT_POSITION_MODE = _env_or_rc("ATLAS_BYBIT_POSITION_MODE", "one_way").strip().lower()
-    BYBIT_LOG_HTTP = _env_or_rc("ATLAS_BYBIT_LOG_HTTP", "0").strip().lower() in {"1", "true", "yes"}
+    BYBIT_LOG_HTTP = _env_bool("ATLAS_BYBIT_LOG_HTTP", "0")
 
     # Telegram
     TELEGRAM_ENABLED = True
@@ -206,18 +228,18 @@ class Config:
         """Runtime'da environment değişikliklerini Config sınıfına yeniden yükler."""
         cls.MIN_STOP_PERCENT = float(_env_or_rc("ATLAS_MIN_STOP_PERCENT", str(cls.MIN_STOP_PERCENT)))
         cls.REJECT_TIGHT_STOPS = _env_or_rc("ATLAS_REJECT_TIGHT_STOPS", "1").strip().lower() in {"1", "true", "yes"}
-        cls.AUTO_TRADING_ENABLED = _env_or_rc("ATLAS_AUTO_TRADING_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
-        cls.AUTO_TRADING_AUTO_ENABLE_WITH_KEYS = _env_or_rc("ATLAS_AUTO_TRADING_AUTO_ENABLE_WITH_KEYS", "1").strip().lower() in {"1", "true", "yes"}
+        cls.AUTO_TRADING_ENABLED = _env_bool("ATLAS_AUTO_TRADING_ENABLED", "0")
+        cls.AUTO_TRADING_AUTO_ENABLE_WITH_KEYS = _env_bool("ATLAS_AUTO_TRADING_AUTO_ENABLE_WITH_KEYS", "1")
         cls.AUTO_TRADING_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_AUTO_TRADING_MIN_CONFIDENCE", "85"))
-        cls.AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION = _env_or_rc("ATLAS_AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION", "0").strip().lower() in {"1", "true", "yes"}
+        cls.AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION = _env_bool("ATLAS_AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION", "0")
         cls.AUTO_TRADING_MIN_LEVERAGE = int(float(_env_or_rc("ATLAS_AUTO_TRADING_MIN_LEVERAGE", "1")))
         cls.AUTO_TRADING_MAX_LEVERAGE = int(float(_env_or_rc("ATLAS_AUTO_TRADING_MAX_LEVERAGE", "20")))
-        cls.BYBIT_TESTNET = _env_or_rc("ATLAS_BYBIT_TESTNET", "1").strip().lower() in {"1", "true", "yes"}
-        cls.BYBIT_DEMO_TRADING = _env_or_rc("ATLAS_BYBIT_DEMO_TRADING", "0").strip().lower() in {"1", "true", "yes"}
-        cls.BYBIT_API_KEY = _env_or_rc("ATLAS_BYBIT_API_KEY", "")
-        cls.BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "")
+        cls.BYBIT_TESTNET = _env_bool("ATLAS_BYBIT_TESTNET", "1")
+        cls.BYBIT_DEMO_TRADING = _env_bool("ATLAS_BYBIT_DEMO_TRADING", "0", aliases=("BYBIT_DEMO_TRADING",))
+        cls.BYBIT_API_KEY = _env_or_rc("ATLAS_BYBIT_API_KEY", "", aliases=("BYBIT_API_KEY", "API_KEY"))
+        cls.BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "", aliases=("ATLAS_BYBIT_SECRET_KEY", "BYBIT_API_SECRET", "BYBIT_SECRET_KEY", "SECRET_KEY"))
         cls.BYBIT_POSITION_MODE = _env_or_rc("ATLAS_BYBIT_POSITION_MODE", "one_way").strip().lower()
-        cls.BYBIT_LOG_HTTP = _env_or_rc("ATLAS_BYBIT_LOG_HTTP", "0").strip().lower() in {"1", "true", "yes"}
+        cls.BYBIT_LOG_HTTP = _env_bool("ATLAS_BYBIT_LOG_HTTP", "0")
         cls.TELEGRAM_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_TELEGRAM_MIN_CONFIDENCE", "75"))
         cls.TELEGRAM_REQUIRE_DECISION_ACTION = _env_or_rc("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "0").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_MINIMAL_LAYOUT = _env_or_rc("ATLAS_TELEGRAM_MINIMAL_LAYOUT", "1").strip().lower() in {"1", "true", "yes"}

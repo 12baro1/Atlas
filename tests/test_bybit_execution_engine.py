@@ -153,3 +153,41 @@ def test_decision_skip_includes_reason_and_execution_context():
     assert result["decision_reason"] == "Decision Score: 60"
     assert result["execution_context"]["demo_trading"] is True
     assert result["execution_context"]["key_set"] is True
+
+
+def test_refresh_from_env_reads_dotenv_export_aliases(tmp_path, monkeypatch):
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        "\n".join(
+            [
+                "export ATLAS_AUTO_TRADING_ENABLED=1",
+                "ATLAS_BYBIT_TESTNET=0",
+                "BYBIT_DEMO_TRADING=1",
+                "BYBIT_API_KEY=demo-key",
+                "BYBIT_SECRET_KEY=demo-secret",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "ATLAS_AUTO_TRADING_ENABLED",
+        "ATLAS_BYBIT_TESTNET",
+        "ATLAS_BYBIT_DEMO_TRADING",
+        "BYBIT_DEMO_TRADING",
+        "ATLAS_BYBIT_API_KEY",
+        "BYBIT_API_KEY",
+        "ATLAS_BYBIT_API_SECRET",
+        "ATLAS_BYBIT_SECRET_KEY",
+        "BYBIT_API_SECRET",
+        "BYBIT_SECRET_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    Config.refresh_from_env()
+
+    assert Config.AUTO_TRADING_ENABLED is True
+    assert Config.BYBIT_TESTNET is False
+    assert Config.BYBIT_DEMO_TRADING is True
+    assert Config.BYBIT_API_KEY == "demo-key"
+    assert Config.BYBIT_API_SECRET == "demo-secret"
