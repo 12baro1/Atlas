@@ -167,6 +167,7 @@ class Config:
     AUTO_TRADING_MIN_LEVERAGE = int(float(os.getenv("ATLAS_AUTO_TRADING_MIN_LEVERAGE", "1")))
     AUTO_TRADING_MAX_LEVERAGE = int(float(os.getenv("ATLAS_AUTO_TRADING_MAX_LEVERAGE", "20")))
     BYBIT_TESTNET = os.getenv("ATLAS_BYBIT_TESTNET", "1").strip().lower() in {"1", "true", "yes"}
+    BYBIT_DEMO_TRADING = os.getenv("ATLAS_BYBIT_DEMO_TRADING", "0").strip().lower() in {"1", "true", "yes"}
     BYBIT_API_KEY = _env_or_rc("ATLAS_BYBIT_API_KEY", "")
     BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "")
     BYBIT_POSITION_MODE = _env_or_rc("ATLAS_BYBIT_POSITION_MODE", "one_way").strip().lower()
@@ -212,6 +213,7 @@ class Config:
         cls.AUTO_TRADING_MIN_LEVERAGE = int(float(_env_or_rc("ATLAS_AUTO_TRADING_MIN_LEVERAGE", "1")))
         cls.AUTO_TRADING_MAX_LEVERAGE = int(float(_env_or_rc("ATLAS_AUTO_TRADING_MAX_LEVERAGE", "20")))
         cls.BYBIT_TESTNET = _env_or_rc("ATLAS_BYBIT_TESTNET", "1").strip().lower() in {"1", "true", "yes"}
+        cls.BYBIT_DEMO_TRADING = _env_or_rc("ATLAS_BYBIT_DEMO_TRADING", "0").strip().lower() in {"1", "true", "yes"}
         cls.BYBIT_API_KEY = _env_or_rc("ATLAS_BYBIT_API_KEY", "")
         cls.BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "")
         cls.BYBIT_POSITION_MODE = _env_or_rc("ATLAS_BYBIT_POSITION_MODE", "one_way").strip().lower()
