@@ -11,6 +11,7 @@ Env flags (read via Config.refresh_from_env):
 
 import logging
 import math
+import json
 from typing import Tuple
 from typing import Any, Dict, Optional
 
@@ -75,6 +76,7 @@ class BybitExecutionEngine:
             self.max_leverage,
             self.log_http,
         )
+        self._log_endpoint_hint(exchange)
         self._preflight_exchange(exchange)
         return exchange
 
@@ -100,6 +102,46 @@ class BybitExecutionEngine:
         payload.update(details)
         return payload
 
+    def _log_endpoint_hint(self, exchange) -> None:
+        """Exchange'in kullandığı endpoint URL'ini loglar; yanlış mod seçimini kolayca fark ettirmek için."""
+        try:
+            from bybit import _resolve_endpoint_url
+            endpoint = _resolve_endpoint_url(exchange)
+        except Exception:
+            endpoint = "unknown"
+        self.logger.info(
+            "Bybit aktif endpoint | url=%s  "
+            "[Demo Trading icin: ATLAS_BYBIT_DEMO_TRADING=1 ATLAS_BYBIT_TESTNET=0]  "
+            "[Testnet icin: ATLAS_BYBIT_TESTNET=1 ATLAS_BYBIT_DEMO_TRADING=0]  "
+            "[Mainnet icin: ATLAS_BYBIT_TESTNET=0 ATLAS_BYBIT_DEMO_TRADING=0]",
+            endpoint,
+        )
+
+    def _check_retcode_10003(self, details: Dict[str, Any]) -> None:
+        """retCode 10003 ise endpoint/anahtar uyumsuzluğunu açıkça loglar."""
+        ret_code = details.get("retCode")
+        msg = str(details.get("message", ""))
+        if ret_code == 10003 or "10003" in msg:
+            self.logger.error(
+                "\n"
+                "========================================================\n"
+                "  Bybit retCode 10003 - API key is invalid\n"
+                "  Anahtar turune gore dogru modu secin:\n"
+                "  - Demo Trading anahtari (ana Bybit hesabi > API Management > Demo):\n"
+                "      ATLAS_BYBIT_DEMO_TRADING=1\n"
+                "      ATLAS_BYBIT_TESTNET=0\n"
+                "  - Testnet anahtari (testnet.bybit.com'dan olusturulmus):\n"
+                "      ATLAS_BYBIT_TESTNET=1\n"
+                "      ATLAS_BYBIT_DEMO_TRADING=0\n"
+                "  - Mainnet anahtari:\n"
+                "      ATLAS_BYBIT_TESTNET=0\n"
+                "      ATLAS_BYBIT_DEMO_TRADING=0\n"
+                "  Mevcut mod: testnet=%s demo_trading=%s\n"
+                "========================================================",
+                self.testnet,
+                self.demo_trading,
+            )
+
     def _preflight_exchange(self, exchange):
         steps = self.preflight_status["steps"]
         errors = self.preflight_status["errors"]
@@ -112,6 +154,7 @@ class BybitExecutionEngine:
             details = self._log_exchange_exception("Bybit preflight market load hatasi", exc)
             steps["markets"] = "failed"
             errors.append({"step": "markets", "details": details})
+            self._check_retcode_10003(details)
 
         try:
             exchange.fetch_balance()
@@ -121,6 +164,7 @@ class BybitExecutionEngine:
             details = self._log_exchange_exception("Bybit preflight balance hatasi (izin/key kontrol edin)", exc)
             steps["balance"] = "failed"
             errors.append({"step": "balance", "details": details})
+            self._check_retcode_10003(details)
 
         self.preflight_status["ok"] = len(errors) == 0
         if not self.preflight_status["ok"]:
@@ -385,8 +429,12 @@ class BybitExecutionEngine:
             self.logger.info("Bybit order request | payload=%s", request_payload)
             order = self.exchange.create_order(**request_payload)
             avg_price = None
+            order_id = None
             if isinstance(order, dict):
                 avg_price = order.get("average") or order.get("price")
+                order_id = order.get("id")
+            ret_code = self._extract_ret_code(order)
+            ret_msg = self._extract_ret_msg(order)
             self.logger.info(
                 "Emir acildi | symbol=%s side=%s leverage=%sx leverage_applied=%s amount=%.8f order_id=%s price=%s response=%s",
                 symbol,
@@ -394,9 +442,16 @@ class BybitExecutionEngine:
                 leverage,
                 leverage_applied,
                 amount,
-                order.get("id") if isinstance(order, dict) else None,
+                order_id,
                 avg_price,
                 order,
+            )
+            self.logger.info(
+                "Bybit order ack | symbol=%s order_id=%s retCode=%s retMsg=%s",
+                symbol,
+                order_id,
+                ret_code,
+                ret_msg,
             )
             return {
                 "executed": True,
@@ -408,10 +463,10 @@ class BybitExecutionEngine:
                 "leverage_applied": leverage_applied,
                 "position_mode_synced": position_mode_synced,
                 "balance": balance,
-                "order_id": order.get("id") if isinstance(order, dict) else None,
+                "order_id": order_id,
                 "price": avg_price,
-                "ret_code": self._extract_ret_code(order),
-                "ret_msg": self._extract_ret_msg(order),
+                "ret_code": ret_code,
+                "ret_msg": ret_msg,
             }
         except Exception as exc:
             details = self._log_exchange_exception(
@@ -419,7 +474,13 @@ class BybitExecutionEngine:
                 exc,
                 context={"symbol": symbol, "payload": request_payload},
             )
-            return self._skip("order_failed", error=str(exc), exchange_error=details)
+            return self._skip(
+                "order_failed",
+                error=str(exc),
+                exchange_error=details,
+                ret_code=details.get("retCode"),
+                ret_msg=details.get("retMsg"),
+            )
 
     def _resolve_leverage(self, result: Dict[str, Any]) -> int:
         signal = (result or {}).get("signal") or {}
@@ -519,23 +580,96 @@ class BybitExecutionEngine:
             if value is not None:
                 details[attr] = value
 
+        ret_code, ret_msg = self._extract_ret_fields_from_payload(details)
+        if ret_code is not None:
+            details["retCode"] = ret_code
+        if ret_msg is not None:
+            details["retMsg"] = ret_msg
+
         self.logger.exception("%s | details=%s", prefix, details)
         return details
 
-    def _extract_ret_code(self, order: Any) -> Any:
-        if not isinstance(order, dict):
+    def _decode_payload_to_dict(self, payload: Any) -> Optional[Dict[str, Any]]:
+        if isinstance(payload, dict):
+            return payload
+
+        if isinstance(payload, bytes):
+            try:
+                payload = payload.decode("utf-8", errors="replace")
+            except Exception:
+                return None
+
+        if not isinstance(payload, str):
             return None
-        info = order.get("info") if isinstance(order.get("info"), dict) else {}
-        for key in ("retCode", "ret_code", "code"):
-            if key in info:
-                return info.get(key)
+
+        text = payload.strip()
+        if not text:
+            return None
+
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start == -1 or end == -1 or end <= start:
+                return None
+            try:
+                parsed = json.loads(text[start : end + 1])
+            except Exception:
+                return None
+
+        if isinstance(parsed, dict):
+            return parsed
         return None
 
+    def _extract_ret_fields_from_payload(self, payload: Any) -> Tuple[Any, Any]:
+        candidates = []
+        if isinstance(payload, dict):
+            candidates.append(payload)
+            info = payload.get("info")
+            if isinstance(info, dict):
+                candidates.append(info)
+        else:
+            parsed = self._decode_payload_to_dict(payload)
+            if isinstance(parsed, dict):
+                candidates.append(parsed)
+
+        if isinstance(payload, dict):
+            for key in ("body", "response", "message", "reason"):
+                parsed = self._decode_payload_to_dict(payload.get(key))
+                if isinstance(parsed, dict):
+                    candidates.append(parsed)
+
+        for candidate in list(candidates):
+            result = candidate.get("result") if isinstance(candidate.get("result"), dict) else None
+            if result is not None:
+                candidates.append(result)
+
+        ret_code = None
+        ret_msg = None
+        for candidate in candidates:
+            has_code = any(key in candidate for key in ("retCode", "ret_code", "code"))
+            if ret_code is None:
+                for key in ("retCode", "ret_code", "code"):
+                    if key in candidate:
+                        ret_code = candidate.get(key)
+                        break
+            if ret_msg is None:
+                for key in ("retMsg", "ret_msg", "msg", "message"):
+                    if key == "message" and not has_code:
+                        continue
+                    if key in candidate:
+                        ret_msg = candidate.get(key)
+                        break
+            if ret_code is not None and ret_msg is not None:
+                break
+
+        return ret_code, ret_msg
+
+    def _extract_ret_code(self, order: Any) -> Any:
+        ret_code, _ = self._extract_ret_fields_from_payload(order)
+        return ret_code
+
     def _extract_ret_msg(self, order: Any) -> Any:
-        if not isinstance(order, dict):
-            return None
-        info = order.get("info") if isinstance(order.get("info"), dict) else {}
-        for key in ("retMsg", "ret_msg", "msg", "message"):
-            if key in info:
-                return info.get(key)
-        return None
+        _, ret_msg = self._extract_ret_fields_from_payload(order)
+        return ret_msg

@@ -21,6 +21,18 @@ def _load_real_ccxt_module():
     current_module = sys.modules.get(__name__)
     original_sys_path = list(sys.path)
 
+    # Repo kökündeki mock modüllerin gerçek paketlerin önüne geçmesini önle.
+    # "requests" gibi stdlib adlarını taşıyan yerel dosyalar ccxt içindeki
+    # HTTP çağrılarını kırabileceğinden, import öncesinde önbelleği temizle.
+    _shadowed_mods = {}
+    for _mod_name in ("requests",):
+        _existing = sys.modules.get(_mod_name)
+        if _existing is not None:
+            _mod_file = getattr(_existing, "__file__", None) or ""
+            if str(Path(_mod_file).resolve()).startswith(repo_root):
+                # Sahte (repo-içi) modülü geçici olarak kaldır
+                _shadowed_mods[_mod_name] = sys.modules.pop(_mod_name)
+
     # Kendi modül gölgelemesini devre dışı bırakıp gerçek ccxt'yi yükle.
     sys.modules.pop("ccxt", None)
     try:
@@ -30,11 +42,15 @@ def _load_real_ccxt_module():
         ]
         return importlib.import_module("ccxt")
     except Exception:
+        # Yükleme başarısız olursa sahte modülleri geri koy
+        sys.modules.update(_shadowed_mods)
         return None
     finally:
         sys.path = original_sys_path
         if current_module is not None:
             sys.modules["ccxt"] = current_module
+        # Gerçek ccxt başarıyla yüklendiyse sahte requests'i geri yükleme;
+        # sys.modules["requests"] artık gerçek paketi gösteriyor.
 
 
 _mode = os.environ.get("ATLAS_CCXT_MODE", "auto").strip().lower()

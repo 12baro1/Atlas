@@ -4,6 +4,8 @@ import os
 import sys
 import time
 
+from telegram_engine import TelegramBot
+
 from bybit import create_public_swap_exchange
 from bybit_execution_engine import BybitExecutionEngine
 from data_engine import get_market_data
@@ -62,6 +64,45 @@ if bool(getattr(Config, "TELEGRAM_ENABLED", True)):
         logger.warning("Telegram aktif ama bot token bos. Bildirim gonderilmeyecek.")
     if not chat_id:
         logger.warning("Telegram chat id bos. Auth db/chat_ids yoksa bildirim gonderilmeyecek.")
+
+
+def _send_execution_telegram(symbol, execution_result):
+    if not bool(getattr(Config, "TELEGRAM_ENABLED", True)):
+        return False
+
+    if not execution_result.get("executed"):
+        return False
+
+    order_id = execution_result.get("order_id") or "N/A"
+    ret_code = execution_result.get("ret_code")
+    ret_msg = execution_result.get("ret_msg")
+    side = str(execution_result.get("side") or "").upper()
+    amount = execution_result.get("amount")
+    price = execution_result.get("price")
+
+    message_lines = [
+        "ATLAS ORDER UPDATE",
+        "Order Executed",
+        f"Symbol: {symbol}",
+        f"Order ID: {order_id}",
+        f"Side: {side}",
+        f"Amount: {amount}",
+        f"Price: {price}",
+        f"retCode: {ret_code}",
+        f"retMsg: {ret_msg}",
+    ]
+    message = "\n".join(message_lines)
+
+    sent = TelegramBot().send(message)
+    logger.info(
+        "Execution Telegram | symbol=%s sent=%s order_id=%s retCode=%s retMsg=%s",
+        symbol,
+        sent,
+        order_id,
+        ret_code,
+        ret_msg,
+    )
+    return sent
 
 processed = 0
 success = 0
@@ -141,6 +182,25 @@ for index, symbol in enumerate(symbols, start=1):
             execution_result.get("reason"),
             execution_result,
         )
+        if execution_result.get("executed"):
+            logger.info(
+                "Execution success | symbol=%s order_id=%s retCode=%s retMsg=%s",
+                symbol,
+                execution_result.get("order_id"),
+                execution_result.get("ret_code"),
+                execution_result.get("ret_msg"),
+            )
+        else:
+            logger.error(
+                "Execution failed | symbol=%s reason=%s error=%s retCode=%s retMsg=%s exchange_error=%s",
+                symbol,
+                execution_result.get("reason"),
+                execution_result.get("error"),
+                execution_result.get("ret_code"),
+                execution_result.get("ret_msg"),
+                execution_result.get("exchange_error"),
+            )
+
         print("Execution :", "OPENED" if execution_result.get("executed") else "SKIPPED")
         print("Execution Reason :", execution_result.get("reason"))
         if execution_result.get("decision_action"):
@@ -151,6 +211,13 @@ for index, symbol in enumerate(symbols, start=1):
             print("Required Confidence :", execution_result.get("required_confidence"))
         if execution_result.get("order_id"):
             print("Order ID :", execution_result.get("order_id"))
+        if execution_result.get("ret_code") is not None:
+            print("retCode :", execution_result.get("ret_code"))
+        if execution_result.get("ret_msg") is not None:
+            print("retMsg :", execution_result.get("ret_msg"))
+
+        if execution_result.get("executed"):
+            _send_execution_telegram(symbol=symbol, execution_result=execution_result)
 
         if result["risk"]:
 

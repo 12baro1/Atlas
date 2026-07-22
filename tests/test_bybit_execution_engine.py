@@ -153,3 +153,47 @@ def test_decision_skip_includes_reason_and_execution_context():
     assert result["decision_reason"] == "Decision Score: 60"
     assert result["execution_context"]["demo_trading"] is True
     assert result["execution_context"]["key_set"] is True
+
+
+def test_extract_ret_fields_from_order_info_payload():
+    engine = BybitExecutionEngine.__new__(BybitExecutionEngine)
+
+    order = {
+        "id": "abc-123",
+        "info": {
+            "retCode": 0,
+            "retMsg": "OK",
+        },
+    }
+
+    assert engine._extract_ret_code(order) == 0
+    assert engine._extract_ret_msg(order) == "OK"
+
+
+def test_log_exchange_exception_extracts_ret_fields_from_body(monkeypatch):
+    engine = BybitExecutionEngine.__new__(BybitExecutionEngine)
+    engine.logger = __import__("logging").getLogger("test.exec")
+
+    class _ExchangeError(Exception):
+        def __init__(self):
+            super().__init__("bybit error")
+            self.body = '{"retCode":110001,"retMsg":"Insufficient balance"}'
+
+    details = engine._log_exchange_exception("Order failed", _ExchangeError(), context={"symbol": "BTC/USDT:USDT"})
+
+    assert details.get("retCode") == 110001
+    assert details.get("retMsg") == "Insufficient balance"
+
+
+def test_log_exchange_exception_extracts_ret_fields_from_prefixed_message():
+    engine = BybitExecutionEngine.__new__(BybitExecutionEngine)
+    engine.logger = __import__("logging").getLogger("test.exec")
+
+    class _ExchangeError(Exception):
+        def __init__(self):
+            super().__init__('bybit {"retCode":10003,"retMsg":"API key is invalid.","result":{}}')
+
+    details = engine._log_exchange_exception("Order failed", _ExchangeError(), context={"symbol": "BTC/USDT:USDT"})
+
+    assert details.get("retCode") == 10003
+    assert details.get("retMsg") == "API key is invalid."
