@@ -76,7 +76,8 @@ class BOSDetector:
             last_low,
             state
         )
-         def _scan(
+
+    def _scan(
         self,
         candles: List[Candle],
         last_high: Pivot,
@@ -181,8 +182,7 @@ class BOSDetector:
         return True
 
 
-        
-          def _calculate_confidence(
+    def _calculate_confidence(
         self,
         candle: Candle,
         pivot: Pivot
@@ -235,7 +235,8 @@ class BOSDetector:
             )
 
         state.score += confidence / 100
-          def _create_signal(
+
+    def _create_signal(
         self,
         candle: Candle,
         index: int,
@@ -275,8 +276,8 @@ class BOSDetector:
             state.last_ll = candle.low
 
         return self.signal
-        
-          def last_signal(self):
+
+    def last_signal(self):
 
         return self.signal
 
@@ -333,4 +334,4 @@ class BOSDetector:
                 else None
             )
         }
-      
+
