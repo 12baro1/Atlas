@@ -17,6 +17,11 @@ from breaker_block_engine import BreakerBlockEngine
 from choch_engine import CHOCHEngine
 from config import Config
 from confluence_engine import ConfluenceEngine
+from trade_cooldown_engine import TradeCooldownEngine
+from state_engine import StateEngine
+from learning_engine import LearningEngine
+from economic_news_engine import EconomicNewsFilter
+from correlation_engine import CorrelationEngine
 from core.market_structure_engine import MarketStructureEngine
 from cisd_engine import CISDEngine
 from decision_engine import DecisionEngine
@@ -42,6 +47,7 @@ from rr_engine import RREngine
 from scanner_engine import ScannerEngine
 from session_filter import SessionFilter
 from signal_engine import SignalEngine
+from setup_quality_engine import SetupQualityEngine
 from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
 from trade_manager import TradeManager
@@ -94,6 +100,12 @@ class AtlasEngine:
         self.volume_profile = VolumeProfileEngine()
         self.institutional = InstitutionalAnalysisEngine()
         self.decision = DecisionEngine()
+        self.setup_quality = SetupQualityEngine()
+        self.state_engine = StateEngine(getattr(Config, "STATE_ENGINE_FILE", "atlas_state.json"))
+        self.news_filter = EconomicNewsFilter()
+        self.correlation = CorrelationEngine()
+        self.cooldown = TradeCooldownEngine()
+        self.learning = LearningEngine(getattr(Config, "LEARNING_ENGINE_FILE", "atlas_learning.json"))
 
         # Sinyal, risk ve operasyon motorları
         self.entry = EntryEngine()
@@ -110,6 +122,7 @@ class AtlasEngine:
         # Dış API uyumluluğu için korunur
         self.config = Config()
         self.position = PositionManager()
+        self.position.positions.extend(self.state_engine.load_open_positions())
         self.trade = TradeManager()
         self.trade_journal = TradeJournal()
         self.scanner = ScannerEngine()
@@ -120,7 +133,14 @@ class AtlasEngine:
         """Çoklu zaman dilimi verisini analiz eder ve birleşik çıktı üretir."""
         self._validate_market_data(data)
 
+        symbol = data.get("symbol", "UNKNOWN")
         candles = data["15m"]
+        if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)) and bool(getattr(Config, "INCREMENTAL_ANALYSIS_ENABLED", True)):
+            cached = self._restore_incremental_if_unchanged(symbol, candles)
+            if cached is not None:
+                return cached
+            data = self._trim_incremental_data(symbol, data)
+            candles = data["15m"]
         h1 = data.get("1h") or data.get("1H")
         weekly = data["1w"]
         daily = data["1d"]
@@ -199,6 +219,20 @@ class AtlasEngine:
             unicorn_state=unicorn_state,
             cisd_state=cisd_state,
         )
+        news_state = self.news_filter.evaluate(
+            timestamp_ms=candles[-1].time,
+            events=data.get("economic_events"),
+        ) if bool(getattr(Config, "ECONOMIC_NEWS_FILTER_ENABLED", True)) else {"active": False, "trade_allowed": True}
+        correlation_state = self.correlation.evaluate(
+            symbol=data.get("symbol", "UNKNOWN"),
+            direction=context_state["mtf"].get("entry", "WAIT"),
+            data=data,
+        ) if bool(getattr(Config, "CORRELATION_ENGINE_ENABLED", True)) else {"active": False, "trade_allowed": True}
+        cooldown_state = self.cooldown.evaluate(
+            symbol=data.get("symbol", "UNKNOWN"),
+            direction=context_state["mtf"].get("entry", "WAIT"),
+            open_positions=self.position.open_positions(),
+        )
 
         execution_state = self._build_execution_state(
             candles=candles,
@@ -222,6 +256,9 @@ class AtlasEngine:
             cisd=cisd_state,
             volume_profile=volume_profile_state,
             institutional=institutional_state,
+            news_filter=news_state,
+            correlation=correlation_state,
+            cooldown=cooldown_state,
         )
 
         decision_state = self.decision.decide(
@@ -239,6 +276,16 @@ class AtlasEngine:
             institutional=institutional_state,
             unicorn=unicorn_state,
             smt=smt_state,
+            news_filter=news_state,
+            correlation=correlation_state,
+            cooldown=cooldown_state,
+        )
+
+        decision_state = self._apply_external_risk_filters(
+            decision=decision_state,
+            news_filter=news_state,
+            correlation=correlation_state,
+            cooldown=cooldown_state,
         )
 
         execution_state["signal"] = self._apply_decision_to_signal(
@@ -262,6 +309,9 @@ class AtlasEngine:
             institutional_state=institutional_state,
             decision_state=decision_state,
             volume_profile_state=volume_profile_state,
+            news_state=news_state,
+            correlation_state=correlation_state,
+            cooldown_state=cooldown_state,
         )
 
         journal_snapshot = self.trade_journal.record_analysis(
@@ -275,6 +325,21 @@ class AtlasEngine:
             },
         )
         analysis["journal"] = journal_snapshot
+
+        result_payload = {
+            "analysis": analysis,
+            "signal": execution_state["signal"],
+            "risk": execution_state["risk"],
+            "rr": execution_state["rr"],
+            "dynamic_tp": execution_state["dynamic_tp"],
+            "journal": journal_snapshot,
+            "decision": decision_state,
+        }
+        if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)):
+            self.state_engine.update_analysis_state(symbol, data, result_payload)
+            self.state_engine.sync_open_positions(self.position.open_positions())
+        if execution_state["signal"].get("signal") in ["LONG", "SHORT"] and decision_state.get("action") in ["EXECUTE", "EXECUTE_WITH_CAUTION"]:
+            self.cooldown.register_signal(symbol, execution_state["signal"].get("signal"))
 
         self._notify_if_elite(
             data=data,
@@ -291,15 +356,57 @@ class AtlasEngine:
             decision=decision_state,
         )
 
-        return {
-            "analysis": analysis,
-            "signal": execution_state["signal"],
-            "risk": execution_state["risk"],
-            "rr": execution_state["rr"],
-            "dynamic_tp": execution_state["dynamic_tp"],
-            "journal": journal_snapshot,
-            "decision": decision_state,
+        return result_payload
+
+    def record_closed_trade_learning(self, trade):
+        """Feed a closed trade result into the adaptive learning engine."""
+        if not bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
+            return None
+        return self.learning.record_closed_trade(trade)
+
+    def _restore_incremental_if_unchanged(self, symbol, candles):
+        """Return cached analysis when the latest 15m candle was already processed."""
+        if not self.state_engine.has_new_entry_candle(symbol, candles):
+            cached = self.state_engine.restore_cached_result(symbol)
+            if cached is not None:
+                self.logger.info("Incremental cache hit | symbol=%s last_candle=%s", symbol, candles[-1].time if candles else None)
+                return cached
+        return None
+
+    def _trim_incremental_data(self, symbol, data):
+        """Avoid reprocessing the full history when persisted state already has older candles."""
+        symbol_state = self.state_engine.get_symbol_state(symbol) or {}
+        if not symbol_state.get("last_candle"):
+            return data
+        warmup = int(getattr(Config, "INCREMENTAL_WARMUP_CANDLES", 250))
+        trimmed = dict(data)
+        for timeframe in self.REQUIRED_TIMEFRAMES + ("1h",):
+            candles = data.get(timeframe) or data.get(timeframe.upper())
+            if not candles or len(candles) <= warmup:
+                continue
+            trimmed[timeframe] = candles[-warmup:]
+        trimmed["incremental"] = {
+            "enabled": True,
+            "warmup_candles": warmup,
+            "new_15m_candles": len(self.state_engine.new_candles_since_last(symbol, data.get("15m") or [])),
         }
+        return trimmed
+
+    def _apply_external_risk_filters(self, decision, news_filter, correlation, cooldown):
+        """Gate new entries around macro news, market correlation conflicts and duplicate trades."""
+        blockers = []
+        for name, payload in (("news_filter", news_filter), ("correlation", correlation), ("cooldown", cooldown)):
+            if payload and not payload.get("trade_allowed", True):
+                blockers.append(f"{name}: {payload.get('reason', 'blocked')}")
+        if not blockers:
+            return decision
+        enriched = dict(decision or {})
+        enriched["action"] = "SKIP"
+        enriched["external_blockers"] = blockers
+        existing = enriched.get("critical_blockers") or []
+        enriched["critical_blockers"] = existing + blockers
+        enriched["reason"] = "; ".join(blockers)
+        return enriched
 
     def _analyze_timeframe(self, candles):
         """Tek zaman dilimi için pivot, etiket, BOS ve CHoCH üretir."""
@@ -489,10 +596,46 @@ class AtlasEngine:
         cisd,
         volume_profile,
         institutional,
+        news_filter=None,
+        correlation=None,
+        cooldown=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
-        entry = self.entry.generate(mtf, entry_structure, fvg, orderblocks)
+        entry = self.entry.generate(mtf, entry_structure, fvg, orderblocks, current_price=candles[-1].close if candles else None)
         confirmation = self.entry_confirmation.confirm(mtf, entry_structure, fvg, entry)
+
+        setup_quality = self.setup_quality.evaluate(
+            candles=candles,
+            direction=entry.get("direction", "WAIT"),
+            mtf=mtf,
+            trend=trend,
+            structure=entry_structure,
+            liquidity_sweep=liquidity_sweep,
+            orderblocks=orderblocks,
+            fvg=fvg,
+            premium_discount=premium_discount,
+            market_phase=market_phase,
+            session=session,
+            entry=entry,
+            confirmation=confirmation,
+            smt=smt,
+            unicorn=unicorn,
+            cisd=cisd,
+            volume_profile=volume_profile,
+            institutional=institutional,
+        )
+        if bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
+            setup_quality = self.learning.apply_to_setup_quality(setup_quality)
+        setup_quality["external_risk_filters"] = {
+            "news_filter": news_filter or {},
+            "correlation": correlation or {},
+            "cooldown": cooldown or {},
+        }
+        if any(not (flt or {}).get("trade_allowed", True) for flt in setup_quality["external_risk_filters"].values()):
+            setup_quality["trade_allowed"] = False
+            setup_quality.setdefault("blockers", []).extend(
+                name for name, flt in setup_quality["external_risk_filters"].items() if not (flt or {}).get("trade_allowed", True)
+            )
 
         confluence = self.confluence.evaluate(
             mtf=mtf,
@@ -539,6 +682,10 @@ class AtlasEngine:
             "cisd": cisd,
             "volume_profile": volume_profile,
             "institutional": institutional,
+            "setup_quality": setup_quality,
+            "news_filter": news_filter or {},
+            "correlation": correlation or {},
+            "cooldown": cooldown or {},
         }
         signal = self.signal.generate(analysis_for_signal)
 
@@ -559,6 +706,7 @@ class AtlasEngine:
             "risk": risk,
             "rr": rr,
             "signal": signal,
+            "setup_quality": setup_quality,
         }
 
     def _compose_analysis(
@@ -572,6 +720,9 @@ class AtlasEngine:
         institutional_state=None,
         decision_state=None,
         volume_profile_state=None,
+        news_state=None,
+        correlation_state=None,
+        cooldown_state=None,
     ):
         """Dış API'de beklenen analysis sözlüğünü oluşturur."""
         return {
@@ -641,6 +792,11 @@ class AtlasEngine:
                 "score": 0,
                 "best": None,
             },
+            "setup_quality": execution_state.get("setup_quality", {}),
+            "news_filter": news_state or {},
+            "correlation": correlation_state or {},
+            "cooldown": cooldown_state or {},
+            "learning": {"setup_success_rates": self.learning.setup_success_rates()},
             "decision": decision_state or {
                 "action": "WAIT",
                 "reason": "No decision",
@@ -654,6 +810,9 @@ class AtlasEngine:
                 "cisd": cisd_state or {},
                 "volume_profile": volume_profile_state or {},
                 "institutional": institutional_state or {},
+                "news_filter": news_state or {},
+                "correlation": correlation_state or {},
+                "cooldown": cooldown_state or {},
                 "decision": decision_state or {},
             },
         }

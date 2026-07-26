@@ -26,6 +26,10 @@ class PositionManager:
             "tp2": trade["tp2"],
             "tp3": trade["tp3"],
             "status": "OPEN",
+            "remaining_percent": 100,
+            "realized_percent": 0,
+            "sl_moved_to_entry": False,
+            "runner_active": False,
             "hit_tp1": False,
             "hit_tp2": False,
             "hit_tp3": False
@@ -64,16 +68,24 @@ class PositionManager:
                     pos["status"] = "STOP"
                     changed_positions.append(pos)
 
-                if price >= pos["tp1"]:
+                if price >= pos["tp1"] and not pos["hit_tp1"]:
+                    self._take_partial(pos, percent=30)
                     pos["hit_tp1"] = True
+                    pos["stop_loss"] = pos["entry"]
+                    pos["sl_moved_to_entry"] = True
+                    changed_positions.append(dict(pos, event="TP1", partial_percent=30))
 
-                if price >= pos["tp2"]:
+                if price >= pos["tp2"] and not pos["hit_tp2"]:
+                    self._take_partial(pos, percent=30)
                     pos["hit_tp2"] = True
+                    pos["runner_active"] = True
+                    changed_positions.append(dict(pos, event="TP2", partial_percent=30))
 
-                if price >= pos["tp3"]:
+                if price >= pos["tp3"] and not pos["hit_tp3"]:
+                    self._take_partial(pos, percent=40)
                     pos["hit_tp3"] = True
                     pos["status"] = "CLOSED"
-                    changed_positions.append(pos)
+                    changed_positions.append(dict(pos, event="TP3", partial_percent=40))
 
             else:
 
@@ -81,16 +93,24 @@ class PositionManager:
                     pos["status"] = "STOP"
                     changed_positions.append(pos)
 
-                if price <= pos["tp1"]:
+                if price <= pos["tp1"] and not pos["hit_tp1"]:
+                    self._take_partial(pos, percent=30)
                     pos["hit_tp1"] = True
+                    pos["stop_loss"] = pos["entry"]
+                    pos["sl_moved_to_entry"] = True
+                    changed_positions.append(dict(pos, event="TP1", partial_percent=30))
 
-                if price <= pos["tp2"]:
+                if price <= pos["tp2"] and not pos["hit_tp2"]:
+                    self._take_partial(pos, percent=30)
                     pos["hit_tp2"] = True
+                    pos["runner_active"] = True
+                    changed_positions.append(dict(pos, event="TP2", partial_percent=30))
 
-                if price <= pos["tp3"]:
+                if price <= pos["tp3"] and not pos["hit_tp3"]:
+                    self._take_partial(pos, percent=40)
                     pos["hit_tp3"] = True
                     pos["status"] = "CLOSED"
-                    changed_positions.append(pos)
+                    changed_positions.append(dict(pos, event="TP3", partial_percent=40))
 
         if journal is not None:
             for pos in changed_positions:
@@ -109,6 +129,26 @@ class PositionManager:
                 )
 
         return changed_positions
+
+    def manage_runner(self, symbol, price, trend_direction=None, trail_distance=None):
+        """Manage remaining runner after TP2 with optional trend-aware trailing stop."""
+        updates = []
+        for pos in self.positions:
+            if pos.get("symbol") != symbol or pos.get("status") != "OPEN" or not pos.get("runner_active"):
+                continue
+            if trail_distance and trail_distance > 0:
+                if pos["side"] == "LONG" and trend_direction in [None, "LONG", "BULLISH"]:
+                    pos["stop_loss"] = max(pos["stop_loss"], price - trail_distance)
+                elif pos["side"] == "SHORT" and trend_direction in [None, "SHORT", "BEARISH"]:
+                    pos["stop_loss"] = min(pos["stop_loss"], price + trail_distance)
+            updates.append(pos)
+        return updates
+
+    def _take_partial(self, pos, percent):
+        available = max(0, pos.get("remaining_percent", 100))
+        taken = min(percent, available)
+        pos["remaining_percent"] = available - taken
+        pos["realized_percent"] = pos.get("realized_percent", 0) + taken
 
     def open_positions(self):
 
