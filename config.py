@@ -47,10 +47,11 @@ def _clean_env_key(key):
 
 
 def _clean_env_value(value):
-    text = _strip_shell_quotes(value)
-    if "#" in text and not (text.startswith("'") or text.startswith('"')):
-        text = text.split("#", 1)[0].strip()
-    return _strip_shell_quotes(text)
+    raw = (value or "").strip()
+    is_quoted = len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {'"', "'"}
+    if not is_quoted and "#" in raw:
+        raw = raw.split("#", 1)[0].strip()
+    return _strip_shell_quotes(raw)
 
 
 def _read_from_dotenv(var_name):
