@@ -31,13 +31,14 @@ class EntryEngine:
             entry = stop_loss * 0.998
         return entry, stop_loss
 
-    def generate(self, mtf, structure, fvg, orderblocks):
+    def generate(self, mtf, structure, fvg, orderblocks, current_price=None):
 
         result = {
             "valid": False,
             "direction": "NONE",
             "entry": None,
             "stop_loss": None,
+            "entry_type": "NONE",
             "score": 0,
             "reason": "",
             "checks": []
@@ -131,27 +132,47 @@ class EntryEngine:
 
         if direction == "LONG":
 
-            if selected_fvg:
-                result["entry"] = selected_fvg["to"]
-            elif selected_ob:
-                result["entry"] = selected_ob["high"]
-
             if selected_ob:
                 result["stop_loss"] = selected_ob["low"]
             elif selected_fvg:
                 result["stop_loss"] = selected_fvg["from"]
 
-        else:
+            limit_entry = selected_fvg["to"] if selected_fvg else (selected_ob["high"] if selected_ob else None)
+            if current_price is not None and result["stop_loss"] is not None:
+                near_market = current_price > result["stop_loss"] and (limit_entry is None or abs(current_price - limit_entry) / current_price <= 0.004)
+                if near_market:
+                    result["entry"] = current_price
+                    result["entry_type"] = "MARKET"
+                    result["score"] += 10
+                    result["checks"].append("✓ Market Entry Near POI")
+                else:
+                    result["entry"] = limit_entry
+                    result["entry_type"] = "LIMIT"
+            else:
+                result["entry"] = limit_entry
+                result["entry_type"] = "LIMIT" if limit_entry is not None else "NONE"
 
-            if selected_fvg:
-                result["entry"] = selected_fvg["from"]
-            elif selected_ob:
-                result["entry"] = selected_ob["low"]
+        else:
 
             if selected_ob:
                 result["stop_loss"] = selected_ob["high"]
             elif selected_fvg:
                 result["stop_loss"] = selected_fvg["to"]
+
+            limit_entry = selected_fvg["from"] if selected_fvg else (selected_ob["low"] if selected_ob else None)
+            if current_price is not None and result["stop_loss"] is not None:
+                near_market = current_price < result["stop_loss"] and (limit_entry is None or abs(current_price - limit_entry) / current_price <= 0.004)
+                if near_market:
+                    result["entry"] = current_price
+                    result["entry_type"] = "MARKET"
+                    result["score"] += 10
+                    result["checks"].append("✓ Market Entry Near POI")
+                else:
+                    result["entry"] = limit_entry
+                    result["entry_type"] = "LIMIT"
+            else:
+                result["entry"] = limit_entry
+                result["entry_type"] = "LIMIT" if limit_entry is not None else "NONE"
 
         if result["entry"] is None or result["stop_loss"] is None:
             fallback_entry, fallback_sl = self._structure_fallback_levels(direction, structure)
@@ -159,6 +180,12 @@ class EntryEngine:
                 result["entry"] = fallback_entry
                 result["stop_loss"] = fallback_sl
                 result["score"] += 15
+                result["entry_type"] = "CONFIRMATION"
+                if current_price is not None and ((direction == "LONG" and current_price > fallback_sl) or (direction == "SHORT" and current_price < fallback_sl)):
+                    result["entry"] = current_price
+                    result["entry_type"] = "MARKET"
+                    result["score"] += 5
+                    result["checks"].append("✓ Market Structure Entry")
                 result["checks"].append("✓ Structure Fallback Levels")
             else:
                 result["checks"].append("✗ Structure Fallback Levels")

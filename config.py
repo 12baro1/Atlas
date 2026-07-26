@@ -188,6 +188,23 @@ class Config:
     TELEGRAM_ASYNC_SEND = os.getenv("ATLAS_TELEGRAM_ASYNC_SEND", "1").strip().lower() in {"1", "true", "yes"}
     TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS = float(os.getenv("ATLAS_TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", "0.5"))
 
+
+    # State / Incremental Analysis
+    STATE_ENGINE_ENABLED = os.getenv("ATLAS_STATE_ENGINE_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+    STATE_ENGINE_FILE = os.getenv("ATLAS_STATE_ENGINE_FILE", "atlas_state.json")
+    INCREMENTAL_ANALYSIS_ENABLED = os.getenv("ATLAS_INCREMENTAL_ANALYSIS_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+    INCREMENTAL_WARMUP_CANDLES = int(os.getenv("ATLAS_INCREMENTAL_WARMUP_CANDLES", "250"))
+
+    # Macro / correlation / cooldown / learning
+    ECONOMIC_NEWS_FILTER_ENABLED = os.getenv("ATLAS_ECONOMIC_NEWS_FILTER_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+    ECONOMIC_NEWS_EVENTS_FILE = os.getenv("ATLAS_ECONOMIC_NEWS_EVENTS_FILE", "economic_events.json")
+    ECONOMIC_NEWS_BLOCK_BEFORE_MINUTES = int(os.getenv("ATLAS_ECONOMIC_NEWS_BLOCK_BEFORE_MINUTES", "45"))
+    ECONOMIC_NEWS_BLOCK_AFTER_MINUTES = int(os.getenv("ATLAS_ECONOMIC_NEWS_BLOCK_AFTER_MINUTES", "30"))
+    CORRELATION_ENGINE_ENABLED = os.getenv("ATLAS_CORRELATION_ENGINE_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+    TRADE_COOLDOWN_MINUTES = float(os.getenv("ATLAS_TRADE_COOLDOWN_MINUTES", "180"))
+    LEARNING_ENGINE_ENABLED = os.getenv("ATLAS_LEARNING_ENGINE_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+    LEARNING_ENGINE_FILE = os.getenv("ATLAS_LEARNING_ENGINE_FILE", "atlas_learning.json")
+
     # Yetkilendirme
     BOT_PASSWORD = os.getenv("ATLAS_BOT_PASSWORD", "")
     ADMIN_CHAT_ID = int(os.getenv("ATLAS_ADMIN_CHAT_ID", "0"))

@@ -24,6 +24,7 @@ class SignalEngine:
         cisd = analysis.get("cisd", {})
         volume_profile = analysis.get("volume_profile", {})
         institutional = analysis.get("institutional", {})
+        setup_quality = analysis.get("setup_quality", {})
 
         market_phase = analysis.get("market_phase", {})
         phase_name = market_phase.get("phase", "Ranging")
@@ -50,6 +51,13 @@ class SignalEngine:
             mtf_alignment=mtf_alignment,
         )
 
+        if setup_quality.get("active"):
+            quality_score = setup_quality.get("score", confidence_adjusted)
+            confidence_adjusted = (confidence_adjusted * 0.45) + (quality_score * 0.55)
+            if not setup_quality.get("trade_allowed", True):
+                confirmed = False
+                wait_reason = "setup_quality_blocked"
+
         confidence_adjusted = self._adjust_confidence_by_liquidity_and_smt(
             base_confidence=confidence_adjusted,
             signal_direction=direction,
@@ -62,6 +70,10 @@ class SignalEngine:
         )
 
         confidence_adjusted = clamp(confidence_adjusted)
+
+        if setup_quality.get("active") and not setup_quality.get("trade_allowed", True):
+            direction = "WAIT"
+            wait_reason = wait_reason or "setup_quality_blocked"
 
         if confidence_adjusted >= 96:
             grade = "S+"
@@ -111,6 +123,9 @@ class SignalEngine:
             "institutional_confidence": institutional.get("confidence", 0),
             "institutional_direction": institutional.get("direction", "NONE"),
             "alignment_conflicts": self._alignment_conflicts(direction, liquidity_sweep, smt, unicorn, cisd, volume_profile),
+            "setup_quality_score": setup_quality.get("score"),
+            "module_scores": setup_quality.get("module_scores", {}),
+            "analysis_report": setup_quality.get("reasons", []),
         }
 
         if direction == "WAIT":
