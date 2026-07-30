@@ -1,26 +1,48 @@
+```
+# Environment files
+.env
+.env.local
+*.env.*
+
+# Logs
+*.log
+
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
+
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-*.egg-info/
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+
+# Build artifacts
 dist/
 build/
+*.egg-info/
+
+# Dependencies
 .venv/
 venv/
-env/
-.env
-.DS_Store
+node_modules/
+
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
-.cache/
-.pytest_cache/
 
-# Runtime Telegram state
-telegram_auth.db
-telegram_auth.db-shm
-telegram_auth.db-wal
-chat_ids.json
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+```

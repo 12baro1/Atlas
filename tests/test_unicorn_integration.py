@@ -90,5 +90,6 @@ def test_telegram_formats_unicorn_section():
     )
 
     assert "ATLAS SIGNAL" in message
-    assert "Signal: LONG" in message
-    assert "DECISION" in message
+    # Minimal layout uses emoji format for direction
+    assert "LONG" in message
+    assert "Entry:" in message
