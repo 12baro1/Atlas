@@ -84,7 +84,7 @@ def test_notify_if_elite_skips_invalid_entry_before_sending(monkeypatch):
         risk={"entry": 1.0, "stop_loss": 1.1, "risk": 0.1, "rr": 1.5},
         rr={"quality": "WEAK", "score": 45},
         dynamic_tp={"tp1": 0.9, "tp2": 0.8, "tp3": 0.7},
-        confluence={"checks": []},
+        confluence={"score": 80, "checks": []},
         market_phase={"phase": "Expansion"},
         unicorn={"active": False},
         cisd={"active": False},
@@ -180,12 +180,12 @@ def test_notify_if_elite_deduplicates_same_signal(monkeypatch):
         "risk": {"entry": 11.18, "stop_loss": 11.2, "risk": 0.02, "tp3": 11.1, "rr": 4.0},
         "rr": {"quality": "VERY GOOD", "score": 90},
         "dynamic_tp": {"tp1": 11.15, "tp2": 11.13, "tp3": 11.1},
-        "confluence": {"checks": []},
+        "confluence": {"score": 80, "checks": []},
         "market_phase": {"phase": "Expansion"},
         "unicorn": {"active": False},
         "cisd": {"active": False},
         "institutional": {"active": False},
-        "decision": {"action": "SHORT"},
+        "decision": {"action": "EXECUTE", "risk_valid": True, "mtf_valid": True},
     }
 
     sent_first = engine._notify_if_elite(**payload)
@@ -226,12 +226,12 @@ def test_notify_if_elite_accepts_execute_action_when_decision_required(monkeypat
         risk={"entry": 1.0, "stop_loss": 0.9, "risk": 0.1, "rr": 3.0, "tp3": 1.3},
         rr={"quality": "GOOD", "score": 80},
         dynamic_tp={"tp1": 1.1, "tp2": 1.2, "tp3": 1.3},
-        confluence={"checks": []},
+        confluence={"score": 80, "checks": []},
         market_phase={"phase": "Expansion"},
         unicorn={"active": False},
         cisd={"active": False},
         institutional={"active": False},
-        decision={"action": "EXECUTE", "reason": "ok"},
+        decision={"action": "EXECUTE", "reason": "ok", "risk_valid": True, "mtf_valid": True},
     )
 
     assert sent is True
@@ -311,3 +311,45 @@ def test_telegram_message_shows_rr_breakdown_and_selected_rr():
     assert "RR: 3" in message or "RR: 3.0" in message
     assert "Entry:" in message
     assert "LONG" in message
+
+
+def test_telegram_quality_gate_blocks_low_grade_before_sending(monkeypatch):
+    engine = AtlasEngine()
+
+    called = {"count": 0}
+
+    class _DummyBot:
+        def send(self, _message):
+            called["count"] += 1
+            return True
+
+    class _DummyEngine:
+        def format_signal(self, _result):
+            return "dummy"
+
+    import telegram_engine as telegram_module
+    monkeypatch.setattr(telegram_module, "TelegramBot", lambda: _DummyBot())
+    monkeypatch.setenv("ATLAS_TELEGRAM_MIN_GRADE", "A")
+    monkeypatch.setenv("ATLAS_TELEGRAM_MIN_CONFIDENCE", "85")
+    monkeypatch.setenv("ATLAS_TELEGRAM_MIN_RR", "3")
+    monkeypatch.setenv("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "1")
+
+    engine.telegram = _DummyEngine()
+
+    sent = engine._notify_if_elite(
+        data={"symbol": "ETH/USDT:USDT"},
+        signal={"signal": "LONG", "confidence": 90, "grade": "B", "strength": "NORMAL"},
+        entry={"direction": "LONG", "valid": True, "entry": 100.0, "stop_loss": 99.0},
+        risk={"entry": 100.0, "stop_loss": 99.0, "risk": 1.0, "rr": 3.2, "tp3": 103.2},
+        rr={"quality": "GOOD", "score": 80},
+        dynamic_tp={"tp1": 101.0, "tp2": 102.0, "tp3": 103.2},
+        confluence={"score": 80, "checks": []},
+        market_phase={"phase": "Expansion"},
+        unicorn={"active": False},
+        cisd={"active": False},
+        institutional={"active": False},
+        decision={"action": "EXECUTE", "score": 82, "risk_valid": True, "mtf_valid": True},
+    )
+
+    assert sent is False
+    assert called["count"] == 0

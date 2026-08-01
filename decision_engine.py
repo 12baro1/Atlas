@@ -149,6 +149,7 @@ class DecisionEngine:
             "confluence_score": confluence_score,
             "entry_valid": entry_valid,
             "risk_valid": risk_valid,
+            "mtf_valid": bool(mtf.get("valid", False)) if isinstance(mtf, dict) else False,
             "rr": rr_value,
             "selected_rr": self._safe_number(risk.get("selected_rr") if isinstance(risk, dict) else None, rr_value),
             "selected_tp": risk.get("selected_tp") if isinstance(risk, dict) else None,
