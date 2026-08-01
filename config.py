@@ -180,8 +180,17 @@ class Config:
     TELEGRAM_MAX_DECISION_REASON_LENGTH = 140
     TELEGRAM_SIGNAL_DEDUP_ENABLED = True
     TELEGRAM_SIGNAL_COOLDOWN_MINUTES = 180
-    TELEGRAM_MIN_CONFIDENCE = float(os.getenv("ATLAS_TELEGRAM_MIN_CONFIDENCE", "75"))
-    TELEGRAM_REQUIRE_DECISION_ACTION = os.getenv("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "0").strip().lower() in {"1", "true", "yes"}
+    TELEGRAM_MIN_CONFIDENCE = float(os.getenv("ATLAS_TELEGRAM_MIN_CONFIDENCE", "85"))
+    TELEGRAM_REQUIRE_DECISION_ACTION = os.getenv("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "1").strip().lower() in {"1", "true", "yes"}
+    TELEGRAM_QUALITY_FILTERS_ENABLED = os.getenv("ATLAS_TELEGRAM_QUALITY_FILTERS_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+    TELEGRAM_MIN_GRADE = os.getenv("ATLAS_TELEGRAM_MIN_GRADE", "A").strip().upper()
+    TELEGRAM_MIN_RR = float(os.getenv("ATLAS_TELEGRAM_MIN_RR", "3.0"))
+    TELEGRAM_ALLOW_CAUTION_SIGNALS = os.getenv("ATLAS_TELEGRAM_ALLOW_CAUTION_SIGNALS", "0").strip().lower() in {"1", "true", "yes"}
+    TELEGRAM_MIN_CONFLUENCE_SCORE = float(os.getenv("ATLAS_TELEGRAM_MIN_CONFLUENCE_SCORE", "70"))
+    TELEGRAM_REQUIRE_MTF_ALIGNMENT = os.getenv("ATLAS_TELEGRAM_REQUIRE_MTF_ALIGNMENT", "1").strip().lower() in {"1", "true", "yes"}
+    TELEGRAM_ALLOWED_MARKET_PHASES = tuple(
+        item.strip() for item in os.getenv("ATLAS_TELEGRAM_ALLOWED_MARKET_PHASES", "Expansion,Trending,Reversal").split(",") if item.strip()
+    )
     TELEGRAM_BOT_TOKEN = os.getenv("ATLAS_TELEGRAM_BOT_TOKEN", DEFAULT_TELEGRAM_BOT_TOKEN)
     TELEGRAM_CHAT_ID = os.getenv("ATLAS_TELEGRAM_CHAT_ID", DEFAULT_TELEGRAM_CHAT_ID)
     TELEGRAM_HTTP_TIMEOUT_SECONDS = float(os.getenv("ATLAS_TELEGRAM_HTTP_TIMEOUT_SECONDS", "3"))
@@ -235,8 +244,17 @@ class Config:
         cls.BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "")
         cls.BYBIT_POSITION_MODE = _env_or_rc("ATLAS_BYBIT_POSITION_MODE", "one_way").strip().lower()
         cls.BYBIT_LOG_HTTP = _env_or_rc("ATLAS_BYBIT_LOG_HTTP", "0").strip().lower() in {"1", "true", "yes"}
-        cls.TELEGRAM_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_TELEGRAM_MIN_CONFIDENCE", "75"))
-        cls.TELEGRAM_REQUIRE_DECISION_ACTION = _env_or_rc("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "0").strip().lower() in {"1", "true", "yes"}
+        cls.TELEGRAM_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_TELEGRAM_MIN_CONFIDENCE", "85"))
+        cls.TELEGRAM_REQUIRE_DECISION_ACTION = _env_or_rc("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "1").strip().lower() in {"1", "true", "yes"}
+        cls.TELEGRAM_QUALITY_FILTERS_ENABLED = _env_or_rc("ATLAS_TELEGRAM_QUALITY_FILTERS_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+        cls.TELEGRAM_MIN_GRADE = _env_or_rc("ATLAS_TELEGRAM_MIN_GRADE", "A").strip().upper()
+        cls.TELEGRAM_MIN_RR = float(_env_or_rc("ATLAS_TELEGRAM_MIN_RR", "3.0"))
+        cls.TELEGRAM_ALLOW_CAUTION_SIGNALS = _env_or_rc("ATLAS_TELEGRAM_ALLOW_CAUTION_SIGNALS", "0").strip().lower() in {"1", "true", "yes"}
+        cls.TELEGRAM_MIN_CONFLUENCE_SCORE = float(_env_or_rc("ATLAS_TELEGRAM_MIN_CONFLUENCE_SCORE", "70"))
+        cls.TELEGRAM_REQUIRE_MTF_ALIGNMENT = _env_or_rc("ATLAS_TELEGRAM_REQUIRE_MTF_ALIGNMENT", "1").strip().lower() in {"1", "true", "yes"}
+        cls.TELEGRAM_ALLOWED_MARKET_PHASES = tuple(
+            item.strip() for item in _env_or_rc("ATLAS_TELEGRAM_ALLOWED_MARKET_PHASES", "Expansion,Trending,Reversal").split(",") if item.strip()
+        )
         cls.TELEGRAM_MINIMAL_LAYOUT = _env_or_rc("ATLAS_TELEGRAM_MINIMAL_LAYOUT", "1").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_BOT_TOKEN = _env_or_rc("ATLAS_TELEGRAM_BOT_TOKEN", cls.DEFAULT_TELEGRAM_BOT_TOKEN)
         cls.TELEGRAM_CHAT_ID = _env_or_rc("ATLAS_TELEGRAM_CHAT_ID", cls.DEFAULT_TELEGRAM_CHAT_ID)

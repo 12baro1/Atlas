@@ -53,9 +53,10 @@ class TelegramEngine:
         tp2 = risk.get("tp2")
         tp3 = risk.get("tp3")
         rr = risk.get("selected_rr") if risk.get("selected_rr") is not None else risk.get("rr")
+        decision = result.get("decision") or {}
 
         msg = [
-            "📊 ATLAS SIGNAL",
+            "📊 ATLAS SIGNAL (FILTERED)",
             f"🪙 {symbol}",
             f"📈 {direction}",
             f"Entry: {self._fmt(entry_price)}",
@@ -66,6 +67,8 @@ class TelegramEngine:
             f"RR: {self._fmt(rr)}",
             f"Grade: {signal.get('grade', '-')}",
             f"Confidence: {signal.get('confidence', 0)}%",
+            f"Decision: {decision.get('action', '-')}",
+            f"Decision Score: {self._fmt(decision.get('score', '-'))}",
         ]
 
         return "\n".join(msg)
