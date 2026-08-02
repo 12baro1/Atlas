@@ -191,6 +191,11 @@ class Config:
     TELEGRAM_ALLOWED_MARKET_PHASES = tuple(
         item.strip() for item in os.getenv("ATLAS_TELEGRAM_ALLOWED_MARKET_PHASES", "Expansion,Trending,Reversal").split(",") if item.strip()
     )
+    TELEGRAM_MIN_MANUAL_SCORE = float(os.getenv("ATLAS_TELEGRAM_MIN_MANUAL_SCORE", "75"))
+    TELEGRAM_HISTORICAL_MIN_TRADES = int(os.getenv("ATLAS_TELEGRAM_HISTORICAL_MIN_TRADES", "20"))
+    TELEGRAM_HISTORICAL_MIN_EXPECTANCY = float(os.getenv("ATLAS_TELEGRAM_HISTORICAL_MIN_EXPECTANCY", "0.30"))
+    TELEGRAM_HISTORICAL_MIN_PROFIT_FACTOR = float(os.getenv("ATLAS_TELEGRAM_HISTORICAL_MIN_PROFIT_FACTOR", "1.30"))
+    TELEGRAM_HISTORICAL_STRICT = os.getenv("ATLAS_TELEGRAM_HISTORICAL_STRICT", "0").strip().lower() in {"1", "true", "yes"}
     TELEGRAM_BOT_TOKEN = os.getenv("ATLAS_TELEGRAM_BOT_TOKEN", DEFAULT_TELEGRAM_BOT_TOKEN)
     TELEGRAM_CHAT_ID = os.getenv("ATLAS_TELEGRAM_CHAT_ID", DEFAULT_TELEGRAM_CHAT_ID)
     TELEGRAM_HTTP_TIMEOUT_SECONDS = float(os.getenv("ATLAS_TELEGRAM_HTTP_TIMEOUT_SECONDS", "3"))
@@ -255,6 +260,11 @@ class Config:
         cls.TELEGRAM_ALLOWED_MARKET_PHASES = tuple(
             item.strip() for item in _env_or_rc("ATLAS_TELEGRAM_ALLOWED_MARKET_PHASES", "Expansion,Trending,Reversal").split(",") if item.strip()
         )
+        cls.TELEGRAM_MIN_MANUAL_SCORE = float(_env_or_rc("ATLAS_TELEGRAM_MIN_MANUAL_SCORE", "75"))
+        cls.TELEGRAM_HISTORICAL_MIN_TRADES = int(_env_or_rc("ATLAS_TELEGRAM_HISTORICAL_MIN_TRADES", "20"))
+        cls.TELEGRAM_HISTORICAL_MIN_EXPECTANCY = float(_env_or_rc("ATLAS_TELEGRAM_HISTORICAL_MIN_EXPECTANCY", "0.30"))
+        cls.TELEGRAM_HISTORICAL_MIN_PROFIT_FACTOR = float(_env_or_rc("ATLAS_TELEGRAM_HISTORICAL_MIN_PROFIT_FACTOR", "1.30"))
+        cls.TELEGRAM_HISTORICAL_STRICT = _env_or_rc("ATLAS_TELEGRAM_HISTORICAL_STRICT", "0").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_MINIMAL_LAYOUT = _env_or_rc("ATLAS_TELEGRAM_MINIMAL_LAYOUT", "1").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_BOT_TOKEN = _env_or_rc("ATLAS_TELEGRAM_BOT_TOKEN", cls.DEFAULT_TELEGRAM_BOT_TOKEN)
         cls.TELEGRAM_CHAT_ID = _env_or_rc("ATLAS_TELEGRAM_CHAT_ID", cls.DEFAULT_TELEGRAM_CHAT_ID)

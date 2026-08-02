@@ -36,6 +36,7 @@ from liquidity_engine import LiquidityEngine
 from liquidity_sweep_engine import LiquiditySweepEngine
 from institutional_engine import InstitutionalAnalysisEngine
 from market_phase_engine import MarketPhaseEngine
+from manual_trade_quality import ManualTradeQualityGate
 from mitigation_engine import MitigationEngine
 from mtf_engine import MTFEngine
 from orderblock_engine import OrderBlockEngine
@@ -106,6 +107,7 @@ class AtlasEngine:
         self.correlation = CorrelationEngine()
         self.cooldown = TradeCooldownEngine()
         self.learning = LearningEngine(getattr(Config, "LEARNING_ENGINE_FILE", "atlas_learning.json"))
+        self.manual_quality_gate = ManualTradeQualityGate(Config)
 
         # Sinyal, risk ve operasyon motorları
         self.entry = EntryEngine()
@@ -1162,6 +1164,16 @@ class AtlasEngine:
             )
             return False
 
+        manual_quality = self.manual_quality_gate.evaluate(
+            symbol=data.get("symbol", "UNKNOWN"),
+            signal=signal,
+            entry=entry,
+            risk=risk,
+            decision=decision,
+            confluence=confluence,
+            market_phase=market_phase,
+            trade_journal=self.trade_journal,
+        )
         quality_blockers = self._telegram_quality_blockers(
             signal=signal,
             entry=entry,
@@ -1170,6 +1182,7 @@ class AtlasEngine:
             confluence=confluence,
             market_phase=market_phase,
         )
+        quality_blockers.extend(manual_quality.get("blockers") or [])
         if quality_blockers:
             self.logger.info(
                 "Telegram skip: quality gate blocked %s | %s",
@@ -1220,8 +1233,14 @@ class AtlasEngine:
                 "cisd": cisd,
                 "institutional": institutional,
                 "decision": decision,
+                "manual_quality": manual_quality,
             }
         )
+
+        bot_class = getattr(telegram_module, "TelegramBot")
+        reply_markup = None
+        if hasattr(bot_class, "trade_feedback_keyboard"):
+            reply_markup = bot_class.trade_feedback_keyboard(symbol, action_for_message)
 
         print(message)
         if bool(getattr(Config, "TELEGRAM_ASYNC_SEND", True)):
@@ -1231,6 +1250,7 @@ class AtlasEngine:
                     "telegram_module": telegram_module,
                     "message": message,
                     "symbol": symbol,
+                    "reply_markup": reply_markup,
                 },
                 daemon=False,
             )
@@ -1242,6 +1262,7 @@ class AtlasEngine:
             telegram_module=telegram_module,
             message=message,
             symbol=symbol,
+            reply_markup=reply_markup,
         )
 
 
@@ -1341,10 +1362,14 @@ class AtlasEngine:
             return "NONE"
         return f"{float(value):.2f}".rstrip("0").rstrip(".")
 
-    def _send_telegram_safe(self, telegram_module, message, symbol):
+    def _send_telegram_safe(self, telegram_module, message, symbol, reply_markup=None):
         """Telegram gönderimini güvenli şekilde çalıştırır; analiz akışını düşürmez."""
         try:
-            sent = telegram_module.TelegramBot().send(message)
+            bot = telegram_module.TelegramBot()
+            try:
+                sent = bot.send(message, reply_markup=reply_markup)
+            except TypeError:
+                sent = bot.send(message)
             if not sent:
                 self.logger.warning("Telegram send failed: %s", symbol)
             return sent

@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.candle import Candle
 from engine import AtlasEngine
 from telegram_engine import TelegramEngine
+import telegram_engine as telegram_module
 
 
 def _candle(index):
@@ -353,3 +354,33 @@ def test_telegram_quality_gate_blocks_low_grade_before_sending(monkeypatch):
 
     assert sent is False
     assert called["count"] == 0
+
+
+def test_telegram_minimal_message_includes_manual_quality():
+    message = TelegramEngine().format_signal(
+        {
+            "symbol": "BTC/USDT:USDT",
+            "signal": {"signal": "LONG", "grade": "A+", "strength": "STRONG", "confidence": 92},
+            "entry": {"direction": "LONG", "valid": True, "entry": 100.0, "stop_loss": 99.0},
+            "risk": {"risk": 1.0, "selected_rr": 3.5, "tp1": 101, "tp2": 102, "tp3": 103},
+            "decision": {"action": "EXECUTE", "score": 88},
+            "manual_quality": {
+                "score": 86,
+                "grade": "A",
+                "historical": {"sample_size": 24, "expectancy": 0.42, "profit_factor": 1.6},
+                "warnings": [],
+                "blockers": [],
+            },
+        }
+    )
+
+    assert "Manual Score: 86/100 (A)" in message
+    assert "History: n=24 exp=0.42R pf=1.6" in message
+
+
+def test_trade_feedback_keyboard_contains_manual_actions():
+    keyboard = telegram_module.TelegramBot.trade_feedback_keyboard("BTC/USDT:USDT", "LONG")
+
+    texts = [button["text"] for row in keyboard["inline_keyboard"] for button in row]
+    assert "✅ Girdim" in texts
+    assert "🛑 SL" in texts

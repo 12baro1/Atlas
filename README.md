@@ -72,3 +72,25 @@ ATLAS_TELEGRAM_ALLOWED_MARKET_PHASES=Expansion,Trending,Reversal
 - `ATLAS_TELEGRAM_ALLOWED_MARKET_PHASES`: Sadece listelenen piyasa fazlarinda Telegram sinyali uretir.
 
 Onemli: Sinyal gelse bile islem oncesi haber, ani volatilite, likidite ve pozisyon buyuklugunu kontrol et. Hicbir filtre kar garantisi vermez; gercek hesapta once kucuk miktar veya demo ile dogrula.
+
+## Manual Trade Score ve Geri Bildirim
+
+Telegram filtresi artik sinyal kalitesini tek bir `Manual Score` ile ozetler. Bu skor confidence, confluence, RR, decision, risk, market phase ve varsa gecmis performans bilgisini birlestirir.
+
+Ek ayarlar:
+
+```env
+ATLAS_TELEGRAM_MIN_MANUAL_SCORE=75
+ATLAS_TELEGRAM_HISTORICAL_MIN_TRADES=20
+ATLAS_TELEGRAM_HISTORICAL_MIN_EXPECTANCY=0.30
+ATLAS_TELEGRAM_HISTORICAL_MIN_PROFIT_FACTOR=1.30
+ATLAS_TELEGRAM_HISTORICAL_STRICT=0
+```
+
+- `ATLAS_TELEGRAM_MIN_MANUAL_SCORE`: Telegram'a dusmesi icin minimum manuel islem skoru.
+- `ATLAS_TELEGRAM_HISTORICAL_MIN_TRADES`: Gecmis performans filtresinin guvenilir saymasi icin minimum kapali islem sayisi.
+- `ATLAS_TELEGRAM_HISTORICAL_MIN_EXPECTANCY`: Benzer setup'larda istenen minimum ortalama R.
+- `ATLAS_TELEGRAM_HISTORICAL_MIN_PROFIT_FACTOR`: Benzer setup'larda istenen minimum profit factor.
+- `ATLAS_TELEGRAM_HISTORICAL_STRICT`: `1` yapilirsa yeterli gecmis veri yokken sinyal engellenir; `0` iken sadece uyari olarak gosterilir.
+
+Telegram mesajlarina manuel takip butonlari da eklenir: `Girdim`, `Girmedim`, `TP`, `SL`, `Erken ciktim`. Bu callback'leri gercek trade sonucuna baglamak sonraki gelistirme adiminda Atlas'in senin manuel performansindan daha hizli ogrenmesini saglar.
