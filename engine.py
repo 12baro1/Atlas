@@ -36,6 +36,7 @@ from liquidity_engine import LiquidityEngine
 from liquidity_sweep_engine import LiquiditySweepEngine
 from institutional_engine import InstitutionalAnalysisEngine
 from market_phase_engine import MarketPhaseEngine
+from manual_trade_quality import ManualTradeQualityGate
 from mitigation_engine import MitigationEngine
 from mtf_engine import MTFEngine
 from orderblock_engine import OrderBlockEngine
@@ -106,6 +107,7 @@ class AtlasEngine:
         self.correlation = CorrelationEngine()
         self.cooldown = TradeCooldownEngine()
         self.learning = LearningEngine(getattr(Config, "LEARNING_ENGINE_FILE", "atlas_learning.json"))
+        self.manual_quality_gate = ManualTradeQualityGate(Config)
 
         # Sinyal, risk ve operasyon motorları
         self.entry = EntryEngine()
@@ -138,6 +140,22 @@ class AtlasEngine:
         if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)) and bool(getattr(Config, "INCREMENTAL_ANALYSIS_ENABLED", True)):
             cached = self._restore_incremental_if_unchanged(symbol, candles)
             if cached is not None:
+                cached_analysis = cached.get("analysis") if isinstance(cached, dict) else None
+                if isinstance(cached, dict):
+                    cached.setdefault("symbol", symbol)
+                if cached_analysis:
+                    cached_analysis.setdefault("symbol", symbol)
+                    cached["journal"] = self.trade_journal.record_analysis(
+                        analysis=cached_analysis,
+                        symbol=symbol,
+                        timeframe="multi",
+                        metadata={
+                            "decision": (cached.get("decision") or {}).get("action"),
+                            "signal": (cached.get("signal") or {}).get("signal"),
+                            "confidence": (cached.get("signal") or {}).get("confidence", 0),
+                            "source": "incremental_cache",
+                        },
+                    )
                 return cached
             data = self._trim_incremental_data(symbol, data)
             candles = data["15m"]
@@ -327,6 +345,7 @@ class AtlasEngine:
         analysis["journal"] = journal_snapshot
 
         result_payload = {
+            "symbol": symbol,
             "analysis": analysis,
             "signal": execution_state["signal"],
             "risk": execution_state["risk"],
@@ -725,7 +744,7 @@ class AtlasEngine:
         cooldown_state=None,
     ):
         """Dış API'de beklenen analysis sözlüğünü oluşturur."""
-        return {
+        analysis_payload = {
             "structure": structure_state["structure"],
             "bos": structure_state["bos"],
             "choch": structure_state["choch"],
@@ -801,6 +820,7 @@ class AtlasEngine:
                 "action": "WAIT",
                 "reason": "No decision",
             },
+            "symbol": decision_state.get("symbol") if isinstance(decision_state, dict) else None,
             "modules": {
                 "structure": structure_state,
                 "context": context_state,
@@ -816,6 +836,9 @@ class AtlasEngine:
                 "decision": decision_state or {},
             },
         }
+        if analysis_payload["symbol"] is None:
+            analysis_payload.pop("symbol")
+        return analysis_payload
 
     def _build_institutional_state(self, data, context_state, structure_state, volume_profile_state, smt_state, unicorn_state, cisd_state):
         """Kurumsal akış, VWAP ve regime katmanını üretir."""
@@ -1131,13 +1154,40 @@ class AtlasEngine:
             )
             return False
 
-        min_confidence = float(getattr(Config, "TELEGRAM_MIN_CONFIDENCE", 75))
+        min_confidence = float(getattr(Config, "TELEGRAM_MIN_CONFIDENCE", 85))
         if signal.get("confidence", 0) < min_confidence:
             self.logger.info(
                 "Telegram skip: confidence=%s < min=%s for %s",
                 signal.get("confidence", 0),
                 min_confidence,
                 data.get("symbol", "UNKNOWN"),
+            )
+            return False
+
+        manual_quality = self.manual_quality_gate.evaluate(
+            symbol=data.get("symbol", "UNKNOWN"),
+            signal=signal,
+            entry=entry,
+            risk=risk,
+            decision=decision,
+            confluence=confluence,
+            market_phase=market_phase,
+            trade_journal=self.trade_journal,
+        )
+        quality_blockers = self._telegram_quality_blockers(
+            signal=signal,
+            entry=entry,
+            risk=risk,
+            decision=decision,
+            confluence=confluence,
+            market_phase=market_phase,
+        )
+        quality_blockers.extend(manual_quality.get("blockers") or [])
+        if quality_blockers:
+            self.logger.info(
+                "Telegram skip: quality gate blocked %s | %s",
+                data.get("symbol", "UNKNOWN"),
+                "; ".join(quality_blockers),
             )
             return False
 
@@ -1183,8 +1233,14 @@ class AtlasEngine:
                 "cisd": cisd,
                 "institutional": institutional,
                 "decision": decision,
+                "manual_quality": manual_quality,
             }
         )
+
+        bot_class = getattr(telegram_module, "TelegramBot")
+        reply_markup = None
+        if hasattr(bot_class, "trade_feedback_keyboard"):
+            reply_markup = bot_class.trade_feedback_keyboard(symbol, action_for_message)
 
         print(message)
         if bool(getattr(Config, "TELEGRAM_ASYNC_SEND", True)):
@@ -1194,6 +1250,7 @@ class AtlasEngine:
                     "telegram_module": telegram_module,
                     "message": message,
                     "symbol": symbol,
+                    "reply_markup": reply_markup,
                 },
                 daemon=False,
             )
@@ -1205,12 +1262,114 @@ class AtlasEngine:
             telegram_module=telegram_module,
             message=message,
             symbol=symbol,
+            reply_markup=reply_markup,
         )
 
-    def _send_telegram_safe(self, telegram_module, message, symbol):
+
+    def _telegram_quality_blockers(self, signal, entry=None, risk=None, decision=None, confluence=None, market_phase=None):
+        """Telegram'a sadece manuel islem icin disiplinli risk/kalite kurallarini gecen setup'lari birakir."""
+        if not bool(getattr(Config, "TELEGRAM_QUALITY_FILTERS_ENABLED", True)):
+            return []
+
+        blockers = []
+        signal = signal or {}
+        entry = entry or {}
+        risk = risk or {}
+        decision = decision or {}
+        confluence = confluence or {}
+        market_phase = market_phase or {}
+
+        min_grade = str(getattr(Config, "TELEGRAM_MIN_GRADE", "A") or "A").strip().upper()
+        grade = str(signal.get("grade", "") or "").strip().upper()
+        if not self._grade_at_least(grade, min_grade):
+            blockers.append(f"grade {grade or 'NONE'} < {min_grade}")
+
+        min_rr = float(getattr(Config, "TELEGRAM_MIN_RR", 3.0))
+        rr_value = self._resolve_telegram_rr(risk)
+        if rr_value is None or rr_value < min_rr:
+            blockers.append(f"rr {self._fmt_optional_number(rr_value)} < {self._fmt_optional_number(min_rr)}")
+
+        min_confluence = float(getattr(Config, "TELEGRAM_MIN_CONFLUENCE_SCORE", 70))
+        confluence_score = self._safe_number(confluence.get("score"), None)
+        if confluence_score is None or confluence_score < min_confluence:
+            blockers.append(
+                f"confluence {self._fmt_optional_number(confluence_score)} < {self._fmt_optional_number(min_confluence)}"
+            )
+
+        action = str(decision.get("action", "WAIT") or "WAIT").strip().upper()
+        allowed_actions = {"EXECUTE"}
+        if bool(getattr(Config, "TELEGRAM_ALLOW_CAUTION_SIGNALS", False)):
+            allowed_actions.add("EXECUTE_WITH_CAUTION")
+        if action not in allowed_actions:
+            blockers.append(f"decision action {action} not allowed")
+
+        for blocker in decision.get("critical_blockers") or []:
+            blockers.append(f"critical blocker: {blocker}")
+        for blocker in decision.get("external_blockers") or []:
+            blockers.append(f"external blocker: {blocker}")
+        if decision.get("risk_valid") is False:
+            blockers.append("decision risk invalid")
+
+        if bool(getattr(Config, "TELEGRAM_REQUIRE_MTF_ALIGNMENT", True)):
+            mtf_valid = decision.get("mtf_valid")
+            if mtf_valid is False:
+                blockers.append("MTF alignment invalid")
+
+        allowed_phases = set(getattr(Config, "TELEGRAM_ALLOWED_MARKET_PHASES", ("Expansion", "Trending", "Reversal")))
+        phase = str(market_phase.get("phase") or decision.get("market_phase") or "").strip()
+        if allowed_phases and phase not in allowed_phases:
+            blockers.append(f"market phase {phase or 'UNKNOWN'} not allowed")
+
+        if entry.get("direction") and signal.get("signal") and entry.get("direction") != signal.get("signal"):
+            blockers.append("entry direction and signal direction mismatch")
+
+        return blockers
+
+    def _resolve_telegram_rr(self, risk):
+        selected_rr = self._safe_positive_number(risk.get("selected_rr"))
+        if selected_rr is not None:
+            return selected_rr
+
+        rr = self._safe_positive_number(risk.get("rr"))
+        if rr is not None:
+            return rr
+
+        rr_by_tp = risk.get("rr_by_tp")
+        if isinstance(rr_by_tp, dict):
+            values = [self._safe_positive_number(value) for value in rr_by_tp.values()]
+            values = [value for value in values if value is not None]
+            if values:
+                return max(values)
+
+        return None
+
+    def _grade_at_least(self, grade, minimum_grade):
+        rank = {"D": 1, "C": 2, "B": 3, "A": 4, "A+": 5, "S": 6, "S+": 7}
+        return rank.get(str(grade or "").strip().upper(), 0) >= rank.get(str(minimum_grade or "").strip().upper(), 0)
+
+    def _safe_positive_number(self, value):
+        number = self._safe_number(value, None)
+        return number if number is not None and number > 0 else None
+
+    def _safe_number(self, value, default=None):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _fmt_optional_number(self, value):
+        if value is None:
+            return "NONE"
+        return f"{float(value):.2f}".rstrip("0").rstrip(".")
+
+    def _send_telegram_safe(self, telegram_module, message, symbol, reply_markup=None):
         """Telegram gönderimini güvenli şekilde çalıştırır; analiz akışını düşürmez."""
         try:
-            sent = telegram_module.TelegramBot().send(message)
+            bot = telegram_module.TelegramBot()
+            try:
+                sent = bot.send(message, reply_markup=reply_markup)
+            except TypeError:
+                sent = bot.send(message)
             if not sent:
                 self.logger.warning("Telegram send failed: %s", symbol)
             return sent

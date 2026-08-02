@@ -53,9 +53,11 @@ class TelegramEngine:
         tp2 = risk.get("tp2")
         tp3 = risk.get("tp3")
         rr = risk.get("selected_rr") if risk.get("selected_rr") is not None else risk.get("rr")
+        decision = result.get("decision") or {}
+        manual_quality = result.get("manual_quality") or {}
 
         msg = [
-            "📊 ATLAS SIGNAL",
+            "📊 ATLAS SIGNAL (FILTERED)",
             f"🪙 {symbol}",
             f"📈 {direction}",
             f"Entry: {self._fmt(entry_price)}",
@@ -66,7 +68,23 @@ class TelegramEngine:
             f"RR: {self._fmt(rr)}",
             f"Grade: {signal.get('grade', '-')}",
             f"Confidence: {signal.get('confidence', 0)}%",
+            f"Decision: {decision.get('action', '-')}",
+            f"Decision Score: {self._fmt(decision.get('score', '-'))}",
+            f"Manual Score: {self._fmt(manual_quality.get('score', '-'))}/100 ({manual_quality.get('grade', '-')})",
         ]
+
+        historical = manual_quality.get("historical") or {}
+        if historical:
+            msg.append(
+                "History: "
+                f"n={historical.get('sample_size', 0)} "
+                f"exp={self._fmt(historical.get('expectancy', 0))}R "
+                f"pf={self._fmt(historical.get('profit_factor', 0))}"
+            )
+        for warning in (manual_quality.get("warnings") or [])[:2]:
+            msg.append(f"⚠️ {warning}")
+        for blocker in (manual_quality.get("blockers") or [])[:2]:
+            msg.append(f"⛔ {blocker}")
 
         return "\n".join(msg)
 
@@ -201,6 +219,33 @@ class TelegramEngine:
 
         return "\n".join(msg)
 
+    def format_trade_update(self, symbol, direction, event, entry=None, stop_loss=None, price=None, reason=None):
+        """Manuel trade takibi icin TP/SL/BE/erken cikis uyarisi formatlar."""
+        labels = {
+            "tp1": "TP1 hit → SL breakeven dusun",
+            "tp2": "TP2 hit → kismi kar/runner yonet",
+            "tp3": "TP3 hit → hedef tamam",
+            "sl": "SL hit",
+            "breakeven": "SL breakeven'a cekilebilir",
+            "invalidation": "Setup bozuldu → cikis degerlendir",
+            "early_exit": "Erken cikis degerlendir",
+        }
+        lines = [
+            "🔔 ATLAS TRADE UPDATE",
+            f"🪙 {symbol}",
+            f"📈 {direction}",
+            f"Event: {labels.get(event, event)}",
+        ]
+        if price is not None:
+            lines.append(f"Price: {self._fmt(price)}")
+        if entry is not None:
+            lines.append(f"Entry: {self._fmt(entry)}")
+        if stop_loss is not None:
+            lines.append(f"SL: {self._fmt(stop_loss)}")
+        if reason:
+            lines.append(f"Reason: {reason}")
+        return "\n".join(lines)
+
 
 class TelegramBot:
     def __init__(self, auth_store=None, token=None, chat_id=None):
@@ -265,13 +310,32 @@ class TelegramBot:
                 unique_chat_ids.append(chat_id)
         return unique_chat_ids
 
-    def send_to_chat(self, chat_id, message):
+    @staticmethod
+    def trade_feedback_keyboard(symbol, direction):
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Girdim", "callback_data": f"trade_entered|{symbol}|{direction}"},
+                    {"text": "❌ Girmedim", "callback_data": f"trade_skipped|{symbol}|{direction}"},
+                ],
+                [
+                    {"text": "🏁 TP", "callback_data": f"trade_tp|{symbol}|{direction}"},
+                    {"text": "🛑 SL", "callback_data": f"trade_sl|{symbol}|{direction}"},
+                    {"text": "⚠️ Erken çıktım", "callback_data": f"trade_exit_early|{symbol}|{direction}"},
+                ],
+            ]
+        }
+
+    def send_to_chat(self, chat_id, message, reply_markup=None):
         if not self.token:
             LOGGER.warning("Telegram token missing; send_to_chat skip")
             return False
 
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
-        payload = urlencode({"chat_id": chat_id, "text": message}).encode("utf-8")
+        payload_data = {"chat_id": chat_id, "text": message}
+        if reply_markup is not None:
+            payload_data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+        payload = urlencode(payload_data).encode("utf-8")
         request = Request(url, data=payload, method="POST")
 
         status_code = 0
@@ -295,7 +359,7 @@ class TelegramBot:
 
         return ok
 
-    def send(self, message):
+    def send(self, message, reply_markup=None):
         try:
             if not self.token:
                 print("Telegram Error : Bot token yok.")
@@ -308,7 +372,7 @@ class TelegramBot:
 
             results = []
             for chat_id in chat_ids:
-                results.append(self.send_to_chat(chat_id, message))
+                results.append(self.send_to_chat(chat_id, message, reply_markup=reply_markup))
 
             return all(results)
         except Exception as exc:

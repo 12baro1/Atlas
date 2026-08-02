@@ -5,15 +5,22 @@ Atlas SMC Engine
 
 class MTFEngine:
 
+    def _trend_from_structure(self, structure):
+        if not structure:
+            return "NEUTRAL"
+
+        label = structure[-1].get("label")
+        if label in ["HH", "HL"]:
+            return "BULLISH"
+        if label in ["LL", "LH"]:
+            return "BEARISH"
+        return "NEUTRAL"
+
     def detect(self, weekly, daily, h4, entry):
 
-        w = weekly[-1]["label"] if weekly else None
-        d = daily[-1]["label"] if daily else None
-        h = h4[-1]["label"] if h4 else None
-
-        weekly_trend = "BULLISH" if w in ["HH", "HL"] else "BEARISH"
-        daily_trend = "BULLISH" if d in ["HH", "HL"] else "BEARISH"
-        h4_trend = "BULLISH" if h in ["HH", "HL"] else "BEARISH"
+        weekly_trend = self._trend_from_structure(weekly)
+        daily_trend = self._trend_from_structure(daily)
+        h4_trend = self._trend_from_structure(h4)
 
         bulls = [weekly_trend, daily_trend, h4_trend].count("BULLISH")
         bears = [weekly_trend, daily_trend, h4_trend].count("BEARISH")
