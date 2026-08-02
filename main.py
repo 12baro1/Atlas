@@ -1,15 +1,19 @@
-import ccxt
 import logging
 import os
 import sys
 import time
+import asyncio
 
 from telegram_engine import TelegramBot
-
 from data_engine import get_market_data
 from config import Config
 from engine import AtlasEngine
 from universe_engine import select_symbols
+
+# Yeni profesyonel modüller
+from utils.dynamic_targets import DynamicTargetCalculator
+from core.ai_learner import AILearningCore
+from signal_engine import AdvancedSignalEngine
 
 engine = AtlasEngine()
 
@@ -19,11 +23,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("atlas.scanner")
 
-# Bybit API olmadan sadece public veri için exchange oluştur
-exchange = ccxt.bybit({
-    "enableRateLimit": True,
-    "options": {"defaultType": "swap"},
-})
+# Profesyonel bileşenleri başlat
+ai_core = AILearningCore()
+target_calc = DynamicTargetCalculator()
+signal_engine = AdvancedSignalEngine(ai_learner=ai_core, target_calculator=target_calc)
 
 markets = exchange.load_markets()
 symbols, universe_stats = select_symbols(
