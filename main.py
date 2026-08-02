@@ -116,33 +116,63 @@ for index, symbol in enumerate(symbols, start=1):
         print("Grade :", result["signal"]["grade"])
         print("Strength :", result["signal"]["strength"])
 
-        print("Trend :", analysis["trend"]["trend"])
+        # Güvenli trend erişimi - KeyError önleme
+        trend_data = analysis.get("trend", {})
+        if trend_data:
+            print("Trend :", trend_data.get("trend", "Bilinmiyor"))
+        else:
+            print("Trend : Veri yok")
 
-        print("Entry :", analysis["entry"]["direction"])
-        print("Entry Price :", analysis["entry"]["entry"])
-        print("Stop Loss :", analysis["entry"]["stop_loss"])
-        print("Entry Valid :", analysis["entry"]["valid"])
-        print("Reason :", analysis["entry"]["reason"])
+        # Güvenli entry erişimi
+        entry_data = analysis.get("entry", {})
+        if entry_data:
+            print("Entry :", entry_data.get("direction", "Bilinmiyor"))
+            print("Entry Price :", entry_data.get("entry", "N/A"))
+            print("Stop Loss :", entry_data.get("stop_loss", "N/A"))
+            print("Entry Valid :", entry_data.get("valid", False))
+            print("Reason :", entry_data.get("reason", "N/A"))
+        else:
+            print("Entry : Veri yok")
 
-        print("Confirmed :", analysis["confirmation"]["confirmed"])
-        print("Confirm Reason :", analysis["confirmation"]["reason"])
+        # Güvenli confirmation erişimi
+        conf_data = analysis.get("confirmation", {})
+        if conf_data:
+            print("Confirmed :", conf_data.get("confirmed", False))
+            print("Confirm Reason :", conf_data.get("reason", "N/A"))
+        else:
+            print("Confirmed : Veri yok")
 
-        print("\nMarket Phase Analysis:")
-        print("  Phase :", analysis["market_phase"]["phase"])
-        print("  Confidence :", analysis["market_phase"]["phase_confidence"], "%")
-        print("  Strength :", analysis["market_phase"]["phase_strength"])
-        print("  Score :", analysis["market_phase"]["phase_score"])
-        print("  MTF Alignment :", analysis["market_phase"]["mtf_alignment"], "%")
+        # Güvenli market_phase erişimi
+        mp_data = analysis.get("market_phase", {})
+        if mp_data:
+            print("\nMarket Phase Analysis:")
+            print("  Phase :", mp_data.get("phase", "Bilinmiyor"))
+            print("  Confidence :", mp_data.get("phase_confidence", 0), "%")
+            print("  Strength :", mp_data.get("phase_strength", "N/A"))
+            print("  Score :", mp_data.get("phase_score", 0))
+            print("  MTF Alignment :", mp_data.get("mtf_alignment", 0), "%")
+        else:
+            print("\nMarket Phase Analysis: Veri yok")
 
-        print("Weekly :", analysis["mtf"]["weekly"])
-        print("Daily :", analysis["mtf"]["daily"])
-        print("H4 :", analysis["mtf"]["h4"])
-        print("Entry TF :", analysis["mtf"]["entry"])
-        print("MTF Valid :", analysis["mtf"]["valid"])
+        # Güvenli mtf erişimi
+        mtf_data = analysis.get("mtf", {})
+        if mtf_data:
+            print("Weekly :", mtf_data.get("weekly", "N/A"))
+            print("Daily :", mtf_data.get("daily", "N/A"))
+            print("H4 :", mtf_data.get("h4", "N/A"))
+            print("Entry TF :", mtf_data.get("entry", "N/A"))
+            print("MTF Valid :", mtf_data.get("valid", False))
+        else:
+            print("MTF : Veri yok")
 
-        print("TP1 :", result["dynamic_tp"]["tp1"])
-        print("TP2 :", result["dynamic_tp"]["tp2"])
-        print("TP3 :", result["dynamic_tp"]["tp3"])
+        # Güvenli dynamic_tp erişimi
+        tp_data = result.get("dynamic_tp", {})
+        if tp_data:
+            print("TP1 :", tp_data.get("tp1", "N/A"))
+            print("TP2 :", tp_data.get("tp2", "N/A"))
+            print("TP3 :", tp_data.get("tp3", "N/A"))
+        else:
+            print("Dynamic TP : Veri yok")
 
         # Bybit Execution Engine kaldırıldı - Manuel işlem modu
         # execution_result = execution_engine.process(symbol=symbol, result=result)
