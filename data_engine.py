@@ -1,8 +1,11 @@
 import ccxt
-from bybit import create_public_swap_exchange
 from core.candle import Candle
 
-exchange = create_public_swap_exchange(enable_rate_limit=True)
+# Bybit API olmadan sadece public veri için exchange oluştur
+exchange = ccxt.bybit({
+    "enableRateLimit": True,
+    "options": {"defaultType": "swap"},
+})
 
 TIMEFRAMES = {
     "1w": 300,

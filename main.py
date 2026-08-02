@@ -6,8 +6,6 @@ import time
 
 from telegram_engine import TelegramBot
 
-from bybit import create_public_swap_exchange
-from bybit_execution_engine import BybitExecutionEngine
 from data_engine import get_market_data
 from config import Config
 from engine import AtlasEngine
@@ -21,7 +19,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("atlas.scanner")
 
-exchange = create_public_swap_exchange(enable_rate_limit=True)
+# Bybit API olmadan sadece public veri için exchange oluştur
+exchange = ccxt.bybit({
+    "enableRateLimit": True,
+    "options": {"defaultType": "swap"},
+})
 
 markets = exchange.load_markets()
 symbols, universe_stats = select_symbols(
@@ -56,7 +58,9 @@ logger.info(
 )
 
 Config.refresh_from_env()
-execution_engine = BybitExecutionEngine()
+
+# Bybit Execution Engine kaldırıldı - Manuel işlem modu
+# execution_engine = BybitExecutionEngine()
 if bool(getattr(Config, "TELEGRAM_ENABLED", True)):
     token = str(getattr(Config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
     chat_id = str(getattr(Config, "TELEGRAM_CHAT_ID", "") or "").strip()
@@ -66,43 +70,9 @@ if bool(getattr(Config, "TELEGRAM_ENABLED", True)):
         logger.warning("Telegram chat id bos. Auth db/chat_ids yoksa bildirim gonderilmeyecek.")
 
 
-def _send_execution_telegram(symbol, execution_result):
-    if not bool(getattr(Config, "TELEGRAM_ENABLED", True)):
-        return False
-
-    if not execution_result.get("executed"):
-        return False
-
-    order_id = execution_result.get("order_id") or "N/A"
-    ret_code = execution_result.get("ret_code")
-    ret_msg = execution_result.get("ret_msg")
-    side = str(execution_result.get("side") or "").upper()
-    amount = execution_result.get("amount")
-    price = execution_result.get("price")
-
-    message_lines = [
-        "ATLAS ORDER UPDATE",
-        "Order Executed",
-        f"Symbol: {symbol}",
-        f"Order ID: {order_id}",
-        f"Side: {side}",
-        f"Amount: {amount}",
-        f"Price: {price}",
-        f"retCode: {ret_code}",
-        f"retMsg: {ret_msg}",
-    ]
-    message = "\n".join(message_lines)
-
-    sent = TelegramBot().send(message)
-    logger.info(
-        "Execution Telegram | symbol=%s sent=%s order_id=%s retCode=%s retMsg=%s",
-        symbol,
-        sent,
-        order_id,
-        ret_code,
-        ret_msg,
-    )
-    return sent
+# _send_execution_telegram fonksiyonu kaldırıldı - Manuel modda kullanılmıyor
+# Bybit ile otomatik işlem yapılmadığı için order execution bildirimi gönderilmiyor
+# Sinyal bildirimleri TelegramEngine tarafından zaten gönderiliyor
 
 processed = 0
 success = 0
@@ -174,50 +144,25 @@ for index, symbol in enumerate(symbols, start=1):
         print("TP2 :", result["dynamic_tp"]["tp2"])
         print("TP3 :", result["dynamic_tp"]["tp3"])
 
-        execution_result = execution_engine.process(symbol=symbol, result=result)
+        # Bybit Execution Engine kaldırıldı - Manuel işlem modu
+        # execution_result = execution_engine.process(symbol=symbol, result=result)
+        # Manuel işlem için execution_result simüle ediyoruz
+        execution_result = {
+            "executed": False,
+            "reason": "manual_mode_no_auto_execution",
+            "symbol": symbol,
+            "signal": result.get("signal", {}).get("signal"),
+            "confidence": result.get("signal", {}).get("confidence"),
+        }
         logger.info(
-            "Execution | symbol=%s executed=%s reason=%s details=%s",
+            "Manual Mode | symbol=%s signal=%s confidence=%s (Otomatik işlem yok, Telegram bildirimi gönderiliyor)",
             symbol,
-            execution_result.get("executed"),
-            execution_result.get("reason"),
-            execution_result,
+            execution_result.get("signal"),
+            execution_result.get("confidence"),
         )
-        if execution_result.get("executed"):
-            logger.info(
-                "Execution success | symbol=%s order_id=%s retCode=%s retMsg=%s",
-                symbol,
-                execution_result.get("order_id"),
-                execution_result.get("ret_code"),
-                execution_result.get("ret_msg"),
-            )
-        else:
-            logger.error(
-                "Execution failed | symbol=%s reason=%s error=%s retCode=%s retMsg=%s exchange_error=%s",
-                symbol,
-                execution_result.get("reason"),
-                execution_result.get("error"),
-                execution_result.get("ret_code"),
-                execution_result.get("ret_msg"),
-                execution_result.get("exchange_error"),
-            )
 
-        print("Execution :", "OPENED" if execution_result.get("executed") else "SKIPPED")
+        print("Execution :", "OPENED" if execution_result.get("executed") else "SKIPPED (Manuel Mod)")
         print("Execution Reason :", execution_result.get("reason"))
-        if execution_result.get("decision_action"):
-            print("Decision Action :", execution_result.get("decision_action"))
-        if execution_result.get("decision_reason"):
-            print("Decision Reason :", execution_result.get("decision_reason"))
-        if execution_result.get("required_confidence") is not None:
-            print("Required Confidence :", execution_result.get("required_confidence"))
-        if execution_result.get("order_id"):
-            print("Order ID :", execution_result.get("order_id"))
-        if execution_result.get("ret_code") is not None:
-            print("retCode :", execution_result.get("ret_code"))
-        if execution_result.get("ret_msg") is not None:
-            print("retMsg :", execution_result.get("ret_msg"))
-
-        if execution_result.get("executed"):
-            _send_execution_telegram(symbol=symbol, execution_result=execution_result)
 
         if result["risk"]:
 
