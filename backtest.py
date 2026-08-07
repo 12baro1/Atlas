@@ -103,6 +103,8 @@ def main():
     Config.CORRELATION_ENGINE_ENABLED = False
     Config.ECONOMIC_NEWS_FILTER_ENABLED = False
     Config.LEARNING_ENGINE_ENABLED = False
+    # Sembol bazlı işlem yasağı sinyal üretimini gerçek backtestte bastırmasın
+    Config.TRADE_COOLDOWN_MINUTES = 0.0
     Config.refresh_from_env()
 
     engine = AtlasEngine()
