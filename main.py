@@ -99,6 +99,19 @@ def scan_once(symbols, label):
             card = build_signal_card(result)
             print(format_card_text(card))
 
+            # Canlı sinyal sonuç takibi: bu semboldeki açık sinyalleri güncel fiyatla çöz
+            if Config.SIGNAL_TRACKING_ENABLED:
+                candles_15m = data.get("15m") or data.get("15M") or []
+                for open_trade in engine.trade_journal.open_trades(symbol=symbol):
+                    closed = engine.trade_journal.resolve_open_signal(open_trade, candles_15m)
+                    if closed and closed.get("result"):
+                        logger.info(
+                            "Sinyal sonucu | %s %s %s | result=%s rr=%s | %s",
+                            closed.get("symbol"), closed.get("side"),
+                            closed.get("opened_at"), closed.get("result"),
+                            closed.get("pnl_rr"), closed.get("close_reason"),
+                        )
+
             logger.info(
                 "Manual Mode | symbol=%s verdict=%s signal=%s confidence=%s (Otomatik işlem yok)",
                 symbol,

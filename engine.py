@@ -126,7 +126,9 @@ class AtlasEngine:
         self.position = PositionManager()
         self.position.positions.extend(self.state_engine.load_open_positions())
         self.trade = TradeManager()
-        self.trade_journal = TradeJournal()
+        self.trade_journal = TradeJournal(
+            db_path=getattr(Config, "TRADE_JOURNAL_DB_FILE", None) if getattr(Config, "SIGNAL_TRACKING_ENABLED", True) else None
+        )
         self.scanner = ScannerEngine()
         self.statistics = StatisticsEngine()
         self.backtest = BacktestEngine()
@@ -359,6 +361,8 @@ class AtlasEngine:
             self.state_engine.sync_open_positions(self.position.open_positions())
         if execution_state["signal"].get("signal") in ["LONG", "SHORT"] and decision_state.get("action") in ["EXECUTE", "EXECUTE_WITH_CAUTION"]:
             self.cooldown.register_signal(symbol, execution_state["signal"].get("signal"))
+            if getattr(Config, "SIGNAL_TRACKING_ENABLED", True) and self.trade_journal is not None:
+                self._register_tracked_signal(symbol, result_payload)
 
         self._notify_if_elite(
             data=data,
@@ -382,6 +386,41 @@ class AtlasEngine:
         if not bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
             return None
         return self.learning.record_closed_trade(trade)
+
+    def _register_tracked_signal(self, symbol, result_payload):
+        """EXECUTE sinyalini canlı sonuç takibi için trade journal'a yazar.
+
+        Cooldown penceresi içinde aynı yöndeki tekrar üretimini, mevcut açık
+        kayıtla çakışmadan tek sefere indirir (mükerrer sinyal kaydı açmaz).
+        """
+        risk = result_payload.get("risk") or {}
+        entry = risk.get("entry")
+        stop_loss = risk.get("stop_loss")
+        side = result_payload.get("signal", {}).get("signal")
+        if entry is None or stop_loss is None or side not in ("LONG", "SHORT"):
+            return None
+
+        for existing in self.trade_journal.open_trades(symbol=symbol):
+            if existing.get("side") == side and existing.get("entry") == entry:
+                return None
+
+        trade = {
+            "symbol": symbol,
+            "side": side,
+            "entry": entry,
+            "stop_loss": stop_loss,
+            "tp1": risk.get("tp1") or (result_payload.get("dynamic_tp") or {}).get("tp1"),
+            "tp2": risk.get("tp2") or (result_payload.get("dynamic_tp") or {}).get("tp2"),
+            "tp3": risk.get("tp3") or (result_payload.get("dynamic_tp") or {}).get("tp3"),
+            "confidence": result_payload.get("signal", {}).get("confidence"),
+            "confluence_score": (result_payload.get("analysis") or {}).get("confluence", {}).get("score"),
+            "market_phase": (result_payload.get("analysis") or {}).get("market_phase", {}).get("phase"),
+            "rr": result_payload.get("rr", {}).get("rr") if isinstance(result_payload.get("rr"), dict) else result_payload.get("rr"),
+        }
+        return self.trade_journal.register_trade(
+            trade, analysis=result_payload, symbol=symbol,
+            metadata={"origin": "live_scanner", "decision_action": result_payload.get("decision", {}).get("action")},
+        )
 
     def _restore_incremental_if_unchanged(self, symbol, candles):
         """Return cached analysis when the latest 15m candle was already processed."""

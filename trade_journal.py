@@ -110,6 +110,83 @@ class TradeJournal:
         self._update_engine_stats(trade)
         return trade
 
+    def open_trades(self, symbol=None):
+        """Açık (OPEN) trade listesini döner; isteğe bağlı sembol filtreli."""
+        out = []
+        for trade in self._trades:
+            if trade.get("status") != "OPEN":
+                continue
+            if symbol and trade.get("symbol") != symbol:
+                continue
+            out.append(trade)
+        return out
+
+    def resolve_open_signal(self, trade, candles):
+        """Açık bir trade'i verilen mumlar üzerinden SL/TP vuruşuyla kapatır.
+
+        Mum zamanları trade açılışından sonraki (>) kapanış mumu baz alınır ve
+        ilk vuruş (SL ya da TP) sonucu belirler. Kapanmamışsa None döner.
+        """
+        opened_at = trade.get("opened_at") or 0
+        side = trade.get("side", "LONG")
+        entry = trade.get("entry")
+        stop_loss = trade.get("stop_loss")
+        tps = [trade.get(k) for k in ("tp1", "tp2", "tp3")]
+        tps = [tp for tp in tps if isinstance(tp, (int, float)) and tp]
+
+        for candle in candles:
+            ts = getattr(candle, "time", None)
+            if ts is None or ts <= opened_at:
+                continue
+
+            high = getattr(candle, "high", None)
+            low = getattr(candle, "low", None)
+            if high is None or low is None:
+                continue
+
+            hit_tp = False
+            if tps:
+                tp = tps[0]
+                if side == "LONG":
+                    hit_sl = low <= stop_loss if stop_loss is not None else False
+                    hit_tp = high >= tp
+                else:
+                    hit_sl = high >= stop_loss if stop_loss is not None else False
+                    hit_tp = low <= tp
+            else:
+                if side == "LONG":
+                    hit_sl = low <= stop_loss if stop_loss is not None else False
+                else:
+                    hit_sl = high >= stop_loss if stop_loss is not None else False
+
+            # SL'ye TP'den önce vurulursa LOSS, önce TP vurulursa WIN
+            if hit_sl and hit_tp:
+                # Intrabar sıralaması bilinmediği için muhafazakâr: SL'yi önce kabul et.
+                hit_tp = False
+            if hit_sl:
+                exit_price = stop_loss
+                return self.close_trade(
+                    trade["id"], exit_price, result="LOSS",
+                    timestamp=ts, reason="stop_loss_hit",
+                )
+            if hit_tp:
+                exit_price = tps[0]
+                return self.close_trade(
+                    trade["id"], exit_price, result="WIN",
+                    timestamp=ts, reason="target_hit",
+                )
+        return None
+
+    def resolve_open_signals(self, candles_by_symbol):
+        """Geçerli mum verisiyle tüm açık sinyalleri çözer; kapananları döner."""
+        closed = []
+        for symbol, candles in candles_by_symbol.items():
+            for trade in self.open_trades(symbol=symbol):
+                closed_trade = self.resolve_open_signal(trade, candles)
+                if closed_trade is not None:
+                    closed.append(closed_trade)
+        return closed
+
     def summary(self):
         """Trade geçmişinden ana performans özetini üretir."""
         closed_trades = [trade for trade in self._trades if trade.get("status") == "CLOSED"]
@@ -343,6 +420,28 @@ class TradeJournal:
             path.parent.mkdir(parents=True, exist_ok=True)
             with sqlite3.connect(self.db_path) as connection:
                 self._create_tables(connection)
+            self._load_from_db()
+
+    def _load_from_db(self):
+        """Kalıcı SQLite'dan snapshot ve trade kayıtlarını belleğe geri yükler."""
+        if not self.db_path or not Path(self.db_path).exists():
+            return
+        try:
+            with sqlite3.connect(self.db_path) as connection:
+                rows = connection.execute("SELECT id, timestamp, symbol, timeframe, payload FROM analysis_snapshots ORDER BY timestamp").fetchall()
+                for _id, _ts, _sym, _tf, payload in rows:
+                    try:
+                        self._snapshots.append(json.loads(payload))
+                    except Exception:
+                        continue
+                trades = connection.execute("SELECT id, symbol, side, status, opened_at, closed_at, payload FROM trades ORDER BY opened_at").fetchall()
+                for _id, _symbol, _side, _status, _opened_at, _closed_at, payload in trades:
+                    try:
+                        self._trades.append(json.loads(payload))
+                    except Exception:
+                        continue
+        except Exception:
+            return
 
     def _create_tables(self, connection):
         connection.execute(

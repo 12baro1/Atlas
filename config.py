@@ -232,6 +232,10 @@ class Config:
     # Backtest
     INITIAL_BALANCE = 10000
 
+    # Canlı sinyal sonuç takibi (trade journal)
+    SIGNAL_TRACKING_ENABLED = os.getenv("ATLAS_SIGNAL_TRACKING_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+    TRADE_JOURNAL_DB_FILE = os.getenv("ATLAS_TRADE_JOURNAL_DB_FILE", "atlas_journal.db")
+
     @classmethod
     def refresh_from_env(cls):
         """Runtime'da environment değişikliklerini Config sınıfına yeniden yükler."""
