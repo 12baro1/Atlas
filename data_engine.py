@@ -66,3 +66,24 @@ def get_market_data(symbol, force_refresh=False):
         data[timeframe] = fetch_candles(symbol, timeframe, c_limit, force_refresh=force_refresh)
 
     return data
+
+
+# Korrelasyon evreni: BTC/ETH (dominance endeksleri Bybit'te yok; oysalar UNKNOWN
+# kalir ve korrelasyon motoru yalnizca gercek veriye dayanarak engel karari verir).
+_CORRELATION_SYMBOLS = {
+    "BTC": ("BTC/USDT:USDT", "4h", 200),
+    "ETH": ("ETH/USDT:USDT", "4h", 200),
+}
+
+
+def get_correlation_universe(force_refresh=False, candle_factory=None):
+    """BTC/ETH 4h mumlarini toplar; scan boyunca cache toplar (bir kez cekilir)."""
+    from core.candle import Candle
+    universe = {}
+    for key, (symbol, timeframe, limit) in _CORRELATION_SYMBOLS.items():
+        try:
+            candles = fetch_candles(symbol, timeframe, limit, force_refresh=force_refresh)
+            universe[key] = candles
+        except Exception:
+            universe[key] = []
+    return universe

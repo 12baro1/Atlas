@@ -46,6 +46,17 @@ class EntryEngine:
 
         direction = mtf.get("entry")
 
+        if direction not in ["LONG", "SHORT"] and structure:
+            # MTF mutabakatsızlık nedeniyle NONE döndüyse, kaliteli kontra/era LONG
+            # setup'larının 'Entry invalid' diye sert engellenmemesi için yönü
+            # 15m giriş yapısının son etiketiyle türet. Bu bir fallback'tir; MTF
+            # yönü varsa onu kullanırız.
+            last_label = structure[-1].get("label")
+            if last_label in ["HH", "HL"]:
+                direction = "LONG"
+            elif last_label in ["LL", "LH"]:
+                direction = "SHORT"
+
         if direction not in ["LONG", "SHORT"]:
             result["reason"] = "No MTF direction"
             return result

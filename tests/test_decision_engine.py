@@ -204,3 +204,23 @@ def test_decision_skips_when_grade_below_relaxed_quality_floor():
 
     assert result["action"] == "SKIP"
     assert "Grade below quality minimum" in result["reason"]
+
+
+def test_decision_mtf_alignment_missing_is_soft_penalty_not_hard_blocker():
+    engine = DecisionEngine()
+
+    result = engine.decide(
+        **_supportive_context(
+            mtf={"valid": False, "entry": "NONE"},
+            signal={"signal": "LONG", "confidence": 99, "grade": "S+", "strength": "ELITE"},
+            confluence={"score": 84, "checks": ["✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)"]},
+            risk={"entry": 100.0, "stop_loss": 99.0, "rr": 4.1, "risk": 1.0, "position_size": 1.0},
+            cisd={"active": True, "direction": "BULLISH", "confidence": 90},
+            market_phase={"phase": "Expansion"},
+        )
+    )
+
+    # Hizalama artık kritik engel değil; skor cezası olarak uygulanıyor.
+    assert not any("alignment" in b for b in result["critical_blockers"])
+    assert "-40 HTF + LTF alignment missing" in result["reason"]
+    assert result["action"] != "SKIP"

@@ -353,8 +353,16 @@ class DecisionEngine:
             elif rr_value >= minimum_rr:
                 self._add_adjustment(adjustments, Config.DECISION_BONUS_RR_3, "RR >=3")
 
-        if self._is_alignment_bonus(mtf, direction):
-            self._add_adjustment(adjustments, Config.DECISION_BONUS_HTF_LTF_ALIGNMENT, "HTF + LTF same direction")
+        if direction in ["LONG", "SHORT"]:
+            if self._is_alignment_bonus(mtf, direction):
+                self._add_adjustment(adjustments, Config.DECISION_BONUS_HTF_LTF_ALIGNMENT, "HTF + LTF same direction")
+            else:
+                # Hizalama yoksa kritik engel yerine yumuşak skor cezası; güçlü
+                # stack/entry olan kontra LONG'lar yine de değerlendirilebilir.
+                # Sert engel davranışını isteyenler QUALITY_REQUIRE_MTF_ALIGNMENT
+                # bayrağıyla penaltıyı açıkça kapatabilir.
+                if bool(getattr(Config, "QUALITY_REQUIRE_MTF_ALIGNMENT", True)):
+                    self._add_adjustment(adjustments, Config.DECISION_PENALTY_HTF_ALIGNMENT_MISSING, "HTF + LTF alignment missing")
 
         self._apply_directional_adjustment(adjustments, unicorn, direction, "Unicorn", Config.DECISION_BONUS_UNICORN_ALIGNMENT, Config.DECISION_PENALTY_UNICORN_MISMATCH)
         self._apply_directional_adjustment(adjustments, cisd, direction, "CISD", Config.DECISION_BONUS_CISD_ALIGNMENT, Config.DECISION_PENALTY_CISD_MISMATCH)
@@ -479,8 +487,11 @@ class DecisionEngine:
                 f"Confluence below quality minimum: {self._fmt_number(confluence_score)} < {self._fmt_number(min_confluence_score)}",
             )
 
-        if bool(getattr(Config, "QUALITY_REQUIRE_MTF_ALIGNMENT", True)) and not self._is_alignment_bonus(mtf, direction):
-            self._append_unique(blockers, "HTF + LTF alignment missing")
+        if direction not in ["LONG", "SHORT"]:
+            # Yön yokken (sinyal zaten WAIT/geçersiz) alignment filtreleri anlamsız
+            # ve sinyalin 'Signal direction invalid' engeline ek olarak gereksiz
+            # "alignment missing" etiketi üretir. Bu zinciri bozma.
+            return blockers
 
         if bool(getattr(Config, "QUALITY_REQUIRE_CISD_ALIGNMENT", True)):
             if not (cisd and cisd.get("active") and self._match_direction(cisd, direction)):

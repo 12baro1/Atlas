@@ -466,6 +466,9 @@ class AtlasEngine:
         """Gate new entries around macro news, market correlation conflicts and duplicate trades."""
         blockers = []
         for name, payload in (("news_filter", news_filter), ("correlation", correlation), ("cooldown", cooldown)):
+            # Correlation motoru veri yokken active=False döner; o durumda engelleme yapma.
+            if payload and not bool(payload.get("active", True)):
+                continue
             if payload and not payload.get("trade_allowed", True):
                 blockers.append(f"{name}: {payload.get('reason', 'blocked')}")
         if not blockers:

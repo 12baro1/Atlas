@@ -3,7 +3,7 @@ import os
 import sys
 import time
 
-from data_engine import get_market_data, exchange, ccxt
+from data_engine import get_market_data, get_correlation_universe, exchange, ccxt
 from config import Config
 from engine import AtlasEngine
 from universe_engine import select_symbols
@@ -95,12 +95,21 @@ def scan_once(symbols, label):
     failed = 0
     skipped = 0
 
+    # Korrelasyon evreni (BTC/ETH) her scan için bir kez çekilir ve paylaşılır.
+    universe = {}
+    try:
+        universe = get_correlation_universe()
+    except Exception:
+        logger.warning("Korrelasyon evreni alinamadi; korrelasyon filtresi pasif.")
+
     for index, symbol in enumerate(symbols, start=1):
         try:
             processed += 1
             logger.info("[%s/%s] Analiz basliyor: %s", index, len(symbols), symbol)
 
             data = get_market_data(symbol)
+            if universe:
+                data["correlation_universe"] = universe
             logger.info("Veri alindi: %s", data["symbol"])
 
             analysis_started = time.perf_counter()

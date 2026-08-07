@@ -117,6 +117,10 @@ class Config:
     DECISION_BONUS_RR_3 = 10
     DECISION_BONUS_RR_5 = 15
     DECISION_BONUS_HTF_LTF_ALIGNMENT = 10
+    # HTF/LTF hizalama eksik olduğunda sert engel yerine skor cezası (yumuşak).
+    # Güçlü confluence/entry içeren kaliteli contrarian LONG'ların gereksiz SKIP
+    # olmasını önlemek için -; skor düşer ama doğrudan sinyali öldürmez.
+    DECISION_PENALTY_HTF_ALIGNMENT_MISSING = -40
     DECISION_BONUS_UNICORN_ALIGNMENT = 8
     DECISION_BONUS_CISD_ALIGNMENT = 8
     DECISION_BONUS_VOLUME_PROFILE_ALIGNMENT = 6
@@ -218,6 +222,11 @@ class Config:
     ECONOMIC_NEWS_BLOCK_BEFORE_MINUTES = int(os.getenv("ATLAS_ECONOMIC_NEWS_BLOCK_BEFORE_MINUTES", "45"))
     ECONOMIC_NEWS_BLOCK_AFTER_MINUTES = int(os.getenv("ATLAS_ECONOMIC_NEWS_BLOCK_AFTER_MINUTES", "30"))
     CORRELATION_ENGINE_ENABLED = os.getenv("ATLAS_CORRELATION_ENGINE_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+    # Trend guzun ATR-normalize fark kati olarak olcer (@trade styr dbs ayarlanabilir).
+    # Daha yuksek deger = daha az korumaci (yalnizca gercek guclu trend engeller).
+    CORRELATION_BTC_BEAR_TREND_MULT = float(os.getenv("ATLAS_CORRELATION_BTC_BEAR_TREND_MULT", "0.30"))
+    CORRELATION_BTC_BULL_TREND_MULT = float(os.getenv("ATLAS_CORRELATION_BTC_BULL_TREND_MULT", "0.30"))
+    CORRELATION_USDT_RISK_OFF_MULT = float(os.getenv("ATLAS_CORRELATION_USDT_RISK_OFF_MULT", "0.30"))
     TRADE_COOLDOWN_MINUTES = float(os.getenv("ATLAS_TRADE_COOLDOWN_MINUTES", "180"))
     LEARNING_ENGINE_ENABLED = os.getenv("ATLAS_LEARNING_ENGINE_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
     LEARNING_ENGINE_FILE = os.getenv("ATLAS_LEARNING_ENGINE_FILE", "atlas_learning.json")
