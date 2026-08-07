@@ -79,7 +79,7 @@ def main():
             )
 
     if args.detail:
-        closed = [t for t in (journal._trades or []) if t.get("status") == "CLOSED"]
+        closed = journal.closed_trades() if hasattr(journal, "closed_trades") else [t for t in (journal._trades or []) if t.get("status") == "CLOSED"]
         if closed:
             print("=" * 46)
             print("  KAPANAN SINYALLER")

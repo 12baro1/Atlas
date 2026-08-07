@@ -348,26 +348,26 @@ class TelegramBot:
                 status_code = getattr(response, "status", 0) or 0
                 body = response.read().decode("utf-8", errors="replace")
                 ok = 200 <= status_code < 300
+                if ok:
+                    LOGGER.info("Telegram gonderildi | chat_id=%s", chat_id)
         except Exception as exc:
             body = str(exc)
+            LOGGER.warning("Telegram gonderme hatasi | chat_id=%s | %s", chat_id, exc)
 
-        print("========== TELEGRAM ==========")
-        print("Chat ID :", chat_id)
-        print("Status :", status_code)
-        print("Response :", body)
-        print("==============================")
+        if not ok:
+            LOGGER.warning("Telegram failure | chat_id=%s | status=%s | body=%s", chat_id, status_code, body)
 
         return ok
 
     def send(self, message, reply_markup=None):
         try:
             if not self.token:
-                print("Telegram Error : Bot token yok.")
+                LOGGER.warning("Telegram: bot token yok.")
                 return False
 
             chat_ids = self.load_chat_ids()
             if not chat_ids:
-                print("Telegram Error : Kayıtlı chat id bulunamadı.")
+                LOGGER.warning("Telegram: kayitli chat id bulunamadi.")
                 return False
 
             results = []
@@ -376,5 +376,5 @@ class TelegramBot:
 
             return all(results)
         except Exception as exc:
-            print("Telegram Error :", exc)
+            LOGGER.exception("Telegram send hatasi: %s", exc)
             return False

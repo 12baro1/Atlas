@@ -54,6 +54,7 @@ from statistics_engine import StatisticsEngine
 from trade_manager import TradeManager
 from trade_journal import TradeJournal
 from trend_engine import TrendEngine
+from trendline_engine import TrendlineEngine
 from unicorn_engine import UnicornEngine
 from volume_profile_engine import VolumeProfileEngine
 from utils.structure_labels import label_swings
@@ -84,6 +85,7 @@ class AtlasEngine:
         self.fvg = FVGEngine()
         self.liquidity_sweep = LiquiditySweepEngine()
         self.breaker = BreakerBlockEngine()
+        self.trendline = TrendlineEngine()
 
         # Faz, bağlam ve MTF motorları
         self.trend = TrendEngine()
@@ -279,6 +281,10 @@ class AtlasEngine:
             news_filter=news_state,
             correlation=correlation_state,
             cooldown=cooldown_state,
+            trendline_sweep=structure_state.get("trendline_sweep"),
+            ifvg=structure_state.get("ifvg"),
+            eqh_eql=structure_state.get("eqh_eql"),
+            internal_structure=structure_state.get("internal_structure"),
         )
 
         decision_state = self.decision.decide(
@@ -356,6 +362,12 @@ class AtlasEngine:
             "journal": journal_snapshot,
             "decision": decision_state,
         }
+
+        self.scanner.add(symbol, result_payload)
+        self.statistics.record_payload(result_payload)
+        if execution_state["signal"].get("signal") in ("LONG", "SHORT"):
+            self.backtest.record(result_payload)
+
         if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)):
             self.state_engine.update_analysis_state(symbol, data, result_payload)
             self.state_engine.sync_open_positions(self.position.open_positions())
@@ -512,6 +524,24 @@ class AtlasEngine:
 
         inducement = self._detect_inducement(structure, liquidity_sweep, eqh_eql)
 
+        current_price = candles[-1].close if candles else 0.0
+
+        trendline_liquidity = self.trendline.detect_liquidity(
+            structure,
+            candles,
+            current_price,
+        )
+        trendline_sweep = self.trendline.detect_sweep(structure, candles)
+        trendline_sweep_state = self.trendline.serialize(trendline_sweep)
+
+        ifvg = self.fvg.detect_inversion(candles)
+
+        internal_structure, external_structure = self._detect_internal_external_structure(
+            structure,
+            candles,
+            liquidity_layers,
+        )
+
         return {
             "structure": structure,
             "bos": [item for item in structure if item.get("bos")],
@@ -521,10 +551,63 @@ class AtlasEngine:
             "eqh_eql": eqh_eql,
             "orderblocks": orderblocks,
             "fvg": fvg,
+            "ifvg": ifvg,
+            "trendline_liquidity": trendline_liquidity,
+            "trendline_sweep": trendline_sweep_state,
+            "internal_structure": internal_structure,
+            "external_structure": external_structure,
             "liquidity_sweep": liquidity_sweep,
             "inducement": inducement,
             "breaker": breaker,
         }
+
+    def _detect_internal_external_structure(self, structure, candles, liquidity_layers):
+        """İç (minor) ve dış (major) yapı katmanlarını etiketler.
+
+        - external_structure: daha geniş bakış açısıyla major swing noktaları
+        - internal_structure: major swing arasındaki minor hareketler
+        """
+        if not structure:
+            return [], []
+
+        # Dış yapı: yüksek öneme sahip (break/önemli) ve aralıklı pivotlar
+        majors = [
+            item
+            for item in structure
+            if item.get("bos") or item.get("choch")
+        ]
+        if not majors:
+            majors = structure[::3]
+
+        external = []
+        for item in majors:
+            external.append(
+                {
+                    "index": item.get("index"),
+                    "price": item.get("price"),
+                    "type": item.get("kind"),
+                    "kind": item.get("kind"),
+                    "label": item.get("label"),
+                    "bos": item.get("bos", False),
+                    "choch": item.get("choch", False),
+                }
+            )
+
+        # İç yapı: major pivotların arasındaki swing'ler
+        major_indices = {item.get("index") for item in majors}
+        internal = [
+            {
+                "index": item.get("index"),
+                "price": item.get("price"),
+                "type": item.get("kind"),
+                "kind": item.get("kind"),
+                "label": item.get("label"),
+            }
+            for item in structure
+            if item.get("index") not in major_indices
+        ]
+
+        return internal, external
 
     def _detect_mtf_liquidity_sweep(self, timeframe_data):
         """15m/1h/4h/1d için MTF liquidity sweep analizi üretir."""
@@ -657,6 +740,10 @@ class AtlasEngine:
         news_filter=None,
         correlation=None,
         cooldown=None,
+        trendline_sweep=None,
+        ifvg=None,
+        eqh_eql=None,
+        internal_structure=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(mtf, entry_structure, fvg, orderblocks, current_price=candles[-1].close if candles else None)
@@ -716,6 +803,10 @@ class AtlasEngine:
             cisd=cisd,
             volume_profile=volume_profile,
             institutional=institutional,
+            trendline_sweep=trendline_sweep,
+            ifvg=ifvg,
+            eqh_eql=eqh_eql,
+            internal_structure=internal_structure,
         )
 
         dynamic_tp = self._calculate_dynamic_tp(
@@ -801,6 +892,11 @@ class AtlasEngine:
                 },
             ),
             "eqh_eql": structure_state["eqh_eql"],
+            "ifvg": structure_state.get("ifvg", []),
+            "trendlines": structure_state.get("trendline_liquidity", []),
+            "trendline_sweep": structure_state.get("trendline_sweep", {}),
+            "internal_structure": structure_state.get("internal_structure", []),
+            "external_structure": structure_state.get("external_structure", []),
             "orderblocks": structure_state["orderblocks"],
             "fvg": structure_state["fvg"],
             "liquidity_sweep": structure_state["liquidity_sweep"],
@@ -1046,10 +1142,57 @@ class AtlasEngine:
         current_price = candles[-1].close
         return swing_high, swing_low, current_price
 
-    def _detect_eqh_eql(self, liquidity):
-        """Liquidity bölgelerini EQH/EQL çıktısına çevirir."""
-        equal_highs = [level for level in liquidity if level.get("type") == "BUY_SIDE"]
-        equal_lows = [level for level in liquidity if level.get("type") == "SELL_SIDE"]
+    def _detect_eqh_eql(self, liquidity, tolerance_pct=0.003):
+        """EQH/EQL detection: yakın fiyattaki çoklu swing tepelerini/dipleri kümeleyerek
+        gerçek equal high/low seviyelerini tespit eder.
+
+        Bir seviye yalnızca en az iki *farklı* swing noktası aynı fiyat bandına
+        kümelendiğinde EQH (equal high) / EQL (equal low) sayılır.
+        """
+        from collections import defaultdict
+
+        equal_highs = []
+        equal_lows = []
+
+        buy = [level for level in liquidity if level.get("type") == "BUY_SIDE"]
+        sell = [level for level in liquidity if level.get("type") == "SELL_SIDE"]
+
+        def _cluster(levels, level_tag):
+            result = []
+            grouped = defaultdict(list)
+            for level in levels:
+                price = level.get("price", 0) or 0
+                if not price:
+                    continue
+                placed = False
+                for key in list(grouped.keys()):
+                    if abs(key - price) <= tolerance_pct * price:
+                        grouped[key].append(level)
+                        placed = True
+                        break
+                if not placed:
+                    grouped[price].append(level)
+            for entries in grouped.values():
+                distinct_prices = {round(e["price"], 6) for e in entries}
+                if len(distinct_prices) < 2:
+                    continue
+                touches = sum(e.get("touches", 1) for e in entries)
+                price = sum(e["price"] for e in entries) / len(entries)
+                indices = [e["index"] for e in entries if e.get("index") is not None]
+                result.append(
+                    {
+                        "type": "SELL_SIDE" if level_tag == "EQL" else "BUY_SIDE",
+                        "level": level_tag,
+                        "price": price,
+                        "touches": touches,
+                        "indices": indices,
+                        "confirmed": True,
+                    }
+                )
+            return result
+
+        equal_highs = _cluster(buy, "EQH")
+        equal_lows = _cluster(sell, "EQL")
 
         return {
             "eqh": equal_highs,

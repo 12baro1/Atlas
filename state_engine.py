@@ -2,6 +2,7 @@
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -13,6 +14,7 @@ class StateEngine:
 
     def __init__(self, path="atlas_state.json"):
         self.path = Path(path)
+        self._lock = threading.Lock()
         self.state = {"version": self.VERSION, "symbols": {}, "open_positions": {}, "updated_at": None}
         self.load()
 
@@ -32,13 +34,17 @@ class StateEngine:
         return self.state
 
     def save(self):
-        self.state["updated_at"] = int(time.time() * 1000)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
-        with tmp_path.open("w", encoding="utf-8") as handle:
-            json.dump(self.state, handle, ensure_ascii=False, separators=(",", ":"), default=self._json_default)
-        os.replace(tmp_path, self.path)
-        return self.state
+        with self._lock:
+            self.state["updated_at"] = int(time.time() * 1000)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self.path.with_name(f"{self.path.stem}.{os.getpid()}.{threading.get_ident()}.tmp")
+            with tmp_path.open("w", encoding="utf-8") as handle:
+                json.dump(self.state, handle, ensure_ascii=False, separators=(",", ":"), default=self._json_default)
+            try:
+                os.replace(tmp_path, self.path)
+            finally:
+                tmp_path.unlink(missing_ok=True)
+            return self.state
 
     def get_symbol_state(self, symbol):
         return self.state.setdefault("symbols", {}).get(symbol)
@@ -73,12 +79,6 @@ class StateEngine:
         self.state.setdefault("symbols", {})[symbol] = {
             "symbol": symbol,
             "last_candle": last_candle,
-            "market_structure": self._compact_list(analysis.get("structure", [])),
-            "bos": self._compact_list(analysis.get("bos", [])),
-            "choch": self._compact_list(analysis.get("choch", [])),
-            "fvg": self._compact_list(analysis.get("fvg", [])),
-            "orderblocks": self._compact_list(analysis.get("orderblocks", [])),
-            "liquidity": self._compact_list(analysis.get("liquidity", [])),
             "last_result": self._compact_result(result),
             "updated_at": int(time.time() * 1000),
         }

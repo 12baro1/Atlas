@@ -26,19 +26,50 @@ class StatisticsEngine:
 
         self.total += 1
 
-        if trade["direction"] == "LONG":
+        if trade.get("direction") == "LONG":
             self.long += 1
 
-        elif trade["direction"] == "SHORT":
+        elif trade.get("direction") == "SHORT":
             self.short += 1
 
         if trade.get("rr"):
-
-            self.total_rr += trade["rr"]["rr"]
+            payload_rr = trade["rr"]
+            value = payload_rr.get("rr") if isinstance(payload_rr, dict) else payload_rr
+            if isinstance(value, (int, float)):
+                self.total_rr += value
 
         if trade.get("signal"):
+            payload_signal = trade["signal"]
+            confidence = payload_signal.get("confidence") if isinstance(payload_signal, dict) else payload_signal
+            if isinstance(confidence, (int, float)):
+                self.total_confidence += confidence
 
-            self.total_confidence += trade["signal"]["confidence"]
+    def record_payload(self, result_payload):
+        """Canlı engine.analyze() çıktısını istatistiklere işler."""
+        if result_payload is None:
+            return
+
+        signal = result_payload.get("signal") or {}
+        risk = result_payload.get("risk") or {}
+        rr = result_payload.get("rr") or {}
+
+        direction = signal.get("signal")
+        if direction not in ("LONG", "SHORT"):
+            return
+
+        self.total += 1
+        if direction == "LONG":
+            self.long += 1
+        else:
+            self.short += 1
+
+        value = rr.get("rr") if isinstance(rr, dict) else rr
+        if isinstance(value, (int, float)):
+            self.total_rr += value
+
+        confidence = signal.get("confidence")
+        if isinstance(confidence, (int, float)):
+            self.total_confidence += confidence
 
     def record_result(self, win):
 

@@ -24,6 +24,10 @@ RUN_DIR="${RUN_DIR:-run}"
 PID_FILE="${RUN_DIR}/atlas_bot.pid"
 LOG_FILE="${LOG_DIR:-${RUN_DIR}/atlas_bot.log}"
 RESTART_DELAY="${RESTART_DELAY:-10}"
+# Crash-loop koruması: art arda hızlı çıkışlarda gecikmeyi artır
+MAX_CONSECUTIVE_FAST_EXITS="${MAX_CONSECUTIVE_FAST_EXITS:-5}"
+FAST_EXIT_THRESHOLD_SECONDS="${FAST_EXIT_THRESHOLD_SECONDS:-60}"
+MAX_BACKOFF_SECONDS="${MAX_BACKOFF_SECONDS:-300}"
 
 # Süper döngü öncesi ortam ayarları (env veya boştaki ayarlarla ezilebilir)
 DEFAULT_SCAN_INTERVAL="${ATLAS_SCAN_INTERVAL_SECONDS:-900}"
@@ -62,13 +66,36 @@ start() {
   # gövdelerinde $DEĞİŞKEN referansları olduğundan bunlar subshell'de dolu olmalı).
   export PYTHON MAIN RUN_DIR PID_FILE LOG_FILE RESTART_DELAY
   export DEFAULT_SCAN_INTERVAL DEFAULT_MAX_SYMBOLS
+  export MAX_CONSECUTIVE_FAST_EXITS FAST_EXIT_THRESHOLD_SECONDS MAX_BACKOFF_SECONDS
 
   detached() {
+    local fast_exits=0
+    local last_exit_ts=0
     while :; do
+      local started_ts
+      started_ts="$(date +%s)"
       run_bot
       local code=$?
-      log "Bot cikti (exit=${code}). ${RESTART_DELAY}s sonra yeniden baslatiliyor..."
-      sleep "$RESTART_DELAY"
+      local now_ts ended_ts delay
+      now_ts="$(date +%s)"
+      ended_ts="$now_ts"
+      # Bot 60 sn'den kısa yaşadıysa hızlı çıkış say
+      if (( ended_ts - started_ts < FAST_EXIT_THRESHOLD_SECONDS )); then
+        fast_exits=$((fast_exits + 1))
+      else
+        fast_exits=0
+      fi
+      # Art arda hızlı çıkış arttıkça gecikmeyi üstel artır (crash-loop koruması)
+      local delay="$RESTART_DELAY"
+      if (( fast_exits >= MAX_CONSECUTIVE_FAST_EXITS )); then
+        delay=$(( RESTART_DELAY * (fast_exits - MAX_CONSECUTIVE_FAST_EXITS + 2) ))
+        if (( delay > MAX_BACKOFF_SECONDS )); then
+          delay="$MAX_BACKOFF_SECONDS"
+        fi
+        log "Crash-loop tespit edildi (son ${fast_exits} hizli cikis). ${delay}s bekleniyor..."
+      fi
+      log "Bot cikti (exit=${code}, fast_exits=${fast_exits}). ${delay}s sonra yeniden baslatiliyor..."
+      sleep "$delay"
     done
   }
   nohup bash -c "$(declare -f detached run_bot log); detached" >/dev/null 2>&1 &

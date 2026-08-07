@@ -28,6 +28,10 @@ class ConfluenceEngine:
         cisd=None,
         volume_profile=None,
         institutional=None,
+        trendline_sweep=None,
+        ifvg=None,
+        eqh_eql=None,
+        internal_structure=None,
     ):
 
         score = 0
@@ -224,6 +228,51 @@ class ConfluenceEngine:
                 checks.append(f"◐ Institutional Flow {institutional_direction} ({institutional_confidence}%)")
         else:
             checks.append("✘ Institutional Flow")
+
+        # Trendline Sweep
+        if trendline_sweep and trendline_sweep.get("active"):
+            sweep_dir = trendline_sweep.get("direction")
+            if (sweep_dir == "SELL_SIDE" and entry_direction == "LONG") or (
+                sweep_dir == "BUY_SIDE" and entry_direction == "SHORT"
+            ):
+                score += 8
+                checks.append("✔ Trendline Sweep")
+            else:
+                score -= 2
+                checks.append("◐ Trendline Sweep (yön uyuşmaz)")
+        else:
+            checks.append("✘ Trendline Sweep")
+
+        # Equal High / Equal Low
+        if eqh_eql and eqh_eql.get("active"):
+            if eqh_eql.get("eql") and entry_direction == "LONG":
+                score += 6
+                checks.append("✔ Equal Low (Sweep hedefi)")
+            elif eqh_eql.get("eqh") and entry_direction == "SHORT":
+                score += 6
+                checks.append("✔ Equal High (Sweep hedefi)")
+        else:
+            checks.append("✘ Equal HL")
+
+        # Inverse FVG
+        if ifvg:
+            inverted_any = False
+            for zone in ifvg:
+                if zone.get("inverted"):
+                    inverted_any = True
+                    break
+            if inverted_any:
+                score += 6
+                checks.append("✔ Inverse FVG")
+            else:
+                checks.append("✘ Inverse FVG")
+        else:
+            checks.append("✘ Inverse FVG")
+
+        # Internal Structure (minor move yapı derinliği)
+        if internal_structure:
+            score += 2
+            checks.append(f"✔ Internal Structure ({len(internal_structure)} swing)")
 
         return {
             "score": score,

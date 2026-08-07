@@ -2,15 +2,13 @@ import logging
 import os
 import sys
 import time
-import asyncio
 
-from telegram_engine import TelegramBot
 from data_engine import get_market_data, exchange, ccxt
 from config import Config
 from engine import AtlasEngine
 from universe_engine import select_symbols
 
-# Yeni profesyonel modüller
+# Terminal kartı
 from utils.signal_card import build_signal_card, format_card_text
 
 engine = AtlasEngine()
@@ -55,8 +53,8 @@ logger.info(
 
 Config.refresh_from_env()
 
-# Bybit Execution Engine kaldırıldı - Manuel işlem modu
-# execution_engine = BybitExecutionEngine()
+# Manuel işlem modu: Bybit'e otomatik emir gönderilmez.
+# Sinyaller Telegram + terminal kartı ile bildirilir, trader kendisi işlem yapar.
 if bool(getattr(Config, "TELEGRAM_ENABLED", True)):
     token = str(getattr(Config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
     chat_id = str(getattr(Config, "TELEGRAM_CHAT_ID", "") or "").strip()
@@ -65,10 +63,31 @@ if bool(getattr(Config, "TELEGRAM_ENABLED", True)):
     if not chat_id:
         logger.warning("Telegram chat id bos. Auth db/chat_ids yoksa bildirim gonderilmeyecek.")
 
+telegram_service = None
+if bool(getattr(Config, "TELEGRAM_POLLING_ENABLED", True)) or bool(getattr(Config, "TELEGRAM_WEBHOOK_ENABLED", False)):
+    try:
+        from telegram_auth import TelegramAuthService
+        from telegram_auth_store import TelegramAuthStore
+        from telegram_service import TelegramService
+        from telegram_webhook import TelegramWebhookHandler
 
-# _send_execution_telegram fonksiyonu kaldırıldı - Manuel modda kullanılmıyor
-# Bybit ile otomatik işlem yapılmadığı için order execution bildirimi gönderilmiyor
-# Sinyal bildirimleri TelegramEngine tarafından zaten gönderiliyor
+        _store = TelegramAuthStore(Config.TELEGRAM_AUTH_DB_FILE)
+        _auth = TelegramAuthService(
+            store=_store,
+            password=Config.BOT_PASSWORD,
+            password_hash=Config.BOT_PASSWORD_HASH,
+            admin_ids=Config.TELEGRAM_ADMIN_IDS,
+        )
+        telegram_service = TelegramService(
+            auth_service=_auth,
+            webhook_handler=TelegramWebhookHandler(),
+        )
+        telegram_service.start(daemon=True)
+        logger.info("Telegram servisi baslatildi (polling=%s webhook=%s).",
+                    bool(getattr(Config, "TELEGRAM_POLLING_ENABLED", True)),
+                    bool(getattr(Config, "TELEGRAM_WEBHOOK_ENABLED", False)))
+    except Exception:
+        logger.exception("Telegram servisi baslatilamadi, otomatik bota devam ediliyor.")
 
 def scan_once(symbols, label):
     processed = 0
@@ -154,3 +173,6 @@ else:
 engine.flush_telegram_notifications(
     join_timeout=float(getattr(Config, "TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", 0.5))
 )
+
+if telegram_service is not None:
+    telegram_service.stop()

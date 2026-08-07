@@ -5,6 +5,8 @@ Atlas SMC Engine
 
 from datetime import datetime, timezone
 
+from config import Config
+
 
 class KillZoneEngine:
     """
@@ -12,19 +14,18 @@ class KillZoneEngine:
     Times are UTC.
     """
 
-    LONDON_START = 7
-    LONDON_END = 10
-
-    NEWYORK_START = 12
-    NEWYORK_END = 15
-
     def detect(self, timestamp_ms):
 
         dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
         hour = dt.hour
 
-        london = self.LONDON_START <= hour < self.LONDON_END
-        newyork = self.NEWYORK_START <= hour < self.NEWYORK_END
+        london_start = int(getattr(Config, "LONDON_START", 7))
+        london_end = int(getattr(Config, "LONDON_END", 10))
+        newyork_start = int(getattr(Config, "NEWYORK_START", 12))
+        newyork_end = int(getattr(Config, "NEWYORK_END", 15))
+
+        london = london_start <= hour < london_end
+        newyork = newyork_start <= hour < newyork_end
 
         active = london or newyork
 

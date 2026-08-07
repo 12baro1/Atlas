@@ -1,38 +1,32 @@
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.py~
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.coverage
 
-# Database
-*.db
-*.sqlite
-*.sqlite3
+# Sanal ortam
+venv/
+.venv/
 
-# Temp files
-*.tmp
-*.temp
-*.bak
-
-# Logs
-*.log
-
-# Environment
-.env.local
-.env.*
-
-# Runtime / state files
+# Atlas çalışma zamanı verileri
 atlas_state.json
 atlas_state.json.tmp
 atlas_learning.json
+atlas_journal.db
+telegram_auth.db
 chat_ids.json
 economic_events.json
-trade_journal.json
 
-# Virtual env
-venv/
+# Log / PID
+run/*.log
+run/*.pid
 
-# Supervisor runtime (logs + pid)
-run/
-.venv/
+# Ortam ve sırlar
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store

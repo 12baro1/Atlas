@@ -121,6 +121,17 @@ class TradeJournal:
             out.append(trade)
         return out
 
+    def closed_trades(self, symbol=None):
+        """Kapanmış (CLOSED) trade listesini döner; isteğe bağlı sembol filtreli."""
+        out = []
+        for trade in self._trades:
+            if trade.get("status") != "CLOSED":
+                continue
+            if symbol and trade.get("symbol") != symbol:
+                continue
+            out.append(trade)
+        return out
+
     def resolve_open_signal(self, trade, candles):
         """Açık bir trade'i verilen mumlar üzerinden SL/TP vuruşuyla kapatır.
 

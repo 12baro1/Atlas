@@ -23,13 +23,20 @@ class BacktestEngine:
 
     def record(self, trade):
 
+        if trade is None:
+            return
+
         self.total += 1
+
+        # Canlı engine.analyze() çıktısı: "signal"/"risk"/"rr" içerir
+        if "signal" in trade and "rr" in trade and "risk" in trade:
+            self._record_payload(trade)
+            return
 
         result = trade.get("result", "LOSS")
 
-        rr = abs(trade.get("rr", 0))
+        rr = abs(trade.get("rr", 0) if isinstance(trade.get("rr"), (int, float)) else 0)
         signed_rr = rr if result == "WIN" else -rr
-
         self.net_rr += signed_rr
 
         if result == "WIN":
@@ -52,6 +59,25 @@ class BacktestEngine:
             self.tp3 += 1
 
         self.history.append(trade)
+
+    def _record_payload(self, result_payload):
+        """Canlı engine.analyze() çıktısını geri test kaydına işler."""
+        signal = result_payload.get("signal") or {}
+        risk = result_payload.get("risk") or {}
+        rr = result_payload.get("rr") or {}
+
+        value = rr.get("rr") if isinstance(rr, dict) else rr
+        value = abs(value) if isinstance(value, (int, float)) else 0
+
+        entry = {"signal": signal, "risk": risk, "rr": rr, "result": "PENDING"}
+        if signal.get("signal") == "LONG":
+            entry["side"] = "LONG"
+        elif signal.get("signal") == "SHORT":
+            entry["side"] = "SHORT"
+        entry["confidence"] = signal.get("confidence")
+        entry["tp"] = (risk.get("dynamic_tp") or {}).get("tp_target")
+
+        self.history.append(entry)
 
     def statistics(self):
 

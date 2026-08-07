@@ -3,7 +3,10 @@ config.py
 Atlas SMC Engine Configuration
 """
 
+import logging
 import os
+
+CONFIG_LOGGER = logging.getLogger("atlas.config")
 
 
 def _strip_shell_quotes(value):
@@ -225,6 +228,11 @@ class Config:
     TELEGRAM_ADMIN_IDS = [ADMIN_CHAT_ID]
     BOT_PASSWORD_HASH = ""
     TELEGRAM_AUTH_DB_FILE = "telegram_auth.db"
+    TELEGRAM_POLLING_ENABLED = os.getenv("ATLAS_TELEGRAM_POLLING_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+    TELEGRAM_POLLING_INTERVAL_SECONDS = float(os.getenv("ATLAS_TELEGRAM_POLLING_INTERVAL_SECONDS", "2"))
+    TELEGRAM_WEBHOOK_ENABLED = os.getenv("ATLAS_TELEGRAM_WEBHOOK_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
+    TELEGRAM_WEBHOOK_HOST = os.getenv("ATLAS_TELEGRAM_WEBHOOK_HOST", "0.0.0.0")
+    TELEGRAM_WEBHOOK_PORT = int(os.getenv("ATLAS_TELEGRAM_WEBHOOK_PORT", "8080"))
 
     # Kullanıcı kayıt dosyası
     CHAT_IDS_FILE = "chat_ids.json"
@@ -278,3 +286,89 @@ class Config:
         cls.BOT_PASSWORD = os.getenv("ATLAS_BOT_PASSWORD", "")
         cls.ADMIN_CHAT_ID = int(os.getenv("ATLAS_ADMIN_CHAT_ID", "0"))
         cls.TELEGRAM_ADMIN_IDS = [cls.ADMIN_CHAT_ID]
+
+    @classmethod
+    def validate(cls, logger=None, raise_on_error=False):
+        """Merkezi yapılandırma doğrulaması.
+
+        Kritik ayarları kontrol eder; sorunları loglar.
+        ``raise_on_error=True`` ise ilk kritik hata da ValueError fırlatır.
+        Dönüş: (hata sayısı, uyarı sayısı)
+        """
+        log = logger or CONFIG_LOGGER
+        errors = 0
+        warnings = 0
+
+        # Kritik risk değerleri
+        if cls.MINIMUM_RR < 1.0:
+            log.warning("MINIMUM_RR >= 1 olmalı (Risk/Ödül oranı). Mevcut: %s", cls.MINIMUM_RR)
+            warnings += 1
+        if cls.RISK_PERCENT <= 0 or cls.RISK_PERCENT > 10:
+            log.warning("RISK_PERCENT 0-10 aralığında olmalı (riskli per işlem). Mevcut: %s", cls.RISK_PERCENT)
+            warnings += 1
+        if cls.MIN_STOP_PERCENT <= 0:
+            log.error("MIN_STOP_PERCENT > 0 olmalı. Mevcut: %s", cls.MIN_STOP_PERCENT)
+            errors += 1
+        if cls.MAX_POSITION_SIZE <= 0:
+            log.error("MAX_POSITION_SIZE > 0 olmalı. Mevcut: %s", cls.MAX_POSITION_SIZE)
+            errors += 1
+
+        # Kaldıraç aralığı
+        min_lev = int(getattr(cls, "AUTO_TRADING_MIN_LEVERAGE", 1))
+        max_lev = int(getattr(cls, "AUTO_TRADING_MAX_LEVERAGE", 20))
+        if min_lev < 1 or max_lev < 1 or min_lev > max_lev:
+            log.error("Geçersiz kaldıraç aralığı: %s-%s", min_lev, max_lev)
+            errors += 1
+
+        # Otomatik işlem güvenlik kontrolü
+        auto = bool(getattr(cls, "AUTO_TRADING_ENABLED", False))
+        if auto:
+            key = str(getattr(cls, "BYBIT_API_KEY", "") or "").strip()
+            secret = str(getattr(cls, "BYBIT_API_SECRET", "") or "").strip()
+            testnet = bool(getattr(cls, "BYBIT_TESTNET", True))
+            demo = bool(getattr(cls, "BYBIT_DEMO_TRADING", False))
+            if not (key and secret):
+                log.error("AUTO_TRADING acik ama Bybit API anahtari/secret eksik.")
+                errors += 1
+            if not testnet and not demo:
+                log.warning("AUTO_TRADING CANLI modda calisiyor (LIVE). Para riski var!")
+                warnings += 1
+
+        # Telegram
+        if cls.TELEGRAM_ENABLED:
+            token = str(getattr(cls, "TELEGRAM_BOT_TOKEN", "") or "").strip()
+            chat_id = str(getattr(cls, "TELEGRAM_CHAT_ID", "") or "").strip()
+            if not token:
+                log.warning("TELEGRAM_ENABLED acik ama BOT_TOKEN yok. Bildirim gonderilemez.")
+                warnings += 1
+            if not chat_id:
+                log.warning("TELEGRAM_BOT_TOKEN var ama CHAT_ID yok; hedef belirsiz.")
+                warnings += 1
+
+        # Zaman dilimi sabitleri
+        if not (0 <= cls.LONDON_START < 24) or not (0 <= cls.LONDON_END < 24):
+            log.error("Geçersiz LONDON saat aralığı: %s-%s", cls.LONDON_START, cls.LONDON_END)
+            errors += 1
+        if not (0 <= cls.NEWYORK_START < 24) or not (0 <= cls.NEWYORK_END < 24):
+            log.error("Geçersiz NEWYORK saat aralığı: %s-%s", cls.NEWYORK_START, cls.NEWYORK_END)
+            errors += 1
+
+        # Anlamlı skor eşikleri
+        if cls.DECISION_SCORE_MAX <= cls.DECISION_SCORE_MIN:
+            log.error("DECISION skor aralığı geçersiz: min=%s max=%s", cls.DECISION_SCORE_MIN, cls.DECISION_SCORE_MAX)
+            errors += 1
+
+        if errors and raise_on_error:
+            raise ValueError(f"Config validation {errors} hata buldu; düzeltilmeden devam edilmemeli.")
+
+        if errors or warnings:
+            log.warning("Config doğrulaması | hata=%s uyarı=%s", errors, warnings)
+        return errors, warnings
+
+    @classmethod
+    def validate_or_raise(cls, logger=None):
+        """Doğrulama hatası varsa ValueError fırlatır (startup çağrısı)."""
+        errors, _ = cls.validate(logger=logger, raise_on_error=True)
+        if errors:
+            raise ValueError(f"Config doğrulama hatası: {errors} problem.")
+        return True
