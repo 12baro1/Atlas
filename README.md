@@ -94,3 +94,43 @@ ATLAS_TELEGRAM_HISTORICAL_STRICT=0
 - `ATLAS_TELEGRAM_HISTORICAL_STRICT`: `1` yapilirsa yeterli gecmis veri yokken sinyal engellenir; `0` iken sadece uyari olarak gosterilir.
 
 Telegram mesajlarina manuel takip butonlari da eklenir: `Girdim`, `Girmedim`, `TP`, `SL`, `Erken ciktim`. Bu callback'leri gercek trade sonucuna baglamak sonraki gelistirme adiminda Atlas'in senin manuel performansindan daha hizli ogrenmesini saglar.
+
+---
+
+## Canli Izleme (Sinyal Sonuc Takibi + Süpervizör)
+
+Sistem her EXECUTE sinyalini kalici `atlas_journal.db`'ye kaydeder, mumlar ilerledikçe SL/TP vuruşuyla WIN/LOSS çözer ve `report.py` ile ölçer.
+
+### Tek seferlik tarama
+```bash
+ATLAS_MAX_SYMBOLS=50 python3 main.py
+```
+
+### Sürekli izleme (crash'e karsi otomatik restart)
+```bash
+./run_bot.sh start                     # arka planda, 900s arayla, max 100 sembol
+./run_bot.sh status                    # calisiyor mu?
+./run_bot.sh logs -f                   # canli loglar
+./run_bot.sh restart
+./run_bot.sh stop
+```
+
+Ayarlar:
+```bash
+ATLAS_SCAN_INTERVAL_SECONDS=900 ./run_bot.sh start   # tarama arasi (sn)
+ATLAS_MAX_SYMBOLS=50 ./run_bot.sh start              # sembol sayisi
+RESTART_DELAY=10 ./run_bot.sh start                  # crash sonrasi bekleme (sn)
+```
+
+### Canli performans raporu
+```bash
+python3 report.py            # winrate, beklenti, profit factor, TP/SL
+python3 report.py --detail   # tek tek sinyal sonuclari
+```
+
+### Backtest (edge dogrulama)
+```bash
+python3 backtest.py --symbol SOL/USDT:USDT --days 90
+python3 backtest.py --symbols SOL/USDT:USDT,DYDX/USDT:USDT --days 60
+python3 backtest.py --symbols ... --lenient   # karar kapisi olmadan
+```

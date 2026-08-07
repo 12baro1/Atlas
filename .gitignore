@@ -33,4 +33,7 @@ trade_journal.json
 
 # Virtual env
 venv/
+
+# Supervisor runtime (logs + pid)
+run/
 .venv/
