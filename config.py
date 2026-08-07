@@ -157,7 +157,7 @@ class Config:
     M15 = "15m"
 
     # Scanner
-    MAX_SYMBOLS = 1000
+    MAX_SYMBOLS = int(os.getenv("ATLAS_MAX_SYMBOLS", "0").strip() or "0")
 
     # Bybit / Auto Trading
     AUTO_TRADING_ENABLED = os.getenv("ATLAS_AUTO_TRADING_ENABLED", "0").strip().lower() in {"1", "true", "yes"}

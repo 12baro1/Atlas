@@ -27,7 +27,7 @@ symbols, universe_stats = select_symbols(
     suffix="/USDT:USDT",
     require_active=True,
     require_swap=False,
-    max_symbols=int(getattr(engine.config, "MAX_SYMBOLS", 0) or 0),
+    max_symbols=int(os.getenv("ATLAS_MAX_SYMBOLS", "0").strip() or 0),
 )
 
 backend = getattr(ccxt, "BACKEND", "unknown")
