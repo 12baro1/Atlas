@@ -11,9 +11,6 @@ from engine import AtlasEngine
 from universe_engine import select_symbols
 
 # Yeni profesyonel modüller
-from utils.dynamic_targets import DynamicTargetCalculator
-from core.ai_learner import AILearningCore
-from signal_engine import AdvancedSignalEngine
 from utils.signal_card import build_signal_card, format_card_text
 
 engine = AtlasEngine()
@@ -23,11 +20,6 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 logger = logging.getLogger("atlas.scanner")
-
-# Profesyonel bileşenleri başlat
-ai_core = AILearningCore()
-target_calc = DynamicTargetCalculator()
-signal_engine = AdvancedSignalEngine(ai_learner=ai_core, target_calculator=target_calc)
 
 markets = exchange.load_markets()
 symbols, universe_stats = select_symbols(
@@ -78,54 +70,73 @@ if bool(getattr(Config, "TELEGRAM_ENABLED", True)):
 # Bybit ile otomatik işlem yapılmadığı için order execution bildirimi gönderilmiyor
 # Sinyal bildirimleri TelegramEngine tarafından zaten gönderiliyor
 
-processed = 0
-success = 0
-failed = 0
-skipped = 0
+def scan_once(symbols, label):
+    processed = 0
+    success = 0
+    failed = 0
+    skipped = 0
 
-for index, symbol in enumerate(symbols, start=1):
+    for index, symbol in enumerate(symbols, start=1):
+        try:
+            processed += 1
+            logger.info("[%s/%s] Analiz basliyor: %s", index, len(symbols), symbol)
 
-    try:
-        processed += 1
-        logger.info("[%s/%s] Analiz basliyor: %s", index, len(symbols), symbol)
+            data = get_market_data(symbol)
+            logger.info("Veri alindi: %s", data["symbol"])
 
-        data = get_market_data(symbol)
-        logger.info("Veri alindi: %s", data["symbol"])
+            analysis_started = time.perf_counter()
+            result = engine.analyze(data)
+            elapsed = time.perf_counter() - analysis_started
+            logger.info("[%s/%s] Analiz tamamlandi: %s (%.2fs)", index, len(symbols), symbol, elapsed)
 
-        analysis_started = time.perf_counter()
-        result = engine.analyze(data)
-        elapsed = time.perf_counter() - analysis_started
-        logger.info("[%s/%s] Analiz tamamlandi: %s (%.2fs)", index, len(symbols), symbol, elapsed)
+            if result is None:
+                skipped += 1
+                logger.warning("[%s/%s] Sonuc yok, atlandi: %s", index, len(symbols), symbol)
+                continue
 
-        if result is None:
-            skipped += 1
-            logger.warning("[%s/%s] Sonuc yok, atlandi: %s", index, len(symbols), symbol)
-            continue
+            success += 1
 
-        success += 1
+            card = build_signal_card(result)
+            print(format_card_text(card))
 
-        card = build_signal_card(result)
-        print(format_card_text(card))
+            logger.info(
+                "Manual Mode | symbol=%s verdict=%s signal=%s confidence=%s (Otomatik işlem yok)",
+                symbol,
+                card["verdict"],
+                card["signal"],
+                card["confidence"],
+            )
 
-        logger.info(
-            "Manual Mode | symbol=%s verdict=%s signal=%s confidence=%s (Otomatik işlem yok)",
-            symbol,
-            card["verdict"],
-            card["signal"],
-            card["confidence"],
-        )
+        except Exception:
+            failed += 1
+            logger.exception("[%s/%s] Analiz hatasi: %s", index, len(symbols), symbol)
 
-    except Exception:
-        failed += 1
-        logger.exception("[%s/%s] Analiz hatasi: %s", index, len(symbols), symbol)
+    logger.info(
+        "Tarama bitti (%s) | islenen=%s basarili=%s atlanan=%s hatali=%s",
+        label,
+        processed,
+        success,
+        skipped,
+        failed,
+    )
+    return processed, success, skipped, failed
 
-logger.info(
-    "Tarama bitti | islenen=%s basarili=%s atlanan=%s hatali=%s",
-    processed,
-    success,
-    skipped,
-    failed,
-)
+
+scan_interval = float(os.getenv("ATLAS_SCAN_INTERVAL_SECONDS", "0").strip() or "0")
+cycle = 1
+
+if scan_interval <= 0:
+    scan_once(symbols, "tek")
+else:
+    while True:
+        logger.info("Cevrim %s basliyor; %s sn sonra tekrar taranacak (Ctrl+C ara).", cycle, scan_interval)
+        scan_once(symbols, "tek")
+        try:
+            time.sleep(scan_interval)
+        except KeyboardInterrupt:
+            logger.info("Durduruldu.")
+            break
+        cycle += 1
 
 engine.flush_telegram_notifications(
     join_timeout=float(getattr(Config, "TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", 0.5))
