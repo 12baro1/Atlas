@@ -194,8 +194,11 @@ def test_risk_engine_expands_too_tight_stop_using_atr_floor(monkeypatch):
     assert risk["rr"] == pytest.approx(3.0)
 
 
-def test_risk_engine_rejects_too_tight_stop_by_default(monkeypatch):
+def test_risk_engine_auto_expands_tight_stop_even_when_reject_on(monkeypatch):
+    # AUTO_EXPAND_TIGHT_STOPS (default True) önceliklidir: REJECT_TIGHT_STOPS açık
+    # olsa bile sıkı stoplar otomatik genişletilir ve sinyal SKIP edilmez.
     monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
+    monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", True)
     risk = RiskEngine().calculate(
         entry=79.00,
         stop_loss=79.01,
@@ -207,8 +210,12 @@ def test_risk_engine_rejects_too_tight_stop_by_default(monkeypatch):
     )
 
     assert risk is not None
-    assert risk["risk_setup_valid"] is False
-    assert risk["risk_setup_reason"] == "Stop distance below minimum"
+    assert risk["risk_setup_valid"] is True
+    assert risk["stop_adjusted"] is True
+    assert risk["stop_loss"] == pytest.approx(79.50)
+    assert risk["risk"] == pytest.approx(0.5)
+    assert risk["rr"] == pytest.approx(3.0)
+    assert risk["position_size"] > 0
 
 
 def test_risk_engine_uses_inferred_tick_for_micro_price_symbols(monkeypatch):

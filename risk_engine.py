@@ -73,11 +73,21 @@ class RiskEngine:
 
         if stop_too_tight:
             if should_auto_expand:
+                # Sıkı stopu atlayın ve güvenli minimum uzaklığa genişlet.
                 adjusted_stop_loss = self._expand_stop(entry, side, minimum_stop_distance, resolved_tick_size)
                 stop_adjusted = True
-            else:
                 self.logger.info(
-                    "Risk rejected: stop too tight | entry=%s stop=%s requested=%s min=%s",
+                    "Risk: stop auto-expanded | entry=%s stop=%s adjusted_stop=%s requested=%s min=%s",
+                    entry,
+                    stop_loss,
+                    adjusted_stop_loss,
+                    requested_risk,
+                    minimum_stop_distance,
+                )
+            elif reject_tight_stops:
+                # Stop genişletilemiyor ve sıkı stopları kabul etmiyoruz; güvenli hale getirilemedi → SKIP.
+                self.logger.info(
+                    "Risk skipped: stop below minimum and auto-expand disabled | entry=%s stop=%s requested=%s min=%s",
                     entry,
                     stop_loss,
                     requested_risk,
@@ -96,29 +106,15 @@ class RiskEngine:
                     requested_risk=requested_risk,
                     stop_adjusted=False,
                 )
-
-        if stop_adjusted and reject_tight_stops:
-            self.logger.info(
-                "Risk rejected: stop required expansion | entry=%s stop=%s adjusted_stop=%s requested=%s min=%s",
-                entry,
-                stop_loss,
-                adjusted_stop_loss,
-                requested_risk,
-                minimum_stop_distance,
-            )
-            return self._invalid_risk_setup(
-                entry,
-                adjusted_stop_loss,
-                side=side,
-                reason="Stop distance below minimum",
-                atr=atr_snapshot,
-                minimum_stop_distance=minimum_stop_distance,
-                tick_size=resolved_tick_size,
-                spread_buffer=spread_buffer,
-                slippage_buffer=slippage_buffer,
-                requested_risk=requested_risk,
-                stop_adjusted=True,
-            )
+            else:
+                # Auto-genişletme kapalı ama sık stop reddi de kapalı: orijinal stop üzerinden ilerle.
+                self.logger.info(
+                    "Risk: tight stop accepted (reject off, no auto-expand) | entry=%s stop=%s requested=%s min=%s",
+                    entry,
+                    stop_loss,
+                    requested_risk,
+                    minimum_stop_distance,
+                )
 
         risk = abs(entry - adjusted_stop_loss)
 
@@ -203,6 +199,8 @@ class RiskEngine:
             "risk_setup_valid": True,
 
             "risk_setup_reason": "Auto-expanded stop" if stop_adjusted else "OK",
+
+            "reason_code": "AUTO_EXPANDED" if stop_adjusted else "OK",
 
             "atr": round(atr_snapshot, 8),
 
@@ -382,6 +380,27 @@ class RiskEngine:
         requested_risk=0.0,
         stop_adjusted=False,
     ):
+        reason_code = {
+            "Stop Loss invalid": "INVALID_STOP",
+            "Invalid Risk Setup": "UNSAFE_WIDE_OR_EXPAND_DISABLED",
+        }.get(reason, "RISK_INVALID")
+
+        self.logger.warning(
+            "Risk skipped | reason_code=%s reason=%s entry=%s stop=%s side=%s "
+            "requested_stop_distance=%s minimum_stop_distance=%s tick_size=%s "
+            "min_stop_percent=%s atr=%s",
+            reason_code,
+            reason,
+            entry,
+            stop_loss,
+            side,
+            round(requested_risk, 8),
+            round(minimum_stop_distance, 8),
+            round(tick_size, 8),
+            float(getattr(Config, "MIN_STOP_PERCENT", 0.0005)),
+            round(atr, 8),
+        )
+
         return {
             "side": side,
             "entry": round(entry, 8),
@@ -391,6 +410,7 @@ class RiskEngine:
             "stop_adjusted": stop_adjusted,
             "risk_setup_valid": False,
             "risk_setup_reason": reason,
+            "reason_code": reason_code,
             "atr": round(atr, 8),
             "tick_size": round(tick_size, 8),
             "minimum_tick_distance": round(max(tick_size, 0.0), 8),

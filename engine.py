@@ -1291,11 +1291,14 @@ class AtlasEngine:
             return False
 
         if signal.get("signal") not in ["LONG", "SHORT"]:
-            self.logger.info(
-                "Telegram skip: signal direction=%s decision_action=%s for %s",
-                signal.get("signal", "WAIT"),
-                (decision or {}).get("action", "WAIT"),
-                data.get("symbol", "UNKNOWN"),
+            self._telegram_skip_log(
+                reason_code="NO_DIRECTION",
+                symbol=data.get("symbol", "UNKNOWN"),
+                signal=signal,
+                risk=risk,
+                decision=decision,
+                market_phase=market_phase,
+                detail=f"signal_dir={signal.get('signal', 'WAIT')} decision={(decision or {}).get('action', 'WAIT')}",
             )
             return False
 
@@ -1307,42 +1310,64 @@ class AtlasEngine:
         )
         require_decision_action = bool(getattr(Config, "TELEGRAM_REQUIRE_DECISION_ACTION", False))
         if require_decision_action and decision_trade_direction not in ["LONG", "SHORT"]:
-            self.logger.info(
-                "Telegram skip: decision action=%s for %s",
-                decision_action,
-                data.get("symbol", "UNKNOWN"),
+            self._telegram_skip_log(
+                reason_code="DECISION_NOT_TRADEABLE",
+                symbol=data.get("symbol", "UNKNOWN"),
+                signal=signal,
+                risk=risk,
+                decision=decision,
+                market_phase=market_phase,
+                detail=f"decision_action={decision_action}",
             )
             return False
         action_for_message = decision_trade_direction if decision_trade_direction in ["LONG", "SHORT"] else signal_action
 
         if not entry.get("valid", False):
-            self.logger.info(
-                "Telegram skip: entry invalid for %s",
-                data.get("symbol", "UNKNOWN"),
+            self._telegram_skip_log(
+                reason_code="ENTRY_INVALID",
+                symbol=data.get("symbol", "UNKNOWN"),
+                signal=signal,
+                risk=risk,
+                decision=decision,
+                market_phase=market_phase,
+                detail=f"entry_valid={entry.get('valid')}",
             )
             return False
 
         if entry.get("entry") is None or entry.get("stop_loss") is None:
-            self.logger.info(
-                "Telegram skip: incomplete entry levels for %s",
-                data.get("symbol", "UNKNOWN"),
+            self._telegram_skip_log(
+                reason_code="ENTRY_LEVELS_MISSING",
+                symbol=data.get("symbol", "UNKNOWN"),
+                signal=signal,
+                risk=risk,
+                decision=decision,
+                market_phase=market_phase,
+                detail=f"entry={entry.get('entry')} stop_loss={entry.get('stop_loss')}",
             )
             return False
 
         if not risk or risk.get("risk") is None or risk.get("risk") <= 0:
-            self.logger.info(
-                "Telegram skip: invalid risk payload for %s",
-                data.get("symbol", "UNKNOWN"),
+            self._telegram_skip_log(
+                reason_code="RISK_PAYLOAD_INVALID",
+                symbol=data.get("symbol", "UNKNOWN"),
+                signal=signal,
+                risk=risk,
+                decision=decision,
+                market_phase=market_phase,
+                detail=f"risk_setup_valid={risk.get('risk_setup_valid') if isinstance(risk, dict) else None} reason={risk.get('risk_setup_reason') if isinstance(risk, dict) else None}",
             )
             return False
 
         min_confidence = float(getattr(Config, "TELEGRAM_MIN_CONFIDENCE", 85))
         if signal.get("confidence", 0) < min_confidence:
-            self.logger.info(
-                "Telegram skip: confidence=%s < min=%s for %s",
-                signal.get("confidence", 0),
-                min_confidence,
-                data.get("symbol", "UNKNOWN"),
+            self._telegram_skip_log(
+                reason_code="LOW_CONFIDENCE",
+                symbol=data.get("symbol", "UNKNOWN"),
+                signal=signal,
+                risk=risk,
+                decision=decision,
+                market_phase=market_phase,
+                detail=f"confidence={self._safe_number(signal.get('confidence'))} < min={min_confidence}",
             )
             return False
 
@@ -1366,26 +1391,40 @@ class AtlasEngine:
         )
         quality_blockers.extend(manual_quality.get("blockers") or [])
         if quality_blockers:
-            self.logger.info(
-                "Telegram skip: quality gate blocked %s | %s",
-                data.get("symbol", "UNKNOWN"),
-                "; ".join(quality_blockers),
+            self._telegram_skip_log(
+                reason_code="QUALITY_GATE",
+                symbol=data.get("symbol", "UNKNOWN"),
+                signal=signal,
+                risk=risk,
+                decision=decision,
+                market_phase=market_phase,
+                detail="; ".join(quality_blockers),
             )
             return False
 
         symbol = data.get("symbol", "UNKNOWN")
         if not self._should_send_telegram_signal(symbol, action_for_message, entry, risk):
-            self.logger.info(
-                "Telegram skip: duplicate cooldown active for %s",
-                symbol,
+            self._telegram_skip_log(
+                reason_code="SIGNAL_COOLDOWN",
+                symbol=symbol,
+                signal=signal,
+                risk=risk,
+                decision=decision,
+                market_phase=market_phase,
+                detail="duplicate setup in cooldown window",
             )
             return False
 
         bot_token = str(getattr(Config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
         if not bot_token:
-            self.logger.info(
-                "Telegram skip: bot token not configured for %s",
-                symbol,
+            self._telegram_skip_log(
+                reason_code="BOT_TOKEN_MISSING",
+                symbol=symbol,
+                signal=signal,
+                risk=risk,
+                decision=decision,
+                market_phase=market_phase,
+                detail="bot token not configured",
             )
             return False
 
@@ -1543,6 +1582,49 @@ class AtlasEngine:
         if value is None:
             return "NONE"
         return f"{float(value):.2f}".rstrip("0").rstrip(".")
+
+    def _telegram_skip_log(
+        self,
+        reason_code,
+        symbol,
+        signal=None,
+        risk=None,
+        decision=None,
+        market_phase=None,
+        detail=None,
+    ):
+        """Telegram'a engellenen her sinyal için ayrıntılı, yapılandırılmış log üretir.
+
+        reason_code, confidence, RR, stop_distance, risk_amount ve market_phase'i
+        tek bir satırda toplar; engellenen sinyallerin teşhisini kolaylaştırır.
+        """
+        signal = signal or {}
+        risk = risk or {}
+        decision = decision or {}
+        market_phase = market_phase or {}
+
+        confidence = self._safe_number(signal.get("confidence"))
+        rr_value = self._resolve_telegram_rr(risk)
+        stop_loss = risk.get("stop_loss") if isinstance(risk, dict) else None
+        entry = risk.get("entry") if isinstance(risk, dict) else None
+        stop_distance = None
+        if entry is not None and stop_loss is not None:
+            stop_distance = self._safe_number(abs(self._safe_number(entry, 0.0) - self._safe_number(stop_loss, 0.0)))
+        risk_amount = self._safe_number(risk.get("risk")) if isinstance(risk, dict) else None
+        phase = str(market_phase.get("phase") or decision.get("market_phase") or "UNKNOWN")
+
+        self.logger.info(
+            "Telegram skip | reason_code=%s symbol=%s confidence=%s rr=%s "
+            "stop_distance=%s risk_amount=%s market_phase=%s detail=%s",
+            reason_code,
+            symbol,
+            self._fmt_optional_number(confidence),
+            self._fmt_optional_number(rr_value),
+            self._fmt_optional_number(stop_distance),
+            self._fmt_optional_number(risk_amount),
+            phase,
+            detail or "-",
+        )
 
     def _send_telegram_safe(self, telegram_module, message, symbol, reply_markup=None):
         """Telegram gönderimini güvenli şekilde çalıştırır; analiz akışını düşürmez."""
