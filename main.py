@@ -5,7 +5,7 @@ import time
 import asyncio
 
 from telegram_engine import TelegramBot
-from data_engine import get_market_data
+from data_engine import get_market_data, exchange, ccxt
 from config import Config
 from engine import AtlasEngine
 from universe_engine import select_symbols

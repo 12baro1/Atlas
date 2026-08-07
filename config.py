@@ -77,8 +77,8 @@ def _env_or_rc(var_name, default=""):
     return default
 
 class Config:
-    DEFAULT_TELEGRAM_BOT_TOKEN = "8451423294:AAFJ8gmvKPk23ierRsh4u5sX3SRIXk2uDWY"
-    DEFAULT_TELEGRAM_CHAT_ID = "6378242540"
+    DEFAULT_TELEGRAM_BOT_TOKEN = ""
+    DEFAULT_TELEGRAM_CHAT_ID = ""
 
     # Risk
     RISK_PERCENT = 1.0

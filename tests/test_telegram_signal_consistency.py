@@ -169,6 +169,8 @@ def test_notify_if_elite_deduplicates_same_signal(monkeypatch):
     import telegram_engine as telegram_module
     monkeypatch.setattr(telegram_module, "TelegramBot", lambda: _DummyBot())
 
+    monkeypatch.setenv("ATLAS_TELEGRAM_BOT_TOKEN", "dummy-token")
+
     engine.telegram = _DummyEngine()
     engine.config.TELEGRAM_SIGNAL_DEDUP_ENABLED = True
     engine.config.TELEGRAM_SIGNAL_COOLDOWN_MINUTES = 180
@@ -216,6 +218,7 @@ def test_notify_if_elite_accepts_execute_action_when_decision_required(monkeypat
 
     import engine as engine_module
     monkeypatch.setattr(engine_module.Config, "TELEGRAM_REQUIRE_DECISION_ACTION", True)
+    monkeypatch.setenv("ATLAS_TELEGRAM_BOT_TOKEN", "dummy-token")
     monkeypatch.setattr(engine_module.Config, "TELEGRAM_BOT_TOKEN", "dummy-token")
 
     engine.telegram = _DummyEngine()
