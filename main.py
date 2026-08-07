@@ -14,6 +14,7 @@ from universe_engine import select_symbols
 from utils.dynamic_targets import DynamicTargetCalculator
 from core.ai_learner import AILearningCore
 from signal_engine import AdvancedSignalEngine
+from utils.signal_card import build_signal_card, format_card_text
 
 engine = AtlasEngine()
 
@@ -103,108 +104,16 @@ for index, symbol in enumerate(symbols, start=1):
 
         success += 1
 
-        analysis = result["analysis"]
+        card = build_signal_card(result)
+        print(format_card_text(card))
 
-        print(f"\n✓ {symbol}")
-
-        if len(analysis["structure"]) > 0:
-            print("Son Yapı :", analysis["structure"][-1]["label"])
-
-        print("Liquidity :", len(analysis["liquidity"]))
-        print("OrderBlocks :", len(analysis["orderblocks"]))
-        print("FVG :", len(analysis["fvg"]))
-
-        print("Signal :", result["signal"]["signal"])
-        print("Confidence :", result["signal"]["confidence"])
-        print("Grade :", result["signal"]["grade"])
-        print("Strength :", result["signal"]["strength"])
-
-        # Güvenli trend erişimi - KeyError önleme
-        trend_data = analysis.get("trend", {})
-        if trend_data:
-            print("Trend :", trend_data.get("trend", "Bilinmiyor"))
-        else:
-            print("Trend : Veri yok")
-
-        # Güvenli entry erişimi
-        entry_data = analysis.get("entry", {})
-        if entry_data:
-            print("Entry :", entry_data.get("direction", "Bilinmiyor"))
-            print("Entry Price :", entry_data.get("entry", "N/A"))
-            print("Stop Loss :", entry_data.get("stop_loss", "N/A"))
-            print("Entry Valid :", entry_data.get("valid", False))
-            print("Reason :", entry_data.get("reason", "N/A"))
-        else:
-            print("Entry : Veri yok")
-
-        # Güvenli confirmation erişimi
-        conf_data = analysis.get("confirmation", {})
-        if conf_data:
-            print("Confirmed :", conf_data.get("confirmed", False))
-            print("Confirm Reason :", conf_data.get("reason", "N/A"))
-        else:
-            print("Confirmed : Veri yok")
-
-        # Güvenli market_phase erişimi
-        mp_data = analysis.get("market_phase", {})
-        if mp_data:
-            print("\nMarket Phase Analysis:")
-            print("  Phase :", mp_data.get("phase", "Bilinmiyor"))
-            print("  Confidence :", mp_data.get("phase_confidence", 0), "%")
-            print("  Strength :", mp_data.get("phase_strength", "N/A"))
-            print("  Score :", mp_data.get("phase_score", 0))
-            print("  MTF Alignment :", mp_data.get("mtf_alignment", 0), "%")
-        else:
-            print("\nMarket Phase Analysis: Veri yok")
-
-        # Güvenli mtf erişimi
-        mtf_data = analysis.get("mtf", {})
-        if mtf_data:
-            print("Weekly :", mtf_data.get("weekly", "N/A"))
-            print("Daily :", mtf_data.get("daily", "N/A"))
-            print("H4 :", mtf_data.get("h4", "N/A"))
-            print("Entry TF :", mtf_data.get("entry", "N/A"))
-            print("MTF Valid :", mtf_data.get("valid", False))
-        else:
-            print("MTF : Veri yok")
-
-        # Güvenli dynamic_tp erişimi
-        tp_data = result.get("dynamic_tp", {})
-        if tp_data:
-            print("TP1 :", tp_data.get("tp1", "N/A"))
-            print("TP2 :", tp_data.get("tp2", "N/A"))
-            print("TP3 :", tp_data.get("tp3", "N/A"))
-        else:
-            print("Dynamic TP : Veri yok")
-
-        # Bybit Execution Engine kaldırıldı - Manuel işlem modu
-        # execution_result = execution_engine.process(symbol=symbol, result=result)
-        # Manuel işlem için execution_result simüle ediyoruz
-        execution_result = {
-            "executed": False,
-            "reason": "manual_mode_no_auto_execution",
-            "symbol": symbol,
-            "signal": result.get("signal", {}).get("signal"),
-            "confidence": result.get("signal", {}).get("confidence"),
-        }
         logger.info(
-            "Manual Mode | symbol=%s signal=%s confidence=%s (Otomatik işlem yok, Telegram bildirimi gönderiliyor)",
+            "Manual Mode | symbol=%s verdict=%s signal=%s confidence=%s (Otomatik işlem yok)",
             symbol,
-            execution_result.get("signal"),
-            execution_result.get("confidence"),
+            card["verdict"],
+            card["signal"],
+            card["confidence"],
         )
-
-        print("Execution :", "OPENED" if execution_result.get("executed") else "SKIPPED (Manuel Mod)")
-        print("Execution Reason :", execution_result.get("reason"))
-
-        if result["risk"]:
-
-            print("----- RISK -----")
-            print("Capital Risk :", result["risk"]["capital_at_risk"])
-            print("Position Size :", result["risk"]["position_size"])
-            print("Risk :", result["risk"]["risk"])
-
-        print("--------------------------------")
 
     except Exception:
         failed += 1
