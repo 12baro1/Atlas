@@ -31,7 +31,9 @@ class TelegramWebhookHandler:
         """
         try:
             if "callback_query" not in update_data:
-                return False
+                # Normal metin / media mesajı: işlem gerektirmez ama Telegram
+                # 400 dönerse sonraki update'ler engellenir; bu yüzden ack ver.
+                return True
 
             callback_query = update_data["callback_query"]
             chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
@@ -41,27 +43,26 @@ class TelegramWebhookHandler:
 
             if not chat_id or not callback_data:
                 LOGGER.warning("Geçersiz callback: chat_id=%s, callback_data=%s", chat_id, callback_data)
-                return False
+                return True
 
-            # Callback verisini parse et
-            parts = callback_data.split("_", 1)
-            if len(parts) != 2:
+            parsed = self._parse_callback_data(callback_data)
+            if parsed is None:
                 LOGGER.warning("Geçersiz callback formatı: %s", callback_data)
-                return False
-
-            action, signal_id = parts
+                self._answer_callback_query(callback_query.get("id"), "❌ Geçersiz komut", show_alert=True)
+                return True
+            action, symbol = parsed
 
             # Kullanıcıyı doğrula (basit yetkilendirme)
             admin_chat_id = getattr(Config, "ADMIN_CHAT_ID", None)
             authorized_chat_ids = self._load_authorized_chat_ids()
-            
+
             if str(chat_id) != str(admin_chat_id) and chat_id not in authorized_chat_ids:
                 LOGGER.warning("Yetkisiz erişim: chat_id=%s, user_id=%s", chat_id, user_id)
                 self._answer_callback_query(callback_query.get("id"), "❌ Yetkiniz yok", show_alert=True)
-                return False
+                return True
 
             # Aksiyonu işle
-            result = self._process_action(action, signal_id, chat_id, user_id)
+            result = self._process_action(action, symbol, chat_id, user_id)
 
             # Kullanıcıya geri bildirim gönder
             if result:
@@ -77,21 +78,45 @@ class TelegramWebhookHandler:
             LOGGER.exception("Webhook işlem hatası: %s", exc)
             return False
 
-    def _process_action(self, action, signal_id, chat_id, user_id):
+    @staticmethod
+    def _parse_callback_data(callback_data):
+        """telegram_engine.trade_feedback_keyboard ile uyumlu parse.
+
+        Format: "trade_entered|BTC/USDT|LONG"
+        Dönüş: (action, symbol) veya None.
+        """
+        parts = callback_data.split("|")
+        if len(parts) < 2:
+            return None
+        raw_action = parts[0]
+        symbol = parts[1].strip()
+        if not symbol:
+            return None
+        if raw_action.startswith("trade_"):
+            raw_action = raw_action[len("trade_"):]
+        action_map = {
+            "entered": "entered",
+            "skipped": "skipped",
+            "tp": "close",
+            "sl": "close",
+            "exit_early": "close",
+        }
+        action = action_map.get(raw_action, raw_action)
+        return action, symbol
+
+    def _process_action(self, action, symbol, chat_id, user_id):
         """
         Buton aksiyonunu işler.
         
         Args:
             action: entered, skipped, analyze, close, note
-            signal_id: Sembol veya sinyal ID'si
+            symbol: Sembol (callback'ten gelen, örn. BTC/USDT)
             chat_id: Telegram chat ID
             user_id: Kullanıcı ID
             
         Returns:
             dict: {"message": str, "edit_message": bool, "new_text": str} veya None
         """
-        symbol = signal_id.replace("_", "/")  # BTC/USDT formatına çevir
-
         action_handlers = {
             "entered": self._handle_entered,
             "skipped": self._handle_skipped,
@@ -187,14 +212,18 @@ class TelegramWebhookHandler:
         return datetime.now().isoformat()
 
     def _load_authorized_chat_ids(self):
-        """Yetkili chat ID'lerini yükle."""
-        # Basit implementasyon - Config'den alınabilir
-        auth_db_file = getattr(Config, "TELEGRAM_AUTH_DB_FILE", "telegram_auth.db")
-        chat_ids_file = getattr(Config, "CHAT_IDS_FILE", "chat_ids.json")
-        
+        """Yetkili chat ID'lerini yükle (telegram_auth_store.db + chat_ids.json)."""
         chat_ids = []
-        
-        # JSON dosyasından yükle
+
+        try:
+            from telegram_auth_store import TelegramAuthStore
+            auth_db_file = getattr(Config, "TELEGRAM_AUTH_DB_FILE", "telegram_auth.db")
+            store = TelegramAuthStore(auth_db_file)
+            chat_ids.extend(store.list_authorized_chat_ids())
+        except Exception:
+            LOGGER.exception("Telegram auth db yuklenemedi")
+
+        chat_ids_file = getattr(Config, "CHAT_IDS_FILE", "chat_ids.json")
         import os
         if os.path.exists(chat_ids_file):
             try:
@@ -204,8 +233,12 @@ class TelegramWebhookHandler:
                         chat_ids.extend([int(x) for x in data if str(x).isdigit()])
             except Exception:
                 pass
-        
-        return chat_ids
+
+        unique = []
+        for chat_id in chat_ids:
+            if chat_id not in unique:
+                unique.append(chat_id)
+        return unique
 
     def _answer_callback_query(self, callback_id, text, show_alert=False):
         """Callback query'ye cevap ver."""

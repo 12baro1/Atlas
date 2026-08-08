@@ -71,8 +71,10 @@ class CorrelationEngine:
                 btc.get("direction") == "LONG"
                 and btc.get("trend_strength", 0.0) >= self._bull_mult()
             )
-            total3_short = total3.get("direction") == "SHORT"
-            if btc_strong_bull and total3_short:
+            # "Broad market strength" = TOTAL3 yükselişte (LONG). Düşen total3
+            # ALT-SHORT'un kendisiyle hizalıdır, blok değil.
+            total3_bull = total3.get("direction") == "LONG"
+            if btc_strong_bull and total3_bull:
                 blocker = True
                 reason = "Altcoin SHORT blocked: broad market strength"
 
@@ -124,7 +126,7 @@ class CorrelationEngine:
 
         if diff >= 0 and momentum >= 0:
             direction = "LONG"
-        elif diff < 0 or momentum < 0:
+        elif diff < 0 and momentum < 0:
             direction = "SHORT"
         else:
             direction = "NEUTRAL"

@@ -55,10 +55,18 @@ class DynamicTPEngine:
             selected_sources.append(source)
             previous_target = target
 
+        tp1, tp2, tp3 = self._order_target_levels(
+            direction=direction,
+            entry=entry,
+            risk=risk,
+            targets=selected_targets,
+            atr_snapshot=atr_snapshot,
+        )
+
         return {
-            "tp1": selected_targets[0],
-            "tp2": selected_targets[1],
-            "tp3": selected_targets[2],
+            "tp1": tp1,
+            "tp2": tp2,
+            "tp3": tp3,
             "reason": ",".join(selected_sources),
             "sources": selected_sources,
             "atr": round(atr_snapshot, 8),
@@ -134,6 +142,59 @@ class DynamicTPEngine:
     def _fallback_rr_level(self, entry, risk, direction, rr_multiple):
         level = entry + (risk * rr_multiple) if direction == "LONG" else entry - (risk * rr_multiple)
         return round(level, 8)
+
+    def _order_target_levels(self, direction, entry, risk, targets, atr_snapshot=0.0):
+        """Profesyonel SMC kuralı: TP'leri girişten uzaklığa göre kesin sıralar.
+
+        - tp1 her zaman en yakın, tp3 her zaman en uzak hedeftir (asla ters değil).
+        - Her TP kendi minimum RR katını (1R/2R/3R) sağlamazsa yerine
+          rr_fallback seviyesi konur; böylece SL genişletilse bile TP oranı korunur.
+        - Aynı fiyata düşen kopya seviyeler trade yönünde ötelenerek 3 ayrı
+          hedef garanti edilir (tp2 == tp3 asla üretilmez).
+        """
+        candidates = []
+        seen = set()
+        for price in targets:
+            if price is None:
+                continue
+            reward = abs(price - entry)
+            if reward <= 0 or price in seen:
+                continue
+            seen.add(price)
+            candidates.append((reward, price))
+
+        candidates.sort(key=lambda item: item[0])
+
+        levels = []
+        used = set()
+        floor_atr = max(float(atr_snapshot or 0.0), 0.0)
+        for rr_multiple in self.MIN_RR_LEVELS:
+            required_reward = max(risk * rr_multiple, floor_atr * rr_multiple)
+            picked = None
+            for reward, price in candidates:
+                if price in used:
+                    continue
+                if reward >= required_reward:
+                    picked = price
+                    break
+            if picked is None:
+                picked = self._fallback_rr_level(entry, max(risk, 1e-12), direction, rr_multiple)
+            picked = self._nudge_level(entry, risk, direction, picked, used)
+            used.add(picked)
+            levels.append(picked)
+
+        levels.sort(key=lambda price: abs(price - entry))
+        return levels[0], levels[1], levels[2]
+
+    def _nudge_level(self, entry, risk, direction, picked, used):
+        """Çakışan seviyeyi trade yönünde basamak basamak öteleyerek benzersiz yapar."""
+        step = max(risk * 0.1, 1e-12)
+        sign = 1.0 if direction == "LONG" else -1.0
+        guard = 0
+        while picked in used and guard < 500:
+            picked = round(picked + sign * step, 8)
+            guard += 1
+        return picked
 
     def _safe_float(self, value):
         try:

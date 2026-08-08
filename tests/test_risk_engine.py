@@ -275,3 +275,47 @@ def test_risk_engine_marks_invalid_setup_when_auto_expand_disabled(monkeypatch):
     assert risk["risk_setup_valid"] is False
     assert risk["risk_setup_reason"] == "Invalid Risk Setup"
     assert risk["rr"] is None
+
+
+def test_rr_engine_rejects_wrong_side_tp():
+    engine = RREngine()
+    assert engine.calculate_rr(10.0, 9.0, 9.5) is None, "LONG icin entry altinda TP gecersiz"
+    assert engine.calculate_rr(10.0, 11.0, 10.5) is None, "SHORT icin entry ustunde TP gecersiz"
+    assert engine.calculate_rr(10.0, 9.0, 11.0) == 1.0
+    assert engine.calculate_rr(10.0, 11.0, 9.0) == 1.0
+
+
+def test_dynamic_tp_never_emits_duplicate_levels():
+    for direction, entry, sl, liq in [
+        ("LONG", 10.0, 9.0, [{"price": 11.0}, {"price": 13.0}]),
+        ("SHORT", 10.0, 11.0, [{"price": 9.0}, {"price": 7.0}]),
+        ("LONG", 1.23456, 1.2335, [{"price": 1.2347}, {"price": 1.2351}, {"price": 1.2359}]),
+    ]:
+        r = DynamicTPEngine().calculate(
+            direction=direction,
+            entry=entry,
+            stop_loss=sl,
+            liquidity=liq,
+            fvg=[],
+            orderblocks=[],
+            structure=[],
+        )
+        tp1, tp2, tp3 = r["tp1"], r["tp2"], r["tp3"]
+        assert len({tp1, tp2, tp3}) == 3, f"{direction}: duplicate TP levels {tp1},{tp2},{tp3}"
+        by_distance = sorted([tp1, tp2, tp3], key=lambda p: abs(p - entry))
+        assert by_distance == [tp1, tp2, tp3], f"{direction}: TP order wrong"
+
+
+def test_dynamic_tp_long_sl_behind_entry_rejected():
+    r = DynamicTPEngine().calculate(
+        direction="LONG",
+        entry=10.0,
+        stop_loss=9.0,
+        liquidity=[{"price": 11.0}],
+        fvg=[],
+        orderblocks=[],
+        structure=[],
+    )
+    tps = [r["tp1"], r["tp2"], r["tp3"]]
+    assert r["tp1"] == 11.0
+    assert all(tp > 10.0 for tp in tps), f"LONG TP'leri entry altina dusemez: {tps}"

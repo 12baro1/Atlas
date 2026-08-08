@@ -39,7 +39,9 @@ def _fetch(symbol, timeframe, limit):
 
 def fetch_candles(symbol, timeframe, limit, force_refresh=False):
     now = time.time()
-    key = (symbol, timeframe)
+    # limit'i anahtara kat: aynı sembol/ZF farklı limitlerle istenirse
+    # birbirinin önbellek kaydını kirletip warmup eksikliği yaratmasın.
+    key = (symbol, timeframe, limit)
 
     if not force_refresh and timeframe != "15m":
         cached = _cache.get(key)

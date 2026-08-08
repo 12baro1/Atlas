@@ -19,6 +19,7 @@ GÜVENLİK:
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
@@ -136,13 +137,13 @@ class BybitExecutionEngine:
             issues.append(f"Geçersiz sembol: {symbol!r}")
         if side is not None and str(side).lower() not in ("buy", "sell"):
             issues.append(f"Geçersiz yön: {side!r}")
-        if amount is not None and (not isinstance(amount, (int, float)) or amount <= 0):
+        if amount is not None and (not isinstance(amount, (int, float)) or not math.isfinite(amount) or amount <= 0):
             issues.append(f"Geçersiz boyut: {amount!r}")
-        if price is not None and price <= 0:
+        if price is not None and (not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0):
             issues.append(f"Geçersiz fiyat: {price}")
-        if stop_loss is not None and stop_loss <= 0:
+        if stop_loss is not None and (not isinstance(stop_loss, (int, float)) or not math.isfinite(stop_loss) or stop_loss <= 0):
             issues.append(f"Geçersiz SL: {stop_loss}")
-        if take_profit is not None and take_profit <= 0:
+        if take_profit is not None and (not isinstance(take_profit, (int, float)) or not math.isfinite(take_profit) or take_profit <= 0):
             issues.append(f"Geçersiz TP: {take_profit}")
 
         min_lev = int(getattr(self.config, "AUTO_TRADING_MIN_LEVERAGE", 1))
@@ -240,15 +241,24 @@ class BybitExecutionEngine:
         """Açık pozisyonu reduce-only emirle kapatmayı dener."""
         opposite = "sell" if str(side).lower() in ("buy", "long") else "buy"
         params = {"reduceOnly": True}
-        if amount is not None:
-            issues = self.validate(symbol=symbol, side=opposite, amount=amount)
-            if issues:
-                self.logger.warning("Kapatma engellendi: %s", "; ".join(issues))
-                return OrderResult(success=False, symbol=symbol, side=side, error="; ".join(issues))
+
+        if amount is None:
+            position = self.fetch_position(symbol)
+            amount = position.get("contracts") or position.get("contract") or 0.0
+            try:
+                amount = float(amount)
+            except (TypeError, ValueError):
+                amount = 0.0
+
+        issues = self.validate(symbol=symbol, side=opposite, amount=amount)
+        if issues:
+            self.logger.warning("Kapatma engellendi: %s", "; ".join(issues))
+            return OrderResult(success=False, symbol=symbol, side=side, error="; ".join(issues))
+
         return self.create_order(
             symbol=symbol,
             side=opposite,
-            amount=amount or 0,
+            amount=amount,
             order_type="market",
             params=params,
         )

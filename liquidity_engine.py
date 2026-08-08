@@ -59,7 +59,7 @@ class LiquidityEngine:
                 matched = False
 
                 for level in highs:
-                    if abs(level["price"] - item["price"]) / level["price"] <= tolerance:
+                    if abs(level["price"] - item["price"]) / max(abs(level["price"]), 1e-9) <= tolerance:
                         level["touches"] += 1
                         matched = True
                         break
@@ -78,7 +78,7 @@ class LiquidityEngine:
                 matched = False
 
                 for level in lows:
-                    if abs(level["price"] - item["price"]) / level["price"] <= tolerance:
+                    if abs(level["price"] - item["price"]) / max(abs(level["price"]), 1e-9) <= tolerance:
                         level["touches"] += 1
                         matched = True
                         break

@@ -127,7 +127,7 @@ class RiskEngine:
         account_balance = float(getattr(Config, "INITIAL_BALANCE", 1000.0))
         base_risk_percent = float(getattr(Config, "RISK_PERCENT", 1.0))
         round_trip_cost_rate = float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.0012))
-        minimum_rr = float(getattr(Config, "MINIMUM_RR", 2.0))
+        minimum_rr = float(getattr(Config, "MINIMUM_RR", 3.0))
 
         tp1 = None
         tp2 = None
@@ -171,7 +171,11 @@ class RiskEngine:
 
         target_capital_at_risk = account_balance * (effective_risk_percent / 100)
         execution_cost_per_unit = abs(entry) * round_trip_cost_rate
-        effective_risk_per_unit = max(risk + spread_buffer + slippage_buffer + execution_cost_per_unit, minimum_tick_distance)
+        # Stop AUTO_EXPAND ile genişletildiyse spread/slippage bufferları zaten
+        # minimum_stop_distance içine gömülüdür; effective risk'e ikinci kez
+        # eklemek pozisyon boyutunu yanlış küçültür.
+        buffer_drag = 0.0 if stop_adjusted else (spread_buffer + slippage_buffer)
+        effective_risk_per_unit = max(risk + buffer_drag + execution_cost_per_unit, minimum_tick_distance)
         position_size_raw = target_capital_at_risk / effective_risk_per_unit
 
         raw_sizing_factor = vp_factor * institutional_factor

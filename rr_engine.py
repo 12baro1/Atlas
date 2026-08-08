@@ -16,6 +16,16 @@ class RREngine:
         if entry is None or stop_loss is None or tp is None:
             return None
 
+        direction = self._resolve_direction(entry, stop_loss)
+        if direction is None:
+            return None
+
+        # TP girişin ters tarafında ise geçersiz bir hedeftir; asla RR üretme.
+        if direction == "LONG" and tp <= entry:
+            return None
+        if direction == "SHORT" and tp >= entry:
+            return None
+
         risk = abs(entry - stop_loss)
         if risk <= 0:
             return None

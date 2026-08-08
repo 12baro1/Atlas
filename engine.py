@@ -163,10 +163,31 @@ class AtlasEngine:
                 return cached
             data = self._trim_incremental_data(symbol, data)
             candles = data["15m"]
+
         h1 = data.get("1h") or data.get("1H")
         weekly = data["1w"]
         daily = data["1d"]
         h4 = data["4h"]
+
+        # LOOK-AHEAD GUARD (canli + backtest ortak kural):
+        # Ust zaman dilimi mumlari yalnizca TAMAMEN KAPANDIKTAN sonra analize
+        # girer. Olusmakta olan HTF mumunun OHLC'si ileriye donuk bilgi saklar.
+        # Referans: son 15m mumunun time'ı — canlı ve backtest aynı `timing`
+        # kuralini kullanir, boylece gelecekteki HTF verisi gecmis karara sızmaz.
+        ref_ms = candles[-1].time if candles else None
+        if ref_ms is not None:
+            from timing import closed_htf_candles
+            h1 = closed_htf_candles(h1, ref_ms, "1h") if h1 else h1
+            weekly = closed_htf_candles(weekly, ref_ms, "1w")
+            daily = closed_htf_candles(daily, ref_ms, "1d")
+            h4 = closed_htf_candles(h4, ref_ms, "4h")
+            # _build_* fonksiyonlari data dict'inden HTF okuduğu için dict'i de
+            # kırpılmış sürümle güncelle: SMT/unicorn/CISD/VPoS aynı kurala ticks.
+            data = dict(data)
+            data["1h"] = h1
+            data["4h"] = h4
+            data["1d"] = daily
+            data["1w"] = weekly
 
         tf_analysis = {
             "entry": self._analyze_timeframe(candles),
@@ -821,6 +842,32 @@ class AtlasEngine:
             structure=entry_structure,
         )
         risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles)
+
+        # Profesyonel SMC kalitesi: SL otomatik olarak genişletildiyse (AUTO_EXPAND)
+        # ilk TP hesabı orijinal/dar SL'e göre yapılmıştı; yeni mesafe ile gerçek
+        # RR bozulur. TP'ler yeni SL'e göre yeniden kurulur ve risk yeniden hesaplanır,
+        # böylece SL ile TP arasındaki asimetri (çoğunlukla 1R vs 3R) korunur.
+        if isinstance(risk, dict) and risk.get("risk_setup_valid") is True and risk.get("stop_adjusted"):
+            expanded_stop = risk.get("stop_loss")
+            original_stop = entry.get("stop_loss")
+            if expanded_stop is not None and original_stop is not None and abs(expanded_stop - original_stop) > 1e-12:
+                dynamic_tp = self._calculate_dynamic_tp(
+                    entry=entry,
+                    liquidity=liquidity,
+                    fvg=fvg,
+                    orderblocks=orderblocks,
+                    candles=candles,
+                    structure=entry_structure,
+                    stop_price=expanded_stop,
+                )
+                risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles)
+                self.logger.info(
+                    "Dynamic TP rebuilt after stop expand | stop=%s tp1=%s tp2=%s tp3=%s",
+                    expanded_stop,
+                    dynamic_tp.get("tp1"),
+                    dynamic_tp.get("tp2"),
+                    dynamic_tp.get("tp3"),
+                )
         rr = self.rr.evaluate(risk) if risk is not None else None
 
         analysis_for_signal = {
@@ -1219,16 +1266,18 @@ class AtlasEngine:
             "recent_structure": structure[-3:] if structure else [],
         }
 
-    def _calculate_dynamic_tp(self, entry, liquidity, fvg, orderblocks, candles=None, structure=None):
+    def _calculate_dynamic_tp(self, entry, liquidity, fvg, orderblocks, candles=None, structure=None, stop_price=None):
         """Entry yoksa boş TP şablonu, varsa dinamik hedefler döndürür."""
         if entry.get("entry") is None:
             return {"tp1": None, "tp2": None, "tp3": None}
+
+        stop_value = entry.get("stop_loss") if stop_price is None else stop_price
 
         try:
             payload = self.dynamic_tp.calculate(
                 direction=entry["direction"],
                 entry=entry["entry"],
-                stop_loss=entry.get("stop_loss"),
+                stop_loss=stop_value,
                 liquidity=liquidity,
                 fvg=fvg,
                 orderblocks=orderblocks,
@@ -1236,8 +1285,9 @@ class AtlasEngine:
                 candles=candles,
             )
             self.logger.info(
-                "TP calculated | direction=%s tp1=%s tp2=%s tp3=%s reason=%s",
+                "TP calculated | direction=%s stop=%s tp1=%s tp2=%s tp3=%s reason=%s",
                 entry.get("direction"),
+                stop_value,
                 payload.get("tp1"),
                 payload.get("tp2"),
                 payload.get("tp3"),

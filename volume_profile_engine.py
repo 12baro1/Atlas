@@ -162,13 +162,8 @@ class VolumeProfileEngine:
             return "POC_NEAR"
 
         if current_price >= midpoint:
-            return "VALUE_HIGH"
-        if current_price <= midpoint:
-            return "VALUE_LOW"
-
-        if current_price >= poc:
-            return "ABOVE_POC"
-        return "BELOW_POC"
+            return "ABOVE_POC" if current_price >= poc else "VALUE_HIGH"
+        return "BELOW_POC" if current_price <= poc else "VALUE_LOW"
 
     def _confidence(self, histogram, poc_index, vah_index, val_index, current_price, vah, val):
         total = max(sum(histogram), 1e-9)

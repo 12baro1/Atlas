@@ -134,16 +134,33 @@ class FVGEngine:
                 continue
 
             # gap fill edilmiş mi ve ardından ters itilmiş mi?
-            filled = False
-            inverted = False
+            fill_index = None
 
             for j in range(i + 1, len(candles)):
                 c = candles[j]
                 if c.high >= zone_from and c.low <= zone_to:
-                    filled = True
-                    inverted = True
-                    insid = j
+                    fill_index = j
                     break
+
+            if fill_index is None:
+                continue
+
+            # İnversiyon = boşluk dolduktan SONRA fiyatın zıt yönde uzak kenarı
+            # kapatması. Yalnızca doldurulmuş gap'i "inverted" işaretlemek
+            # yanlıştır; trend yönünde devam eden bir dolduru inversiyon değildir.
+            inverted = False
+            if direction == "BULLISH":
+                # Boşluğun altına kapanış → aşağı itilme
+                for k in range(fill_index + 1, len(candles)):
+                    if candles[k].close < zone_from:
+                        inverted = True
+                        break
+            else:
+                # Boşluğun üstüne kapanış → yukarı itilme
+                for k in range(fill_index + 1, len(candles)):
+                    if candles[k].close > zone_to:
+                        inverted = True
+                        break
 
             if inverted:
                 inversions.append({
@@ -153,7 +170,7 @@ class FVGEngine:
                     "size": zone_to - zone_from,
                     "inverted": True,
                     "index": i,
-                    "fill_index": j,
+                    "fill_index": fill_index,
                 })
 
         return inversions

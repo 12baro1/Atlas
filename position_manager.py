@@ -17,14 +17,27 @@ class PositionManager:
         if trade is None:
             return
 
+        # trade_manager.build() iç içe (entry=dict, risk=dict) üretir;
+        # flat kayıtlar da olabilir. İkisini de tüket:
+        entry_record = trade.get("entry")
+        if isinstance(entry_record, dict):
+            entry_price = entry_record.get("entry")
+            stop_loss = entry_record.get("stop_loss")
+            risk_record = trade.get("risk") or {}
+            tp1, tp2, tp3 = risk_record.get("tp1"), risk_record.get("tp2"), risk_record.get("tp3")
+        else:
+            entry_price = entry_record
+            stop_loss = trade.get("stop_loss")
+            tp1, tp2, tp3 = trade.get("tp1"), trade.get("tp2"), trade.get("tp3")
+
         position = {
             "symbol": symbol,
-            "side": trade["side"],
-            "entry": trade["entry"],
-            "stop_loss": trade["stop_loss"],
-            "tp1": trade["tp1"],
-            "tp2": trade["tp2"],
-            "tp3": trade["tp3"],
+            "side": trade.get("side") or trade.get("direction"),
+            "entry": entry_price,
+            "stop_loss": stop_loss,
+            "tp1": tp1,
+            "tp2": tp2,
+            "tp3": tp3,
             "status": "OPEN",
             "remaining_percent": 100,
             "realized_percent": 0,
@@ -125,7 +138,7 @@ class PositionManager:
                     },
                     analysis=analysis,
                     symbol=symbol,
-                    metadata={"event": pos["status"], "price": price},
+                    metadata={"event": pos.get("event") or pos["status"], "price": price},
                 )
 
         return changed_positions

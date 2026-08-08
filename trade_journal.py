@@ -6,6 +6,7 @@ Atlas Trade Journal & Performance Analytics Engine
 from __future__ import annotations
 
 import copy
+import gzip
 import json
 import math
 import sqlite3
@@ -14,6 +15,11 @@ import time
 import uuid
 from collections import defaultdict
 from pathlib import Path
+
+
+def _gzip_payload(payload):
+    """Snapshot'ı gzip'li BLOB'a çevirir (arşivde yer kazandırır)."""
+    return gzip.compress(json.dumps(payload, default=str).encode("utf-8"))
 
 
 class TradeJournal:
@@ -25,6 +31,7 @@ class TradeJournal:
         self._trades = []
         self._engine_stats = defaultdict(lambda: {"wins": 0, "losses": 0, "total": 0})
         self._ensure_store()
+        self._enforce_retention()
 
     def record_analysis(self, analysis, symbol=None, timeframe="multi", timestamp=None, metadata=None):
         """İşlem açılışındaki tüm analiz çıktısını snapshot olarak kaydeder."""
@@ -48,6 +55,7 @@ class TradeJournal:
 
         self._snapshots.append(snapshot)
         self._persist_snapshot(snapshot)
+        self._enforce_retention()
         return snapshot
 
     def register_trade(self, trade, analysis=None, symbol=None, timestamp=None, metadata=None):
@@ -425,20 +433,117 @@ class TradeJournal:
             "latest_snapshot": copy.deepcopy(self._snapshots[-1]),
         }
 
+    def _connect(self):
+        """Kilitli veritabanına erişim için busy_timeout ile bağlantı açar."""
+        connection = sqlite3.connect(self.db_path, timeout=30.0)
+        connection.execute("PRAGMA busy_timeout = 30000")
+        return connection
+
     def _ensure_store(self):
         if self.db_path:
             path = Path(self.db_path)
             path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as connection:
+            with self._connect() as connection:
                 self._create_tables(connection)
             self._load_from_db()
+
+    def _retention_settings(self):
+        try:
+            from config import Config
+        except Exception:
+            Config = None
+        retention_days = int(getattr(Config, "JOURNAL_RETENTION_DAYS", 30) if Config else 30)
+        max_snapshots = int(getattr(Config, "JOURNAL_RETENTION_MAX_SNAPSHOTS", 30000) if Config else 30000)
+        return retention_days, max_snapshots
+
+    def _enforce_retention(self):
+        """Büyüme kontrolü: eski snapshot'lar kalıcı analiz tablosundan arşive taşınır.
+
+        - Eşik: JOURNAL_RETENTION_DAYS (gün) ve JOURNAL_RETENTION_MAX_SNAPSHOTS.
+        - Arşivleme geri alınamaz silme DEĞİL: satırlar analysis_snapshots_archive
+          tablosuna (gzip'lenmiş payload ile) taşınır ve bellekteki _snapshots /
+          ana tablodan ayıklanır. Böylece atlas_journal.db büyümesi sınırlanır,
+          geçmiş veri kaybolmaz.
+        """
+        if not self.db_path or not Path(self.db_path).exists():
+            return
+        retention_days, max_snapshots = self._retention_settings()
+        if retention_days <= 0 and max_snapshots <= 0:
+            return
+
+        cutoff_ms = int(time.time() * 1000) - int(retention_days) * 86400 * 1000 if retention_days > 0 else 0
+        self._snapshots.sort(key=lambda s: s.get("timestamp", 0))
+        stale = [
+            s for s in self._snapshots
+            if (retention_days > 0 and s.get("timestamp", 0) < cutoff_ms)
+            or (max_snapshots > 0 and len(self._snapshots) - self._snapshots.index(s) - 1 >= max_snapshots)
+        ]
+
+        if not stale:
+            return
+        stale_ids = {s.get("id") for s in stale}
+        archived = 0
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS analysis_snapshots_archive (
+                    id TEXT PRIMARY KEY,
+                    timestamp INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    payload BLOB NOT NULL
+                )
+                """
+            )
+            for s in stale:
+                try:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO analysis_snapshots_archive (id, timestamp, symbol, timeframe, payload) VALUES (?, ?, ?, ?, ?)",
+                        (
+                            s.get("id"),
+                            s.get("timestamp", 0),
+                            s.get("symbol", "UNKNOWN"),
+                            s.get("timeframe", "multi"),
+                            _gzip_payload(s),
+                        ),
+                    )
+                    connection.execute("DELETE FROM analysis_snapshots WHERE id = ?", (s.get("id"),))
+                    archived += 1
+                except Exception:
+                    continue
+            connection.commit()
+        self._snapshots = [s for s in self._snapshots if s.get("id") not in stale_ids]
+        if archived:
+            self._vacuum_if_large()
+
+    def _vacuum_if_large(self):
+        """Arşiv sonrası DB fiziksel olarak küçülür mü? (freepages isteğe bağlı)"""
+        try:
+            with self._connect() as connection:
+                connection.execute("PRAGMA auto_vacuum=INCREMENTAL")
+                connection.execute("PRAGMA incremental_vacuum")
+                connection.execute("PRAGMA optimize")
+                connection.commit()
+        except Exception:
+            pass
+
+    def archive_stats(self):
+        """Arşiv hakkında bilgi döner: gerçek silinmemiş, tabloya taşınmış satırlar."""
+        if not self.db_path or not Path(self.db_path).exists():
+            return {"archived_snapshots": 0, "active_snapshots": len(self._snapshots)}
+        try:
+            with self._connect() as connection:
+                count = connection.execute("SELECT COUNT(*) FROM analysis_snapshots_archive").fetchone()[0]
+            return {"archived_snapshots": count, "active_snapshots": len(self._snapshots)}
+        except Exception:
+            return {"archived_snapshots": 0, "active_snapshots": len(self._snapshots)}
 
     def _load_from_db(self):
         """Kalıcı SQLite'dan snapshot ve trade kayıtlarını belleğe geri yükler."""
         if not self.db_path or not Path(self.db_path).exists():
             return
         try:
-            with sqlite3.connect(self.db_path) as connection:
+            with self._connect() as connection:
                 rows = connection.execute("SELECT id, timestamp, symbol, timeframe, payload FROM analysis_snapshots ORDER BY timestamp").fetchall()
                 for _id, _ts, _sym, _tf, payload in rows:
                     try:
@@ -455,6 +560,13 @@ class TradeJournal:
             return
 
     def _create_tables(self, connection):
+        # Yeni DB'lerde auto_vacuum=INCREMENTAL: arşivleme sonrası DELETEdilen
+        # sayfalar `PRAGMA incremental_vacuum` ile fiziksel olarak geri kazanılır.
+        # (auto_vacuum=0 ise incremental_vacuum no-op kalır ve dosya küçülmez.)
+        try:
+            connection.execute("PRAGMA auto_vacuum=INCREMENTAL")
+        except Exception:
+            pass
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS analysis_snapshots (
@@ -484,7 +596,7 @@ class TradeJournal:
     def _persist_snapshot(self, snapshot):
         if not self.db_path:
             return
-        with sqlite3.connect(self.db_path) as connection:
+        with self._connect() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO analysis_snapshots (id, timestamp, symbol, timeframe, payload) VALUES (?, ?, ?, ?, ?)",
                 (snapshot["id"], snapshot["timestamp"], snapshot["symbol"], snapshot["timeframe"], json.dumps(snapshot, default=str)),
@@ -494,7 +606,7 @@ class TradeJournal:
     def _persist_trade(self, trade):
         if not self.db_path:
             return
-        with sqlite3.connect(self.db_path) as connection:
+        with self._connect() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO trades (id, symbol, side, status, opened_at, closed_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (trade["id"], trade["symbol"], trade["side"], trade["status"], trade["opened_at"], trade.get("closed_at"), json.dumps(trade, default=str)),
@@ -509,7 +621,9 @@ class TradeJournal:
         for snapshot in reversed(self._snapshots):
             if snapshot.get("symbol") == symbol:
                 return snapshot
-        return self._snapshots[-1]
+        # Başka bir sembolün snapshot'unu bu trade'e iliştirme; yanlış
+        # session/killzone/killzone/market_phase atıflarını önle.
+        return None
 
     def _find_trade(self, trade_id):
         for trade in self._trades:
@@ -521,8 +635,9 @@ class TradeJournal:
         side = trade.get("side", "NONE")
         entry = trade.get("entry")
         stop_loss = trade.get("stop_loss")
-        if entry is None or stop_loss is None:
-            return "WIN"
+        if entry is None or stop_loss is None or exit_price is None:
+            # Yetersiz/geçersiz veriden kazanç uydurma; ölçümlere dahil etme.
+            return "UNKNOWN"
         if side == "LONG":
             return "WIN" if exit_price >= entry else "LOSS"
         if side == "SHORT":

@@ -252,6 +252,13 @@ class Config:
     # Canlı sinyal sonuç takibi (trade journal)
     SIGNAL_TRACKING_ENABLED = os.getenv("ATLAS_SIGNAL_TRACKING_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
     TRADE_JOURNAL_DB_FILE = os.getenv("ATLAS_TRADE_JOURNAL_DB_FILE", "atlas_journal.db")
+    # DB büyüme kontrolü: eski snapshot'lar aten_expiry süresi (gün) sonrası arşive taşınır.
+    # JOURNAL_RETENTION_DAYS=0 ise arşivleme devre dışı kalır (her şey kalıcı).
+    JOURNAL_RETENTION_DAYS = int(os.getenv("ATLAS_JOURNAL_RETENTION_DAYS", "30"))
+    # Bellekte kalan maksimum snapshot sayısı; üzerine çıkanlar en eskiden arşive taşınır.
+    # Varsayılan 5000: ~115KB/snapshot → aktif tablo ~575MB'de sınırlanır (önceki 30000
+    # aktif tabloyu ~3.4GB'a şişiriyordu). Geçmiş yine gzip'li arşivde kalır.
+    JOURNAL_RETENTION_MAX_SNAPSHOTS = int(os.getenv("ATLAS_JOURNAL_RETENTION_MAX_SNAPSHOTS", "5000"))
 
     @classmethod
     def refresh_from_env(cls):

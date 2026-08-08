@@ -1,5 +1,6 @@
 import sys
 import os
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -21,26 +22,29 @@ def _analysis(confidence, confluence, phase="Expansion"):
     }
 
 
+T0 = int(time.time() * 1000)
+
+
 def test_trade_journal_records_lifecycle_and_reports(tmp_path):
     journal = TradeJournal(db_path=tmp_path / "journal.sqlite")
 
-    first_snapshot = journal.record_analysis(_analysis(82, 88), symbol="BTC/USDT:USDT", timeframe="15m", timestamp=1_700_000_000_000)
+    first_snapshot = journal.record_analysis(_analysis(82, 88), symbol="BTC/USDT:USDT", timeframe="15m", timestamp=T0)
     first_trade = journal.register_trade(
         trade={"side": "LONG", "entry": 100.0, "stop_loss": 99.0, "tp1": 101.0, "tp2": 102.0, "tp3": 103.0, "rr": 2.0, "confidence": 82, "confluence_score": 88},
         analysis=_analysis(82, 88),
         symbol="BTC/USDT:USDT",
-        timestamp=1_700_000_000_000,
+        timestamp=T0,
     )
-    journal.close_trade(first_trade["id"], exit_price=102.0, result="WIN", timestamp=1_700_000_060_000)
+    journal.close_trade(first_trade["id"], exit_price=102.0, result="WIN", timestamp=T0 + 60_000)
 
-    second_snapshot = journal.record_analysis(_analysis(61, 55, phase="Ranging"), symbol="ETH/USDT:USDT", timeframe="1h", timestamp=1_700_000_120_000)
+    second_snapshot = journal.record_analysis(_analysis(61, 55, phase="Ranging"), symbol="ETH/USDT:USDT", timeframe="1h", timestamp=T0 + 120_000)
     second_trade = journal.register_trade(
         trade={"side": "SHORT", "entry": 100.0, "stop_loss": 101.0, "tp1": 99.0, "tp2": 98.0, "tp3": 97.0, "rr": 1.5, "confidence": 61, "confluence_score": 55},
         analysis=_analysis(61, 55, phase="Ranging"),
         symbol="ETH/USDT:USDT",
         timestamp=1_700_000_120_000,
     )
-    journal.close_trade(second_trade["id"], exit_price=101.5, result="LOSS", timestamp=1_700_000_180_000)
+    journal.close_trade(second_trade["id"], exit_price=101.5, result="LOSS", timestamp=T0 + 180_000)
 
     summary = journal.summary()
     analysis_summary = journal.analysis_summary()

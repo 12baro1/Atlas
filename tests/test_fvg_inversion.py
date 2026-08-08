@@ -31,6 +31,7 @@ def test_bullish_fvg_inversion_detected():
         c(1, 101, 101.5, 100.5, 101),
         c(2, 102, 104, 103, 103.5),    # right.low=103 -> 102<103 TRUE bullish gap [102,103]
         c(3, 103.5, 103.8, 101.5, 102.5),  # fiyat ine gap'i doldurur (hit 102-103)
+        c(4, 102.5, 102.6, 101.2, 101.3),  # boşluğun altına (102) kapanış → ters itilme
     ]
 
     inversions = engine.detect_inversion(candles)
@@ -39,6 +40,23 @@ def test_bullish_fvg_inversion_detected():
     inv = inversions[0]
     assert inv["inverted"] is True
     assert inv["type"] == "BULLISH"
+
+
+def test_no_inversion_on_filled_but_continue_same_direction():
+    engine = FVGEngine()
+    # Gap dolar ama fiyat zıt yönde reddedilmez (boşluğun altına kapanmaz) →
+    # bu bir inversiyon değil, doldurulmuş gaptır.
+    candles = [
+        c(0, 100, 102, 100, 101),
+        c(1, 101, 101.5, 100.5, 101),
+        c(2, 102, 104, 103, 103.5),   # bullish gap [102,103]
+        c(3, 103.5, 103.8, 101.5, 102.5),  # gap dolar, içinde kapanır
+        c(4, 102.5, 106, 102.2, 105.5),    # yukarı devam → inversiyon yok
+    ]
+
+    inversions = engine.detect_inversion(candles)
+
+    assert inversions == []
 
 
 def test_no_inversion_when_gap_not_filled():
