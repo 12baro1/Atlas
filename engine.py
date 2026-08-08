@@ -420,6 +420,47 @@ class AtlasEngine:
             return None
         return self.learning.record_closed_trade(trade)
 
+    def refresh_learning(self, symbol=None):
+        """Journal'daki kapanmış sonuçları meta öğrenme katmanına işler.
+
+        Kaynak önceliği (LEARNING_MANUAL_TRADE_PRIMARY): önce manuel işlemler,
+        örneklem yetmezse teorik sinyal sonuçları fallback olarak yüklenir.
+        """
+        if not bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
+            return None
+        if self.trade_journal is None:
+            return None
+        source = "manual"
+        use_manual_primary = bool(getattr(Config, "LEARNING_MANUAL_TRADE_PRIMARY", True))
+        manual_records = self.trade_journal.learning_records(source="manual", symbol=symbol)
+        signal_records = self.trade_journal.learning_records(source="signal", symbol=symbol)
+        min_fallback = int(getattr(Config, "LEARNING_MIN_SIGNAL_FALLBACK_SAMPLES", 50))
+
+        records = manual_records
+        if use_manual_primary:
+            # Manuel veri yetersizse teorik sinyal sonuçları yedek olarak kullanılır.
+            if not records and signal_records:
+                records = signal_records
+                source = "signal"
+        else:
+            # Manuel veri önceliği yoksa sinyal kayıtları doğrudan kullanılır.
+            if not records and signal_records:
+                records = signal_records
+                source = "signal"
+            elif len(records) < min_fallback and signal_records:
+                records = signal_records
+                source = "signal"
+
+        if not records:
+            return None
+        self.learning.stats["source"] = source
+        self.learning.stats["feed_meta"] = {
+            "manual": len(manual_records),
+            "signal": len(signal_records),
+            "selected": source,
+        }
+        return self.learning.rebuild_from_records(records)
+
     def _register_tracked_signal(self, symbol, result_payload):
         """EXECUTE sinyalini canlı sonuç takibi için trade journal'a yazar.
 
@@ -450,10 +491,44 @@ class AtlasEngine:
             "market_phase": (result_payload.get("analysis") or {}).get("market_phase", {}).get("phase"),
             "rr": result_payload.get("rr", {}).get("rr") if isinstance(result_payload.get("rr"), dict) else result_payload.get("rr"),
         }
-        return self.trade_journal.register_trade(
+        journal_trade = self.trade_journal.register_trade(
             trade, analysis=result_payload, symbol=symbol,
             metadata={"origin": "live_scanner", "decision_action": result_payload.get("decision", {}).get("action")},
         )
+
+        # Teorik sinyal sonucu (SIGNAL OUTCOME) kaydı: TP/SL çözümlenmesi için.
+        # Aynı sembol+yönde açık bir kayıt varsa tekrar açılmaz.
+        opened_at = result_payload.get("decision", {}).get("executed_at") or int(time.time() * 1000)
+        existing = [
+            o for o in self.trade_journal.open_signal_outcomes(symbol=symbol)
+            if o.get("direction") == side
+        ]
+        if not existing:
+            try:
+                self.trade_journal.register_signal_outcome(
+                    symbol=symbol,
+                    direction=side,
+                    timeframe="15m",
+                    entry=entry,
+                    stop_loss=stop_loss,
+                    tp1=risk.get("tp1") or (result_payload.get("dynamic_tp") or {}).get("tp1"),
+                    tp2=risk.get("tp2") or (result_payload.get("dynamic_tp") or {}).get("tp2"),
+                    tp3=risk.get("tp3") or (result_payload.get("dynamic_tp") or {}).get("tp3"),
+                    rr=trade["rr"],
+                    confidence=trade["confidence"],
+                    grade=(result_payload.get("analysis") or {}).get("grade"),
+                    market_phase=trade["market_phase"],
+                    setup_fingerprint=(result_payload.get("analysis") or {}).get("setup", {}).get("fingerprint"),
+                    opened_at=opened_at,
+                    payload={
+                        "origin": "live_scanner",
+                        "decision_action": result_payload.get("decision", {}).get("action"),
+                        "setup_type": (result_payload.get("analysis") or {}).get("setup", {}).get("type"),
+                    },
+                )
+            except Exception:
+                self.logger.exception("register_signal_outcome hatasi | symbol=%s signal=%s", symbol, side)
+        return journal_trade
 
     def _restore_incremental_if_unchanged(self, symbol, candles):
         """Return cached analysis when the latest 15m candle was already processed."""
@@ -794,7 +869,11 @@ class AtlasEngine:
             institutional=institutional,
         )
         if bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
-            setup_quality = self.learning.apply_to_setup_quality(setup_quality)
+            setup_quality = self.learning.apply_to_setup_quality(
+                setup_quality,
+                market_phase=(market_phase or {}).get("phase"),
+                timeframe="15m",
+            )
         setup_quality["external_risk_filters"] = {
             "news_filter": news_filter or {},
             "correlation": correlation or {},
@@ -997,6 +1076,11 @@ class AtlasEngine:
                 "best": None,
             },
             "setup_quality": execution_state.get("setup_quality", {}),
+            "setup": {
+                "fingerprint": (execution_state.get("setup_quality") or {}).get("setup_fingerprint"),
+                "features": (execution_state.get("setup_quality") or {}).get("features", []),
+                "type": (execution_state.get("setup_quality") or {}).get("setup") or None,
+            },
             "news_filter": news_state or {},
             "correlation": correlation_state or {},
             "cooldown": cooldown_state or {},

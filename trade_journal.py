@@ -29,6 +29,8 @@ class TradeJournal:
         self.db_path = str(db_path) if db_path else None
         self._snapshots = []
         self._trades = []
+        self._signal_outcomes = []
+        self._manual_trades = []
         self._engine_stats = defaultdict(lambda: {"wins": 0, "losses": 0, "total": 0})
         self._ensure_store()
         self._enforce_retention()
@@ -556,6 +558,18 @@ class TradeJournal:
                         self._trades.append(json.loads(payload))
                     except Exception:
                         continue
+                outcomes = connection.execute("SELECT signal_id, symbol, direction, timeframe, status, opened_at, resolved_at, payload FROM signal_outcomes ORDER BY opened_at").fetchall()
+                for _sid, _sym, _dir, _tf, _status, _opened_at, _resolved_at, payload in outcomes:
+                    try:
+                        self._signal_outcomes.append(json.loads(payload))
+                    except Exception:
+                        continue
+                manual = connection.execute("SELECT id, signal_id, symbol, side, status, opened_at, closed_at, payload FROM manual_trades ORDER BY opened_at").fetchall()
+                for _id, _sid, _sym, _side, _status, _opened_at, _closed_at, payload in manual:
+                    try:
+                        self._manual_trades.append(json.loads(payload))
+                    except Exception:
+                        continue
         except Exception:
             return
 
@@ -591,6 +605,34 @@ class TradeJournal:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS signal_outcomes (
+                signal_id TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                status TEXT NOT NULL,
+                opened_at INTEGER NOT NULL,
+                resolved_at INTEGER,
+                payload TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS manual_trades (
+                id TEXT PRIMARY KEY,
+                signal_id TEXT,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                status TEXT NOT NULL,
+                opened_at INTEGER NOT NULL,
+                closed_at INTEGER,
+                payload TEXT NOT NULL
+            )
+            """
+        )
         connection.commit()
 
     def _persist_snapshot(self, snapshot):
@@ -610,6 +652,44 @@ class TradeJournal:
             connection.execute(
                 "INSERT OR REPLACE INTO trades (id, symbol, side, status, opened_at, closed_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (trade["id"], trade["symbol"], trade["side"], trade["status"], trade["opened_at"], trade.get("closed_at"), json.dumps(trade, default=str)),
+            )
+            connection.commit()
+
+    def _persist_signal_outcome(self, outcome):
+        if not self.db_path:
+            return
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO signal_outcomes (signal_id, symbol, direction, timeframe, status, opened_at, resolved_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    outcome.get("signal_id"),
+                    outcome.get("symbol"),
+                    outcome.get("direction"),
+                    outcome.get("timeframe"),
+                    outcome.get("status"),
+                    outcome.get("opened_at"),
+                    outcome.get("resolved_at"),
+                    json.dumps(outcome, default=str),
+                ),
+            )
+            connection.commit()
+
+    def _persist_manual_trade(self, manual_trade):
+        if not self.db_path:
+            return
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO manual_trades (id, signal_id, symbol, side, status, opened_at, closed_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    manual_trade.get("id"),
+                    manual_trade.get("signal_id"),
+                    manual_trade.get("symbol"),
+                    manual_trade.get("side"),
+                    manual_trade.get("status"),
+                    manual_trade.get("opened_at"),
+                    manual_trade.get("closed_at"),
+                    json.dumps(manual_trade, default=str),
+                ),
             )
             connection.commit()
 
@@ -917,9 +997,656 @@ class TradeJournal:
             return killzone.get("name") or killzone.get("session") or "UNKNOWN"
         return str(killzone) if killzone else "UNKNOWN"
 
-    def _trade_value(self, trade):
-        if trade.get("pnl_rr") is not None:
-            return trade["pnl_rr"]
-        if trade.get("rr") is not None:
-            return trade["rr"] if trade.get("result") == "WIN" else -abs(trade["rr"])
-        return 0.0
+    def resolve_signal_outcome(self, outcome, candles, max_steps=None):
+        """Teorik sinyal sonucunu mumlar üzerinde ilerletir.
+
+        Partial TP mantığı desteklenir: birden fazla TP varsa her TP eşit
+        ağırlıkta kısmi kapanış oluşturur (ör. 3 TP → %33.3). TP1'den sonra
+        koruyucu stop breakeven'e, TP2'den sonra TP1 seviyesine taşınır.
+        TP sonrası SL gelen senaryo 'WIN' olarak değil gerçekleşen kısmi R
+        ile işaretlenir.
+
+        Dönüş: güncellenmiş outcome (kapanmışsa) veya None (henüz açık).
+        """
+        if outcome.get("status") != "PENDING":
+            return outcome
+
+        symbol = outcome.get("symbol")
+        entry = self._num(outcome.get("entry"))
+        stop_loss = self._num(outcome.get("stop_loss"))
+        if entry is None or stop_loss is None:
+            return None
+
+        candles = self._candles_for_symbol(candles, symbol)
+        matching = [c for c in candles if getattr(c, "time", 0) > outcome.get("opened_at", 0)]
+        matching = matching[: max_steps] if max_steps else matching
+        if not matching:
+            return None
+
+        side = outcome.get("direction", "LONG")
+        tps = [(i + 1, self._num(outcome.get(f"tp{i + 1}"))) for i in range(3)]
+        tps = [(i, tp) for i, tp in tps if tp is not None]
+        weights = self._norm_partial_weights(outcome)
+
+        risk = abs(entry - stop_loss)
+        if risk <= 0:
+            return None
+
+        reached = list(outcome.get("tps_hit") or [])
+        trailing_stop = self._num(outcome.get("trailing_stop")) or stop_loss
+        realized = 0.0
+        hit_sl = bool(outcome.get("hit_sl"))
+        mfe = float(outcome.get("max_favorable_excursion") or 0.0)
+        mae = float(outcome.get("max_adverse_excursion") or 0.0)
+        closed_all = len(reached) >= len(tps) and len(tps) > 0
+
+        for candle in matching:
+            low = self._num(getattr(candle, "low", None))
+            high = self._num(getattr(candle, "high", None))
+            close = self._num(getattr(candle, "close", None))
+            if low is None or high is None:
+                continue
+
+            # MFE / MAE takibi
+            if side == "LONG":
+                if high is not None:
+                    mfe = max(mfe, (high - entry))
+                if low is not None:
+                    mae = min(mae, (entry - low))
+            else:
+                if high is not None:
+                    mae = min(mae, (entry - high))
+                if low is not None:
+                    mfe = max(mfe, (entry - low))
+
+            if closed_all:
+                break
+
+            # SL önceliği: kalan pozisyon önce stop'tan çıkar.
+            sl_zone_hit = False
+            current_stop = trailing_stop
+            if side == "LONG":
+                if current_stop is not None and low <= current_stop:
+                    sl_zone_hit = True
+            elif current_stop is not None and high >= current_stop:
+                sl_zone_hit = True
+
+            if sl_zone_hit and not hit_sl:
+                hit_sl = True
+                closed_frac_of_current = sum(self._weight_for(weights, i) for i in reached)
+                remaining = max(0.0, 1.0 - closed_frac_of_current)
+                if side == "LONG":
+                    rr_stop = (current_stop - entry) / risk
+                else:
+                    rr_stop = (entry - current_stop) / risk
+                realized += remaining * rr_stop
+                closed_all = True
+                break
+
+            # TP'leri sırayla dene
+            for level_no, tp_price in tps:
+                if level_no in reached:
+                    continue
+                valid_zone = (high >= tp_price) if side == "LONG" else (low <= tp_price)
+                if not valid_zone:
+                    continue
+                weight = self._weight_for(weights, level_no)
+                if side == "LONG":
+                    rr_tp = (tp_price - entry) / risk
+                else:
+                    rr_tp = (entry - tp_price) / risk
+                realized += weight * rr_tp
+                reached.append(level_no)
+                # Koruma stopunu taşı
+                if len(reached) == 1 and 1 in reached:
+                    if side == "LONG":
+                        trailing_stop = max(current_stop if current_stop is not None else stop_loss, entry)
+                    else:
+                        trailing_stop = min(current_stop if current_stop is not None else stop_loss, entry)
+                elif 2 in reached and 3 not in reached:
+                    tp1 = self._num(outcome.get("tp1"))
+                    if tp1 is not None:
+                        trailing_stop = tp1
+                else:
+                    trailing_stop = current_stop
+                if len(reached) >= len(tps):
+                    closed_all = True
+                    break
+
+        # Güncelle
+        for level_no, _tp in tps:
+            outcome[f"hit_tp{level_no}"] = level_no in reached
+        outcome["hit_sl"] = hit_sl
+        outcome["tps_hit"] = reached
+        outcome["trailing_stop"] = trailing_stop
+        outcome["realized_r"] = round(realized, 4)
+        outcome["max_favorable_excursion"] = round(mfe, 8)
+        outcome["max_adverse_excursion"] = round(mae, 8)
+
+        if closed_all or hit_sl:
+            return self._finalize_signal_outcome(outcome)
+
+        # Expiry kontrolü
+        opened_at = int(outcome.get("opened_at") or 0)
+        expiry_hours = self._signal_outcome_expiry_hours()
+        last_ts = getattr(matching[-1], "time", 0) or int(time.time() * 1000)
+        if expiry_hours > 0 and last_ts > opened_at + int(expiry_hours * 3600 * 1000):
+            outcome["status"] = "EXPIRED"
+            outcome["resolved_at"] = last_ts
+            outcome["final_result"] = "EXPIRED"
+            self._persist_signal_outcome(outcome)
+            return outcome
+
+        self._persist_signal_outcome(outcome)
+        return None
+
+    def _finalize_signal_outcome(self, outcome):
+        """TP/sl ile kapanmış sinyali kalıcı duruma geçirir."""
+        realized = float(outcome.get("realized_r") or 0.0)
+        if outcome.get("hit_sl") and not outcome.get("tps_hit"):
+            outcome["status"] = "SL"
+            outcome["final_result"] = "LOSS"
+        elif outcome.get("hit_sl") and outcome.get("tps_hit"):
+            # TP sonrası SL: '%WIN' değil, gerçekleşen kısmi R işaretlenir.
+            outcome["status"] = "SL"
+            outcome["final_result"] = "PARTIAL"
+        elif len(outcome.get("tps_hit") or []) >= 3:
+            outcome["status"] = "TP3"
+            outcome["final_result"] = "WIN"
+        elif len(outcome.get("tps_hit") or []) == 2:
+            outcome["status"] = "TP2"
+            outcome["final_result"] = "WIN"
+        elif len(outcome.get("tps_hit") or []) == 1:
+            outcome["status"] = "TP1"
+            outcome["final_result"] = "WIN"
+        else:
+            outcome["status"] = "PENDING"
+            outcome["final_result"] = None
+            self._persist_signal_outcome(outcome)
+            return outcome
+        outcome["resolved_at"] = int(time.time() * 1000)
+        self._persist_signal_outcome(outcome)
+        return outcome
+
+    def expire_stale_signal_outcomes(self, now_ms=None, candles=None):
+        """Expiry süresi geçm PENDING sinyalleri EXPIRED yapar."""
+        now_ms = int(now_ms or time.time() * 1000)
+        expiry_hours = self._signal_outcome_expiry_hours()
+        expired = []
+        for outcome in self._signal_outcomes:
+            if outcome.get("status") != "PENDING":
+                continue
+            opened_at = int(outcome.get("opened_at") or 0)
+            age = now_ms - opened_at
+            if expiry_hours > 0 and age > expiry_hours * 3600 * 1000:
+                outcome["status"] = "EXPIRED"
+                outcome["resolved_at"] = now_ms
+                outcome["final_result"] = "EXPIRED"
+                self._persist_signal_outcome(outcome)
+                expired.append(outcome)
+        return expired
+
+    def resolve_signal_outcomes(self, candles_by_symbol):
+        """Tüm açık sinyal sonuçlarını ilerletir; kapananları döner."""
+        resolved = []
+        opened = list(self.open_signal_outcomes())
+        for outcome in opened:
+            symbol = outcome.get("symbol")
+            candles = (candles_by_symbol or {}).get(symbol) or []
+            updated = self.resolve_signal_outcome(outcome, candles)
+            if updated is not None and updated.get("status") != "PENDING":
+                resolved.append(updated)
+        return resolved
+
+    # ------------------------------------------------------------------
+    # Manuel işlemler (MANUAL TRADE)
+    # ------------------------------------------------------------------
+
+    def open_manual_trade(self, *, signal_id, actual_entry=None, actual_stop=None, actual_tp=None,
+                          position_size=None, opened_at=None, exit=None):
+        """Kullanıcının gerçek işlemini bir sinyale bağlar.
+
+        Sinyal bulunamazsa ya da aynı signal_id'ye ait açık manual trade
+        varsa hata döner (duplicate koruması).
+        """
+        outcome = self.find_signal_outcome(signal_id) if signal_id else None
+        if outcome is None:
+            return None, "signal_not_found"
+        for manual in self._manual_trades:
+            if manual.get("signal_id") == signal_id:
+                return manual, "already_open"
+
+        now = int(opened_at or time.time() * 1000)
+        manual = {
+            "id": self._uuid("manual"),
+            "signal_id": signal_id,
+            "symbol": outcome.get("symbol"),
+            "side": outcome.get("direction"),
+            "status": "OPEN",
+            "opened_at": now,
+            "closed_at": None,
+            "entry": self._norm_price(actual_entry) or self._num(outcome.get("entry")),
+            "stop_loss": self._norm_price(actual_stop) or self._num(outcome.get("stop_loss")),
+            "tp1": self._norm_price(actual_tp or outcome.get("tp1")),
+            "tp2": self._norm_price(outcome.get("tp2")),
+            "tp3": self._norm_price(outcome.get("tp3")),
+            "position_size": position_size,
+            "result": None,
+            "pnl_rr": None,
+            "pnl": None,
+            "manual_exit_reason": None,
+            "actual_exit": None,
+            "setup_fingerprint": outcome.get("setup_fingerprint"),
+            "regime": outcome.get("regime") or outcome.get("market_phase"),
+            "grade": outcome.get("grade"),
+            "confidence": outcome.get("confidence"),
+            "timeframe": outcome.get("timeframe", "15m"),
+        }
+        self._manual_trades.append(manual)
+        self._persist_manual_trade(manual)
+        return manual, "opened"
+
+    def close_manual_trade(self, manual_id=None, signal_id=None, *, actual_exit=None, result=None,
+                           pnl=None, closed_at=None, manual_exit_reason=None):
+        """Kullanıcının gerçek işlemini kapatır.
+
+        result: WIN | LOSS | BREAKEVEN | MANUAL_CLOSE | CANCELLED.
+        Result bilinmiyorsa actual_exit/entry/stop bazında otomatik infer edilir.
+        """
+        manual = None
+        for candidate in self._manual_trades:
+            if manual_id and candidate.get("id") == manual_id:
+                manual = candidate
+                break
+            if signal_id and candidate.get("signal_id") == signal_id:
+                manual = candidate
+                break
+        if manual is None:
+            return None, "manual_not_found"
+        if manual.get("status") == "CLOSED":
+            return manual, "already_closed"
+
+        closed_at = int(closed_at or time.time() * 1000)
+        entry = self._num(manual.get("entry"))
+        stop_loss = self._num(manual.get("stop_loss"))
+        exit_price = self._num(actual_exit)
+        if exit_price is None:
+            exit_price = self._num(manual.get("actual_exit"))
+
+        side = manual.get("side", "LONG")
+        if result is None and exit_price is not None:
+            if exit_price == entry:
+                result = "BREAKEVEN"
+            elif side == "LONG":
+                result = "WIN" if exit_price > entry else "LOSS"
+            else:
+                result = "WIN" if exit_price < entry else "LOSS"
+        result = (result or "MANUAL_CLOSE").upper()
+        allowed = ("WIN", "LOSS", "BREAKEVEN", "MANUAL_CLOSE", "CANCELLED")
+        if result not in allowed:
+            result = "MANUAL_CLOSE"
+
+        pnl_rr = 0.0
+        if entry is not None and stop_loss is not None and exit_price is not None:
+            risk = abs(entry - stop_loss)
+            if risk > 0:
+                if side == "LONG":
+                    pnl_rr = (exit_price - entry) / risk
+                else:
+                    pnl_rr = (entry - exit_price) / risk
+                if result == "LOSS":
+                    pnl_rr = -abs(pnl_rr)
+                elif result == "BREAKEVEN":
+                    pnl_rr = 0.0
+                pnl_rr = round(pnl_rr, 4)
+
+        manual["status"] = "CLOSED"
+        manual["closed_at"] = closed_at
+        manual["actual_exit"] = exit_price
+        manual["result"] = result
+        manual["pnl_rr"] = pnl_rr
+        manual["pnl"] = pnl
+        manual["manual_exit_reason"] = manual_exit_reason
+        self._persist_manual_trade(manual)
+        return manual, "closed"
+
+    def open_manual_trades(self, symbol=None):
+        out = []
+        for manual in self._manual_trades:
+            if manual.get("status") != "OPEN":
+                continue
+            if symbol and manual.get("symbol") != symbol:
+                continue
+            out.append(manual)
+        return out
+
+    def closed_manual_trades(self, symbol=None):
+        out = []
+        for manual in self._manual_trades:
+            if manual.get("status") != "CLOSED":
+                continue
+            if symbol and manual.get("symbol") != symbol:
+                continue
+            out.append(manual)
+        return out
+
+    # ------------------------------------------------------------------
+    # Ayrı performans istatistikleri
+    # ------------------------------------------------------------------
+
+    def signal_performance(self):
+        """SIGNAL PERFORMANCE: teorik sinyal sonuçları (tps / sl / expired)."""
+        resolved = [o for o in self._signal_outcomes if o.get("status") != "PENDING"]
+        if not resolved:
+            return self._empty_signal_performance()
+        terminal = [o for o in resolved if o.get("final_result") in ("WIN", "LOSS", "PARTIAL")]
+        wins = [o for o in terminal if o.get("final_result") == "WIN"]
+        losses = [o for o in terminal if o.get("final_result") == "LOSS"]
+        partials = [o for o in terminal if o.get("final_result") == "PARTIAL"]
+        r_values = [self._num(o.get("realized_r"), 0.0) for o in terminal]
+        winrate = (len(wins) / len(terminal) * 100) if terminal else 0.0
+        return {
+            "total": len(resolved),
+            "pending": len([o for o in resolved if o.get("status") == "PENDING"]),
+            "closed": len(terminal),
+            "wins": len(wins),
+            "losses": len(losses),
+            "partials": len(partials),
+            "expired": len([o for o in resolved if o.get("status") == "EXPIRED"]),
+            "cancelled": len([o for o in resolved if o.get("status") == "CANCELLED"]),
+            "winrate": round(winrate, 2),
+            "expectancy": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
+            "profit_factor": self._profit_factor(r_values),
+            "average_r": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
+            "long": len([o for o in terminal if o.get("direction") == "LONG"]),
+            "short": len([o for o in terminal if o.get("direction") == "SHORT"]),
+            "tp1": len([o for o in terminal if o.get("hit_tp1")]),
+            "tp2": len([o for o in terminal if o.get("hit_tp2")]),
+            "tp3": len([o for o in terminal if o.get("hit_tp3")]),
+            "sl": len([o for o in terminal if o.get("hit_sl")]),
+        }
+
+    def manual_trade_performance(self):
+        """MANUAL TRADE PERFORMANCE (kullanıcının gerçek işlemleri)."""
+        closed = self.closed_manual_trades()
+        if not closed:
+            return self._empty_manual_performance()
+        wins = [m for m in closed if m.get("result") == "WIN"]
+        losses = [m for m in closed if m.get("result") == "LOSS"]
+        breakeven = [m for m in closed if m.get("result") == "BREAKEVEN"]
+        r_values = [self._num(m.get("pnl_rr"), 0.0) for m in closed]
+        return {
+            "total": len(closed),
+            "wins": len(wins),
+            "losses": len(losses),
+            "breakeven": len(breakeven),
+            "cancelled": len([m for m in closed if m.get("result") == "CANCELLED"]),
+            "open": len(self.open_manual_trades()),
+            "winrate": round(len(wins) / len(closed) * 100, 2) if closed else 0.0,
+            "expectancy": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
+            "profit_factor": self._profit_factor(r_values),
+            "average_r": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
+        }
+
+    # ------------------------------------------------------------------
+    # Learning verisi (future-data guard: yalnızca kapanan + as-of)
+    # ------------------------------------------------------------------
+
+    def learning_records(self, *, as_of_ms=None, source="manual", symbol=None):
+        """LearningEngine için geçmiş kayıtları döndürür.
+
+        as_of_ms verilirse yalnızca bu andan ÖNCE kapanan kayıtlar gelir
+        (future-data / look-ahead koruması). source="manual" manuel işlemleri,
+        "signal" teorik sinyal sonuçlarını döndürür.
+        """
+        as_of_ms = int(as_of_ms) if as_of_ms else None
+        if source == "manual":
+            records = []
+            for manual in self._manual_trades:
+                if manual.get("status") != "CLOSED":
+                    continue
+                closed_at = int(manual.get("closed_at") or 0)
+                if as_of_ms is not None and closed_at > as_of_ms:
+                    continue
+                if symbol and manual.get("symbol") != symbol:
+                    continue
+                records.append(self._manual_to_learning_record(manual))
+            return records
+        records = []
+        for outcome in self._signal_outcomes:
+            if outcome.get("status") == "PENDING":
+                continue
+            closed_at = int(outcome.get("resolved_at") or outcome.get("opened_at") or 0)
+            if as_of_ms is not None and closed_at > as_of_ms:
+                continue
+            if symbol and outcome.get("symbol") != symbol:
+                continue
+            records.append(self._signal_to_learning_record(outcome))
+        return records
+
+    def _manual_to_learning_record(self, manual):
+        wins = manual.get("result") in ("WIN",)
+        r_value = self._num(manual.get("pnl_rr"), 0.0)
+        return {
+            "source": "manual",
+            "direction": manual.get("side", "NONE"),
+            "symbol": manual.get("symbol"),
+            "closed_at": int(manual.get("closed_at") or manual.get("opened_at") or 0),
+            "opened_at": int(manual.get("opened_at") or 0),
+            "result": manual.get("result"),
+            "win": wins,
+            "r": r_value,
+            "timeframe": self._manual_timeframe(manual),
+            "setup_fingerprint": manual.get("setup_fingerprint"),
+            "regime": manual.get("regime"),
+            "grade": manual.get("grade"),
+            "confidence": manual.get("confidence"),
+        }
+
+    def _signal_to_learning_record(self, outcome):
+        win = outcome.get("final_result") == "WIN"
+        r_value = self._num(outcome.get("realized_r"), 0.0)
+        return {
+            "source": "signal",
+            "direction": outcome.get("direction"),
+            "symbol": outcome.get("symbol"),
+            "closed_at": int(outcome.get("resolved_at") or outcome.get("opened_at") or 0),
+            "opened_at": int(outcome.get("opened_at") or 0),
+            "result": outcome.get("final_result"),
+            "win": win,
+            "r": r_value,
+            "timeframe": outcome.get("timeframe"),
+            "setup_fingerprint": outcome.get("setup_fingerprint"),
+            "regime": outcome.get("regime") or outcome.get("market_phase"),
+            "grade": outcome.get("grade"),
+            "confidence": outcome.get("confidence"),
+        }
+
+    def _manual_timeframe(self, manual):
+        payload = (manual.get("payload") or {}) if isinstance(manual.get("payload"), dict) else {}
+        return payload.get("timeframe") or "15m"
+
+    def _candles_for_symbol(self, candles, symbol):
+        if isinstance(candles, dict):
+            return candles.get(symbol) or candles.get("15m") or []
+        if not candles:
+            return []
+        return candles
+
+    def _norm_partial_weights(self, outcome):
+        weights = outcome.get("partial_weights")
+        if isinstance(weights, (list, tuple)) and weights:
+            return [float(w) for w in weights]
+        return [1.0, 1.0, 1.0]
+
+    def _weight_for(self, weights, level_no):
+        index = level_no - 1
+        if 0 <= index < len(weights):
+            return float(weights[index])
+        return 1.0
+
+    def _signal_partial_weights(self):
+        try:
+            from config import Config
+            raw = str(getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0"))
+            parts = [float(item.strip()) for item in raw.split(",") if item.strip()]
+            return parts or [1.0, 1.0, 1.0]
+        except Exception:
+            return [1.0, 1.0, 1.0]
+
+    def _signal_outcome_expiry_hours(self):
+        try:
+            from config import Config
+            return float(getattr(Config, "SIGNAL_OUTCOME_EXPIRY_HOURS", 72))
+        except Exception:
+            return 72.0
+
+    def _profit_factor(self, r_values):
+        wins_total = sum(v for v in r_values if v > 0)
+        losses_total = abs(sum(v for v in r_values if v < 0))
+        if losses_total > 0:
+            return round(wins_total / losses_total, 4)
+        return round(wins_total, 4) if wins_total else 0.0
+
+    def _norm_price(self, value):
+        price = self._num(value)
+        return price
+
+    def _num(self, value, default=None):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _empty_signal_performance(self):
+        return {
+            "total": 0, "pending": 0, "closed": 0, "wins": 0, "losses": 0, "partials": 0,
+            "expired": 0, "cancelled": 0, "winrate": 0, "expectancy": 0, "profit_factor": 0,
+            "average_r": 0, "long": 0, "short": 0, "tp1": 0, "tp2": 0, "tp3": 0, "sl": 0,
+        }
+
+    def _empty_manual_performance(self):
+        return {
+            "total": 0, "wins": 0, "losses": 0, "breakeven": 0, "cancelled": 0, "open": 0,
+            "winrate": 0, "expectancy": 0, "profit_factor": 0, "average_r": 0,
+        }
+
+    # ------------------------------------------------------------------
+    # Signal ID + teorik sinyal sonucu (SIGNAL OUTCOME)
+    # ------------------------------------------------------------------
+
+    def generate_signal_id(self, opened_at=None):
+        """ATL-YYYYMMDD-SSSSSSS formatında benzersiz sinyal ID üretir.
+
+        Aynı günde üretilen ID'lerin collision yapmaması için mevcut
+        signal_outcomes + manual_trades içindeki kullanılmış ID'lerden
+        devam sırası seçer (yalnızca bellekte tutulan kayıtlar üzerinden).
+        """
+        import datetime
+        opened_at = int(opened_at or time.time() * 1000)
+        day = datetime.datetime.fromtimestamp(opened_at / 1000, tz=datetime.timezone.utc).strftime("%Y%m%d")
+        prefix = f"ATL-{day}-"
+        used = set()
+        for outcome in self._signal_outcomes:
+            prefix_str = str(outcome.get("signal_id") or "")
+            if prefix_str.startswith(prefix):
+                try:
+                    used.add(int(prefix_str[len(prefix):]))
+                except ValueError:
+                    continue
+        for manual in self._manual_trades:
+            sid = str(manual.get("signal_id") or "")
+            if sid.startswith(prefix):
+                try:
+                    used.add(int(sid[len(prefix):]))
+                except ValueError:
+                    continue
+        counter = max(used, default=0) + 1
+        return f"{prefix}{counter:06d}"
+
+    def register_signal_outcome(self, *, symbol, direction, timeframe="15m", entry, stop_loss, tp1=None, tp2=None, tp3=None,
+                                rr=None, confidence=None, grade=None, market_phase=None, setup_fingerprint=None,
+                                opened_at=None, signal_id=None, payload=None):
+        """Yeni sinyal için teorik sonuç takip kaydı oluşturur (PENDING).
+
+        Aynı signal_id zaten kayıtlıysa tekrar eklemez (duplicate koruması).
+        """
+        expectations = {
+            "LONG": (lambda: entry > stop_loss),
+            "SHORT": (lambda: entry < stop_loss),
+        }
+        direction_norm = str(direction or "").upper()
+        if direction_norm not in ("LONG", "SHORT"):
+            raise ValueError("register_signal_outcome: direction LONG/SHORT olmalı")
+        if entry is None or stop_loss is None:
+            raise ValueError("register_signal_outcome: entry ve stop_loss zorunlu")
+
+        opened_at = int(opened_at or time.time() * 1000)
+        signal_id = signal_id or self.generate_signal_id(opened_at=opened_at)
+        if self.find_signal_outcome(signal_id) is not None:
+            return self.find_signal_outcome(signal_id)
+
+        tp1 = self._norm_price(tp1)
+        tp2 = self._norm_price(tp2)
+        tp3 = self._norm_price(tp3)
+
+        outcome = {
+            "signal_id": signal_id,
+            "symbol": symbol,
+            "direction": direction_norm,
+            "timeframe": timeframe or "15m",
+            "status": "PENDING",
+            "opened_at": opened_at,
+            "resolved_at": None,
+            "entry": self._norm_price(entry),
+            "stop_loss": self._norm_price(stop_loss),
+            "tp1": tp1,
+            "tp2": tp2,
+            "tp3": tp3,
+            "rr": rr,
+            "confidence": confidence,
+            "grade": grade,
+            "market_phase": market_phase,
+            "setup_fingerprint": setup_fingerprint,
+            "expiry_hours": self._signal_outcome_expiry_hours(),
+            "partial_weights": self._signal_partial_weights(),
+            "realized_r": 0.0,
+            "max_favorable_excursion": 0.0,
+            "max_adverse_excursion": 0.0,
+            "hit_tp1": False,
+            "hit_tp2": False,
+            "hit_tp3": False,
+            "hit_sl": False,
+            "final_result": None,
+            "tps_hit": [],
+            "payload": copy.deepcopy(payload or {}),
+        }
+        self._signal_outcomes.append(outcome)
+        self._persist_signal_outcome(outcome)
+        return outcome
+
+    def find_signal_outcome(self, signal_id):
+        for outcome in self._signal_outcomes:
+            if outcome.get("signal_id") == signal_id:
+                return outcome
+        return None
+
+    def open_signal_outcomes(self, symbol=None):
+        out = []
+        for outcome in self._signal_outcomes:
+            if outcome.get("status") != "PENDING":
+                continue
+            if symbol and outcome.get("symbol") != symbol:
+                continue
+            out.append(outcome)
+        return out
+
+    def resolved_signal_outcomes(self, symbol=None):
+        out = []
+        for outcome in self._signal_outcomes:
+            if outcome.get("status") == "PENDING":
+                continue
+            if symbol and outcome.get("symbol") != symbol:
+                continue
+            out.append(outcome)
+        return out

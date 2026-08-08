@@ -56,6 +56,9 @@ class TelegramAuthService:
         if clean_text.startswith("/admin"):
             return self._handle_admin_command(chat_id, clean_text)
 
+        if clean_text.startswith("/trade"):
+            return None
+
         if clean_text.startswith("/"):
             return "✅ Yetkilendirildiniz. Atlas komutlarını kullanabilirsiniz."
 

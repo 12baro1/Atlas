@@ -7,6 +7,7 @@ Produces practical module-level scores for professional SMC execution.
 
 from core.analysis_utils import clamp
 from utils.atr import atr as calculate_atr
+from canonical_features import build_fingerprint, normalize_features
 
 
 class SetupQualityEngine:
@@ -47,12 +48,21 @@ class SetupQualityEngine:
         if blockers:
             total = min(total, 54)
         reasons = [f"{name}:{item['score']}" for name, item in scores.items()]
+
+        # Kanonik setup fingerprint: aktif modül adlarından üretilir ve
+        # LearningEngine bucket anahtarlarıyla birebir eşleşecek şekilde.
+        active_features = normalize_features(
+            name for name, item in scores.items()
+            if item.get("score", 0) >= 50
+        )
         return {
             "active": True,
             "direction": direction,
             "score": int(clamp(total)),
             "confidence": int(clamp(total)),
             "module_scores": scores,
+            "features": active_features,
+            "setup_fingerprint": build_fingerprint(active_features),
             "blockers": blockers,
             "reasons": reasons,
             "trade_allowed": direction in ["LONG", "SHORT"] and total >= 58 and not blockers,

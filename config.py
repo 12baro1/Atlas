@@ -231,6 +231,44 @@ class Config:
     LEARNING_ENGINE_ENABLED = os.getenv("ATLAS_LEARNING_ENGINE_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
     LEARNING_ENGINE_FILE = os.getenv("ATLAS_LEARNING_ENGINE_FILE", "atlas_learning.json")
 
+    # --- LearningEngine (meta analiz katmanı) ---
+    # Kaynak önceliği: MANUAL_TRADE_PRIMARY=1 ise önce manuel işlemler; az
+    # örneklemde SIGNAL_OUTCOMES yedek (fallback) olarak kullanılır.
+    LEARNING_MANUAL_TRADE_PRIMARY = os.getenv("ATLAS_LEARNING_MANUAL_TRADE_PRIMARY", "1").strip().lower() in {"1", "true", "yes"}
+    # Bir bucket'ın "güvenilir" sayılması için gereken asgari örneklem (toplam win+loss).
+    LEARNING_MIN_SAMPLES = int(os.getenv("ATLAS_LEARNING_MIN_SAMPLES", "20"))
+    # Manuel veri az ise signal outcome'lara düşen asgari örneklem.
+    LEARNING_MIN_SIGNAL_FALLBACK_SAMPLES = int(os.getenv("ATLAS_LEARNING_MIN_SIGNAL_FALLBACK_SAMPLES", "50"))
+    # Time decay: buçuk ömür (gün). Eski sonuçlar daha düşük ağırlık alır.
+    LEARNING_HALF_LIFE_DAYS = float(os.getenv("ATLAS_LEARNING_HALF_LIFE_DAYS", "45"))
+    # Bayesian prior esnekliği; küçük örneklemde aşırı güveni önler.
+    LEARNING_BETA_PRIOR_ALPHA = float(os.getenv("ATLAS_LEARNING_BETA_PRIOR_ALPHA", "2.0"))
+    LEARNING_BETA_PRIOR_BETA = float(os.getenv("ATLAS_LEARNING_BETA_PRIOR_BETA", "2.0"))
+    # Güven aralığı (Wilson alt sınırı) güvenilirlik eşiği.
+    LEARNING_MIN_RELIABILITY = float(os.getenv("ATLAS_LEARNING_MIN_RELIABILITY", "0.55"))
+    # Meta katmanı, SMC skorunu ne kadar aşağı/yukarı ayarlayabilir (puan).
+    LEARNING_EDGE_UPLIFT_MAX = float(os.getenv("ATLAS_LEARNING_EDGE_UPLIFT_MAX", "6"))
+    LEARNING_EDGE_PENALTY_MAX = float(os.getenv("ATLAS_LEARNING_EDGE_PENALTY_MAX", "10"))
+    # Ortalama R -> skor puanı çarpanı (1R = LEARNING_EDGE_SCALE puan).
+    LEARNING_EDGE_SCALE = float(os.getenv("ATLAS_LEARNING_EDGE_SCALE", "3.0"))
+    # Negatif edge'de WAIT önerisi için gereken mutlak güçlü negatif eşik (hist_edge).
+    LEARNING_STRONG_NEGATIVE_EDGE = float(os.getenv("ATLAS_LEARNING_STRONG_NEGATIVE_EDGE", "-0.20"))
+    LEARNING_USE_MARKET_REGIME = os.getenv("ATLAS_LEARNING_USE_MARKET_REGIME", "1").strip().lower() in {"1", "true", "yes"}
+    LEARNING_USE_TIMEFRAME = os.getenv("ATLAS_LEARNING_USE_TIMEFRAME", "1").strip().lower() in {"1", "true", "yes"}
+    LEARNING_USE_DIRECTION = os.getenv("ATLAS_LEARNING_USE_DIRECTION", "1").strip().lower() in {"1", "true", "yes"}
+    # En geniş fallback (tüm direction/regime/tf). Açılırsa izolasyon zayıflar,
+    # bu yüzden varsayılan KAPALI (default kapalı = izolasyon öncelikli).
+    LEARNING_GLOBAL_FALLBACK = os.getenv("ATLAS_LEARNING_GLOBAL_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
+    LEARNING_EDGE_CONFIDENCE_FLOOR = float(os.getenv("ATLAS_LEARNING_EDGE_CONFIDENCE_FLOOR", "65"))
+
+    # --- Signal tracking (teorik sinyal sonucu) ---
+    SIGNAL_OUTCOME_EXPIRY_HOURS = float(os.getenv("ATLAS_SIGNAL_OUTCOME_EXPIRY_HOURS", "72"))
+    SIGNAL_OUTCOME_PARTIAL_WEIGHTS = os.getenv("ATLAS_SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+
+    # --- Manuel işlemler (Telegram /trade) ---
+    MANUAL_TRACKING_ENABLED = os.getenv("ATLAS_MANUAL_TRACKING_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+    MANUAL_TRADE_COMMAND_ENABLED = os.getenv("ATLAS_MANUAL_TRADE_COMMAND_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+
     # Yetkilendirme
     BOT_PASSWORD = os.getenv("ATLAS_BOT_PASSWORD", "")
     ADMIN_CHAT_ID = int(os.getenv("ATLAS_ADMIN_CHAT_ID", "0"))
@@ -302,6 +340,27 @@ class Config:
         cls.BOT_PASSWORD = os.getenv("ATLAS_BOT_PASSWORD", "")
         cls.ADMIN_CHAT_ID = int(os.getenv("ATLAS_ADMIN_CHAT_ID", "0"))
         cls.TELEGRAM_ADMIN_IDS = [cls.ADMIN_CHAT_ID]
+
+        cls.LEARNING_MANUAL_TRADE_PRIMARY = _env_or_rc("ATLAS_LEARNING_MANUAL_TRADE_PRIMARY", "1").strip().lower() in {"1", "true", "yes"}
+        cls.LEARNING_MIN_SAMPLES = int(_env_or_rc("ATLAS_LEARNING_MIN_SAMPLES", "20"))
+        cls.LEARNING_MIN_SIGNAL_FALLBACK_SAMPLES = int(_env_or_rc("ATLAS_LEARNING_MIN_SIGNAL_FALLBACK_SAMPLES", "50"))
+        cls.LEARNING_HALF_LIFE_DAYS = float(_env_or_rc("ATLAS_LEARNING_HALF_LIFE_DAYS", "45"))
+        cls.LEARNING_BETA_PRIOR_ALPHA = float(_env_or_rc("ATLAS_LEARNING_BETA_PRIOR_ALPHA", "2.0"))
+        cls.LEARNING_BETA_PRIOR_BETA = float(_env_or_rc("ATLAS_LEARNING_BETA_PRIOR_BETA", "2.0"))
+        cls.LEARNING_MIN_RELIABILITY = float(_env_or_rc("ATLAS_LEARNING_MIN_RELIABILITY", "0.55"))
+        cls.LEARNING_EDGE_UPLIFT_MAX = float(_env_or_rc("ATLAS_LEARNING_EDGE_UPLIFT_MAX", "6"))
+        cls.LEARNING_EDGE_PENALTY_MAX = float(_env_or_rc("ATLAS_LEARNING_EDGE_PENALTY_MAX", "10"))
+        cls.LEARNING_EDGE_SCALE = float(_env_or_rc("ATLAS_LEARNING_EDGE_SCALE", "3.0"))
+        cls.LEARNING_STRONG_NEGATIVE_EDGE = float(_env_or_rc("ATLAS_LEARNING_STRONG_NEGATIVE_EDGE", "-0.20"))
+        cls.LEARNING_USE_MARKET_REGIME = _env_or_rc("ATLAS_LEARNING_USE_MARKET_REGIME", "1").strip().lower() in {"1", "true", "yes"}
+        cls.LEARNING_USE_TIMEFRAME = _env_or_rc("ATLAS_LEARNING_USE_TIMEFRAME", "1").strip().lower() in {"1", "true", "yes"}
+        cls.LEARNING_USE_DIRECTION = _env_or_rc("ATLAS_LEARNING_USE_DIRECTION", "1").strip().lower() in {"1", "true", "yes"}
+        cls.LEARNING_GLOBAL_FALLBACK = _env_or_rc("ATLAS_LEARNING_GLOBAL_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
+        cls.LEARNING_EDGE_CONFIDENCE_FLOOR = float(_env_or_rc("ATLAS_LEARNING_EDGE_CONFIDENCE_FLOOR", "65"))
+        cls.SIGNAL_OUTCOME_EXPIRY_HOURS = float(_env_or_rc("ATLAS_SIGNAL_OUTCOME_EXPIRY_HOURS", "72"))
+        cls.SIGNAL_OUTCOME_PARTIAL_WEIGHTS = _env_or_rc("ATLAS_SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+        cls.MANUAL_TRACKING_ENABLED = _env_or_rc("ATLAS_MANUAL_TRACKING_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+        cls.MANUAL_TRADE_COMMAND_ENABLED = _env_or_rc("ATLAS_MANUAL_TRADE_COMMAND_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
 
     @classmethod
     def validate(cls, logger=None, raise_on_error=False):

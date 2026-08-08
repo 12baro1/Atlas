@@ -68,7 +68,7 @@ if bool(getattr(Config, "TELEGRAM_POLLING_ENABLED", True)) or bool(getattr(Confi
     try:
         from telegram_auth import TelegramAuthService
         from telegram_auth_store import TelegramAuthStore
-        from telegram_service import TelegramService
+        from telegram_service import TelegramService, TelegramTradeCommandHandler
         from telegram_webhook import TelegramWebhookHandler
 
         _store = TelegramAuthStore(Config.TELEGRAM_AUTH_DB_FILE)
@@ -78,9 +78,11 @@ if bool(getattr(Config, "TELEGRAM_POLLING_ENABLED", True)) or bool(getattr(Confi
             password_hash=Config.BOT_PASSWORD_HASH,
             admin_ids=Config.TELEGRAM_ADMIN_IDS,
         )
+        _trade_handler = TelegramTradeCommandHandler(journal=engine.trade_journal)
         telegram_service = TelegramService(
             auth_service=_auth,
             webhook_handler=TelegramWebhookHandler(),
+            trade_command_handler=_trade_handler,
         )
         telegram_service.start(daemon=True)
         logger.info("Telegram servisi baslatildi (polling=%s webhook=%s).",
@@ -140,6 +142,18 @@ def scan_once(symbols, label):
                             closed.get("pnl_rr"), closed.get("close_reason"),
                         )
 
+                # Teorik sinyal sonuçları (TP/SL rozetleme + expiry)
+                resolved = engine.trade_journal.resolve_signal_outcomes(
+                    {symbol: candles_15m}
+                )
+                for outcome in resolved:
+                    logger.info(
+                        "Sinyal outcome | %s %s | status=%s result=%s realized_r=%s",
+                        outcome.get("symbol"), outcome.get("direction"),
+                        outcome.get("status"), outcome.get("final_result"),
+                        outcome.get("realized_r"),
+                    )
+
             logger.info(
                 "Manual Mode | symbol=%s verdict=%s signal=%s confidence=%s (Otomatik işlem yok)",
                 symbol,
@@ -163,15 +177,34 @@ def scan_once(symbols, label):
     return processed, success, skipped, failed
 
 
+def refresh_learning_meta():
+    """Meta öğrenme katmanını journal'daki kapanmış sonuçlarla tazeler."""
+    try:
+        if not bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
+            return
+        refresher = engine.refresh_learning()
+        if refresher is None:
+            return
+        logger.info(
+            "Learning meta | kaynak=%s bucket=%s",
+            getattr(engine.learning, "stats", {}).get("source"),
+            len(getattr(engine.learning, "stats", {}).get("setups", {})),
+        )
+    except Exception:
+        logger.exception("Learning meta tazelemesi basarisiz.")
+
+
 scan_interval = float(os.getenv("ATLAS_SCAN_INTERVAL_SECONDS", "0").strip() or "0")
 cycle = 1
 
 if scan_interval <= 0:
     scan_once(symbols, "tek")
+    refresh_learning_meta()
 else:
     while True:
         logger.info("Cevrim %s basliyor; %s sn sonra tekrar taranacak (Ctrl+C ara).", cycle, scan_interval)
         scan_once(symbols, "tek")
+        refresh_learning_meta()
         try:
             time.sleep(scan_interval)
         except KeyboardInterrupt:
