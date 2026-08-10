@@ -773,6 +773,7 @@ class AtlasTUIApp(App):
             f"Current Symbol: {current_symbol}",
             f"Status: {scanner.get('status', 'READY')}",
             f"AI: {self._ai_subtitle_label()}",
+            f"AI Detail: {self._ai_status_message(self._ai_state, include_detail=True)}",
             f"Scanned: {scanner.get('processed', 0)}",
             f"LONG: {directions.get('LONG', 0)}",
             f"SHORT: {directions.get('SHORT', 0)}",
@@ -1112,9 +1113,15 @@ class AtlasTUIApp(App):
     def _ai_subtitle_label(self):
         provider = str(self._ai_state.get("provider") or "").strip().lower()
         status = str(self._ai_state.get("status") or "UNKNOWN").strip().upper()
+        model = str(self._ai_state.get("model") or "").strip()
         if provider == "local":
-            return f"LOCAL/{status}"
-        if status == "REMOTE":
+            if status == "ONLINE":
+                label = model or "QWEN3-4B"
+                return f"{label}"
+            if status == "STARTING":
+                return "LOCAL/STARTING"
+            return "OFFLINE"
+        if provider == "openai_compat":
             return "REMOTE"
         if provider:
             return f"{provider.upper()}/{status}"

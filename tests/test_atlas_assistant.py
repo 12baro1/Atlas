@@ -3,7 +3,15 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
+
+from ai.atlas_chat_agent import AtlasChatAgent
 from atlas_assistant import AtlasAssistant
+
+
+@pytest.fixture(autouse=True)
+def disable_llm_client(monkeypatch):
+    monkeypatch.setattr(AtlasChatAgent, "_build_client_from_env", lambda self: None)
 
 
 class DummyRuntime:

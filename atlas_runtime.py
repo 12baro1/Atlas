@@ -60,12 +60,18 @@ class AtlasRuntime:
             repo_root=Path(__file__).resolve().parent,
             config=Config,
         )
+        _model_file = str(getattr(Config, "AI_LOCAL_MODEL_FILE", "") or "").strip()
+        _model_label = "QWEN3-4B"
+        if _model_file:
+            _model_name = _model_file.rsplit("/", 1)[-1].replace(".gguf", "")
+            _model_label = _model_name.split("-Q4")[0].split("-q4")[0].upper() or "QWEN3-4B"
         self._ai_state = {
-            "provider": str(getattr(Config, "AI_PROVIDER", "openai_compat") or "openai_compat"),
+            "provider": str(getattr(Config, "AI_PROVIDER", "local") or "local").strip().lower(),
             "status": "UNKNOWN",
             "detail": "",
             "base_url": self._llama_manager.base_url,
             "owner": "none",
+            "model": _model_label,
         }
 
         with self._journal_lock:

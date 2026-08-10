@@ -211,11 +211,13 @@ class Config:
     CONSOLE_SIGNAL_PRINT_ENABLED = os.getenv("ATLAS_CONSOLE_SIGNAL_PRINT_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
 
     # AI chat provider (OpenAI-compatible)
-    AI_PROVIDER = os.getenv("ATLAS_AI_PROVIDER", "openai_compat").strip().lower()
+    # Varsayilan LOCAL: yerel llama-server (Qwen3-4B) kullanilir; remote
+    # (openai_compat) yalnizca ATLAS_AI_PROVIDER=openai_compat ile acilir.
+    AI_PROVIDER = os.getenv("ATLAS_AI_PROVIDER", "local").strip().lower()
     AI_API_KEY = _env_or_rc("ATLAS_AI_API_KEY", "")
     AI_BASE_URL = _env_or_rc("ATLAS_AI_BASE_URL", "https://api.openai.com")
     AI_MODEL = _env_or_rc("ATLAS_AI_MODEL", "gpt-4o-mini")
-    AI_TIMEOUT_SECONDS = float(os.getenv("ATLAS_AI_TIMEOUT_SECONDS", "30"))
+    AI_TIMEOUT_SECONDS = float(os.getenv("ATLAS_AI_TIMEOUT_SECONDS", "180"))
     AI_TEMPERATURE = float(os.getenv("ATLAS_AI_TEMPERATURE", "0.2"))
     AI_LOCAL_AUTO_START = os.getenv("ATLAS_AI_LOCAL_AUTO_START", "1").strip().lower() in {"1", "true", "yes"}
     AI_LOCAL_HOST = os.getenv("ATLAS_AI_LOCAL_HOST", "127.0.0.1").strip()
@@ -362,11 +364,11 @@ class Config:
         cls.TELEGRAM_ASYNC_SEND = _env_or_rc("ATLAS_TELEGRAM_ASYNC_SEND", "1").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS = float(_env_or_rc("ATLAS_TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", "0.5"))
         cls.CONSOLE_SIGNAL_PRINT_ENABLED = _env_or_rc("ATLAS_CONSOLE_SIGNAL_PRINT_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
-        cls.AI_PROVIDER = _env_or_rc("ATLAS_AI_PROVIDER", "openai_compat").strip().lower()
+        cls.AI_PROVIDER = _env_or_rc("ATLAS_AI_PROVIDER", "local").strip().lower()
         cls.AI_API_KEY = _env_or_rc("ATLAS_AI_API_KEY", "")
         cls.AI_BASE_URL = _env_or_rc("ATLAS_AI_BASE_URL", "https://api.openai.com")
         cls.AI_MODEL = _env_or_rc("ATLAS_AI_MODEL", "gpt-4o-mini")
-        cls.AI_TIMEOUT_SECONDS = float(_env_or_rc("ATLAS_AI_TIMEOUT_SECONDS", "30"))
+        cls.AI_TIMEOUT_SECONDS = float(_env_or_rc("ATLAS_AI_TIMEOUT_SECONDS", "180"))
         cls.AI_TEMPERATURE = float(_env_or_rc("ATLAS_AI_TEMPERATURE", "0.2"))
         cls.AI_LOCAL_AUTO_START = _env_or_rc("ATLAS_AI_LOCAL_AUTO_START", "1").strip().lower() in {"1", "true", "yes"}
         cls.AI_LOCAL_HOST = _env_or_rc("ATLAS_AI_LOCAL_HOST", "127.0.0.1").strip()

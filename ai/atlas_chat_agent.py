@@ -49,7 +49,9 @@ class AtlasChatAgent:
         if self._provider == "local":
             state = self._safe_ai_status()
             self._last_local_status = state
-            if str(state.get("status") or "").upper() != "ONLINE":
+            # state boşsa (gerçek runtime yok / test ortami) gate'i atla;
+            # gerçek runtime'da local ise ailine gore yonlendir.
+            if state and str(state.get("status") or "").upper() != "ONLINE":
                 return AgentResult(text=self._local_unavailable_message(state))
 
         self._messages.append({"role": "user", "content": text})
@@ -101,7 +103,7 @@ class AtlasChatAgent:
         provider = str(getattr(Config, "AI_PROVIDER", "openai_compat") or "openai_compat").strip().lower()
         self._provider = provider
 
-        timeout_seconds = float(getattr(Config, "AI_TIMEOUT_SECONDS", 30) or 30)
+        timeout_seconds = float(getattr(Config, "AI_TIMEOUT_SECONDS", 180) or 180)
         temperature = float(getattr(Config, "AI_TEMPERATURE", 0.2) or 0.2)
 
         if provider == "local":
@@ -111,9 +113,7 @@ class AtlasChatAgent:
                 host = str(getattr(Config, "AI_LOCAL_HOST", "127.0.0.1") or "127.0.0.1").strip()
                 port = int(getattr(Config, "AI_LOCAL_PORT", 8080) or 8080)
                 base_url = f"http://{host}:{port}/v1"
-            model = str(getattr(Config, "AI_MODEL", "") or "").strip()
-            if not model or model == "gpt-4o-mini":
-                model = "qwen3-4b-instruct"
+            model = self._resolve_local_model_id(base_url=base_url, status=status)
             cfg = OpenAICompatConfig(
                 api_key=str(getattr(Config, "AI_API_KEY", "") or "").strip(),
                 base_url=base_url,
@@ -172,6 +172,37 @@ class AtlasChatAgent:
         except Exception:
             pass
         return {}
+
+    def _resolve_local_model_id(self, *, base_url, status):
+        """Local server'in gercek model id'sini /v1/models'ten alir.
+
+        - Online ise sunucunun bildirdigi model id kullanilir (Qwen3-4B-Q4_K_M.gguf).
+        - Degilse ATLAS_AI_MODEL'in gercek degeri, o da yoksa GGUF dosya adina
+          duser. OpenAI default'una ('gpt-4o-mini') ASLA dusmez.
+        """
+        if status and str(status.get("status") or "").upper() == "ONLINE":
+            try:
+                import requests
+
+                response = requests.get(f"{base_url}/models", timeout=3.0)
+                if response.status_code == 200:
+                    payload = response.json()
+                    models = payload.get("data") or []
+                    if models and isinstance(models[0], dict):
+                        model_id = str(models[0].get("id") or "").strip()
+                        if model_id:
+                            return model_id
+            except Exception:
+                pass
+
+        configured = str(getattr(Config, "AI_MODEL", "") or "").strip()
+        if configured and configured != "gpt-4o-mini":
+            return configured
+        model_file = str(getattr(Config, "AI_LOCAL_MODEL_FILE", "") or "").strip()
+        basename = model_file.rsplit("/", 1)[-1]
+        if basename and basename != model_file:
+            return basename
+        return "Qwen3-4B-Q4_K_M.gguf"
 
     def _tool_specs(self):
         return [
