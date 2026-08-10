@@ -20,6 +20,7 @@ from confluence_engine import ConfluenceEngine
 from trade_cooldown_engine import TradeCooldownEngine
 from state_engine import StateEngine
 from learning_engine import LearningEngine
+from manual_trade_service import ManualTradeService
 from economic_news_engine import EconomicNewsFilter
 from correlation_engine import CorrelationEngine
 from core.market_structure_engine import MarketStructureEngine
@@ -130,6 +131,10 @@ class AtlasEngine:
         self.trade = TradeManager()
         self.trade_journal = TradeJournal(
             db_path=getattr(Config, "TRADE_JOURNAL_DB_FILE", None) if getattr(Config, "SIGNAL_TRACKING_ENABLED", True) else None
+        )
+        self.manual_trade_service = ManualTradeService(
+            journal=self.trade_journal,
+            refresh_learning=self.refresh_learning,
         )
         self._warm_learning_index()
         self.scanner = ScannerEngine()
@@ -510,7 +515,7 @@ class AtlasEngine:
 
         for existing in self.trade_journal.open_trades(symbol=symbol):
             if existing.get("side") == side and existing.get("entry") == entry:
-                return None
+                return existing
 
         trade = {
             "symbol": symbol,
@@ -541,13 +546,17 @@ class AtlasEngine:
             or None
         )
         setup_features = list(setup_quality.get("features") or [])
+        signal_id = None
         existing = [
-            o for o in self.trade_journal.open_signal_outcomes(symbol=symbol)
+            o
+            for o in self.trade_journal.open_signal_outcomes(symbol=symbol)
             if o.get("direction") == side
         ]
-        if not existing:
+        if existing:
+            signal_id = existing[0].get("signal_id")
+        else:
             try:
-                self.trade_journal.register_signal_outcome(
+                outcome = self.trade_journal.register_signal_outcome(
                     symbol=symbol,
                     direction=side,
                     timeframe="15m",
@@ -570,10 +579,20 @@ class AtlasEngine:
                         or None,
                         "setup_features": setup_features,
                         "learning": setup_quality.get("learning") or {},
+                        "setup_quality": setup_quality,
+                        "decision": result_payload.get("decision") or {},
                     },
                 )
+                signal_id = (outcome or {}).get("signal_id")
             except Exception:
                 self.logger.exception("register_signal_outcome hatasi | symbol=%s signal=%s", symbol, side)
+
+        if isinstance(journal_trade, dict) and signal_id:
+            journal_trade["signal_id"] = signal_id
+            try:
+                self.trade_journal._persist_trade(journal_trade)
+            except Exception:
+                pass
         return journal_trade
 
     def _restore_incremental_if_unchanged(self, symbol, candles):
@@ -1711,11 +1730,22 @@ class AtlasEngine:
         )
 
         bot_class = getattr(telegram_module, "TelegramBot")
+        signal_id = None
+        if self.trade_journal is not None:
+            try:
+                signal_id = self.manual_trade_service.resolve_signal_id(
+                    symbol=symbol,
+                    direction=action_for_message,
+                )
+            except Exception:
+                signal_id = None
+
         reply_markup = None
         if hasattr(bot_class, "trade_feedback_keyboard"):
-            reply_markup = bot_class.trade_feedback_keyboard(symbol, action_for_message)
+            reply_markup = bot_class.trade_feedback_keyboard(symbol, action_for_message, signal_id=signal_id)
 
-        print(message)
+        if bool(getattr(Config, "CONSOLE_SIGNAL_PRINT_ENABLED", True)):
+            print(message)
         if bool(getattr(Config, "TELEGRAM_ASYNC_SEND", True)):
             thread = threading.Thread(
                 target=self._send_telegram_safe,

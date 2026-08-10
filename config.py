@@ -208,6 +208,7 @@ class Config:
     TELEGRAM_HTTP_TIMEOUT_SECONDS = float(os.getenv("ATLAS_TELEGRAM_HTTP_TIMEOUT_SECONDS", "3"))
     TELEGRAM_ASYNC_SEND = os.getenv("ATLAS_TELEGRAM_ASYNC_SEND", "1").strip().lower() in {"1", "true", "yes"}
     TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS = float(os.getenv("ATLAS_TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", "0.5"))
+    CONSOLE_SIGNAL_PRINT_ENABLED = os.getenv("ATLAS_CONSOLE_SIGNAL_PRINT_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
 
 
     # State / Incremental Analysis
@@ -337,6 +338,7 @@ class Config:
         cls.TELEGRAM_HTTP_TIMEOUT_SECONDS = float(_env_or_rc("ATLAS_TELEGRAM_HTTP_TIMEOUT_SECONDS", "3"))
         cls.TELEGRAM_ASYNC_SEND = _env_or_rc("ATLAS_TELEGRAM_ASYNC_SEND", "1").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS = float(_env_or_rc("ATLAS_TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", "0.5"))
+        cls.CONSOLE_SIGNAL_PRINT_ENABLED = _env_or_rc("ATLAS_CONSOLE_SIGNAL_PRINT_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
         cls.BOT_PASSWORD = os.getenv("ATLAS_BOT_PASSWORD", "")
         cls.ADMIN_CHAT_ID = int(os.getenv("ATLAS_ADMIN_CHAT_ID", "0"))
         cls.TELEGRAM_ADMIN_IDS = [cls.ADMIN_CHAT_ID]

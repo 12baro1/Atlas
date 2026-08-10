@@ -78,11 +78,12 @@ if bool(getattr(Config, "TELEGRAM_POLLING_ENABLED", True)) or bool(getattr(Confi
             password_hash=Config.BOT_PASSWORD_HASH,
             admin_ids=Config.TELEGRAM_ADMIN_IDS,
         )
-        _trade_handler = TelegramTradeCommandHandler(journal=engine.trade_journal)
+        _trade_handler = TelegramTradeCommandHandler(manual_trade_service=engine.manual_trade_service)
         telegram_service = TelegramService(
             auth_service=_auth,
-            webhook_handler=TelegramWebhookHandler(),
+            webhook_handler=TelegramWebhookHandler(trade_command_handler=_trade_handler),
             trade_command_handler=_trade_handler,
+            manual_trade_service=engine.manual_trade_service,
         )
         telegram_service.start(daemon=True)
         logger.info("Telegram servisi baslatildi (polling=%s webhook=%s).",
@@ -127,7 +128,8 @@ def scan_once(symbols, label):
             success += 1
 
             card = build_signal_card(result)
-            print(format_card_text(card))
+            if bool(getattr(Config, "CONSOLE_SIGNAL_PRINT_ENABLED", True)):
+                print(format_card_text(card))
 
             # Canlı sinyal sonuç takibi: bu semboldeki açık sinyalleri güncel fiyatla çöz
             if Config.SIGNAL_TRACKING_ENABLED:

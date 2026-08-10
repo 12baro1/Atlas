@@ -1243,16 +1243,105 @@ class TradeJournal:
             "grade": outcome.get("grade"),
             "confidence": outcome.get("confidence"),
             "timeframe": outcome.get("timeframe", "15m"),
+            "original_entry": self._norm_price(outcome.get("entry")),
+            "original_stop_loss": self._norm_price(outcome.get("stop_loss")),
+            "original_tp1": self._norm_price(outcome.get("tp1")),
+            "original_tp2": self._norm_price(outcome.get("tp2")),
+            "original_tp3": self._norm_price(outcome.get("tp3")),
+            "original_setup_fingerprint": outcome.get("setup_fingerprint"),
+            "original_signal_snapshot": {
+                "signal_id": outcome.get("signal_id"),
+                "symbol": outcome.get("symbol"),
+                "direction": outcome.get("direction"),
+                "timeframe": outcome.get("timeframe"),
+                "entry": outcome.get("entry"),
+                "stop_loss": outcome.get("stop_loss"),
+                "tp1": outcome.get("tp1"),
+                "tp2": outcome.get("tp2"),
+                "tp3": outcome.get("tp3"),
+                "rr": outcome.get("rr"),
+                "grade": outcome.get("grade"),
+                "confidence": outcome.get("confidence"),
+                "market_phase": outcome.get("market_phase"),
+                "setup_fingerprint": outcome.get("setup_fingerprint"),
+                "payload": copy.deepcopy(outcome.get("payload") or {}),
+            },
         }
         self._manual_trades.append(manual)
         self._persist_manual_trade(manual)
         return manual, "opened"
 
+    def mark_manual_not_traded(self, *, signal_id, closed_at=None, reason=None):
+        """Sinyal için kullanıcı girmeme kararını kalıcı yazar.
+
+        NOT_TRADED kaydı learning'e LOSS olarak beslenmez.
+        """
+        outcome = self.find_signal_outcome(signal_id) if signal_id else None
+        if outcome is None:
+            return None, "signal_not_found"
+
+        existing = self.find_manual_trade(signal_id=signal_id)
+        if existing is not None:
+            return existing, "already_open"
+
+        now = int(closed_at or time.time() * 1000)
+        manual = {
+            "id": self._uuid("manual"),
+            "signal_id": signal_id,
+            "symbol": outcome.get("symbol"),
+            "side": outcome.get("direction"),
+            "status": "NOT_TRADED",
+            "opened_at": now,
+            "closed_at": now,
+            "entry": None,
+            "stop_loss": None,
+            "tp1": None,
+            "tp2": None,
+            "tp3": None,
+            "position_size": None,
+            "result": "NOT_TRADED",
+            "pnl_rr": None,
+            "pnl": None,
+            "manual_exit_reason": reason or "USER_SKIPPED",
+            "actual_exit": None,
+            "setup_fingerprint": outcome.get("setup_fingerprint"),
+            "regime": outcome.get("regime") or outcome.get("market_phase"),
+            "grade": outcome.get("grade"),
+            "confidence": outcome.get("confidence"),
+            "timeframe": outcome.get("timeframe", "15m"),
+            "original_entry": self._norm_price(outcome.get("entry")),
+            "original_stop_loss": self._norm_price(outcome.get("stop_loss")),
+            "original_tp1": self._norm_price(outcome.get("tp1")),
+            "original_tp2": self._norm_price(outcome.get("tp2")),
+            "original_tp3": self._norm_price(outcome.get("tp3")),
+            "original_setup_fingerprint": outcome.get("setup_fingerprint"),
+            "original_signal_snapshot": {
+                "signal_id": outcome.get("signal_id"),
+                "symbol": outcome.get("symbol"),
+                "direction": outcome.get("direction"),
+                "timeframe": outcome.get("timeframe"),
+                "entry": outcome.get("entry"),
+                "stop_loss": outcome.get("stop_loss"),
+                "tp1": outcome.get("tp1"),
+                "tp2": outcome.get("tp2"),
+                "tp3": outcome.get("tp3"),
+                "rr": outcome.get("rr"),
+                "grade": outcome.get("grade"),
+                "confidence": outcome.get("confidence"),
+                "market_phase": outcome.get("market_phase"),
+                "setup_fingerprint": outcome.get("setup_fingerprint"),
+                "payload": copy.deepcopy(outcome.get("payload") or {}),
+            },
+        }
+        self._manual_trades.append(manual)
+        self._persist_manual_trade(manual)
+        return manual, "not_traded"
+
     def close_manual_trade(self, manual_id=None, signal_id=None, *, actual_exit=None, result=None,
                            pnl=None, closed_at=None, manual_exit_reason=None):
         """Kullanıcının gerçek işlemini kapatır.
 
-        result: WIN | LOSS | BREAKEVEN | MANUAL_CLOSE | CANCELLED.
+        result: WIN | LOSS | BREAKEVEN | EARLY_EXIT | MANUAL_CLOSE | CANCELLED.
         Result bilinmiyorsa actual_exit/entry/stop bazında otomatik infer edilir.
         """
         manual = None
@@ -1267,6 +1356,8 @@ class TradeJournal:
             return None, "manual_not_found"
         if manual.get("status") == "CLOSED":
             return manual, "already_closed"
+        if manual.get("status") != "OPEN":
+            return manual, "not_open"
 
         closed_at = int(closed_at or time.time() * 1000)
         entry = self._num(manual.get("entry"))
@@ -1284,7 +1375,7 @@ class TradeJournal:
             else:
                 result = "WIN" if exit_price < entry else "LOSS"
         result = (result or "MANUAL_CLOSE").upper()
-        allowed = ("WIN", "LOSS", "BREAKEVEN", "MANUAL_CLOSE", "CANCELLED")
+        allowed = ("WIN", "LOSS", "BREAKEVEN", "EARLY_EXIT", "MANUAL_CLOSE", "CANCELLED")
         if result not in allowed:
             result = "MANUAL_CLOSE"
 
@@ -1316,6 +1407,16 @@ class TradeJournal:
         out = []
         for manual in self._manual_trades:
             if manual.get("status") != "OPEN":
+                continue
+            if symbol and manual.get("symbol") != symbol:
+                continue
+            out.append(manual)
+        return out
+
+    def not_traded_manual_trades(self, symbol=None):
+        out = []
+        for manual in self._manual_trades:
+            if manual.get("status") != "NOT_TRADED":
                 continue
             if symbol and manual.get("symbol") != symbol:
                 continue
@@ -1371,19 +1472,27 @@ class TradeJournal:
     def manual_trade_performance(self):
         """MANUAL TRADE PERFORMANCE (kullanıcının gerçek işlemleri)."""
         closed = self.closed_manual_trades()
+        not_traded_count = len(self.not_traded_manual_trades())
+        open_count = len(self.open_manual_trades())
         if not closed:
-            return self._empty_manual_performance()
+            payload = self._empty_manual_performance()
+            payload["not_traded"] = not_traded_count
+            payload["open"] = open_count
+            return payload
         wins = [m for m in closed if m.get("result") == "WIN"]
         losses = [m for m in closed if m.get("result") == "LOSS"]
         breakeven = [m for m in closed if m.get("result") == "BREAKEVEN"]
+        early_exit = [m for m in closed if m.get("result") == "EARLY_EXIT"]
         r_values = [self._num(m.get("pnl_rr"), 0.0) for m in closed]
         return {
             "total": len(closed),
             "wins": len(wins),
             "losses": len(losses),
             "breakeven": len(breakeven),
+            "early_exit": len(early_exit),
             "cancelled": len([m for m in closed if m.get("result") == "CANCELLED"]),
-            "open": len(self.open_manual_trades()),
+            "open": open_count,
+            "not_traded": not_traded_count,
             "winrate": round(len(wins) / len(closed) * 100, 2) if closed else 0.0,
             "expectancy": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
             "profit_factor": self._profit_factor(r_values),
@@ -1407,6 +1516,8 @@ class TradeJournal:
             records = []
             for manual in self._manual_trades:
                 if manual.get("status") != "CLOSED":
+                    continue
+                if str(manual.get("result") or "").upper() == "NOT_TRADED":
                     continue
                 closed_at = int(manual.get("closed_at") or 0)
                 if as_of_ms is not None and closed_at > as_of_ms:
@@ -1440,8 +1551,14 @@ class TradeJournal:
         return records
 
     def _manual_to_learning_record(self, manual):
-        wins = manual.get("result") in ("WIN",)
         r_value = self._num(manual.get("pnl_rr"), 0.0)
+        result = str(manual.get("result") or "").upper()
+        if result == "WIN":
+            wins = True
+        elif result == "EARLY_EXIT":
+            wins = r_value > 0
+        else:
+            wins = False
         features = manual.get("features") or []
         if not features and manual.get("setup_fingerprint"):
             features = list(parse_fingerprint(manual.get("setup_fingerprint")))
@@ -1461,6 +1578,40 @@ class TradeJournal:
             "grade": manual.get("grade"),
             "confidence": manual.get("confidence"),
         }
+
+    def find_manual_trade(self, *, signal_id=None, manual_id=None):
+        for manual in self._manual_trades:
+            if signal_id and manual.get("signal_id") == signal_id:
+                return manual
+            if manual_id and manual.get("id") == manual_id:
+                return manual
+        return None
+
+    def manual_trades(self, *, status=None, symbol=None, limit=None):
+        items = []
+        for manual in self._manual_trades:
+            if status and manual.get("status") != status:
+                continue
+            if symbol and manual.get("symbol") != symbol:
+                continue
+            items.append(manual)
+        items.sort(key=lambda item: int(item.get("opened_at") or 0), reverse=True)
+        if limit is not None:
+            return items[:int(limit)]
+        return items
+
+    def signal_outcomes(self, *, status=None, symbol=None, limit=None):
+        items = []
+        for outcome in self._signal_outcomes:
+            if status and outcome.get("status") != status:
+                continue
+            if symbol and outcome.get("symbol") != symbol:
+                continue
+            items.append(outcome)
+        items.sort(key=lambda item: int(item.get("opened_at") or 0), reverse=True)
+        if limit is not None:
+            return items[:int(limit)]
+        return items
 
     def _tracked_to_learning_record(self, trade):
         """Gerçek (scanner ile açılıp kapanan) işlemi öğrenme kaydına çevirir.
@@ -1607,7 +1758,14 @@ class TradeJournal:
 
     def _empty_manual_performance(self):
         return {
-            "total": 0, "wins": 0, "losses": 0, "breakeven": 0, "cancelled": 0, "open": 0,
+            "total": 0,
+            "wins": 0,
+            "losses": 0,
+            "breakeven": 0,
+            "early_exit": 0,
+            "cancelled": 0,
+            "open": 0,
+            "not_traded": 0,
             "winrate": 0, "expectancy": 0, "profit_factor": 0, "average_r": 0,
         }
 

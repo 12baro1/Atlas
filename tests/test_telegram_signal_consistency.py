@@ -387,3 +387,13 @@ def test_trade_feedback_keyboard_contains_manual_actions():
     texts = [button["text"] for row in keyboard["inline_keyboard"] for button in row]
     assert "✅ Girdim" in texts
     assert "🛑 SL" in texts
+
+
+def test_trade_feedback_keyboard_supports_signal_id_payload():
+    keyboard = telegram_module.TelegramBot.trade_feedback_keyboard(
+        "BTC/USDT:USDT",
+        "LONG",
+        signal_id="ATL-20260810-000123",
+    )
+    callback_data = keyboard["inline_keyboard"][0][0]["callback_data"]
+    assert callback_data.startswith("trade_entered|ATL-20260810-000123|")

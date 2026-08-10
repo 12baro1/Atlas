@@ -82,3 +82,32 @@ def test_webhook_handler_routes_to_webhook_handler():
     from http.server import BaseHTTPRequestHandler
 
     assert issubclass(handler_cls, BaseHTTPRequestHandler)
+
+
+def test_trade_callback_processed_by_handler(monkeypatch):
+    class DummyTradeHandler:
+        def enabled(self):
+            return True
+
+        def handle_callback(self, callback_data):
+            return f"handled: {callback_data}"
+
+    service = TelegramService(trade_command_handler=DummyTradeHandler())
+    sent = {}
+
+    monkeypatch.setattr(service, "send_message", lambda chat_id, text: sent.setdefault("payload", (chat_id, text)))
+    monkeypatch.setattr(service, "_answer_callback_query", lambda callback_id, text: sent.setdefault("answer", (callback_id, text)))
+
+    service._process_update(
+        {
+            "callback_query": {
+                "id": "cb-1",
+                "data": "trade_entered|ATL-20260810-000001|BTC/USDT:USDT|LONG",
+                "message": {"chat": {"id": 123}},
+            }
+        }
+    )
+
+    assert sent["payload"][0] == 123
+    assert "handled" in sent["payload"][1]
+    assert sent["answer"][0] == "cb-1"

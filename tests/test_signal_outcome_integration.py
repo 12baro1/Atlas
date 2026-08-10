@@ -160,6 +160,48 @@ def test_telegram_trade_command_handler(tmp_path):
     assert "ATLAS PERFORMANS" in perf_reply
 
 
+def test_mark_not_traded_not_counted_as_loss(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="SOL/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        opened_at=1_700_000_000_000,
+    )
+    manual, code = journal.mark_manual_not_traded(signal_id=outcome["signal_id"])
+    assert code == "not_traded"
+    assert manual["status"] == "NOT_TRADED"
+    assert manual["result"] == "NOT_TRADED"
+
+    perf = journal.manual_trade_performance()
+    assert perf["total"] == 0
+    assert perf["not_traded"] == 1
+    assert perf["losses"] == 0
+
+
+def test_duplicate_close_blocked(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        opened_at=1_700_000_000_000,
+    )
+    journal.open_manual_trade(signal_id=outcome["signal_id"], actual_entry=100.0)
+
+    first, first_code = journal.close_manual_trade(signal_id=outcome["signal_id"], result="WIN", actual_exit=101.0)
+    assert first_code == "closed"
+    assert first["status"] == "CLOSED"
+
+    second, second_code = journal.close_manual_trade(signal_id=outcome["signal_id"], result="LOSS", actual_exit=98.0)
+    assert second_code == "already_closed"
+    assert second["result"] == "WIN"
+
+
 def test_telegram_trade_command_disabled(monkeypatch, tmp_path):
     monkeypatch.setattr(Config, "MANUAL_TRADE_COMMAND_ENABLED", False)
     journal = TradeJournal(db_path=tmp_path / "j.sqlite")

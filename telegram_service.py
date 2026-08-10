@@ -14,6 +14,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from config import Config
+from manual_trade_service import ManualTradeService
 
 LOGGER = logging.getLogger("atlas.telegram.service")
 
@@ -21,12 +22,12 @@ LOGGER = logging.getLogger("atlas.telegram.service")
 class TelegramService:
     """Polling ve webhook akisini birlikte barindiran runtime servisi."""
 
-    def __init__(self, telegram_bot=None, auth_service=None, webhook_handler=None, trade_command_handler=None):
+    def __init__(self, telegram_bot=None, auth_service=None, webhook_handler=None, trade_command_handler=None, manual_trade_service=None):
         Config.refresh_from_env()
         self.telegram_bot = telegram_bot
         self.auth_service = auth_service
         self.webhook_handler = webhook_handler
-        self.trade_command_handler = trade_command_handler or TelegramTradeCommandHandler()
+        self.trade_command_handler = trade_command_handler or TelegramTradeCommandHandler(manual_trade_service=manual_trade_service)
         self.stop_flag = threading.Event()
         self._offsets = {}
         self.logger = LOGGER
@@ -57,6 +58,11 @@ class TelegramService:
             self.logger.exception("Telegram send_message hatasi: %s", exc)
 
     def _process_update(self, update):
+        callback_query = update.get("callback_query")
+        if callback_query:
+            self._process_callback_query(callback_query)
+            return
+
         message = update.get("message")
         if not message:
             return
@@ -81,6 +87,38 @@ class TelegramService:
                 reply = self.trade_command_handler.handle(chat_id, text)
                 if reply:
                     self.send_message(chat_id, reply)
+
+    def _process_callback_query(self, callback_query):
+        callback_data = callback_query.get("data")
+        callback_id = callback_query.get("id")
+        chat_id = (callback_query.get("message") or {}).get("chat", {}).get("id")
+
+        if not callback_data:
+            return
+
+        if self.trade_command_handler is None or not self.trade_command_handler.enabled():
+            self._answer_callback_query(callback_id, "Manual trade komutlari kapali.")
+            return
+
+        reply = self.trade_command_handler.handle_callback(callback_data)
+        if callback_id:
+            self._answer_callback_query(callback_id, (reply or "Islem alindi")[:180])
+        if chat_id and reply:
+            self.send_message(chat_id, reply)
+
+    def _answer_callback_query(self, callback_query_id, text):
+        if not callback_query_id:
+            return
+        try:
+            import requests
+
+            requests.post(
+                self._build_url("answerCallbackQuery"),
+                data={"callback_query_id": callback_query_id, "text": text},
+                timeout=10,
+            )
+        except Exception:
+            self.logger.exception("answerCallbackQuery hatasi")
 
     def poll_once(self):
         offset = getattr(self, "_offset", None)
@@ -131,8 +169,12 @@ class TelegramService:
                 ok = False
                 if data is not None:
                     if service.webhook_handler is not None:
-                        ok = service.webhook_handler.handle_update(data)
-                    else:
+                        try:
+                            ok = bool(service.webhook_handler.handle_update(data))
+                        except Exception:
+                            service.logger.exception("webhook_handler hatasi")
+                            ok = False
+                    if not ok:
                         service._process_update(data)
                         ok = True
                 self.send_response(200 if ok else 400)
@@ -174,8 +216,13 @@ class TelegramTradeCommandHandler:
       /trade performance            -> sinyal + manuel istatistikler
     """
 
-    def __init__(self, journal=None):
-        self.journal = journal
+    def __init__(self, journal=None, manual_trade_service=None):
+        self.manual_service = manual_trade_service
+        if self.manual_service is None and journal is not None:
+            self.manual_service = ManualTradeService(journal)
+        self.journal = journal or (self.manual_service.journal if self.manual_service is not None else None)
+        if self.manual_service is None and self.journal is not None:
+            self.manual_service = ManualTradeService(self.journal)
 
     def enabled(self):
         return bool(getattr(Config, "MANUAL_TRADE_COMMAND_ENABLED", True))
@@ -194,17 +241,85 @@ class TelegramTradeCommandHandler:
             return self._help()
         if normalized == "open":
             return self._open(parts)
+        if normalized == "skip":
+            return self._skip(parts)
+        if normalized == "tp":
+            return self._close_with_result(parts, "TP")
+        if normalized == "sl":
+            return self._close_with_result(parts, "SL")
+        if normalized == "early":
+            return self._close_with_result(parts, "EARLY_EXIT")
         if normalized == "close":
             return self._close(parts)
+        if normalized == "status":
+            return self._status()
         if normalized == "performance":
             return self._performance()
         return self._help()
+
+    def handle_callback(self, callback_data):
+        parts = str(callback_data or "").split("|")
+        if not parts:
+            return "Gecersiz callback"
+        action = parts[0].replace("trade_", "")
+        signal_id = None
+        symbol = None
+        direction = None
+
+        if len(parts) >= 4 and parts[1].startswith("ATL-"):
+            signal_id = parts[1]
+            symbol = parts[2]
+            direction = parts[3]
+        elif len(parts) >= 3:
+            symbol = parts[1]
+            direction = parts[2]
+
+        if signal_id is None and self.manual_service is not None:
+            signal_id = self.manual_service.resolve_signal_id(symbol=symbol, direction=direction)
+        if signal_id is None:
+            return "Signal ID bulunamadi"
+
+        if action == "entered":
+            _manual, code = self.manual_service.open_trade(signal_id=signal_id)
+            if code == "opened":
+                return f"Islem acildi: {signal_id}"
+            if code == "already_open":
+                return f"Islem zaten kayitli: {signal_id}"
+            return f"Islem acilamadi: {code}"
+        if action == "skipped":
+            _manual, code = self.manual_service.mark_not_traded(signal_id=signal_id)
+            if code == "not_traded":
+                return f"NOT_TRADED kaydi alindi: {signal_id}"
+            if code == "already_open":
+                return f"Bu sinyal zaten kayitli: {signal_id}"
+            return f"NOT_TRADED kaydedilemedi: {code}"
+        if action == "tp":
+            _manual, code = self.manual_service.close_trade(signal_id=signal_id, result="TP")
+            if code == "closed":
+                return f"TP kaydedildi: {signal_id}"
+            return f"TP kaydedilemedi: {code}"
+        if action == "sl":
+            _manual, code = self.manual_service.close_trade(signal_id=signal_id, result="SL")
+            if code == "closed":
+                return f"SL kaydedildi: {signal_id}"
+            return f"SL kaydedilemedi: {code}"
+        if action == "exit_early":
+            _manual, code = self.manual_service.close_trade(signal_id=signal_id, result="EARLY_EXIT")
+            if code == "closed":
+                return f"EARLY_EXIT kaydedildi: {signal_id}"
+            return f"EARLY_EXIT kaydedilemedi: {code}"
+        return "Bilinmeyen callback aksiyonu"
 
     def _help(self):
         lines = [
             "🧰 /trade komutları",
             "/trade open <signal_id> [entry] [stop] [tp]",
+            "/trade skip <signal_id>",
+            "/trade tp <signal_id> [exit]",
+            "/trade sl <signal_id> [exit]",
+            "/trade early <signal_id> [exit]",
             "/trade close <signal_id> [exit] [WIN|LOSS|BREAKEVEN]",
+            "/trade status",
             "/trade performance",
         ]
         return "\n".join(lines)
@@ -216,7 +331,7 @@ class TelegramTradeCommandHandler:
         entry = self._num(parts[3]) if len(parts) > 3 else None
         stop = self._num(parts[4]) if len(parts) > 4 else None
         tp = self._num(parts[5]) if len(parts) > 5 else None
-        manual, code = self.journal.open_manual_trade(
+        manual, code = self.manual_service.open_trade(
             signal_id=signal_id,
             actual_entry=entry,
             actual_stop=stop,
@@ -226,6 +341,8 @@ class TelegramTradeCommandHandler:
             return "❌ Sinyal bulunamadı. Önce canlı bir sinyal üretilmeli."
         if code == "already_open":
             return "ℹ Bu sinyale ait işlem zaten açık."
+        if code != "opened":
+            return f"❌ İşlem açılamadı: {code}"
         lines = [
             "✅ İşlem kaydedildi (manuel)",
             f"Sinyal: {manual.get('signal_id')}",
@@ -234,13 +351,43 @@ class TelegramTradeCommandHandler:
         ]
         return "\n".join(lines)
 
+    def _skip(self, parts):
+        if len(parts) < 3:
+            return "ℹ Kullanim: /trade skip <signal_id>"
+        signal_id = parts[2]
+        _manual, code = self.manual_service.mark_not_traded(signal_id=signal_id)
+        if code == "not_traded":
+            return "✅ NOT_TRADED kaydedildi"
+        if code == "already_open":
+            return "ℹ Bu sinyal zaten kayitli"
+        if code == "signal_not_found":
+            return "❌ Sinyal bulunamadi"
+        return f"❌ NOT_TRADED kaydedilemedi: {code}"
+
+    def _close_with_result(self, parts, result):
+        if len(parts) < 3:
+            return f"ℹ Kullanim: /trade {result.lower()} <signal_id> [exit]"
+        signal_id = parts[2]
+        exit_price = self._num(parts[3]) if len(parts) > 3 else None
+        manual, code = self.manual_service.close_trade(signal_id=signal_id, result=result, actual_exit=exit_price)
+        if code == "closed":
+            return (
+                f"✅ İşlem kapatıldı\n"
+                f"{manual.get('symbol')} {manual.get('side')} | {manual.get('result')} | {self._fmt(manual.get('pnl_rr'))}R"
+            )
+        if code == "already_closed":
+            return "ℹ️ İşlem zaten kapanmış."
+        if code == "manual_not_found":
+            return "❌ Açık işlem bulunamadı."
+        return f"❌ İşlem kapatılamadı: {code}"
+
     def _close(self, parts):
         if len(parts) < 3:
             return "ℹ Kullanım: /trade close <signal_id> [exit] [WIN|LOSS|BREAKEVEN]"
         signal_id = parts[2]
         exit_price = self._num(parts[3]) if len(parts) > 3 else None
         result = parts[4].upper() if len(parts) > 4 else None
-        manual, code = self.journal.close_manual_trade(
+        manual, code = self.manual_service.close_trade(
             signal_id=signal_id,
             actual_exit=exit_price,
             result=result,
@@ -249,10 +396,24 @@ class TelegramTradeCommandHandler:
             return "❌ Açık işlem bulunamadı."
         if code == "already_closed":
             return "ℹ️ İşlem zaten kapanmış."
+        if code != "closed":
+            return f"❌ İşlem kapatılamadı: {code}"
         return (
             f"✅ İşlem kapatıldı\n"
             f"{manual.get('symbol')} {manual.get('side')} | {manual.get('result')} | {self._fmt(manual.get('pnl_rr'))}R"
         )
+
+    def _status(self):
+        open_trades = self.journal.open_manual_trades()
+        not_traded = self.journal.not_traded_manual_trades()
+        lines = [
+            "📌 MANUAL TRADE STATUS",
+            f"Open: {len(open_trades)}",
+            f"Not traded: {len(not_traded)}",
+        ]
+        for item in open_trades[:5]:
+            lines.append(f"- {item.get('signal_id')} {item.get('symbol')} {item.get('side')} OPEN")
+        return "\n".join(lines)
 
     def _performance(self):
         signal_perf = self.journal.signal_performance()

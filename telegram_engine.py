@@ -319,17 +319,30 @@ class TelegramBot:
         return unique_chat_ids
 
     @staticmethod
-    def trade_feedback_keyboard(symbol, direction):
+    def trade_feedback_keyboard(symbol, direction, signal_id=None):
+        if signal_id:
+            entered_cb = f"trade_entered|{signal_id}|{symbol}|{direction}"
+            skipped_cb = f"trade_skipped|{signal_id}|{symbol}|{direction}"
+            tp_cb = f"trade_tp|{signal_id}|{symbol}|{direction}"
+            sl_cb = f"trade_sl|{signal_id}|{symbol}|{direction}"
+            early_cb = f"trade_exit_early|{signal_id}|{symbol}|{direction}"
+        else:
+            entered_cb = f"trade_entered|{symbol}|{direction}"
+            skipped_cb = f"trade_skipped|{symbol}|{direction}"
+            tp_cb = f"trade_tp|{symbol}|{direction}"
+            sl_cb = f"trade_sl|{symbol}|{direction}"
+            early_cb = f"trade_exit_early|{symbol}|{direction}"
+
         return {
             "inline_keyboard": [
                 [
-                    {"text": "✅ Girdim", "callback_data": f"trade_entered|{symbol}|{direction}"},
-                    {"text": "❌ Girmedim", "callback_data": f"trade_skipped|{symbol}|{direction}"},
+                    {"text": "✅ Girdim", "callback_data": entered_cb},
+                    {"text": "❌ Girmedim", "callback_data": skipped_cb},
                 ],
                 [
-                    {"text": "🏁 TP", "callback_data": f"trade_tp|{symbol}|{direction}"},
-                    {"text": "🛑 SL", "callback_data": f"trade_sl|{symbol}|{direction}"},
-                    {"text": "⚠️ Erken çıktım", "callback_data": f"trade_exit_early|{symbol}|{direction}"},
+                    {"text": "🏁 TP", "callback_data": tp_cb},
+                    {"text": "🛑 SL", "callback_data": sl_cb},
+                    {"text": "⚠️ Erken çıktım", "callback_data": early_cb},
                 ],
             ]
         }

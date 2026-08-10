@@ -14,10 +14,11 @@ LOGGER = logging.getLogger("atlas.telegram.webhook")
 class TelegramWebhookHandler:
     """Telegram inline button callback'larını işler."""
 
-    def __init__(self):
+    def __init__(self, trade_command_handler=None):
         Config.refresh_from_env()
         self.token = str(getattr(Config, "TELEGRAM_BOT_TOKEN", "")).strip()
         self.logger = logging.getLogger("atlas.telegram.webhook")
+        self.trade_command_handler = trade_command_handler
 
     def handle_update(self, update_data):
         """
@@ -40,6 +41,11 @@ class TelegramWebhookHandler:
             message_id = callback_query.get("message", {}).get("message_id")
             callback_data = callback_query.get("data", "")
             user_id = callback_query.get("from", {}).get("id")
+
+            if self.trade_command_handler is not None and hasattr(self.trade_command_handler, "handle_callback"):
+                reply = self.trade_command_handler.handle_callback(callback_data)
+                self._answer_callback_query(callback_query.get("id"), (reply or "İşlem alındı")[:180], show_alert=False)
+                return True
 
             if not chat_id or not callback_data:
                 LOGGER.warning("Geçersiz callback: chat_id=%s, callback_data=%s", chat_id, callback_data)
@@ -89,7 +95,10 @@ class TelegramWebhookHandler:
         if len(parts) < 2:
             return None
         raw_action = parts[0]
-        symbol = parts[1].strip()
+        symbol_index = 1
+        if len(parts) >= 4 and str(parts[1]).startswith("ATL-"):
+            symbol_index = 2
+        symbol = parts[symbol_index].strip()
         if not symbol:
             return None
         if raw_action.startswith("trade_"):
