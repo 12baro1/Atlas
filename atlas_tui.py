@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections import Counter, defaultdict
 from datetime import datetime
 
@@ -345,6 +346,14 @@ class AtlasTUIApp(App):
         self._chat_lines = []
         self._pending_chat_action = None
         self._chat_busy = False
+        self._ai_state = {
+            "provider": "unknown",
+            "status": "UNKNOWN",
+            "detail": "",
+            "owner": "none",
+            "base_url": "",
+        }
+        self._last_ai_poll_at = 0.0
 
 
     def compose(self) -> ComposeResult:
@@ -418,6 +427,7 @@ class AtlasTUIApp(App):
         self._show_page("dashboard")
         self.set_interval(1.2, self._refresh_views)
         self._bootstrap_session()
+        self._start_ai_bootstrap()
         self._refresh_views()
         self.query_one("#chat-input", Input).focus()
 
@@ -582,9 +592,48 @@ class AtlasTUIApp(App):
                 f"{summary.get('closed_manual', 0)} gecmis manuel kapanis bulundu."
             ),
         )
+        self._update_ai_state(force=True)
+        self._chat_append("Atlas", self._ai_status_message(self._ai_state))
         if self.initial_symbol:
             self._chat_append("Atlas", f"Baslangic sembolu alindi: {self.initial_symbol}. Analiz baslatiliyor...")
             self._start_background_chat(self.initial_symbol)
+
+    def _start_ai_bootstrap(self):
+        state = dict(self._ai_state)
+        provider = str(state.get("provider") or "").strip().lower()
+        if provider == "local" and str(state.get("status") or "").upper() != "ONLINE":
+            self._chat_append("Atlas", "Local AI baslatiliyor...")
+            self._set_message("Local AI baslatiliyor...")
+        thread = threading.Thread(target=self._ai_bootstrap_worker, daemon=True)
+        thread.start()
+
+    def _ai_bootstrap_worker(self):
+        try:
+            state = self.runtime.initialize_ai()
+        except Exception as exc:
+            state = {
+                "provider": "local",
+                "status": "OFFLINE",
+                "detail": f"initialize_error:{exc}",
+                "owner": "none",
+                "base_url": "",
+            }
+        self.call_from_thread(self._apply_ai_state, state)
+
+    def _apply_ai_state(self, state):
+        if isinstance(state, dict):
+            self._ai_state = dict(state)
+        self._chat_append("Atlas", self._ai_status_message(self._ai_state, include_detail=True))
+        status = str(self._ai_state.get("status") or "").upper()
+        if status == "ONLINE":
+            self._set_message("AI ONLINE")
+        elif status == "REMOTE":
+            self._set_message("AI REMOTE")
+        elif status == "STARTING":
+            self._set_message("Local AI baslatiliyor...")
+        elif status == "OFFLINE":
+            self._set_message("AI OFFLINE")
+        self._refresh_views()
 
     def _start_background_chat(self, symbol_text):
         thread = threading.Thread(target=self._chat_background_worker, args=(symbol_text,), daemon=True)
@@ -671,6 +720,7 @@ class AtlasTUIApp(App):
         self.query_one("#message-bar", Static).update(f"{self._message}")
 
     def _refresh_views(self):
+        self._update_ai_state()
         snapshot = self.runtime.snapshot()
         outcomes = self.runtime.signal_outcomes()
         manuals = self.runtime.journal_summary()
@@ -701,9 +751,10 @@ class AtlasTUIApp(App):
         success = scanner.get("success", 0)
         failed = scanner.get("failed", 0)
         symbol = snapshot.get("current_symbol") or "-"
+        ai = self._ai_subtitle_label()
         self.sub_title = (
             f"{status} | mode {mode} | symbol {symbol} | "
-            f"cycle {cycle} | processed {processed} | success {success} | failed {failed}"
+            f"cycle {cycle} | processed {processed} | success {success} | failed {failed} | ai {ai}"
         )
 
     def _refresh_dashboard(self, snapshot):
@@ -721,6 +772,7 @@ class AtlasTUIApp(App):
             f"Mode: {scanner.get('mode', 'MANUAL_ANALYSIS')}",
             f"Current Symbol: {current_symbol}",
             f"Status: {scanner.get('status', 'READY')}",
+            f"AI: {self._ai_subtitle_label()}",
             f"Scanned: {scanner.get('processed', 0)}",
             f"LONG: {directions.get('LONG', 0)}",
             f"SHORT: {directions.get('SHORT', 0)}",
@@ -1044,3 +1096,48 @@ class AtlasTUIApp(App):
                 "profit_factor": profit_factor,
             }
         return dict(metrics)
+
+    def _update_ai_state(self, force=False):
+        now = time.time()
+        if not force and (now - self._last_ai_poll_at) < 4.0:
+            return
+        self._last_ai_poll_at = now
+        try:
+            state = self.runtime.ai_status()
+            if isinstance(state, dict):
+                self._ai_state = dict(state)
+        except Exception:
+            return
+
+    def _ai_subtitle_label(self):
+        provider = str(self._ai_state.get("provider") or "").strip().lower()
+        status = str(self._ai_state.get("status") or "UNKNOWN").strip().upper()
+        if provider == "local":
+            return f"LOCAL/{status}"
+        if status == "REMOTE":
+            return "REMOTE"
+        if provider:
+            return f"{provider.upper()}/{status}"
+        return status
+
+    def _ai_status_message(self, state, include_detail=False):
+        provider = str((state or {}).get("provider") or "").strip().lower()
+        status = str((state or {}).get("status") or "UNKNOWN").strip().upper()
+        detail = str((state or {}).get("detail") or "").strip()
+        owner = str((state or {}).get("owner") or "none").strip()
+        base_url = str((state or {}).get("base_url") or "").strip()
+
+        if provider != "local":
+            return "AI provider remote modda calisiyor."
+        if status == "ONLINE":
+            host = "Atlas" if owner == "atlas" else "harici"
+            return f"Local AI ONLINE ({host}) @ {base_url}" if base_url else f"Local AI ONLINE ({host})"
+        if status == "STARTING":
+            return "Local AI baslatiliyor..."
+        if status == "OFFLINE":
+            if include_detail and detail:
+                return f"Local AI OFFLINE: {detail}"
+            return "Local AI OFFLINE."
+        if include_detail and detail:
+            return f"Local AI {status}: {detail}"
+        return f"Local AI durumu: {status}"

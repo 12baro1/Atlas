@@ -9,8 +9,10 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
+from ai.atlas_chat_agent import AtlasChatAgent
 
-class AtlasAssistant:
+
+class _RuleBasedAtlasAssistant:
     """Natural-language assistant over Atlas runtime tools."""
 
     _STOPWORDS = {
@@ -562,3 +564,35 @@ class AtlasAssistant:
             "WAIT": "Wait",
         }
         return mapping.get(text, str(value or "-"))
+
+
+class AtlasAssistant:
+    """Primary assistant wrapper.
+
+    - Uses real LLM + tool-calling when provider env is configured.
+    - Falls back to local parser when provider is unavailable.
+    """
+
+    def __init__(self, runtime):
+        self.runtime = runtime
+        self._llm_agent = AtlasChatAgent(runtime)
+        self._fallback = _RuleBasedAtlasAssistant(runtime)
+
+    def handle_user_message(self, message):
+        if self._llm_agent.enabled:
+            try:
+                result = self._llm_agent.handle(message)
+                text = str(result.text or "").strip() or "Su an anlamli bir cevap uretemedim."
+                return {
+                    "responses": [text],
+                    "action": result.action,
+                }
+            except Exception as exc:
+                fallback = self._fallback.handle_user_message(message)
+                responses = list(fallback.get("responses") or [])
+                responses.append(f"(AI katmani gecici hata verdi: {exc})")
+                return {
+                    "responses": responses,
+                    "action": fallback.get("action"),
+                }
+        return self._fallback.handle_user_message(message)

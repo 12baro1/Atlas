@@ -210,6 +210,29 @@ class Config:
     TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS = float(os.getenv("ATLAS_TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", "0.5"))
     CONSOLE_SIGNAL_PRINT_ENABLED = os.getenv("ATLAS_CONSOLE_SIGNAL_PRINT_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
 
+    # AI chat provider (OpenAI-compatible)
+    AI_PROVIDER = os.getenv("ATLAS_AI_PROVIDER", "openai_compat").strip().lower()
+    AI_API_KEY = _env_or_rc("ATLAS_AI_API_KEY", "")
+    AI_BASE_URL = _env_or_rc("ATLAS_AI_BASE_URL", "https://api.openai.com")
+    AI_MODEL = _env_or_rc("ATLAS_AI_MODEL", "gpt-4o-mini")
+    AI_TIMEOUT_SECONDS = float(os.getenv("ATLAS_AI_TIMEOUT_SECONDS", "30"))
+    AI_TEMPERATURE = float(os.getenv("ATLAS_AI_TEMPERATURE", "0.2"))
+    AI_LOCAL_AUTO_START = os.getenv("ATLAS_AI_LOCAL_AUTO_START", "1").strip().lower() in {"1", "true", "yes"}
+    AI_LOCAL_HOST = os.getenv("ATLAS_AI_LOCAL_HOST", "127.0.0.1").strip()
+    AI_LOCAL_PORT = int(os.getenv("ATLAS_AI_LOCAL_PORT", "8080"))
+    AI_LOCAL_CONTEXT = int(os.getenv("ATLAS_AI_LOCAL_CONTEXT", "4096"))
+    AI_LOCAL_THREADS = int(os.getenv("ATLAS_AI_LOCAL_THREADS", "0"))
+    AI_LOCAL_GPU_LAYERS = int(os.getenv("ATLAS_AI_LOCAL_GPU_LAYERS", "0"))
+    AI_LOCAL_MODEL_FILE = _env_or_rc("ATLAS_AI_LOCAL_MODEL_FILE", "models/Qwen3-4B-Q4_K_M.gguf")
+    AI_LOCAL_LLAMA_SERVER = _env_or_rc("ATLAS_AI_LOCAL_LLAMA_SERVER", "")
+    AI_LOCAL_GGML_BACKEND = _env_or_rc("ATLAS_AI_LOCAL_GGML_BACKEND", "")
+    AI_LOCAL_REASONING = _env_or_rc("ATLAS_AI_LOCAL_REASONING", "0").strip().lower() in {"1", "true", "yes", "on"}
+    AI_LOCAL_PARALLEL_SLOTS = int(_env_or_rc("ATLAS_AI_LOCAL_PARALLEL_SLOTS", "1"))
+    AI_LOCAL_CACHE_RAM_MIB = int(_env_or_rc("ATLAS_AI_LOCAL_CACHE_RAM_MIB", "0"))
+    AI_LOCAL_WARMUP = _env_or_rc("ATLAS_AI_LOCAL_WARMUP", "0").strip().lower() in {"1", "true", "yes", "on"}
+    AI_LOCAL_REPACK = _env_or_rc("ATLAS_AI_LOCAL_REPACK", "0").strip().lower() in {"1", "true", "yes", "on"}
+    AI_LOCAL_START_TIMEOUT_SECONDS = float(_env_or_rc("ATLAS_AI_LOCAL_START_TIMEOUT_SECONDS", "180"))
+
 
     # State / Incremental Analysis
     STATE_ENGINE_ENABLED = os.getenv("ATLAS_STATE_ENGINE_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
@@ -339,6 +362,27 @@ class Config:
         cls.TELEGRAM_ASYNC_SEND = _env_or_rc("ATLAS_TELEGRAM_ASYNC_SEND", "1").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS = float(_env_or_rc("ATLAS_TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", "0.5"))
         cls.CONSOLE_SIGNAL_PRINT_ENABLED = _env_or_rc("ATLAS_CONSOLE_SIGNAL_PRINT_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+        cls.AI_PROVIDER = _env_or_rc("ATLAS_AI_PROVIDER", "openai_compat").strip().lower()
+        cls.AI_API_KEY = _env_or_rc("ATLAS_AI_API_KEY", "")
+        cls.AI_BASE_URL = _env_or_rc("ATLAS_AI_BASE_URL", "https://api.openai.com")
+        cls.AI_MODEL = _env_or_rc("ATLAS_AI_MODEL", "gpt-4o-mini")
+        cls.AI_TIMEOUT_SECONDS = float(_env_or_rc("ATLAS_AI_TIMEOUT_SECONDS", "30"))
+        cls.AI_TEMPERATURE = float(_env_or_rc("ATLAS_AI_TEMPERATURE", "0.2"))
+        cls.AI_LOCAL_AUTO_START = _env_or_rc("ATLAS_AI_LOCAL_AUTO_START", "1").strip().lower() in {"1", "true", "yes"}
+        cls.AI_LOCAL_HOST = _env_or_rc("ATLAS_AI_LOCAL_HOST", "127.0.0.1").strip()
+        cls.AI_LOCAL_PORT = int(_env_or_rc("ATLAS_AI_LOCAL_PORT", "8080"))
+        cls.AI_LOCAL_CONTEXT = int(_env_or_rc("ATLAS_AI_LOCAL_CONTEXT", "4096"))
+        cls.AI_LOCAL_THREADS = int(_env_or_rc("ATLAS_AI_LOCAL_THREADS", "0"))
+        cls.AI_LOCAL_GPU_LAYERS = int(_env_or_rc("ATLAS_AI_LOCAL_GPU_LAYERS", "0"))
+        cls.AI_LOCAL_MODEL_FILE = _env_or_rc("ATLAS_AI_LOCAL_MODEL_FILE", "models/Qwen3-4B-Q4_K_M.gguf")
+        cls.AI_LOCAL_LLAMA_SERVER = _env_or_rc("ATLAS_AI_LOCAL_LLAMA_SERVER", "")
+        cls.AI_LOCAL_GGML_BACKEND = _env_or_rc("ATLAS_AI_LOCAL_GGML_BACKEND", "")
+        cls.AI_LOCAL_REASONING = _env_or_rc("ATLAS_AI_LOCAL_REASONING", "0").strip().lower() in {"1", "true", "yes", "on"}
+        cls.AI_LOCAL_PARALLEL_SLOTS = int(_env_or_rc("ATLAS_AI_LOCAL_PARALLEL_SLOTS", "1"))
+        cls.AI_LOCAL_CACHE_RAM_MIB = int(_env_or_rc("ATLAS_AI_LOCAL_CACHE_RAM_MIB", "0"))
+        cls.AI_LOCAL_WARMUP = _env_or_rc("ATLAS_AI_LOCAL_WARMUP", "0").strip().lower() in {"1", "true", "yes", "on"}
+        cls.AI_LOCAL_REPACK = _env_or_rc("ATLAS_AI_LOCAL_REPACK", "0").strip().lower() in {"1", "true", "yes", "on"}
+        cls.AI_LOCAL_START_TIMEOUT_SECONDS = float(_env_or_rc("ATLAS_AI_LOCAL_START_TIMEOUT_SECONDS", "180"))
         cls.BOT_PASSWORD = os.getenv("ATLAS_BOT_PASSWORD", "")
         cls.ADMIN_CHAT_ID = int(os.getenv("ATLAS_ADMIN_CHAT_ID", "0"))
         cls.TELEGRAM_ADMIN_IDS = [cls.ADMIN_CHAT_ID]

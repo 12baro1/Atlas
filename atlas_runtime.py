@@ -8,7 +8,9 @@ import os
 import threading
 import time
 from collections import deque
+from pathlib import Path
 
+from ai.local_llama_server import LocalLlamaServerManager
 from config import Config
 from data_engine import exchange, get_correlation_universe, get_market_data
 from engine import AtlasEngine
@@ -54,6 +56,17 @@ class AtlasRuntime:
         self._logs = deque(maxlen=500)
         self._error = None
         self._telegram_service = None
+        self._llama_manager = LocalLlamaServerManager(
+            repo_root=Path(__file__).resolve().parent,
+            config=Config,
+        )
+        self._ai_state = {
+            "provider": str(getattr(Config, "AI_PROVIDER", "openai_compat") or "openai_compat"),
+            "status": "UNKNOWN",
+            "detail": "",
+            "base_url": self._llama_manager.base_url,
+            "owner": "none",
+        }
 
         with self._journal_lock:
             perf = self.engine.trade_journal.manual_trade_performance()
@@ -87,9 +100,68 @@ class AtlasRuntime:
             )
         except Exception:
             pass
+        try:
+            self._llama_manager.stop_if_owned()
+        except Exception:
+            pass
 
     def boot_summary(self):
         return dict(self._boot_summary)
+
+    def initialize_ai(self):
+        provider = str(getattr(Config, "AI_PROVIDER", "openai_compat") or "openai_compat").strip().lower()
+        self._ai_state["provider"] = provider
+        self._ai_state["base_url"] = self._llama_manager.base_url
+
+        if provider != "local":
+            self._ai_state["status"] = "REMOTE"
+            self._ai_state["detail"] = "provider_not_local"
+            self._ai_state["owner"] = "none"
+            return dict(self._ai_state)
+
+        status = self._llama_manager.status()
+        if status.online:
+            self._ai_state["status"] = "ONLINE"
+            self._ai_state["detail"] = status.detail
+            self._ai_state["owner"] = status.owner
+            return dict(self._ai_state)
+
+        self._ai_state["status"] = "STARTING"
+        self._ai_state["detail"] = "Local AI baslatiliyor..."
+        timeout_seconds = float(getattr(Config, "AI_LOCAL_START_TIMEOUT_SECONDS", 180) or 180)
+        started = self._llama_manager.ensure_running(timeout_seconds=timeout_seconds)
+        if started.online:
+            self._ai_state["status"] = "ONLINE"
+            self._ai_state["detail"] = started.detail
+            self._ai_state["owner"] = started.owner
+        else:
+            self._ai_state["status"] = "OFFLINE"
+            self._ai_state["detail"] = started.detail
+            self._ai_state["owner"] = started.owner
+        return dict(self._ai_state)
+
+    def ai_status(self):
+        provider = str(getattr(Config, "AI_PROVIDER", "openai_compat") or "openai_compat").strip().lower()
+        self._ai_state["provider"] = provider
+        self._ai_state["base_url"] = self._llama_manager.base_url
+
+        if provider != "local":
+            current = dict(self._ai_state)
+            if current.get("status") == "UNKNOWN":
+                current["status"] = "REMOTE"
+                current["detail"] = "provider_not_local"
+            return current
+
+        current = self._llama_manager.status()
+        if current.online:
+            self._ai_state["status"] = "ONLINE"
+            self._ai_state["detail"] = current.detail
+            self._ai_state["owner"] = current.owner
+        elif self._ai_state.get("status") not in {"STARTING", "OFFLINE"}:
+            self._ai_state["status"] = "OFFLINE"
+            self._ai_state["detail"] = current.detail
+            self._ai_state["owner"] = current.owner
+        return dict(self._ai_state)
 
     def attach_telegram_service(self, service):
         self._telegram_service = service
@@ -236,6 +308,16 @@ class AtlasRuntime:
             recent_manual = self.engine.trade_journal.manual_trades(limit=200)
         return recent_manual
 
+    def manual_trades(self, *, limit=200, status=None, symbol=None):
+        with self._journal_lock:
+            return list(
+                self.engine.trade_journal.manual_trades(
+                    limit=limit,
+                    status=status,
+                    symbol=symbol,
+                )
+            )
+
     def open_manual_trades(self, symbol=None):
         with self._journal_lock:
             return list(self.engine.trade_journal.open_manual_trades(symbol=symbol))
@@ -248,9 +330,15 @@ class AtlasRuntime:
         with self._journal_lock:
             return dict(self.engine.trade_journal.manual_trade_performance())
 
-    def signal_outcomes(self):
+    def signal_outcomes(self, *, limit=400, status=None, symbol=None):
         with self._journal_lock:
-            return self.engine.trade_journal.signal_outcomes(limit=400)
+            return list(
+                self.engine.trade_journal.signal_outcomes(
+                    limit=limit,
+                    status=status,
+                    symbol=symbol,
+                )
+            )
 
     def manual_trade_for(self, signal_id):
         with self._journal_lock:
@@ -267,9 +355,23 @@ class AtlasRuntime:
         with self._journal_lock:
             return copy.deepcopy(self.engine.learning.stats)
 
-    def learning_records(self, source="manual"):
+    def learning_records(self, source="manual", symbol=None, as_of_ms=None):
         with self._journal_lock:
-            return list(self.engine.trade_journal.learning_records(source=source))
+            return list(
+                self.engine.trade_journal.learning_records(
+                    source=source,
+                    symbol=symbol,
+                    as_of_ms=as_of_ms,
+                )
+            )
+
+    def setup_statistics(self):
+        with self._journal_lock:
+            return dict(self.engine.trade_journal.setup_statistics())
+
+    def analysis_summary(self):
+        with self._journal_lock:
+            return dict(self.engine.trade_journal.analysis_summary())
 
     def _loop(self):
         interval = float(getattr(Config, "ATLAS_SCAN_INTERVAL_SECONDS", 0) if hasattr(Config, "ATLAS_SCAN_INTERVAL_SECONDS") else 0)
