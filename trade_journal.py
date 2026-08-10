@@ -16,6 +16,8 @@ import uuid
 from collections import defaultdict
 from pathlib import Path
 
+from canonical_features import build_fingerprint, normalize_features, parse_fingerprint
+
 
 def _gzip_payload(payload):
     """Snapshot'ı gzip'li BLOB'a çevirir (arşivde yer kazandırır)."""
@@ -1397,6 +1399,7 @@ class TradeJournal:
 
         as_of_ms verilirse yalnızca bu andan ÖNCE kapanan kayıtlar gelir
         (future-data / look-ahead koruması). source="manual" manuel işlemleri,
+        "tracked" gerçek (scanner ile açılıp SL/TP ile kapanan) işlemleri,
         "signal" teorik sinyal sonuçlarını döndürür.
         """
         as_of_ms = int(as_of_ms) if as_of_ms else None
@@ -1411,6 +1414,18 @@ class TradeJournal:
                 if symbol and manual.get("symbol") != symbol:
                     continue
                 records.append(self._manual_to_learning_record(manual))
+            return records
+        if source == "tracked":
+            records = []
+            for trade in self._trades:
+                if trade.get("status") != "CLOSED":
+                    continue
+                closed_at = int(trade.get("closed_at") or 0)
+                if as_of_ms is not None and closed_at > as_of_ms:
+                    continue
+                if symbol and trade.get("symbol") != symbol:
+                    continue
+                records.append(self._tracked_to_learning_record(trade))
             return records
         records = []
         for outcome in self._signal_outcomes:
@@ -1427,6 +1442,9 @@ class TradeJournal:
     def _manual_to_learning_record(self, manual):
         wins = manual.get("result") in ("WIN",)
         r_value = self._num(manual.get("pnl_rr"), 0.0)
+        features = manual.get("features") or []
+        if not features and manual.get("setup_fingerprint"):
+            features = list(parse_fingerprint(manual.get("setup_fingerprint")))
         return {
             "source": "manual",
             "direction": manual.get("side", "NONE"),
@@ -1438,14 +1456,72 @@ class TradeJournal:
             "r": r_value,
             "timeframe": self._manual_timeframe(manual),
             "setup_fingerprint": manual.get("setup_fingerprint"),
+            "features": features,
             "regime": manual.get("regime"),
             "grade": manual.get("grade"),
             "confidence": manual.get("confidence"),
         }
 
+    def _tracked_to_learning_record(self, trade):
+        """Gerçek (scanner ile açılıp kapanan) işlemi öğrenme kaydına çevirir.
+
+        Kayıtlı analiz anlık görüntüsünden kanonik feature kümesi çıkarılır
+        (setup_quality.setup_fingerprint ya da module_scores fallback), böylece
+        geçmiş kapanan işlemler yeni setup'ların aynı modüllerine bağlanır.
+        """
+        analysis = trade.get("analysis") or {}
+        if not isinstance(analysis, dict):
+            analysis = {}
+        inner = analysis.get("analysis") if isinstance(analysis.get("analysis"), dict) else analysis
+        setup_quality = inner.get("setup_quality") or {}
+        signal = inner.get("signal") or {}
+        features = self._setup_quality_features(setup_quality)
+        r_value = self._num(trade.get("pnl_rr"), 0.0)
+        result = trade.get("result") or ("WIN" if r_value > 0 else "LOSS")
+        stored_phase = str(trade.get("market_phase") or "")
+        if not stored_phase or stored_phase.upper() in ("UNKNOWN", "NONE"):
+            stored_phase = str((inner.get("market_phase") or {}).get("phase") or "UNKNOWN")
+        regime = stored_phase or "UNKNOWN"
+        return {
+            "source": "tracked",
+            "direction": trade.get("side") or "UNKNOWN",
+            "symbol": trade.get("symbol"),
+            "closed_at": int(trade.get("closed_at") or trade.get("opened_at") or 0),
+            "opened_at": int(trade.get("opened_at") or 0),
+            "result": result,
+            "win": bool(r_value > 0) or result in ("WIN",),
+            "r": r_value,
+            "timeframe": "15m",
+            "setup_fingerprint": setup_quality.get("setup_fingerprint")
+            or build_fingerprint(features),
+            "features": features,
+            "regime": regime,
+            "grade": signal.get("grade") or setup_quality.get("grade"),
+            "confidence": self._num(signal.get("confidence") or trade.get("confidence"), 0),
+        }
+
+    def _setup_quality_features(self, setup_quality):
+        if not isinstance(setup_quality, dict):
+            return []
+        fingerprint = setup_quality.get("setup_fingerprint")
+        if isinstance(fingerprint, str) and fingerprint:
+            return list(parse_fingerprint(fingerprint))
+        module_scores = setup_quality.get("module_scores") or {}
+        return list(
+            normalize_features(
+                name
+                for name, item in module_scores.items()
+                if isinstance(item, dict) and item.get("score", 0) >= 50
+            )
+        )
+
     def _signal_to_learning_record(self, outcome):
         win = outcome.get("final_result") == "WIN"
         r_value = self._num(outcome.get("realized_r"), 0.0)
+        payload = outcome.get("payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        features = payload.get("setup_features") or []
         return {
             "source": "signal",
             "direction": outcome.get("direction"),
@@ -1457,12 +1533,16 @@ class TradeJournal:
             "r": r_value,
             "timeframe": outcome.get("timeframe"),
             "setup_fingerprint": outcome.get("setup_fingerprint"),
+            "features": features,
             "regime": outcome.get("regime") or outcome.get("market_phase"),
             "grade": outcome.get("grade"),
             "confidence": outcome.get("confidence"),
         }
 
     def _manual_timeframe(self, manual):
+        direct = manual.get("timeframe")
+        if direct:
+            return str(direct)
         payload = (manual.get("payload") or {}) if isinstance(manual.get("payload"), dict) else {}
         return payload.get("timeframe") or "15m"
 

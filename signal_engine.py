@@ -126,6 +126,7 @@ class SignalEngine:
             "setup_quality_score": setup_quality.get("score"),
             "module_scores": setup_quality.get("module_scores", {}),
             "analysis_report": setup_quality.get("reasons", []),
+            "learning": setup_quality.get("learning") or {},
         }
 
         if direction == "WAIT":

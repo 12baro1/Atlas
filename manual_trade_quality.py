@@ -27,18 +27,25 @@ class ManualTradeQualityGate:
         confluence_score = self._num(confluence.get("score"), 0)
         rr = self._resolve_rr(risk)
         decision_score = self._num(decision.get("score"), 0)
+        min_rr = max(float(getattr(self.config, "TELEGRAM_MIN_RR", 3.0)), 0.01)
 
+        # Bileşen tavanları bilinçli olarak 95'te toplanacak şekilde normalize
+        # edilir: 100'e yalnızca öğrenme (learning) + geçmiş (historical) etkisi
+        # eklendiğinde çok yaklaşılabilir; sıradan güçlü setup'lar 100'e yapışmaz.
         components["confidence"] = min(25, confidence * 0.25)
-        components["confluence"] = min(20, confluence_score * 0.20)
-        components["rr"] = min(20, (rr or 0) / max(float(getattr(self.config, "TELEGRAM_MIN_RR", 3.0)), 0.01) * 15)
-        components["decision"] = 15 if decision.get("action") == "EXECUTE" else 5 if decision.get("action") == "EXECUTE_WITH_CAUTION" else 0
-        components["phase"] = 10 if self._phase_allowed(market_phase, decision) else 0
-        components["risk"] = 10 if decision.get("risk_valid", True) and entry.get("valid", False) else 0
+        components["confluence"] = min(16, confluence_score * 0.16)
+        components["rr"] = min(12, (rr or 0) / min_rr * 9)
+        components["decision"] = 12 if decision.get("action") == "EXECUTE" else 5 if decision.get("action") == "EXECUTE_WITH_CAUTION" else 0
+        components["phase"] = 8 if self._phase_allowed(market_phase, decision) else 0
+        components["risk"] = 7 if decision.get("risk_valid", True) and entry.get("valid", False) else 0
 
         historical = self._historical_context(symbol=symbol, decision=decision, market_phase=market_phase, trade_journal=trade_journal)
-        components["historical"] = historical["score"]
+        components["historical"] = self._rescale_historical(historical["score"])
         warnings.extend(historical["warnings"])
         blockers.extend(historical["blockers"])
+
+        learning = signal.get("learning") or {}
+        components["learning"] = self._learning_component(learning)
 
         score = int(max(0, min(100, round(sum(components.values())))))
         if score < float(getattr(self.config, "TELEGRAM_MIN_MANUAL_SCORE", 75)):
@@ -57,7 +64,27 @@ class ManualTradeQualityGate:
             "warnings": warnings,
             "components": {key: round(value, 2) for key, value in components.items()},
             "historical": historical,
+            "learning": dict(learning),
         }
+
+    def _learning_component(self, learning):
+        """Öğrenilen geçmiş başarıyı skor bileşenine çevirir (-5..+5).
+
+        Eşleşme yoksa nötr (0); eşleşme varsa score_delta ile doğru orantılı
+        sınırlı bir katkı verilir. Böylece skorun 100 olması istisnai kalırken
+        öğrenme gerçekçi şekilde skoru etkiler.
+        """
+        if not isinstance(learning, dict) or not learning.get("matched"):
+            return 0
+        delta = int(learning.get("score_delta") or 0)
+        if delta < 0:
+            points = delta // 2
+        else:
+            points = (delta + 1) // 2
+        return max(-5, min(5, points))
+
+    def _rescale_historical(self, raw_score):
+        return {15: 10, 7: 6, 5: 4, 0: 0}.get(int(raw_score), min(10, int(raw_score)))
 
     def _historical_context(self, *, symbol, decision, market_phase, trade_journal):
         min_trades = int(getattr(self.config, "TELEGRAM_HISTORICAL_MIN_TRADES", 20))

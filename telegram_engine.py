@@ -81,6 +81,14 @@ class TelegramEngine:
                 f"exp={self._fmt(historical.get('expectancy', 0))}R "
                 f"pf={self._fmt(historical.get('profit_factor', 0))}"
             )
+        learning = manual_quality.get("learning") or {}
+        if learning.get("matched"):
+            msg.append(
+                "Learning: "
+                f"n={learning.get('sample_count', 0)} "
+                f"edge={self._fmt(learning.get('expected_r', 0))}R "
+                f"delta={learning.get('score_delta', 0):+d}"
+            )
         for warning in (manual_quality.get("warnings") or [])[:2]:
             msg.append(f"⚠️ {warning}")
         for blocker in (manual_quality.get("blockers") or [])[:2]:

@@ -131,6 +131,7 @@ class AtlasEngine:
         self.trade_journal = TradeJournal(
             db_path=getattr(Config, "TRADE_JOURNAL_DB_FILE", None) if getattr(Config, "SIGNAL_TRACKING_ENABLED", True) else None
         )
+        self._warm_learning_index()
         self.scanner = ScannerEngine()
         self.statistics = StatisticsEngine()
         self.backtest = BacktestEngine()
@@ -145,6 +146,8 @@ class AtlasEngine:
             cached = self._restore_incremental_if_unchanged(symbol, candles)
             if cached is not None:
                 cached_analysis = cached.get("analysis") if isinstance(cached, dict) else None
+                if cached_analysis:
+                    self._reapply_learning_to_cached(cached_analysis)
                 if isinstance(cached, dict):
                     cached.setdefault("symbol", symbol)
                 if cached_analysis:
@@ -420,11 +423,28 @@ class AtlasEngine:
             return None
         return self.learning.record_closed_trade(trade)
 
+    def _warm_learning_index(self):
+        """Process başlangıcında journal'daki kapanmış kayıtlardan index kurar.
+
+        Hangı entrypoint kullanılırsa kullanılsın (main.py, telegram, testler,
+        betikler) learning index'in hazır olmasını garantiler. Hata olursa sessiz
+        atlanır; atlas_learning.json'daki legacy bucket'lardan kurulan index
+        zaten hazırdır.
+        """
+        try:
+            if not bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
+                return None
+            return self.refresh_learning()
+        except Exception:
+            self.logger.exception("Learning index warm-up basarisiz.")
+            return None
+
     def refresh_learning(self, symbol=None):
         """Journal'daki kapanmış sonuçları meta öğrenme katmanına işler.
 
         Kaynak önceliği (LEARNING_MANUAL_TRADE_PRIMARY): önce manuel işlemler,
-        örneklem yetmezse teorik sinyal sonuçları fallback olarak yüklenir.
+        yoksa gerçek kapanmış (scanner) işlemler, o da yoksa teorik sinyal
+        sonuçları fallback olarak yüklenir.
         """
         if not bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
             return None
@@ -433,20 +453,33 @@ class AtlasEngine:
         source = "manual"
         use_manual_primary = bool(getattr(Config, "LEARNING_MANUAL_TRADE_PRIMARY", True))
         manual_records = self.trade_journal.learning_records(source="manual", symbol=symbol)
+        tracked_records = self.trade_journal.learning_records(source="tracked", symbol=symbol)
         signal_records = self.trade_journal.learning_records(source="signal", symbol=symbol)
         min_fallback = int(getattr(Config, "LEARNING_MIN_SIGNAL_FALLBACK_SAMPLES", 50))
 
         records = manual_records
         if use_manual_primary:
-            # Manuel veri yetersizse teorik sinyal sonuçları yedek olarak kullanılır.
-            if not records and signal_records:
+            # Manuel veri yetersizse gerçek kapanan işlemler, o da yoksa
+            # teorik sinyal sonuçları yedek olarak kullanılır.
+            if not records and tracked_records:
+                records = tracked_records
+                source = "tracked"
+            elif not records and signal_records:
                 records = signal_records
                 source = "signal"
         else:
             # Manuel veri önceliği yoksa sinyal kayıtları doğrudan kullanılır.
-            if not records and signal_records:
+            if not records and tracked_records:
+                records = tracked_records
+                source = "tracked"
+            elif not records and signal_records:
                 records = signal_records
                 source = "signal"
+            elif not records:
+                pass
+            elif len(records) < min_fallback and tracked_records and len(tracked_records) >= len(records):
+                records = tracked_records
+                source = "tracked"
             elif len(records) < min_fallback and signal_records:
                 records = signal_records
                 source = "signal"
@@ -456,6 +489,7 @@ class AtlasEngine:
         self.learning.stats["source"] = source
         self.learning.stats["feed_meta"] = {
             "manual": len(manual_records),
+            "tracked": len(tracked_records),
             "signal": len(signal_records),
             "selected": source,
         }
@@ -499,6 +533,14 @@ class AtlasEngine:
         # Teorik sinyal sonucu (SIGNAL OUTCOME) kaydı: TP/SL çözümlenmesi için.
         # Aynı sembol+yönde açık bir kayıt varsa tekrar açılmaz.
         opened_at = result_payload.get("decision", {}).get("executed_at") or int(time.time() * 1000)
+        analysis = result_payload.get("analysis") or {}
+        setup_quality = analysis.get("setup_quality") or {}
+        setup_fingerprint = (
+            setup_quality.get("setup_fingerprint")
+            or (analysis.get("setup") or {}).get("fingerprint")
+            or None
+        )
+        setup_features = list(setup_quality.get("features") or [])
         existing = [
             o for o in self.trade_journal.open_signal_outcomes(symbol=symbol)
             if o.get("direction") == side
@@ -516,14 +558,18 @@ class AtlasEngine:
                     tp3=risk.get("tp3") or (result_payload.get("dynamic_tp") or {}).get("tp3"),
                     rr=trade["rr"],
                     confidence=trade["confidence"],
-                    grade=(result_payload.get("analysis") or {}).get("grade"),
+                    grade=(analysis.get("signal") or {}).get("grade"),
                     market_phase=trade["market_phase"],
-                    setup_fingerprint=(result_payload.get("analysis") or {}).get("setup", {}).get("fingerprint"),
+                    setup_fingerprint=setup_fingerprint,
                     opened_at=opened_at,
                     payload={
                         "origin": "live_scanner",
                         "decision_action": result_payload.get("decision", {}).get("action"),
-                        "setup_type": (result_payload.get("analysis") or {}).get("setup", {}).get("type"),
+                        "setup_type": (analysis.get("setup") or {}).get("type")
+                        or setup_quality.get("setup")
+                        or None,
+                        "setup_features": setup_features,
+                        "learning": setup_quality.get("learning") or {},
                     },
                 )
             except Exception:
@@ -538,6 +584,64 @@ class AtlasEngine:
                 self.logger.info("Incremental cache hit | symbol=%s last_candle=%s", symbol, candles[-1].time if candles else None)
                 return cached
         return None
+
+    def _reapply_learning_to_cached(self, cached_analysis):
+        """Cache'ten dönen analize güncel learning index'i yeniden uygular.
+
+        Incremental cache sırasında zaman geçebilir; arada yeni trade'ler
+        kapanıp learning index değişebilir. Cache'teki setup_quality'nin
+        eski/boş learning meta'sını taşıması yerine güncel öğrenme etkisi
+        yeniden hesaplanıp hem setup_quality hem de sinyal meta'sı güncellenir.
+        """
+        if not bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
+            return cached_analysis
+        setup_quality = cached_analysis.get("setup_quality") or {}
+        if not isinstance(setup_quality, dict) or not setup_quality.get("module_scores"):
+            return cached_analysis
+        phase = (cached_analysis.get("market_phase") or {}).get("phase") if isinstance(cached_analysis.get("market_phase"), dict) else None
+        adjusted = self.learning.apply_to_setup_quality(
+            setup_quality,
+            market_phase=phase,
+            timeframe="15m",
+        )
+        cached_analysis["setup_quality"] = adjusted
+        signal = cached_analysis.get("signal")
+        if isinstance(signal, dict):
+            signal["learning"] = adjusted.get("learning") or {}
+        self._log_learning_live(
+            setup_quality.get("score"),
+            adjusted,
+            context="cache_hit",
+        )
+        return cached_analysis
+
+    def _log_learning_live(self, setup_quality_before, adjusted, context="live"):
+        """Canlı öğrenme etkisini uçtan uca tek satırda loglar."""
+        learning_info = (adjusted or {}).get("learning") or {}
+        adjustments = (adjusted or {}).get("learning_adjustments") or {}
+        active_adjustments = {
+            name: round(float(value), 4)
+            for name, value in adjustments.items()
+            if float(value) != 1.0
+        }
+        self.logger.info(
+            "LEARNING LIVE | context=%s matched=%s level=%s samples=%s "
+            "historical_edge=%.4f reliability=%.4f expected_r=%.4f "
+            "learning_adjustment=%s setup_quality_before=%s setup_quality_after=%s "
+            "score_delta=%+d no_match_reason=%s",
+            context,
+            learning_info.get("matched"),
+            learning_info.get("level"),
+            int(learning_info.get("sample_count") or 0),
+            float(learning_info.get("historical_edge") or 0),
+            float(learning_info.get("reliability") or 0),
+            float(learning_info.get("expected_r") or 0),
+            active_adjustments or "-",
+            setup_quality_before,
+            (adjusted or {}).get("score"),
+            int(learning_info.get("score_delta") or 0),
+            learning_info.get("no_match_reason") or "-",
+        )
 
     def _trim_incremental_data(self, symbol, data):
         """Avoid reprocessing the full history when persisted state already has older candles."""
@@ -868,12 +972,14 @@ class AtlasEngine:
             volume_profile=volume_profile,
             institutional=institutional,
         )
+        setup_quality_before = setup_quality.get("score")
         if bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
             setup_quality = self.learning.apply_to_setup_quality(
                 setup_quality,
                 market_phase=(market_phase or {}).get("phase"),
                 timeframe="15m",
             )
+        self._log_learning_live(setup_quality_before, setup_quality, context="live")
         setup_quality["external_risk_filters"] = {
             "news_filter": news_filter or {},
             "correlation": correlation or {},
@@ -1518,6 +1624,15 @@ class AtlasEngine:
             market_phase=market_phase,
             trade_journal=self.trade_journal,
         )
+        live_learning = (manual_quality.get("learning") or {}).get("matched")
+        if live_learning:
+            self.logger.info(
+                "LEARNING LIVE END | symbol=%s manual_score=%s confidence=%s decision_score=%s",
+                data.get("symbol", "UNKNOWN"),
+                manual_quality.get("score"),
+                signal.get("confidence"),
+                (decision or {}).get("score"),
+            )
         quality_blockers = self._telegram_quality_blockers(
             signal=signal,
             entry=entry,

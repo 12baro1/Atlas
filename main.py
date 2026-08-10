@@ -185,10 +185,18 @@ def refresh_learning_meta():
         refresher = engine.refresh_learning()
         if refresher is None:
             return
+        stats = getattr(engine.learning, "stats", {})
+        buckets = 0
+        total_samples = 0
+        for bucket in (stats.get("index") or {}).values():
+            buckets += len(bucket)
+            total_samples += sum(int(entry.get("total", 0)) for entry in bucket.values())
         logger.info(
-            "Learning meta | kaynak=%s bucket=%s",
-            getattr(engine.learning, "stats", {}).get("source"),
-            len(getattr(engine.learning, "stats", {}).get("setups", {})),
+            "Learning meta | kaynak=%s bucket=%s index=%s ornek=%s",
+            stats.get("source"),
+            len(stats.get("setups", {})),
+            buckets,
+            total_samples,
         )
     except Exception:
         logger.exception("Learning meta tazelemesi basarisiz.")
@@ -197,12 +205,15 @@ def refresh_learning_meta():
 scan_interval = float(os.getenv("ATLAS_SCAN_INTERVAL_SECONDS", "0").strip() or "0")
 cycle = 1
 
+refresh_learning_meta()
+
 if scan_interval <= 0:
     scan_once(symbols, "tek")
     refresh_learning_meta()
 else:
     while True:
         logger.info("Cevrim %s basliyor; %s sn sonra tekrar taranacak (Ctrl+C ara).", cycle, scan_interval)
+        refresh_learning_meta()
         scan_once(symbols, "tek")
         refresh_learning_meta()
         try:

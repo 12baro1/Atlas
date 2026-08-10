@@ -46,7 +46,83 @@ class LearningEngine:
                 self.stats.setdefault("index", {})
         except (OSError, json.JSONDecodeError):
             pass
+        # Eski/üçüncü parti dosyalarda 'index' yoksa (legacy bucket-only format)
+        # mevcut setups bucket'larından hiyerarşik index re-build edilir. Böylece
+        # yalnızca dosyayı okuyan her process matching yapabilir; production'da
+        # refresh_learning() journal'dan daha doğru index kurar.
+        self._ensure_index_from_setups()
         return self.stats
+
+    # ------------------------------------------------------------------
+    # Index migrasyonu (legacy 'setups' -> hiyerarşik 'index')
+    # ------------------------------------------------------------------
+
+    def _ensure_index_from_setups(self):
+        """'index' boş ama 'setups' doluysa legacy bucket'lardan index kurar.
+
+        Legacy anahtar formatları parse edilir:
+          - Yeni:  SHORT|EXPANSION|15M|feat|feat   (direction önde)
+          - Eski:  Expansion|15m|LONG|fvg|ob       (regime/tf önde)
+        Elimizdeki alanlar sınırlı olduğundan yaklaşık raw sayaçlar kurulur;
+        asıl kesin index her zaman journal kayıtlarından rebuild edilir.
+        """
+        if not self.stats.get("setups") or self.stats.get("index"):
+            return self.stats
+        index = {"exact": {}, "family": {}, "global": {}}
+        for setup, bucket in self.stats["setups"].items():
+            ctx = self._legacy_bucket_context(setup)
+            if ctx is None:
+                continue
+            raw = self._empty_raw()
+            total = int(bucket.get("total", 0))
+            wins = int(bucket.get("wins", 0))
+            mean_r = float(bucket.get("average_r") or bucket.get("edge") or 0)
+            raw["total"] = total
+            raw["wins"] = wins
+            raw["r_sum"] = mean_r * total
+            raw["pos_sum"] = abs(raw["r_sum"]) if raw["r_sum"] >= 0 else 0.0
+            raw["neg_sum"] = raw["r_sum"] if raw["r_sum"] < 0 else 0.0
+            raw["confidence_sum"] = float(bucket.get("average_confidence", 0) or 0) * total
+            raw["decay_sum"] = float(bucket.get("weight", 1.0) or 1.0) * total
+            raw["decay_wins"] = wins
+            metrics = self._compute_metrics(raw, counts=total)
+            for level, key in self._candidate_keys(ctx):
+                index[level][key] = metrics
+        self.stats["index"] = index
+        return self.stats
+
+    def _legacy_bucket_context(self, setup):
+        """Setup anahtarını context dict'e çevirir; parse edilemezse None."""
+        if not isinstance(setup, str):
+            return None
+        parts = [part.strip() for part in setup.split("|") if part.strip()]
+        if not parts:
+            return None
+        upper = [part.upper() for part in parts]
+        direction = None
+        if upper[0] in ("LONG", "SHORT", "NONE", "UNKNOWN"):
+            direction = upper[0]
+            remainder = parts[1:]
+        elif len(upper) >= 3 and upper[2] in ("LONG", "SHORT", "NONE", "UNKNOWN"):
+            direction = upper[2]
+            remainder = parts[:2] + parts[3:]
+        else:
+            direction = "UNKNOWN"
+            remainder = parts
+        if len(remainder) >= 2:
+            regime, timeframe = remainder[0].upper(), remainder[1].upper()
+            feature_tokens = remainder[2:]
+        else:
+            regime = remainder[0].upper() if remainder else "UNKNOWN"
+            timeframe = "UNKNOWN"
+            feature_tokens = []
+        normalized = normalize_features(feature_tokens)
+        return {
+            "direction": direction,
+            "regime": regime,
+            "timeframe": timeframe,
+            "feature_key": "|".join(normalized) or "UNKNOWN",
+        }
 
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -307,6 +383,7 @@ class LearningEngine:
                 "reliability": 0.0,
                 "expected_r": 0.0,
                 "edge_score": 0.0,
+                "no_match_reason": self._no_match_reason(ctx),
             }
             return adjusted
 
@@ -325,7 +402,7 @@ class LearningEngine:
         reliability = float(metrics.get("reliability", 0) or 0)
         expected_r = float(metrics.get("average_r", 0) or 0)
         sample_count = int(metrics.get("total", 0) or 0)
-        historical_edge = round(self._edge_score(metrics), 4)
+        edge_score = round(self._edge_score(metrics), 4)
 
         adjusted["module_scores"] = module_scores
         adjusted["score"] = new_score
@@ -341,9 +418,25 @@ class LearningEngine:
             "reliability": reliability,
             "expected_r": expected_r,
             "score_delta": delta,
-            "edge_score": historical_edge,
+            "edge_score": edge_score,
         }
         return adjusted
+
+    def _no_match_reason(self, ctx):
+        """matched=False'in nedenini net biçimde raporlar."""
+        index = self.stats.get("index", {})
+        if not any(index.get(level) for level in ("exact", "family", "global")):
+            return "learning index yok (index bos)"
+        if self.stats.get("meta", {}).get("records_fed", 0) <= 0:
+            return "kapanmis trade kaydi yok"
+        feature_key = ctx.get("feature_key") or "UNKNOWN"
+        regime = ctx.get("regime") or "UNKNOWN"
+        tf = ctx.get("timeframe") or "UNKNOWN"
+        direction = ctx.get("direction") or "UNKNOWN"
+        return (
+            f"hierarjide eslesen bucket yok (dir={direction} regime={regime} "
+            f"tf={tf} features={feature_key})"
+        )
 
     def setup_success_rates(self):
         output = {}
