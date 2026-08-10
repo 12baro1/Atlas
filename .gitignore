@@ -30,3 +30,7 @@ run/*.pid
 
 # OS
 .DS_Store
+
+# Yerel AI binary/model dosyalari (repository'ye girmez)
+models/
+.local/

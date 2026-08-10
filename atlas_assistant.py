@@ -578,10 +578,10 @@ class AtlasAssistant:
         self._llm_agent = AtlasChatAgent(runtime)
         self._fallback = _RuleBasedAtlasAssistant(runtime)
 
-    def handle_user_message(self, message):
+    def handle_user_message(self, message, on_update=None):
         if self._llm_agent.enabled:
             try:
-                result = self._llm_agent.handle(message)
+                result = self._llm_agent.handle(message, on_text_delta=on_update)
                 text = str(result.text or "").strip() or "Su an anlamli bir cevap uretemedim."
                 return {
                     "responses": [text],

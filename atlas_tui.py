@@ -344,6 +344,7 @@ class AtlasTUIApp(App):
         self._manual_map = {}
         self._log_count = 0
         self._chat_lines = []
+        self._chat_stream_buffer = ""
         self._pending_chat_action = None
         self._chat_busy = False
         self._ai_state = {
@@ -648,22 +649,38 @@ class AtlasTUIApp(App):
 
     async def _run_chat_message(self, message):
         self._chat_busy = True
+        self._chat_stream_buffer = ""
         self._set_message("Atlas dusunuyor...")
         worker = threading.Thread(target=self._chat_worker_thread, args=(message,), daemon=True)
         worker.start()
 
     def _chat_worker_thread(self, message):
         try:
-            response = self.assistant.handle_user_message(message)
+            response = self.assistant.handle_user_message(message, on_update=self._queue_chat_chunk)
         except Exception as exc:
             response = {"responses": [f"Komut islenirken hata: {exc}"], "action": None}
         self.call_from_thread(self._apply_chat_response, response)
 
+    def _queue_chat_chunk(self, chunk):
+        self.call_from_thread(self._apply_chat_chunk, chunk)
+
+    def _apply_chat_chunk(self, chunk):
+        text = str(chunk or "")
+        if not text:
+            return
+        self._chat_stream_buffer += text
+        self._set_message("Atlas yaziyor...")
+        self._render_chat_log()
+
     def _apply_chat_response(self, response):
         self._chat_busy = False
+        streamed_text = str(self._chat_stream_buffer or "").strip()
+        self._chat_stream_buffer = ""
         responses = list((response or {}).get("responses") or [])
-        for line in responses:
-            self._chat_append("Atlas", line)
+        if responses:
+            self._chat_append("Atlas", "\n".join(str(line or "") for line in responses))
+        elif streamed_text:
+            self._chat_append("Atlas", streamed_text)
         action = (response or {}).get("action")
         if action:
             self._pending_chat_action = action
@@ -691,12 +708,19 @@ class AtlasTUIApp(App):
         for line in lines:
             self._chat_lines.append(f"{role}: {line}")
         self._chat_lines = self._chat_lines[-400:]
+        self._render_chat_log()
+
+    def _render_chat_log(self):
         try:
             widget = self.query_one("#chat-log", Log)
         except Exception:
             return
         widget.clear()
-        for line in self._chat_lines[-120:]:
+        rendered = list(self._chat_lines[-120:])
+        if str(self._chat_stream_buffer or "").strip():
+            for line in (self._chat_stream_buffer.splitlines() or [self._chat_stream_buffer]):
+                rendered.append(f"Atlas: {line}")
+        for line in rendered[-120:]:
             widget.write_line(line)
 
     def _show_page(self, page):

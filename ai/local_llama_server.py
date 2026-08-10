@@ -65,6 +65,13 @@ class LocalLlamaServerManager:
         if model_path is None or not model_path.exists():
             return LlamaServerStatus(False, "none", self.base_url, "model_not_found")
 
+        context = self._resolved_context()
+        threads = self._resolved_threads()
+        threads_batch = self._resolved_threads_batch()
+        batch_size = self._resolved_batch_size()
+        ubatch_size = self._resolved_ubatch_size(batch_size=batch_size)
+        parallel_slots = self._resolved_parallel_slots()
+
         cmd = [
             str(server_bin),
             "--host",
@@ -74,11 +81,17 @@ class LocalLlamaServerManager:
             "-m",
             str(model_path),
             "--ctx-size",
-            str(int(getattr(self.config, "AI_LOCAL_CONTEXT", 4096))),
+            str(context),
             "--threads",
-            str(self._resolved_threads()),
+            str(threads),
+            "--threads-batch",
+            str(threads_batch),
+            "--batch-size",
+            str(batch_size),
+            "--ubatch-size",
+            str(ubatch_size),
             "--parallel",
-            str(max(1, int(getattr(self.config, "AI_LOCAL_PARALLEL_SLOTS", 1) or 1))),
+            str(parallel_slots),
             "--cache-ram",
             str(max(0, int(getattr(self.config, "AI_LOCAL_CACHE_RAM_MIB", 0) or 0))),
         ]
@@ -187,7 +200,72 @@ class LocalLlamaServerManager:
         if configured > 0:
             return configured
         cpu_count = os.cpu_count() or 4
-        return max(1, min(cpu_count, 8))
+        if cpu_count <= 4:
+            return cpu_count
+        if cpu_count <= 8:
+            return max(4, cpu_count - 2)
+        return max(4, min(cpu_count - 2, 10))
+
+    def _resolved_threads_batch(self):
+        configured = int(getattr(self.config, "AI_LOCAL_THREADS_BATCH", 0) or 0)
+        if configured > 0:
+            return configured
+        return max(self._resolved_threads(), min(os.cpu_count() or 4, 8))
+
+    def _resolved_context(self):
+        configured = int(getattr(self.config, "AI_LOCAL_CONTEXT", 0) or 0)
+        if configured > 0:
+            return configured
+        memory_mib = self._system_memory_mib()
+        if memory_mib <= 8192:
+            return 2048
+        if memory_mib <= 12288:
+            return 3072
+        return 4096
+
+    def _resolved_parallel_slots(self):
+        configured = int(getattr(self.config, "AI_LOCAL_PARALLEL_SLOTS", 0) or 0)
+        if configured > 0:
+            return configured
+        memory_mib = self._system_memory_mib()
+        cpu_count = os.cpu_count() or 4
+        if memory_mib <= 12288 or cpu_count <= 8:
+            return 1
+        if memory_mib <= 24576:
+            return 2
+        return 3
+
+    def _resolved_batch_size(self):
+        configured = int(getattr(self.config, "AI_LOCAL_BATCH_SIZE", 0) or 0)
+        if configured > 0:
+            return configured
+        memory_mib = self._system_memory_mib()
+        cpu_count = os.cpu_count() or 4
+        if memory_mib <= 8192 or cpu_count <= 8:
+            return 256
+        if memory_mib <= 16384:
+            return 512
+        return 1024
+
+    def _resolved_ubatch_size(self, *, batch_size):
+        configured = int(getattr(self.config, "AI_LOCAL_UBATCH_SIZE", 0) or 0)
+        if configured > 0:
+            return configured
+        memory_mib = self._system_memory_mib()
+        if memory_mib <= 8192:
+            return min(batch_size, 64)
+        return min(batch_size, 128)
+
+    def _system_memory_mib(self):
+        try:
+            page_size = int(os.sysconf("SC_PAGE_SIZE"))
+            pages = int(os.sysconf("SC_PHYS_PAGES"))
+            total = page_size * pages
+            if total > 0:
+                return max(1, total // (1024 * 1024))
+        except (AttributeError, OSError, ValueError):
+            pass
+        return 8192
 
     def _resolved_ld_library_path(self):
         candidate = self.repo_root / ".local" / "llama" / "debs" / "usr" / "lib" / "aarch64-linux-gnu"

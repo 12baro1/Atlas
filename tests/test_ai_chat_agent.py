@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ai.atlas_chat_agent import AtlasChatAgent
+from ai.atlas_chat_agent import AtlasChatAgent, DIRECT_CHAT_SYSTEM_PROMPT
 
 
 class _DummyManualService:
@@ -233,6 +233,16 @@ class _FakeClient:
         return {"message": {"content": "Devam edelim."}}
 
 
+class _StreamingClient:
+    def __init__(self):
+        self.calls = []
+
+    def stream_completion(self, *, messages, max_tokens=None):
+        self.calls.append({"messages": messages, "max_tokens": max_tokens})
+        yield {"choices": [{"delta": {"content": "Merhaba"}}]}
+        yield {"choices": [{"delta": {"content": "."}}]}
+
+
 def test_ai_chat_agent_natural_conversation_flow():
     runtime = _DummyRuntime()
     agent = AtlasChatAgent(runtime)
@@ -268,3 +278,20 @@ def test_ai_chat_agent_natural_conversation_flow():
     r8 = agent.handle("Az onceki islemin RR degeri neydi?")
     assert "RR" in r8.text or "rr" in r8.text
     assert any(call[0] == "current_signal" for call in runtime.calls)
+
+
+def test_ai_chat_agent_streams_simple_chat_without_tools():
+    runtime = _DummyRuntime()
+    agent = AtlasChatAgent(runtime)
+    client = _StreamingClient()
+    agent._client = client
+
+    chunks = []
+    result = agent.handle("Hey Atlas", on_text_delta=chunks.append)
+
+    assert result.text == "Merhaba."
+    assert chunks == ["Merhaba", "."]
+    assert len(client.calls) == 1
+    assert client.calls[0]["max_tokens"] == agent._max_tokens("simple")
+    assert client.calls[0]["messages"][0]["content"] == DIRECT_CHAT_SYSTEM_PROMPT
+    assert len(client.calls[0]["messages"]) == 2

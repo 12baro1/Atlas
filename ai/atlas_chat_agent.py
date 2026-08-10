@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from config import Config
@@ -18,6 +19,13 @@ SYSTEM_PROMPT = (
     "Manual trade islemleri icin gerekiyorsa önce uygun araclari cagir. "
     "Fiyat gerektiren kapanis/giris islemlerinde prepare_ui_action aracini kullanarak "
     "TUI popup aksiyonu iste."
+)
+
+DIRECT_CHAT_SYSTEM_PROMPT = (
+    "Sen Atlas'sin. "
+    "Turkce cevap ver. "
+    "Basit soruya tek kisa cumleyle cevap ver. "
+    "Gereksiz reasoning/thinking kullanma."
 )
 
 
@@ -41,7 +49,7 @@ class AtlasChatAgent:
     def enabled(self):
         return self._client is not None
 
-    def handle(self, user_text):
+    def handle(self, user_text, on_text_delta=None):
         text = str(user_text or "").strip()
         if not text:
             return AgentResult(text="Mesaji goremedim, tekrar yazabilir misin?")
@@ -58,10 +66,21 @@ class AtlasChatAgent:
         if not self.enabled:
             return AgentResult(text=self._fallback_disabled_message())
 
+        mode = self._request_mode(text)
+        if mode != "tool":
+            return self._handle_direct_response(mode=mode, on_text_delta=on_text_delta)
+
         tools = self._tool_specs()
         pending_action = None
+        history_limit = self._history_limit("tool")
+        max_tokens = self._max_tokens("tool")
         for _ in range(6):
-            response = self._client.create_completion(messages=self._messages, tools=tools, tool_choice="auto")
+            response = self._client_create_completion(
+                messages=self._request_messages(mode="tool", limit=history_limit, include_tools=True),
+                tools=tools,
+                tool_choice="auto",
+                max_tokens=max_tokens,
+            )
             message = response.get("message") or {}
             tool_calls = list(message.get("tool_calls") or [])
 
@@ -87,10 +106,10 @@ class AtlasChatAgent:
             content = self._extract_text(message)
             if not content:
                 content = "Su an anlamli bir cevap uretemedim."
-            self._messages.append({"role": "assistant", "content": content})
             action = self._extract_structured_action(content)
             if action is not None:
                 content = action.get("message") or ""
+            self._messages.append({"role": "assistant", "content": content})
             final_action = pending_action
             if action is not None and isinstance(action.get("action"), dict):
                 final_action = action.get("action")
@@ -526,6 +545,150 @@ class AtlasChatAgent:
                 if isinstance(block, dict) and block.get("type") == "text":
                     parts.append(str(block.get("text") or ""))
             return "\n".join(part.strip() for part in parts if part.strip())
+        return ""
+
+    def _handle_direct_response(self, *, mode, on_text_delta=None):
+        messages = self._request_messages(mode=mode, limit=self._history_limit(mode), include_tools=False)
+        max_tokens = self._max_tokens(mode)
+        text_parts = []
+        streamed = False
+
+        stream = self._client_stream_completion(messages=messages, max_tokens=max_tokens)
+        if stream is not None:
+            for event in stream:
+                chunk = self._extract_stream_text(event)
+                if not chunk:
+                    continue
+                streamed = True
+                text_parts.append(chunk)
+                if callable(on_text_delta):
+                    on_text_delta(chunk)
+
+        if not text_parts:
+            response = self._client_create_completion(messages=messages, max_tokens=max_tokens)
+            message = response.get("message") or {}
+            content = self._extract_text(message)
+            if content:
+                text_parts.append(content)
+                if callable(on_text_delta) and not streamed:
+                    on_text_delta(content)
+
+        content = "".join(text_parts).strip()
+        if not content:
+            content = "Su an anlamli bir cevap uretemedim."
+        self._messages.append({"role": "assistant", "content": content})
+        return AgentResult(text=content)
+
+    def _request_mode(self, text):
+        lowered = str(text or "").strip().lower()
+        if self._needs_tooling(lowered):
+            return "tool"
+        word_count = len(re.findall(r"\S+", lowered))
+        if len(lowered) <= 80 and word_count <= 12:
+            return "simple"
+        return "chat"
+
+    def _needs_tooling(self, lowered):
+        markers = (
+            "analiz",
+            "incele",
+            "sinyal",
+            "trade",
+            "islem",
+            "işlem",
+            "emir",
+            "girdim",
+            "girmedim",
+            "manual",
+            "learning",
+            "istatistik",
+            "setup",
+            "panel",
+            "journal",
+            "kaybediyor",
+            "pozisyon",
+            "kapat",
+            "close",
+            "open",
+            "goster",
+            "göster",
+        )
+        if any(marker in lowered for marker in markers):
+            return True
+        return re.search(r"\b(tp|sl|rr)\b", lowered) is not None
+
+    def _request_messages(self, *, mode, limit, include_tools):
+        history = []
+        for item in self._messages[1:]:
+            role = item.get("role")
+            if not include_tools:
+                if role == "tool":
+                    continue
+                if role == "assistant" and item.get("tool_calls"):
+                    continue
+            history.append(item)
+        if limit > 0:
+            history = history[-limit:]
+        system_prompt = SYSTEM_PROMPT if mode == "tool" else DIRECT_CHAT_SYSTEM_PROMPT
+        return [{"role": "system", "content": system_prompt}, *history]
+
+    def _history_limit(self, mode):
+        if mode == "tool":
+            return max(2, int(getattr(Config, "AI_CHAT_TOOL_HISTORY_MESSAGES", 8) or 8))
+        if mode == "simple":
+            return max(1, int(getattr(Config, "AI_CHAT_SIMPLE_HISTORY_MESSAGES", 1) or 1))
+        return max(2, int(getattr(Config, "AI_CHAT_DEFAULT_HISTORY_MESSAGES", 4) or 4))
+
+    def _max_tokens(self, mode):
+        if mode == "tool":
+            return max(32, int(getattr(Config, "AI_CHAT_TOOL_MAX_TOKENS", 160) or 160))
+        if mode == "simple":
+            return max(16, int(getattr(Config, "AI_CHAT_SIMPLE_MAX_TOKENS", 32) or 32))
+        return max(32, int(getattr(Config, "AI_CHAT_DEFAULT_MAX_TOKENS", 128) or 128))
+
+    def _client_create_completion(self, *, messages, tools=None, tool_choice="auto", max_tokens=None):
+        kwargs = {
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": tool_choice,
+        }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        try:
+            return self._client.create_completion(**kwargs)
+        except TypeError:
+            kwargs.pop("max_tokens", None)
+            return self._client.create_completion(**kwargs)
+
+    def _client_stream_completion(self, *, messages, max_tokens=None):
+        streamer = getattr(self._client, "stream_completion", None)
+        if streamer is None:
+            return None
+        kwargs = {"messages": messages}
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        try:
+            return streamer(**kwargs)
+        except TypeError:
+            kwargs.pop("max_tokens", None)
+            return streamer(**kwargs)
+
+    def _extract_stream_text(self, event):
+        if not isinstance(event, dict):
+            return ""
+        choices = event.get("choices") or []
+        if not choices:
+            return ""
+        delta = choices[0].get("delta") or choices[0].get("message") or {}
+        content = delta.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text") or ""))
+            return "".join(parts)
         return ""
 
     def _safe_json_loads(self, text):
