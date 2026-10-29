@@ -226,6 +226,7 @@ def test_notify_if_elite_accepts_execute_action_when_decision_required(monkeypat
     monkeypatch.setattr(engine_module.Config, "TELEGRAM_REQUIRE_DECISION_ACTION", True)
     monkeypatch.setenv("ATLAS_TELEGRAM_BOT_TOKEN", "dummy-token")
     monkeypatch.setattr(engine_module.Config, "TELEGRAM_BOT_TOKEN", "dummy-token")
+    monkeypatch.setattr(engine_module.Config, "TELEGRAM_ENABLED", True)
 
     engine.telegram = _DummyEngine()
 
