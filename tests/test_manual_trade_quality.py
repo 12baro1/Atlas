@@ -49,3 +49,54 @@ def test_manual_quality_blocks_negative_historical_expectancy(monkeypatch):
 
     assert result["allowed"] is False
     assert any("historical expectancy" in blocker for blocker in result["blockers"])
+
+
+def test_manual_quality_does_not_use_other_symbols_history(monkeypatch):
+    monkeypatch.setattr(Config, "TELEGRAM_HISTORICAL_MIN_TRADES", 1)
+    journal = TradeJournal()
+    trade = journal.register_trade(
+        {"symbol": "ETH/USDT:USDT", "side": "LONG", "entry": 100, "stop_loss": 99, "rr": 3},
+        symbol="ETH/USDT:USDT",
+        timestamp=1,
+    )
+    trade["status"] = "CLOSED"
+    trade["pnl_rr"] = 5.0
+    trade["result"] = "WIN"
+    trade["market_phase"] = "Expansion"
+
+    result = ManualTradeQualityGate(Config).evaluate(**_base_payload(trade_journal=journal))
+
+    assert result["historical"]["sample_size"] == 0
+    assert result["historical"]["scope"] == "no_matching_symbol_history"
+    assert any("no closed trades for symbol BTC/USDT:USDT" in warning for warning in result["warnings"])
+    assert result["historical"]["score"] == 5
+
+
+def test_manual_quality_prefers_matching_symbol_and_direction(monkeypatch):
+    monkeypatch.setattr(Config, "TELEGRAM_HISTORICAL_MIN_TRADES", 2)
+    journal = TradeJournal()
+    for index, (symbol, side, pnl_rr) in enumerate(
+        [
+            ("BTC/USDT:USDT", "LONG", 1.0),
+            ("BTC/USDT:USDT", "LONG", 1.0),
+            ("BTC/USDT:USDT", "SHORT", -1.0),
+            ("ETH/USDT:USDT", "LONG", -2.0),
+        ],
+        start=1,
+    ):
+        trade = journal.register_trade(
+            {"symbol": symbol, "side": side, "entry": 100, "stop_loss": 99, "rr": 3},
+            symbol=symbol,
+            timestamp=index,
+        )
+        trade["status"] = "CLOSED"
+        trade["pnl_rr"] = pnl_rr
+        trade["result"] = "WIN" if pnl_rr > 0 else "LOSS"
+        trade["market_phase"] = "Expansion"
+
+    result = ManualTradeQualityGate(Config).evaluate(**_base_payload(trade_journal=journal))
+
+    assert result["historical"]["sample_size"] == 2
+    assert result["historical"]["scope"] == "symbol_and_direction"
+    assert result["historical"]["expectancy"] == 1.0
+    assert result["historical"]["score"] == 15
