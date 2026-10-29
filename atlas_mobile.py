@@ -141,8 +141,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = (ROOT / "mobile" / name).read_bytes()
         except OSError:
-            self.send_bytes(500, "text/plain; charset=utf-8", b"Mobile interface files missing")
-            return
+            try:
+                # Android APK build embeds these files as Python resources.
+                from mobile_assets import ASSETS
+                body = ASSETS[name]
+            except (ImportError, KeyError):
+                self.send_bytes(500, "text/plain; charset=utf-8", b"Mobile interface files missing")
+                return
         self.send_bytes(200, content_type, body)
 
     def do_POST(self):
