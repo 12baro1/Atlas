@@ -1,5 +1,6 @@
 import os
 import sys
+import math
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -100,3 +101,20 @@ def test_manual_quality_prefers_matching_symbol_and_direction(monkeypatch):
     assert result["historical"]["scope"] == "symbol_and_direction"
     assert result["historical"]["expectancy"] == 1.0
     assert result["historical"]["score"] == 15
+
+
+def test_manual_quality_sanitizes_nan_and_infinite_inputs():
+    gate = ManualTradeQualityGate(Config)
+    result = gate.evaluate(
+        **_base_payload(
+            signal={"signal": "LONG", "confidence": float("nan"), "learning": {"matched": False}},
+            confluence={"score": float("inf")},
+            risk={"selected_rr": float("nan")},
+        )
+    )
+
+    assert isinstance(result["score"], int)
+    assert 0 <= result["score"] <= 100
+    assert all(math.isfinite(value) for value in result["components"].values())
+    assert gate._num(float("nan"), 7) == 7
+    assert gate._num(float("inf"), 9) == 9
