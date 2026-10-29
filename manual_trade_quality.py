@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 
 class ManualTradeQualityGate:
     """Score a setup before it is sent to Telegram for manual trading."""
@@ -196,9 +198,10 @@ class ManualTradeQualityGate:
 
     def _num(self, value, default=0):
         try:
-            return float(value)
-        except (TypeError, ValueError):
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
             return default
+        return number if math.isfinite(number) else default
 
     def _fmt(self, value):
         return f"{float(value):.2f}".rstrip("0").rstrip(".")
