@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 
 from config import Config
-from data_engine import ccxt
 
 
 LOGGER = logging.getLogger("atlas.app")
@@ -64,7 +63,7 @@ def _ensure_path_in_shell_rc(bin_dir):
             continue
 
 
-def run_tui(initial_symbol=None, full_scan=False):
+def run_tui(initial_symbol=None):
     try:
         from atlas_runtime import AtlasRuntime
         from atlas_tui import AtlasTUIApp
@@ -75,16 +74,24 @@ def run_tui(initial_symbol=None, full_scan=False):
         raise
 
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
-    # Terminal-only product: no AI model startup and no Telegram notifications.
+    # Force terminal-only mode even if old .env settings enable notifications.
     os.environ["ATLAS_CONSOLE_SIGNAL_PRINT_ENABLED"] = "0"
+    os.environ["ATLAS_TELEGRAM_ENABLED"] = "0"
+    os.environ["ATLAS_TELEGRAM_POLLING_ENABLED"] = "0"
+    os.environ["ATLAS_TELEGRAM_WEBHOOK_ENABLED"] = "0"
+    os.environ["ATLAS_TELEGRAM_BOT_TOKEN"] = ""
+    os.environ["ATLAS_TELEGRAM_CHAT_ID"] = ""
     Config.refresh_from_env()
+
+    runtime = AtlasRuntime(symbols=[], full_scan=False)
+    # Runtime construction can refresh settings; force the safety switches again.
     Config.TELEGRAM_ENABLED = False
     Config.TELEGRAM_POLLING_ENABLED = False
     Config.TELEGRAM_WEBHOOK_ENABLED = False
     Config.TELEGRAM_BOT_TOKEN = ""
     Config.TELEGRAM_CHAT_ID = ""
+    Config.CONSOLE_SIGNAL_PRINT_ENABLED = False
 
-    runtime = AtlasRuntime(symbols=[], full_scan=False)
     app = AtlasTUIApp(runtime, initial_symbol=initial_symbol)
     try:
         app.run()
