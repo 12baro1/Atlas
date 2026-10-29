@@ -983,7 +983,14 @@ class AtlasEngine:
         internal_structure=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
-        entry = self.entry.generate(mtf, entry_structure, fvg, orderblocks, current_price=candles[-1].close if candles else None)
+        entry = self.entry.generate(
+            mtf,
+            entry_structure,
+            fvg,
+            orderblocks,
+            current_price=candles[-1].close if candles else None,
+            allow_structure_fallback=bool(getattr(Config, "ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK", False)),
+        )
         confirmation = self.entry_confirmation.confirm(mtf, entry_structure, fvg, entry)
 
         setup_quality = self.setup_quality.evaluate(
