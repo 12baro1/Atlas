@@ -154,3 +154,17 @@ def test_partial_remaining_open_returns_open():
     out = simulate_trade_partial(100.0, 98.0, [101.0, 102.0], candles, "LONG")
     assert out["result"] == "OPEN"
     assert out["net_rr"] == 0.0
+def test_runner_applies_round_trip_fee_rate_once():
+    runner = BacktestRunner(fee_rate=0.002, partial_exits=False)
+    candles = [_candle(1, 100.0, 101.5, 100.1, 101.0)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 100.0, "stop_loss": 99.0, "tp1": 101.0, "tp2": None, "tp3": None},
+    }
+
+    trade = runner._to_trade(result, candles, entry_index=0)
+
+    # 0.2% round-trip cost at entry 100 = 0.20 price units = 0.20R.
+    assert trade is not None
+    assert trade["net_rr"] == 0.8
