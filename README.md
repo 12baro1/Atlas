@@ -1,89 +1,59 @@
 # Atlas
 
-Atlas, kripto perpetual piyasalarını analiz eden SMC tabanlı sinyal motorudur. Varsayılan kullanım analiz + terminal sonucu + isteğe bağlı Telegram bildirimi şeklindedir. Borsa emir yürütmesi kod seviyesinde kapalıdır.
+Atlas, SMC tabanlı kripto piyasası analiz aracıdır. Kullanımı tek bir terminal ekranına indirgenmiştir. **Yapay zekâ sohbeti yok, Telegram bildirimi yok, borsaya emir gönderme yok.**
 
-## 1. Android / UserLAnd kurulumu
+## Android / UserLAnd kurulumu
 
 Proje klasöründe:
 
 ```bash
 python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
-cp .env.example .env
-nano .env
-```
-
-`.env` içinde yalnızca kendi Telegram bot token'ını ve chat ID'ni yerel olarak doldur. Borsa API key/secret ekleme. Gerçek kimlik bilgilerini GitHub'a yükleme.
-
-## 2. Çalıştırma
-
-```bash
 python3 atlas_app.py --install-cli
 source ~/.bashrc
+```
+
+## Kullanım
+
+```bash
 atlas
 ```
 
-`atlas` varsayılan olarak BTC için analizi başlatır ve sonucu terminal arayüzünde gösterir. Başka bir sembol:
+Tek bir terminal ekranı açılır. Alt kısımdaki komut alanına coin veya komut yazıp Enter'a bas.
+
+- `BRC` — BRC/USDT perpetual piyasasını analiz eder.
+- `BTC`, `ETH`, `SOL` — seçilen coin'i analiz eder.
+- `işlem ver` — hacmi yüksek ilk beş USDT perpetual piyasasını analiz eder ve Atlas'ın geçerli işlem koşullarını geçen en güçlü kurulumu ekranda gösterir.
+- `yardım` — komutları gösterir.
+- `çıkış` — uygulamayı kapatır.
+
+İstersen doğrudan sembolle de açabilirsin:
 
 ```bash
+atlas BRC
 atlas ETH
-atlas SOL/USDT:USDT
 ```
 
-İlk analiz sembolünü değiştirmek için `.env` içinde:
+## İşlem seçimi nasıl çalışır?
 
-```env
-ATLAS_DEFAULT_SYMBOL=ETH
-```
+`işlem ver` komutu hacme göre ilk beş uygun piyasayı tarar. Yalnızca karar motorunun `EXECUTE` olarak onayladığı, LONG/SHORT yönü ve geçerli giriş/stop/RR bilgileri bulunan kurulumlar aday kabul edilir. Aday yoksa Atlas işlem uydurmak yerine beklemeyi söyler.
 
-Tüm sembolleri sürekli tarama yalnızca açıkça istendiğinde:
+Bu tarama tüm coinleri kapsamlı biçimde taramaz; ilk beş yüksek hacimli piyasayla sınırlıdır. Sıralama puanı kazanma olasılığı değildir ve kâr garantisi vermez.
+
+## Güvenlik ve veri
+
+- Atlas borsaya emir göndermez; yalnızca analiz yapar.
+- Telegram bildirimleri ve Telegram servis başlangıcı kapalıdır.
+- Sohbet modeli/AI başlatılmaz veya analiz için kullanılmaz.
+- Piyasa mumları herkese açık borsa piyasa verisinden alınır; borsa alım-satım API anahtarı gerekmez.
+- Canlı piyasa verisi için internet bağlantısı gerekir.
+- Analiz koşulları oluşmazsa sonuç BEKLE/ATLA olabilir. Zorla sinyal üretmez.
+
+## Test ve backtest
 
 ```bash
-atlas --full-scan
-```
-
-## 3. Arka planda çalışma
-
-```bash
-atlas --background
-atlas --status
-atlas --logs
-atlas --restart
-atlas --stop
-```
-
-Arka plan tarama aralığı ve sembol sınırı:
-
-```bash
-ATLAS_SCAN_INTERVAL_SECONDS=900 atlas --background
-ATLAS_MAX_SYMBOLS=50 atlas --full-scan
-```
-
-## 4. Backtest ve rapor
-
-```bash
-python3 backtest.py --symbol BTC/USDT:USDT --days 90
-python3 backtest.py --symbols BTC/USDT:USDT,ETH/USDT:USDT --days 90
-python3 report.py
-python3 report.py --detail
 python3 -m pytest -q
+python3 backtest.py --symbol BTC/USDT:USDT --days 90
 ```
 
-Backtest sonuçları gelecekteki kârı garanti etmez. Komisyon, kayma, kapanmış mum kullanımı ve ayrı test dönemi doğrulanmadan gerçek sermayeyle işlem yapılmamalıdır.
-
-## 5. Telegram manuel işlem günlüğü
-
-```
-/start
-/trade help
-/trade performance
-```
-
-Sinyal ve manuel işlem sonuçları farklı kaynaklar olarak tutulur. Yeterli örnek oluşana kadar öğrenme katmanının performansı kanıtladığı varsayılmaz.
-
-## Güvenlik
-
-- Atlas borsaya otomatik emir göndermez; bu güvenlik kilidi environment değişkenleriyle açılamaz.
-- Daha önce repoda bulunan `.env` dosyasındaki gerçek bilgiler ifşa edilmiş kabul edilmeli; eski token/key'leri iptal edip yenilerini yerel ortamda kullan.
-- `.env` dosyasını, veritabanlarını ve logları Git'e ekleme.
-- `atlas --full-scan` çok sayıda sembol tarar; varsayılan `atlas` yalnızca seçili tek sembolle başlar.
+Testlerin geçmesi kârlılık kanıtı değildir. Gerçek sermayeden önce komisyon, kayma, drawdown ve ayrı test dönemlerini değerlendir.
