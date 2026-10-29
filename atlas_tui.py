@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import re
 import threading
-from datetime import datetime
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
@@ -12,6 +12,14 @@ from textual.widgets import Footer, Header, Input, Static
 from data_engine import exchange
 from universe_engine import select_symbols
 from utils.signal_card import build_signal_card, format_card_text
+
+
+_SYMBOL_INPUT_RE = re.compile(r"[A-Z0-9]{2,24}(?:/USDT(?::USDT)?)?\Z")
+
+
+def _is_symbol_input(value: str) -> bool:
+    """Accept a plain coin ticker or an explicit USDT perpetual symbol."""
+    return bool(_SYMBOL_INPUT_RE.fullmatch(str(value or "").strip().upper()))
 
 
 def _best_symbols(limit=5):
@@ -135,6 +143,12 @@ class AtlasTUIApp(App):
             return
         if normalized in {"çıkış", "cikis", "exit", "quit"}:
             self.exit()
+            return
+        if not _is_symbol_input(command):
+            self._show(
+                "KOMUT TANINMADI\n\n"
+                "Bir coin sembolü (BTC, ETH, BRC), 'işlem ver' veya 'yardım' yaz."
+            )
             return
         self._busy = True
         self._show(f"{command.upper()}\nAnaliz ediliyor…\nVeri kaynağına bağlanılıyor.")
