@@ -235,7 +235,7 @@ class SignalEngine:
         return clamp(adjusted)
 
     def _normalize_confluence_score(self, raw_score):
-        """Confluence skorunu 0-100 confidence aralığına kalibre eder."""
+        """Normalize heuristic confluence to 0-100; this is not a calibrated win probability."""
         score = float(raw_score or 0)
 
         if score <= 60:

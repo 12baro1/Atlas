@@ -397,3 +397,17 @@ def test_trade_feedback_keyboard_supports_signal_id_payload():
     )
     callback_data = keyboard["inline_keyboard"][0][0]["callback_data"]
     assert callback_data.startswith("trade_entered|ATL-20260810-000123|")
+
+def test_telegram_labels_heuristic_confidence_as_score_not_probability():
+    message = TelegramEngine().format_signal(
+        {
+            "symbol": "BTC/USDT:USDT",
+            "signal": {"signal": "LONG", "grade": "A", "confidence": 92},
+            "entry": {"direction": "LONG", "entry": 100.0, "stop_loss": 99.0},
+            "risk": {"entry": 100.0, "stop_loss": 99.0, "selected_rr": 3.0, "tp1": 101.0, "tp2": 102.0, "tp3": 103.0},
+            "decision": {"action": "EXECUTE", "score": 85},
+        }
+    )
+
+    assert "Confidence score: 92/100" in message
+    assert "Confidence: 92%" not in message

@@ -1,29 +1,28 @@
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import ccxt
-
-from core.candle import convert
+from core.candle import Candle
 from utils.atr import atr
 
-exchange = ccxt.bybit({
-    "options":{"defaultType":"swap"},
-    "enableRateLimit":True
-})
 
-markets = exchange.load_markets()
-symbol = next((item for item in markets if item.endswith("/USDT:USDT")), "BTC/USDT:USDT")
+def _flat_candles(count=20):
+    return [
+        Candle(
+            time=index * 15 * 60 * 1000,
+            open=100.0,
+            high=102.0,
+            low=98.0,
+            close=100.0,
+            volume=10.0,
+        )
+        for index in range(count)
+    ]
 
-raw = exchange.fetch_ohlcv(
-    symbol,
-    "15m",
-    limit=100
-)
 
-candles = convert(raw)
+def test_atr_uses_true_range_without_network_access():
+    candles = _flat_candles()
 
-print()
-
-print("ATR =", round(atr(candles),2))
-
+    assert atr(candles, period=14) == 4.0
+    assert atr(candles, period=21) == 0

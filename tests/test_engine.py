@@ -1,51 +1,53 @@
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import ccxt
-
-from core.candle import convert
+from core.candle import Candle
 from core.market_structure_engine import MarketStructureEngine
 
-exchange=ccxt.bybit({
-    "options":{"defaultType":"swap"},
-    "enableRateLimit":True
-})
 
-markets = exchange.load_markets()
-symbol = next((item for item in markets if item.endswith("/USDT:USDT")), "BTC/USDT:USDT")
+def _synthetic_candles(count=80):
+    """Build deterministic OHLCV data so tests never depend on a live exchange."""
+    candles = []
+    for index in range(count):
+        center = 100.0 + ((index % 12) - 6) * 1.5
+        open_price = center - 0.25
+        close_price = center + 0.25
+        candles.append(
+            Candle(
+                time=index * 15 * 60 * 1000,
+                open=open_price,
+                high=center + 1.0,
+                low=center - 1.0,
+                close=close_price,
+                volume=100.0 + index,
+            )
+        )
+    return candles
 
-raw=exchange.fetch_ohlcv(
-    symbol,
-    "15m",
-    limit=500
-)
 
-candles=convert(raw)
+def test_market_structure_pipeline_runs_offline():
+    candles = _synthetic_candles()
+    engine = MarketStructureEngine()
 
-engine=MarketStructureEngine()
+    engine.find_pivots(candles, left=2, right=2)
+    engine.calculate_strength(candles)
+    engine.merge_pivots()
+    engine.filter_noise(min_strength=1)
+    pivots = engine.validate_sequence()
 
-engine.find_pivots(candles)
+    assert isinstance(pivots, list)
+    assert all(pivot.kind in {"HIGH", "LOW"} for pivot in pivots)
+    assert all(0 <= pivot.index < len(candles) for pivot in pivots)
 
-engine.calculate_strength(candles)
 
-engine.merge_pivots()
+def test_find_pivots_resets_previous_results():
+    candles = _synthetic_candles()
+    engine = MarketStructureEngine()
 
-engine.filter_noise()
+    first = engine.find_pivots(candles, left=2, right=2)
+    second = engine.find_pivots(candles, left=2, right=2)
 
-pivots=engine.validate_sequence()
-
-print()
-
-print("Toplam Pivot:",len(pivots))
-
-print()
-
-for p in pivots[-20:]:
-
-    print(
-        p.kind,
-        round(p.price,2),
-        p.strength
-    )
-
+    assert len(second) == len(first)
+    assert second is engine.pivots

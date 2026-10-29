@@ -235,8 +235,12 @@ class BacktestRunner:
         total = len(candles)
         warmup = 300
         for idx in range(warmup, total, max(1, step)):
-            window = {tf: candles[: idx + 1] if tf == "15m" else _window_up_to(data.get(tf), candles[idx].time, tf)
-                      for tf in ("15m", "1h", "4h", "1d", "1w")}
+            # Signal decision is made at the close of the current 15m candle.
+            decision_time_ms = candles[idx].time + 15 * 60 * 1000
+            window = {
+                tf: candles[: idx + 1] if tf == "15m" else _window_up_to(data.get(tf), decision_time_ms, tf)
+                for tf in ("15m", "1h", "4h", "1d", "1w")
+            }
             window["symbol"] = data.get("symbol", "SYMBOL")
 
             result = self.analyze_fn(window) if self.analyze_fn else on_signal(window)
@@ -300,7 +304,8 @@ class BacktestRunner:
             return None
 
         risk_distance = abs(entry_price - stop)
-        fee_rr = (abs(entry_price) * self.fee_rate * 2) / risk_distance if risk_distance > 0 else self.fee_rate * 2
+        # fee_rate is ROUND-TRIP cost (same meaning as Config.ROUND_TRIP_COST_RATE).
+        fee_rr = (abs(entry_price) * self.fee_rate) / risk_distance if risk_distance > 0 else self.fee_rate
         base_rr = outcome.get("net_rr", 0.0)
         if not use_partial:
             if outcome.get("result") == "WIN":

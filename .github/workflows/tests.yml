@@ -1,0 +1,40 @@
+name: Atlas checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: atlas-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+      - name: Compile Python files
+        run: python -m compileall -q .
+      - name: Run test suite
+        env:
+          ATLAS_AUTO_TRADING_ENABLED: "0"
+          ATLAS_TELEGRAM_BOT_TOKEN: ""
+          ATLAS_TELEGRAM_CHAT_ID: ""
+        run: python -m pytest -q

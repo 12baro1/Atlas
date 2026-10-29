@@ -180,11 +180,12 @@ class AtlasEngine:
         # LOOK-AHEAD GUARD (canli + backtest ortak kural):
         # Ust zaman dilimi mumlari yalnizca TAMAMEN KAPANDIKTAN sonra analize
         # girer. Olusmakta olan HTF mumunun OHLC'si ileriye donuk bilgi saklar.
-        # Referans: son 15m mumunun time'ı — canlı ve backtest aynı `timing`
-        # kuralini kullanir, boylece gelecekteki HTF verisi gecmis karara sızmaz.
-        ref_ms = candles[-1].time if candles else None
+        # Referans: son kapalı 15m mumunun KAPANIŞ zamanı. Canlı ve backtest
+        # aynı karar anını kullanır; kapanış sınırındaki HTF mumları gecikmez,
+        # oluşmakta olan HTF mumları da geleceğe dönük bilgi sızdıramaz.
+        from timing import TF_PERIOD_MS, closed_htf_candles
+        ref_ms = candles[-1].time + TF_PERIOD_MS["15m"] if candles else None
         if ref_ms is not None:
-            from timing import closed_htf_candles
             h1 = closed_htf_candles(h1, ref_ms, "1h") if h1 else h1
             weekly = closed_htf_candles(weekly, ref_ms, "1w")
             daily = closed_htf_candles(daily, ref_ms, "1d")

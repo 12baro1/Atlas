@@ -135,7 +135,12 @@ def format_card_text(card):
         lines.append(f"  TP1/2/3    : {' / '.join(str(t) for t in card['tp_levels'])}")
     lines.append(f"  RR         : {card['rr']}")
     lines.append(f"  Kalite     : {card['setup_quality']}/100  (Confluence {card['confluence']})")
-    lines.append(f"  Piyasa Fz  : {card['market_phase']}  |  Sinyal {card['signal']} ({card['confidence']}%)")
+    confidence = card.get("confidence")
+    try:
+        confidence_text = f"{float(confidence):g}"
+    except (TypeError, ValueError):
+        confidence_text = "-"
+    lines.append(f"  Piyasa Fz  : {card['market_phase']}  |  Sinyal {card['signal']} (skor {confidence_text}/100)")
     if card["selected_tp"]:
         lines.append(f"  Hedef TP   : {card['selected_tp']}")
     if card["position_size"]:

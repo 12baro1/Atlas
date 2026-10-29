@@ -98,7 +98,9 @@ class BybitExecutionEngine:
         return bool(key and secret)
 
     def enabled(self) -> bool:
-        return bool(getattr(self.config, "AUTO_TRADING_ENABLED", False))
+        # Atlas is analysis-only. Do not allow even injected/test config objects
+        # to activate exchange order execution.
+        return False
 
     def is_demo(self) -> bool:
         return bool(getattr(self.config, "BYBIT_DEMO_TRADING", False))

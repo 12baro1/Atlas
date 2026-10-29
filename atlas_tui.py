@@ -641,10 +641,21 @@ class AtlasTUIApp(App):
         thread.start()
 
     def _chat_background_worker(self, symbol_text):
+        # Startup analysis must not depend on a local/remote LLM being online.
         try:
-            response = self.assistant.handle_user_message(f"{symbol_text} analiz et")
+            analyzed = self.runtime.analyze_symbol(symbol_text, force_refresh=True)
+            if not analyzed.get("ok"):
+                reason = analyzed.get("error") or "unknown_error"
+                response = {
+                    "responses": [f"{symbol_text}: ANALİZ TAMAMLANAMADI", f"Neden: {reason}"],
+                    "action": None,
+                }
+            else:
+                from utils.signal_card import build_signal_card, format_card_text
+                card = build_signal_card(analyzed.get("result") or {})
+                response = {"responses": [format_card_text(card)], "action": None}
         except Exception as exc:
-            response = {"responses": [f"Analiz sirasinda hata: {exc}"], "action": None}
+            response = {"responses": [f"Analiz sırasında hata: {exc}"], "action": None}
         self.call_from_thread(self._apply_chat_response, response)
 
     async def _run_chat_message(self, message):

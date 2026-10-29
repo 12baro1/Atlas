@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from config import Config
+from config import Config, _env_or_rc
 from data_engine import ccxt, exchange
 from universe_engine import select_symbols
 
@@ -188,7 +188,12 @@ def run_tui(initial_symbol=None, full_scan=False):
 
 def build_parser():
     parser = argparse.ArgumentParser(prog="atlas", description="Atlas terminal application")
-    parser.add_argument("symbol", nargs="?", help="start TUI and analyze this symbol first (e.g. BTC or BTC/USDT:USDT)")
+    parser.add_argument(
+        "symbol",
+        nargs="?",
+        default=(_env_or_rc("ATLAS_DEFAULT_SYMBOL", "BTC").strip() or "BTC"),
+        help="symbol to analyze first (default: ATLAS_DEFAULT_SYMBOL or BTC; e.g. BTC or ETH)",
+    )
     parser.add_argument("--background", action="store_true", help="run scanner in background via run_bot.sh")
     parser.add_argument("--stop", action="store_true", help="stop background scanner")
     parser.add_argument("--status", action="store_true", help="background scanner status")

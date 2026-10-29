@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.candle import Candle
 from timing import closed_htf_candles, TF_PERIOD_MS
-from backtest_runner import _window_up_to
+from backtest_runner import _window_up_to, BacktestRunner
 
 
 def _candle(t, o=100, h=101, l=99, c=100):
@@ -65,3 +65,35 @@ def test_backtest_runner_uses_same_rule():
 def test_empty_inputs():
     assert closed_htf_candles([], 123, "1h") == []
     assert closed_htf_candles(None, 123, "1h") == []
+def test_closed_m15_excludes_currently_forming_candle():
+    # The 10:00 candle closes at 10:15; at 10:12 it must not enter analysis.
+    candles = [
+        _candle(10 * 3600_000 - 15 * 60_000),
+        _candle(10 * 3600_000),
+    ]
+    ref = 10 * 3600_000 + 12 * 60_000
+    out = closed_htf_candles(candles, ref, "15m")
+    assert [c.time for c in out] == [10 * 3600_000 - 15 * 60_000]
+
+
+def test_closed_m15_includes_candle_at_exact_close_boundary():
+    candles = [_candle(10 * 3600_000)]
+    ref = 10 * 3600_000 + 15 * 60_000
+    assert [c.time for c in closed_htf_candles(candles, ref, "15m")] == [10 * 3600_000]
+
+def test_backtest_runner_includes_htf_candle_closed_at_15m_close():
+    m15_period = TF_PERIOD_MS["15m"]
+    m15 = [_candle(i * m15_period) for i in range(301)]
+    decision_time = m15[-1].time + m15_period
+    h4 = [_candle(decision_time - TF_PERIOD_MS["4h"])]
+
+    captured = {}
+
+    def analyze(window):
+        captured["h4"] = window["4h"]
+        return None
+
+    runner = BacktestRunner(analyze_fn=analyze)
+    runner.run({"symbol": "BTC/USDT:USDT", "15m": m15, "4h": h4}, step=1)
+
+    assert captured["h4"] == h4

@@ -67,7 +67,7 @@ class TelegramEngine:
             f"TP3: {self._fmt(tp3)} ({self._percent_gain(entry_price, tp3, direction)})",
             f"RR: {self._fmt(rr)}",
             f"Grade: {signal.get('grade', '-')}",
-            f"Confidence: {signal.get('confidence', 0)}%",
+            f"Confidence score: {signal.get('confidence', 0)}/100",
             f"Decision: {decision.get('action', '-')}",
             f"Decision Score: {self._fmt(decision.get('score', '-'))}",
             f"Manual Score: {self._fmt(manual_quality.get('score', '-'))}/100 ({manual_quality.get('grade', '-')})",
@@ -120,7 +120,7 @@ class TelegramEngine:
         msg.append(f"🟢 Signal : {signal.get('signal', 'WAIT')}")
         msg.append(f"⭐ Grade : {signal.get('grade', '-')}")
         msg.append(f"💪 Strength : {signal.get('strength', '-')}")
-        msg.append(f"🎯 Confidence : {signal.get('confidence', 0)}%")
+        msg.append(f"🎯 Confidence score : {signal.get('confidence', 0)}/100")
         msg.append("")
 
         if market_phase:

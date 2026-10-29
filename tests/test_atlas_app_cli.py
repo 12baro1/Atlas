@@ -58,3 +58,24 @@ def test_install_cli_creates_symlink(monkeypatch, tmp_path):
 
     mode = os.stat(source).st_mode
     assert mode & stat.S_IXUSR
+
+
+def test_parser_defaults_to_btc_for_first_analysis(monkeypatch):
+    monkeypatch.delenv("ATLAS_DEFAULT_SYMBOL", raising=False)
+    args = build_parser().parse_args([])
+    assert args.symbol == "BTC"
+
+
+def test_parser_uses_configured_default_symbol(monkeypatch):
+    monkeypatch.setenv("ATLAS_DEFAULT_SYMBOL", "ETH")
+    args = build_parser().parse_args([])
+    assert args.symbol == "ETH"
+
+def test_parser_reads_default_symbol_from_dotenv(monkeypatch, tmp_path):
+    monkeypatch.delenv("ATLAS_DEFAULT_SYMBOL", raising=False)
+    (tmp_path / ".env").write_text("ATLAS_DEFAULT_SYMBOL=SOL\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    args = build_parser().parse_args([])
+
+    assert args.symbol == "SOL"
