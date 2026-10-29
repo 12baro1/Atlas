@@ -12,16 +12,23 @@ def _num(value, digits=2):
         return None
 
 
-def _verdict(decision, signal):
+def _verdict(decision, signal, entry):
     """Tek bir net karar döndürür: AL, SAT, BEKLE veya ATLA."""
     action = str((decision or {}).get("action", "WAIT") or "").upper()
     signal_dir = str((signal or {}).get("signal", "WAIT") or "").upper()
+    entry_type = str((entry or {}).get("entry_type") or "").upper()
+    entry_reason = str((entry or {}).get("entry_type_reason") or "").lower()
 
     if action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and signal_dir in ("LONG", "SHORT"):
         return ("AL" if signal_dir == "LONG" else "SAT", signal_dir, None)
     if action == "WAIT":
         wait_reason = (signal or {}).get("wait_reason") or (decision or {}).get("reason")
         return ("BEKLE", None, wait_reason)
+
+    # A pending LIMIT pullback is not an executable trade or a broken setup.
+    if entry_type == "LIMIT" and "wait for pullback" in entry_reason:
+        return ("BEKLE", None, (entry or {}).get("entry_type_reason") or "Geri çekilme bekleniyor")
+
     return ("ATLA", None, (decision or {}).get("reason"))
 
 
@@ -52,7 +59,12 @@ def build_signal_card(result):
     entry = analysis.get("entry") or {}
     symbol = result.get("symbol", "UNKNOWN")
 
-    verdict_label, direction, verdict_reason = _verdict(decision, signal)
+    verdict_label, direction, verdict_reason = _verdict(decision, signal, entry)
+    pending_pullback = (
+        verdict_label == "BEKLE"
+        and str(entry.get("entry_type") or "").upper() == "LIMIT"
+        and "wait for pullback" in str(entry.get("entry_type_reason") or "").lower()
+    )
 
     card = {
         "symbol": symbol,
@@ -103,9 +115,22 @@ def build_signal_card(result):
     card["capital_at_risk"] = _num(risk.get("capital_at_risk"))
 
     card["critical_blocks"] = list(decision.get("critical_blockers") or [])
+    if pending_pullback:
+        # These are downstream consequences of a pending entry, not separate faults.
+        pending_entry_blocks = {
+            "Signal direction invalid",
+            "Entry invalid",
+            "Risk cannot be calculated",
+            "RR below quality minimum: None < 3",
+        }
+        card["critical_blocks"] = [
+            item for item in card["critical_blocks"]
+            if item not in pending_entry_blocks
+            and not str(item).startswith("RR below quality minimum:")
+        ]
     card["soft_adjustments"] = _label_items(decision, "soft_blockers")
     card["bonuses"] = _label_items(decision, "bonuses")
-    if verdict_label in ("ATLA", "BEKLE") and verdict_reason:
+    if verdict_label in ("ATLA", "BEKLE") and verdict_reason and verdict_reason not in card["critical_blocks"]:
         card["critical_blocks"].append(verdict_reason)
 
     card["summary"] = _summarize(card)
