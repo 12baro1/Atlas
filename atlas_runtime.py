@@ -425,6 +425,18 @@ class AtlasRuntime:
 
             with self._analysis_lock:
                 data = get_market_data(symbol, force_refresh=force_refresh)
+                # Never base live SMC confirmation on a still-forming 15m candle.
+                # Backtests use historical candles and do not pass through this live-runtime filter.
+                from timing import closed_htf_candles
+                now_ms = int(time.time() * 1000)
+                candles_15m = data.get("15m") or data.get("15M") or []
+                closed_15m = closed_htf_candles(candles_15m, now_ms, "15m")
+                if not closed_15m:
+                    self._inc("skipped")
+                    self._log(f"WAIT {symbol}: no fully closed 15m candle available")
+                    return {"ok": False, "symbol": symbol, "error": "no_closed_15m_candle"}
+                data = dict(data)
+                data["15m"] = closed_15m
                 if universe:
                     data["correlation_universe"] = universe
 
