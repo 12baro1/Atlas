@@ -45,3 +45,17 @@ def test_entry_engine_rejects_wrong_side_stop_loss():
 
     if result["entry"] is not None and result["stop_loss"] is not None:
         assert result["stop_loss"] > result["entry"] or result["valid"] is False
+
+
+def test_entry_engine_does_not_infer_direction_from_15m_when_mtf_is_wait():
+    result = EntryEngine().generate(
+        mtf={"entry": "WAIT"},
+        structure=[{"label": "HH", "kind": "HIGH", "price": 101.0}],
+        fvg=[{"type": "BULLISH", "from": 99.8, "to": 100.0, "filled": False}],
+        orderblocks=[],
+        current_price=100.0,
+    )
+
+    assert result["valid"] is False
+    assert result["direction"] == "NONE"
+    assert result["reason"] == "No MTF direction"
