@@ -300,7 +300,8 @@ class BacktestRunner:
             return None
 
         risk_distance = abs(entry_price - stop)
-        fee_rr = (abs(entry_price) * self.fee_rate * 2) / risk_distance if risk_distance > 0 else self.fee_rate * 2
+        # fee_rate is ROUND-TRIP cost (same meaning as Config.ROUND_TRIP_COST_RATE).
+        fee_rr = (abs(entry_price) * self.fee_rate) / risk_distance if risk_distance > 0 else self.fee_rate
         base_rr = outcome.get("net_rr", 0.0)
         if not use_partial:
             if outcome.get("result") == "WIN":
