@@ -40,6 +40,7 @@ class EntryEngine:
             "stop_loss": None,
             "entry_type": "NONE",
             "entry_type_reason": "No valid directional setup",
+            "entry_zone_crossed": False,
             "score": 0,
             "reason": "",
             "checks": []
@@ -155,10 +156,15 @@ class EntryEngine:
                     result["entry_type_reason"] = "Price is within 0.4% of the selected bullish POI"
                     result["score"] += 10
                     result["checks"].append("✓ Market Entry Near POI")
-                else:
+                elif limit_entry is not None and current_price > limit_entry:
                     result["entry"] = limit_entry
                     result["entry_type"] = "LIMIT"
                     result["entry_type_reason"] = "Wait for pullback to bullish POI"
+                else:
+                    result["entry"] = None
+                    result["entry_type"] = "NONE"
+                    result["entry_type_reason"] = "Bullish POI already crossed; wait for a fresh setup"
+                    result["entry_zone_crossed"] = True
             else:
                 result["entry"] = limit_entry
                 result["entry_type"] = "LIMIT" if limit_entry is not None else "NONE"
@@ -180,16 +186,21 @@ class EntryEngine:
                     result["entry_type_reason"] = "Price is within 0.4% of the selected bearish POI"
                     result["score"] += 10
                     result["checks"].append("✓ Market Entry Near POI")
-                else:
+                elif limit_entry is not None and current_price < limit_entry:
                     result["entry"] = limit_entry
                     result["entry_type"] = "LIMIT"
                     result["entry_type_reason"] = "Wait for pullback to bearish POI"
+                else:
+                    result["entry"] = None
+                    result["entry_type"] = "NONE"
+                    result["entry_type_reason"] = "Bearish POI already crossed; wait for a fresh setup"
+                    result["entry_zone_crossed"] = True
             else:
                 result["entry"] = limit_entry
                 result["entry_type"] = "LIMIT" if limit_entry is not None else "NONE"
                 result["entry_type_reason"] = "Bearish POI limit level" if limit_entry is not None else "No valid bearish POI"
 
-        if result["entry"] is None or result["stop_loss"] is None:
+        if (result["entry"] is None or result["stop_loss"] is None) and not result.get("entry_zone_crossed"):
             fallback_entry, fallback_sl = self._structure_fallback_levels(direction, structure)
             if fallback_entry is not None and fallback_sl is not None:
                 result["entry"] = fallback_entry
