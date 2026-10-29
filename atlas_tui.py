@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import re
 import threading
-from datetime import datetime
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
@@ -12,6 +12,21 @@ from textual.widgets import Footer, Header, Input, Static
 from data_engine import exchange
 from universe_engine import select_symbols
 from utils.signal_card import build_signal_card, format_card_text
+
+
+_SYMBOL_INPUT_RE = re.compile(r"[A-Z0-9]{2,24}(?:/USDT(?::USDT)?)?\Z")
+_BEST_TRADE_COMMANDS = {"işlem ver", "islem ver", "en iyi işlem", "en iyi islem", "best", "best trade"}
+
+
+def _is_symbol_input(value: str) -> bool:
+    """Accept a plain coin ticker or an explicit USDT perpetual symbol."""
+    return bool(_SYMBOL_INPUT_RE.fullmatch(str(value or "").strip().upper()))
+
+
+def _is_supported_input(value: str) -> bool:
+    """Recognize supported commands before treating input as a coin ticker."""
+    normalized = str(value or "").strip().lower()
+    return normalized in _BEST_TRADE_COMMANDS or _is_symbol_input(value)
 
 
 def _best_symbols(limit=5):
@@ -136,6 +151,12 @@ class AtlasTUIApp(App):
         if normalized in {"çıkış", "cikis", "exit", "quit"}:
             self.exit()
             return
+        if not _is_supported_input(command):
+            self._show(
+                "KOMUT TANINMADI\n\n"
+                "Bir coin sembolü (BTC, ETH, BRC), 'işlem ver' veya 'yardım' yaz."
+            )
+            return
         self._busy = True
         self._show(f"{command.upper()}\nAnaliz ediliyor…\nVeri kaynağına bağlanılıyor.")
         threading.Thread(target=self._run_command, args=(command,), daemon=True).start()
@@ -143,7 +164,7 @@ class AtlasTUIApp(App):
     def _run_command(self, command: str) -> None:
         try:
             lowered = command.strip().lower()
-            if lowered in {"işlem ver", "islem ver", "en iyi işlem", "en iyi islem", "best", "best trade"}:
+            if lowered in _BEST_TRADE_COMMANDS:
                 result_text = self._find_best_trade()
             else:
                 outcome = self.runtime.analyze_symbol(command, force_refresh=True)

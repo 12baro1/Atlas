@@ -39,3 +39,26 @@ def test_best_symbols_ignores_missing_or_invalid_volumes(monkeypatch):
     monkeypatch.setattr(atlas_tui.exchange, "fetch_tickers", lambda symbols: tickers)
 
     assert atlas_tui._best_symbols(limit=5) == []
+
+
+def test_symbol_input_accepts_tickers_and_usdt_perpetual_symbols():
+    assert atlas_tui._is_symbol_input("BTC")
+    assert atlas_tui._is_symbol_input("1000PEPE")
+    assert atlas_tui._is_symbol_input("btc/usdt:usdt")
+    assert atlas_tui._is_symbol_input("ETH/USDT")
+
+
+def test_symbol_input_rejects_free_text_and_malformed_symbols():
+    assert not atlas_tui._is_symbol_input("bana işlem ver")
+    assert not atlas_tui._is_symbol_input("BTC USDT")
+    assert not atlas_tui._is_symbol_input("")
+    assert not atlas_tui._is_symbol_input("BTC; rm -rf")
+
+
+def test_supported_input_accepts_best_trade_commands():
+    for command in ("işlem ver", "islem ver", "en iyi işlem", "best trade"):
+        assert atlas_tui._is_supported_input(command)
+
+
+def test_supported_input_rejects_unknown_free_text():
+    assert not atlas_tui._is_supported_input("bana işlem ver")
