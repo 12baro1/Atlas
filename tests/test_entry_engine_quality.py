@@ -59,3 +59,35 @@ def test_entry_engine_does_not_infer_direction_from_15m_when_mtf_is_wait():
     assert result["valid"] is False
     assert result["direction"] == "NONE"
     assert result["reason"] == "No MTF direction"
+
+
+def test_entry_engine_blocks_far_price_after_bullish_poi_was_crossed():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 99.5}],
+        fvg=[{"type": "BULLISH", "from": 99.8, "to": 100.0, "filled": False}],
+        orderblocks=[],
+        current_price=98.0,
+    )
+
+    assert result["valid"] is False
+    assert result["entry"] is None
+    assert result["entry_type"] == "NONE"
+    assert result["entry_zone_crossed"] is True
+    assert "already crossed" in result["entry_type_reason"]
+
+
+def test_entry_engine_blocks_far_price_after_bearish_poi_was_crossed():
+    result = EntryEngine().generate(
+        mtf={"entry": "SHORT"},
+        structure=[{"label": "LL", "kind": "LOW", "price": 98.0}],
+        fvg=[{"type": "BEARISH", "from": 100.0, "to": 99.8, "filled": False}],
+        orderblocks=[],
+        current_price=102.0,
+    )
+
+    assert result["valid"] is False
+    assert result["entry"] is None
+    assert result["entry_type"] == "NONE"
+    assert result["entry_zone_crossed"] is True
+    assert "already crossed" in result["entry_type_reason"]
