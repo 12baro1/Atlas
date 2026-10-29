@@ -220,6 +220,17 @@ class EntryEngine:
             else:
                 result["checks"].append("✗ Invalid SL")
 
+        # Directional SL guard: LONG stops must be below entry; SHORT stops above.
+        if result["entry"] is not None and result["stop_loss"] is not None:
+            if direction == "LONG" and result["stop_loss"] >= result["entry"]:
+                result["reason"] = "Invalid LONG: stop-loss must be below entry"
+                result["checks"].append("✗ SL direction")
+                return result
+            if direction == "SHORT" and result["stop_loss"] <= result["entry"]:
+                result["reason"] = "Invalid SHORT: stop-loss must be above entry"
+                result["checks"].append("✗ SL direction")
+                return result
+
         result["valid"] = (
             result["score"] >= 60
             and result["entry"] is not None
