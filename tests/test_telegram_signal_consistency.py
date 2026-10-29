@@ -61,6 +61,8 @@ def test_telegram_message_hides_levels_when_entry_invalid():
 
 def test_notify_if_elite_skips_invalid_entry_before_sending(monkeypatch):
     engine = AtlasEngine()
+    import engine as engine_module
+    monkeypatch.setattr(engine_module.Config, "TELEGRAM_ENABLED", True)
 
     called = {"count": 0}
 
@@ -77,6 +79,8 @@ def test_notify_if_elite_skips_invalid_entry_before_sending(monkeypatch):
     monkeypatch.setattr(telegram_module, "TelegramBot", lambda: _DummyBot())
 
     engine.telegram = _DummyEngine()
+
+    monkeypatch.setattr(engine_module.Config, "TELEGRAM_ENABLED", True)
 
     sent = engine._notify_if_elite(
         data={"symbol": "AGLD/USDT:USDT"},
@@ -154,6 +158,8 @@ def test_telegram_message_compact_mode_reduces_clutter():
 
 def test_notify_if_elite_deduplicates_same_signal(monkeypatch):
     engine = AtlasEngine()
+    import engine as engine_module
+    monkeypatch.setattr(engine_module.Config, "TELEGRAM_ENABLED", True)
 
     called = {"count": 0}
 
