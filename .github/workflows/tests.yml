@@ -2,12 +2,16 @@ name: Atlas checks
 
 on:
   push:
-    branches: [main, "fix/**"]
+    branches: [main]
   pull_request:
     branches: [main]
 
 permissions:
   contents: read
+
+concurrency:
+  group: atlas-checks-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   tests:
