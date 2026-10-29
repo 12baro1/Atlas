@@ -31,7 +31,7 @@ class EntryEngine:
             entry = stop_loss * 0.998
         return entry, stop_loss
 
-    def generate(self, mtf, structure, fvg, orderblocks, current_price=None):
+    def generate(self, mtf, structure, fvg, orderblocks, current_price=None, allow_structure_fallback=False):
 
         result = {
             "valid": False,
@@ -39,6 +39,7 @@ class EntryEngine:
             "entry": None,
             "stop_loss": None,
             "entry_type": "NONE",
+            "entry_type_reason": "No valid directional setup",
             "score": 0,
             "reason": "",
             "checks": []
@@ -46,11 +47,8 @@ class EntryEngine:
 
         direction = mtf.get("entry")
 
-        if direction not in ["LONG", "SHORT"] and structure:
-            # MTF mutabakatsızlık nedeniyle NONE döndüyse, kaliteli kontra/era LONG
-            # setup'larının 'Entry invalid' diye sert engellenmemesi için yönü
-            # 15m giriş yapısının son etiketiyle türet. Bu bir fallback'tir; MTF
-            # yönü varsa onu kullanırız.
+        if direction not in ["LONG", "SHORT"] and allow_structure_fallback and structure:
+            # Optional legacy mode: infer direction from 15m structure only when explicitly enabled.
             last_label = structure[-1].get("label")
             if last_label in ["HH", "HL"]:
                 direction = "LONG"
@@ -154,14 +152,17 @@ class EntryEngine:
                 if near_market:
                     result["entry"] = current_price
                     result["entry_type"] = "MARKET"
+                    result["entry_type_reason"] = "Price is within 0.4% of the selected bullish POI"
                     result["score"] += 10
                     result["checks"].append("✓ Market Entry Near POI")
                 else:
                     result["entry"] = limit_entry
                     result["entry_type"] = "LIMIT"
+                    result["entry_type_reason"] = "Wait for pullback to bullish POI"
             else:
                 result["entry"] = limit_entry
                 result["entry_type"] = "LIMIT" if limit_entry is not None else "NONE"
+                result["entry_type_reason"] = "Bullish POI limit level" if limit_entry is not None else "No valid bullish POI"
 
         else:
 
@@ -176,14 +177,17 @@ class EntryEngine:
                 if near_market:
                     result["entry"] = current_price
                     result["entry_type"] = "MARKET"
+                    result["entry_type_reason"] = "Price is within 0.4% of the selected bearish POI"
                     result["score"] += 10
                     result["checks"].append("✓ Market Entry Near POI")
                 else:
                     result["entry"] = limit_entry
                     result["entry_type"] = "LIMIT"
+                    result["entry_type_reason"] = "Wait for pullback to bearish POI"
             else:
                 result["entry"] = limit_entry
                 result["entry_type"] = "LIMIT" if limit_entry is not None else "NONE"
+                result["entry_type_reason"] = "Bearish POI limit level" if limit_entry is not None else "No valid bearish POI"
 
         if result["entry"] is None or result["stop_loss"] is None:
             fallback_entry, fallback_sl = self._structure_fallback_levels(direction, structure)
