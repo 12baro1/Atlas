@@ -74,7 +74,12 @@ def test_validate_rejects_bad_session_hours(monkeypatch):
     errors, _ = Config.validate(logger=_silent_logger())
     assert errors >= 1
 
-def test_auto_trading_is_hard_disabled_for_analysis_only_mode():
-    # Environment variables must not enable exchange order execution.
+def test_auto_trading_is_hard_disabled_for_analysis_only_mode(monkeypatch):
+    # Even an old local .env/shell export must not enable exchange order execution.
+    monkeypatch.setenv("ATLAS_AUTO_TRADING_ENABLED", "1")
+    monkeypatch.setenv("ATLAS_AUTO_TRADING_AUTO_ENABLE_WITH_KEYS", "1")
+
+    Config.refresh_from_env()
+
     assert Config.AUTO_TRADING_ENABLED is False
     assert Config.AUTO_TRADING_AUTO_ENABLE_WITH_KEYS is False
