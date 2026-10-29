@@ -1,4 +1,4 @@
-"""Atlas CLI entrypoint and full-screen TUI launcher."""
+"""Atlas CLI entrypoint for the terminal-only command screen."""
 
 from __future__ import annotations
 
@@ -10,9 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from config import Config, _env_or_rc
-from data_engine import ccxt, exchange
-from universe_engine import select_symbols
+from config import Config
+
 
 LOGGER = logging.getLogger("atlas.app")
 
@@ -64,92 +63,7 @@ def _ensure_path_in_shell_rc(bin_dir):
             continue
 
 
-def _select_symbols():
-    Config.refresh_from_env()
-    markets = exchange.load_markets()
-    symbols, stats = select_symbols(
-        markets=markets,
-        suffix="/USDT:USDT",
-        require_active=True,
-        require_swap=False,
-        max_symbols=int(os.getenv("ATLAS_MAX_SYMBOLS", "0").strip() or 0),
-    )
-
-    backend = getattr(ccxt, "BACKEND", "unknown")
-    if backend == "mock":
-        allow_mock = os.getenv("ATLAS_ALLOW_MOCK", "0").strip().lower() in {"1", "true", "yes"}
-        if not allow_mock:
-            raise RuntimeError(
-                "ccxt mock backend aktif. Canli tarama icin once `python3 -m pip install ccxt` calistirin. "
-                "Sadece test/offline icin `ATLAS_ALLOW_MOCK=1 atlas` kullanin."
-            )
-        LOGGER.warning("ccxt mock backend aktif (ATLAS_ALLOW_MOCK=1).")
-    LOGGER.info(
-        "Sembol secimi | backend=%s toplam=%s kalan=%s suffix_elendi=%s inactive_elendi=%s cap_elendi=%s",
-        backend,
-        stats.get("total_markets"),
-        stats.get("kept"),
-        stats.get("skipped_suffix"),
-        stats.get("skipped_inactive"),
-        stats.get("limited"),
-    )
-    return symbols
-
-
-def _normalize_cli_symbol(raw_symbol):
-    text = str(raw_symbol or "").strip().upper()
-    if not text:
-        return None
-    text = text.replace(" ", "")
-    if "/" in text and ":" in text:
-        return text
-    if "/" in text and ":" not in text:
-        left, right = text.split("/", 1)
-        if right == "USDT":
-            return f"{left}/USDT:USDT"
-        return text
-    if text.endswith(":USDT") and "/" not in text:
-        base = text[:-5]
-        if base:
-            return f"{base}/USDT:USDT"
-    if text.endswith("USDT") and "/" not in text and len(text) > 4:
-        return f"{text[:-4]}/USDT:USDT"
-    if text.isalpha() and 2 <= len(text) <= 12:
-        return f"{text}/USDT:USDT"
-    return text
-
-
-def _build_telegram_service(runtime):
-    if not (bool(getattr(Config, "TELEGRAM_POLLING_ENABLED", True)) or bool(getattr(Config, "TELEGRAM_WEBHOOK_ENABLED", False))):
-        return None
-    try:
-        from telegram_auth import TelegramAuthService
-        from telegram_auth_store import TelegramAuthStore
-        from telegram_service import TelegramService, TelegramTradeCommandHandler
-        from telegram_webhook import TelegramWebhookHandler
-
-        store = TelegramAuthStore(Config.TELEGRAM_AUTH_DB_FILE)
-        auth = TelegramAuthService(
-            store=store,
-            password=Config.BOT_PASSWORD,
-            password_hash=Config.BOT_PASSWORD_HASH,
-            admin_ids=Config.TELEGRAM_ADMIN_IDS,
-        )
-        trade_handler = TelegramTradeCommandHandler(manual_trade_service=runtime.manual_service)
-        webhook_handler = TelegramWebhookHandler(trade_command_handler=trade_handler)
-        service = TelegramService(
-            auth_service=auth,
-            webhook_handler=webhook_handler,
-            trade_command_handler=trade_handler,
-            manual_trade_service=runtime.manual_service,
-        )
-        return service
-    except Exception:
-        LOGGER.exception("Telegram service init failed")
-        return None
-
-
-def run_tui(initial_symbol=None, full_scan=False):
+def run_tui(initial_symbol=None):
     try:
         from atlas_runtime import AtlasRuntime
         from atlas_tui import AtlasTUIApp
@@ -160,25 +74,25 @@ def run_tui(initial_symbol=None, full_scan=False):
         raise
 
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
-    os.environ.setdefault("ATLAS_CONSOLE_SIGNAL_PRINT_ENABLED", "0")
+    # Force terminal-only mode even if old .env settings enable notifications.
+    os.environ["ATLAS_CONSOLE_SIGNAL_PRINT_ENABLED"] = "0"
+    os.environ["ATLAS_TELEGRAM_ENABLED"] = "0"
+    os.environ["ATLAS_TELEGRAM_POLLING_ENABLED"] = "0"
+    os.environ["ATLAS_TELEGRAM_WEBHOOK_ENABLED"] = "0"
+    os.environ["ATLAS_TELEGRAM_BOT_TOKEN"] = ""
+    os.environ["ATLAS_TELEGRAM_CHAT_ID"] = ""
     Config.refresh_from_env()
 
-    symbols = []
-    if full_scan:
-        symbols = _select_symbols()
-        if not symbols:
-            print("Taranacak sembol bulunamadi.")
-            return 1
+    runtime = AtlasRuntime(symbols=[], full_scan=False)
+    # Runtime construction can refresh settings; force the safety switches again.
+    Config.TELEGRAM_ENABLED = False
+    Config.TELEGRAM_POLLING_ENABLED = False
+    Config.TELEGRAM_WEBHOOK_ENABLED = False
+    Config.TELEGRAM_BOT_TOKEN = ""
+    Config.TELEGRAM_CHAT_ID = ""
+    Config.CONSOLE_SIGNAL_PRINT_ENABLED = False
 
-    runtime = AtlasRuntime(symbols=symbols, full_scan=full_scan)
-    service = _build_telegram_service(runtime)
-    if service is not None:
-        service.start(daemon=True)
-        runtime.attach_telegram_service(service)
-
-    runtime.start(daemon=True)
-
-    app = AtlasTUIApp(runtime, initial_symbol=_normalize_cli_symbol(initial_symbol))
+    app = AtlasTUIApp(runtime, initial_symbol=initial_symbol)
     try:
         app.run()
         return 0
@@ -187,19 +101,16 @@ def run_tui(initial_symbol=None, full_scan=False):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(prog="atlas", description="Atlas terminal application")
+    parser = argparse.ArgumentParser(
+        prog="atlas",
+        description="Atlas terminal-only SMC analysis. No AI chat, Telegram, or exchange execution.",
+    )
     parser.add_argument(
         "symbol",
         nargs="?",
-        default=(_env_or_rc("ATLAS_DEFAULT_SYMBOL", "BTC").strip() or "BTC"),
-        help="symbol to analyze first (default: ATLAS_DEFAULT_SYMBOL or BTC; e.g. BTC or ETH)",
+        default=None,
+        help="optional coin to analyze immediately (e.g. BRC, BTC, ETH); omit to open the command screen",
     )
-    parser.add_argument("--background", action="store_true", help="run scanner in background via run_bot.sh")
-    parser.add_argument("--stop", action="store_true", help="stop background scanner")
-    parser.add_argument("--status", action="store_true", help="background scanner status")
-    parser.add_argument("--restart", action="store_true", help="restart background scanner")
-    parser.add_argument("--logs", action="store_true", help="show background logs")
-    parser.add_argument("--full-scan", action="store_true", help="start TUI with continuous full market scan")
     parser.add_argument("--install-cli", action="store_true", help="install atlas command into ~/.local/bin")
     return parser
 
@@ -207,21 +118,9 @@ def build_parser():
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
-
     if args.install_cli:
         return install_cli()
-    if args.background:
-        return _run_bot_script("start")
-    if args.stop:
-        return _run_bot_script("stop")
-    if args.status:
-        return _run_bot_script("status")
-    if args.restart:
-        return _run_bot_script("restart")
-    if args.logs:
-        return _run_bot_script("logs", "-f")
-
-    return run_tui(initial_symbol=args.symbol, full_scan=args.full_scan)
+    return run_tui(initial_symbol=args.symbol)
 
 
 if __name__ == "__main__":
