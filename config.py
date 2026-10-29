@@ -87,9 +87,9 @@ class Config:
     RISK_PERCENT = 1.0
     MINIMUM_RR = 3.0
     # In live analysis, do not fabricate TP levels when structure has no valid targets.
-    DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK = os.getenv("ATLAS_ALLOW_SYNTHETIC_TP_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
+    DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK = _env_or_rc("ATLAS_ALLOW_SYNTHETIC_TP_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
     # Require higher-timeframe direction by default; 15m-only direction is legacy opt-in.
-    ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK = os.getenv("ATLAS_ENTRY_ALLOW_STRUCTURE_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
+    ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK = _env_or_rc("ATLAS_ENTRY_ALLOW_STRUCTURE_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
     ROUND_TRIP_COST_RATE = 0.0020
     ATR_PERIOD = 14
     MIN_STOP_ATR_MULTIPLIER = 0.25
@@ -188,7 +188,7 @@ class Config:
 
     # Telegram
     # Atlas is terminal-first by default; Telegram is opt-in.
-    TELEGRAM_ENABLED = os.getenv("ATLAS_TELEGRAM_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
+    TELEGRAM_ENABLED = _env_or_rc("ATLAS_TELEGRAM_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
     TELEGRAM_COMPACT_MODE = True
     TELEGRAM_MINIMAL_LAYOUT = os.getenv("ATLAS_TELEGRAM_MINIMAL_LAYOUT", "1").strip().lower() in {"1", "true", "yes"}
     TELEGRAM_MAX_DECISION_REASON_LENGTH = 140
@@ -358,6 +358,9 @@ class Config:
         cls.BYBIT_API_SECRET = _env_or_rc("ATLAS_BYBIT_API_SECRET", "")
         cls.BYBIT_POSITION_MODE = _env_or_rc("ATLAS_BYBIT_POSITION_MODE", "one_way").strip().lower()
         cls.BYBIT_LOG_HTTP = _env_or_rc("ATLAS_BYBIT_LOG_HTTP", "0").strip().lower() in {"1", "true", "yes"}
+        cls.TELEGRAM_ENABLED = _env_or_rc("ATLAS_TELEGRAM_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
+        cls.DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK = _env_or_rc("ATLAS_ALLOW_SYNTHETIC_TP_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
+        cls.ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK = _env_or_rc("ATLAS_ENTRY_ALLOW_STRUCTURE_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_TELEGRAM_MIN_CONFIDENCE", "85"))
         cls.TELEGRAM_REQUIRE_DECISION_ACTION = _env_or_rc("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "1").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_QUALITY_FILTERS_ENABLED = _env_or_rc("ATLAS_TELEGRAM_QUALITY_FILTERS_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
