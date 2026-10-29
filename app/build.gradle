@@ -15,6 +15,7 @@ android {
 }
 chaquopy {
     defaultConfig {
+        // Include Atlas engine modules from the repository root in the APK.
         version = "3.11"
         pip {
             install "ccxt>=4.2.0"
