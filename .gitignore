@@ -11,6 +11,9 @@ venv/
 .venv/
 
 # Atlas çalışma zamanı verileri
+*.db
+*.sqlite
+*.sqlite3
 atlas_state.json
 atlas_state.json.tmp
 atlas_learning.json
@@ -20,6 +23,9 @@ chat_ids.json
 economic_events.json
 
 # Log / PID
+*.log
+*.pid
+*.tmp
 run/*.log
 run/*.pid
 
