@@ -8,9 +8,6 @@ import os
 import threading
 import time
 from collections import deque
-from pathlib import Path
-
-from ai.local_llama_server import LocalLlamaServerManager
 from config import Config
 from data_engine import exchange, get_correlation_universe, get_market_data
 from engine import AtlasEngine
@@ -56,23 +53,7 @@ class AtlasRuntime:
         self._logs = deque(maxlen=500)
         self._error = None
         self._telegram_service = None
-        self._llama_manager = LocalLlamaServerManager(
-            repo_root=Path(__file__).resolve().parent,
-            config=Config,
-        )
-        _model_file = str(getattr(Config, "AI_LOCAL_MODEL_FILE", "") or "").strip()
-        _model_label = "QWEN3-4B"
-        if _model_file:
-            _model_name = _model_file.rsplit("/", 1)[-1].replace(".gguf", "")
-            _model_label = _model_name.split("-Q4")[0].split("-q4")[0].upper() or "QWEN3-4B"
-        self._ai_state = {
-            "provider": str(getattr(Config, "AI_PROVIDER", "local") or "local").strip().lower(),
-            "status": "UNKNOWN",
-            "detail": "",
-            "base_url": self._llama_manager.base_url,
-            "owner": "none",
-            "model": _model_label,
-        }
+        self._ai_state = {"provider": "disabled", "status": "DISABLED", "detail": "AI is not part of terminal Atlas."}
 
         with self._journal_lock:
             perf = self.engine.trade_journal.manual_trade_performance()
@@ -106,67 +87,17 @@ class AtlasRuntime:
             )
         except Exception:
             pass
-        try:
-            self._llama_manager.stop_if_owned()
-        except Exception:
-            pass
+
 
     def boot_summary(self):
         return dict(self._boot_summary)
 
     def initialize_ai(self):
-        provider = str(getattr(Config, "AI_PROVIDER", "openai_compat") or "openai_compat").strip().lower()
-        self._ai_state["provider"] = provider
-        self._ai_state["base_url"] = self._llama_manager.base_url
-
-        if provider != "local":
-            self._ai_state["status"] = "REMOTE"
-            self._ai_state["detail"] = "provider_not_local"
-            self._ai_state["owner"] = "none"
-            return dict(self._ai_state)
-
-        status = self._llama_manager.status()
-        if status.online:
-            self._ai_state["status"] = "ONLINE"
-            self._ai_state["detail"] = status.detail
-            self._ai_state["owner"] = status.owner
-            return dict(self._ai_state)
-
-        self._ai_state["status"] = "STARTING"
-        self._ai_state["detail"] = "Local AI baslatiliyor..."
-        timeout_seconds = float(getattr(Config, "AI_LOCAL_START_TIMEOUT_SECONDS", 180) or 180)
-        started = self._llama_manager.ensure_running(timeout_seconds=timeout_seconds)
-        if started.online:
-            self._ai_state["status"] = "ONLINE"
-            self._ai_state["detail"] = started.detail
-            self._ai_state["owner"] = started.owner
-        else:
-            self._ai_state["status"] = "OFFLINE"
-            self._ai_state["detail"] = started.detail
-            self._ai_state["owner"] = started.owner
+        """Compatibility stub: AI inference is deliberately removed from Atlas."""
         return dict(self._ai_state)
 
     def ai_status(self):
-        provider = str(getattr(Config, "AI_PROVIDER", "openai_compat") or "openai_compat").strip().lower()
-        self._ai_state["provider"] = provider
-        self._ai_state["base_url"] = self._llama_manager.base_url
-
-        if provider != "local":
-            current = dict(self._ai_state)
-            if current.get("status") == "UNKNOWN":
-                current["status"] = "REMOTE"
-                current["detail"] = "provider_not_local"
-            return current
-
-        current = self._llama_manager.status()
-        if current.online:
-            self._ai_state["status"] = "ONLINE"
-            self._ai_state["detail"] = current.detail
-            self._ai_state["owner"] = current.owner
-        elif self._ai_state.get("status") not in {"STARTING", "OFFLINE"}:
-            self._ai_state["status"] = "OFFLINE"
-            self._ai_state["detail"] = current.detail
-            self._ai_state["owner"] = current.owner
+        """Compatibility stub: no local or remote model is started."""
         return dict(self._ai_state)
 
     def attach_telegram_service(self, service):
