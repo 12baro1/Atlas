@@ -29,7 +29,7 @@ def _is_supported_input(value: str) -> bool:
     return normalized in _BEST_TRADE_COMMANDS or _is_symbol_input(value)
 
 
-def _best_symbols(limit=5):
+def _best_symbols(limit=30):
     markets = exchange.load_markets()
     symbols, _ = select_symbols(
         markets=markets,
@@ -50,7 +50,8 @@ def _best_symbols(limit=5):
         if quote_volume > 0:
             ranked.append((quote_volume, symbol))
     ranked.sort(reverse=True)
-    return [symbol for _, symbol in ranked[:limit]]
+    selected = ranked[:limit] if limit and limit > 0 else ranked
+    return [symbol for _, symbol in selected]
 
 
 class AtlasTUIApp(App):
@@ -106,7 +107,7 @@ class AtlasTUIApp(App):
             yield Static("ATLAS  /  SMC ANALİZ TERMİNALİ", id="brand")
             yield Static(
                 "Bir coin yaz: BRC, BTC, ETH\n"
-                "'işlem ver' yaz: hacmi yüksek coinlerde en iyi geçerli kurulumu ara\n"
+                "'işlem ver' yaz: en yüksek hacimli 30 USDT perpetual piyasasını tara\n"
                 "'yardım' yaz: komutları göster",
                 id="help",
             )
@@ -143,7 +144,8 @@ class AtlasTUIApp(App):
             self._show(
                 "KOMUTLAR\n"
                 "• BRC / BTC / ETH — seçilen coin'i analiz et\n"
-                "• işlem ver / en iyi işlem — hacmi yüksek ilk 5 uygun piyasayı tara\n"
+                "• işlem ver / en iyi işlem — varsayılan en yüksek hacimli 30 piyasayı tara\n"
+                "• ATLAS_SCAN_LIMIT=0 ayarıyla tüm uygun piyasaları analiz et (telefonu yavaşlatabilir)\n"
                 "• çıkış — Atlas'ı kapat\n\n"
                 "Atlas emir göndermez. İşlem önerisi oluşmazsa BEKLE gösterir."
             )
@@ -183,7 +185,11 @@ class AtlasTUIApp(App):
             self.call_from_thread(self._finish, f"ANALİZ HATASI\n\n{type(exc).__name__}: {exc}")
 
     def _find_best_trade(self) -> str:
-        symbols = _best_symbols(limit=5)
+        try:
+            scan_limit = max(0, int(__import__('os').getenv('ATLAS_SCAN_LIMIT', '30')))
+        except (TypeError, ValueError):
+            scan_limit = 30
+        symbols = _best_symbols(limit=scan_limit)
         if not symbols:
             return "Uygun piyasa bulunamadı. Veri sağlayıcısını kontrol et."
         candidates = []
