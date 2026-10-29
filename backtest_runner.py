@@ -235,8 +235,12 @@ class BacktestRunner:
         total = len(candles)
         warmup = 300
         for idx in range(warmup, total, max(1, step)):
-            window = {tf: candles[: idx + 1] if tf == "15m" else _window_up_to(data.get(tf), candles[idx].time, tf)
-                      for tf in ("15m", "1h", "4h", "1d", "1w")}
+            # Signal decision is made at the close of the current 15m candle.
+            decision_time_ms = candles[idx].time + 15 * 60 * 1000
+            window = {
+                tf: candles[: idx + 1] if tf == "15m" else _window_up_to(data.get(tf), decision_time_ms, tf)
+                for tf in ("15m", "1h", "4h", "1d", "1w")
+            }
             window["symbol"] = data.get("symbol", "SYMBOL")
 
             result = self.analyze_fn(window) if self.analyze_fn else on_signal(window)
