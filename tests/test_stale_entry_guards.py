@@ -45,3 +45,18 @@ def test_short_rejects_stop_loss_below_entry():
     )
     assert result["valid"] is False
     assert "stop-loss must be above entry" in result["reason"]
+
+
+def test_signal_card_displays_recommended_entry_type():
+    from utils.signal_card import build_signal_card, format_card_text
+
+    card = build_signal_card({
+        "symbol": "BTC/USDT:USDT",
+        "signal": {"signal": "SHORT", "confidence": 80},
+        "decision": {"action": "EXECUTE"},
+        "risk": {"entry": 100.0, "stop_loss": 102.0, "tp1": 96.0},
+        "rr": {"rr": 2.0},
+        "analysis": {"entry": {"entry": 100.0, "entry_type": "LIMIT"}},
+    })
+    assert card["entry_type"] == "LIMIT"
+    assert "Emir türü  : LIMIT" in format_card_text(card)
