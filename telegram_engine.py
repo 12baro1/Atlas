@@ -120,7 +120,7 @@ class TelegramEngine:
         msg.append(f"🟢 Signal : {signal.get('signal', 'WAIT')}")
         msg.append(f"⭐ Grade : {signal.get('grade', '-')}")
         msg.append(f"💪 Strength : {signal.get('strength', '-')}")
-        msg.append(f"🎯 Confidence : {signal.get('confidence', 0)}%")
+        msg.append(f"🎯 Confidence score : {signal.get('confidence', 0)}/100")
         msg.append("")
 
         if market_phase:
