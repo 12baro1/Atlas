@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#090b10">
+<meta name="description" content="Atlas SMC kripto analiz arayüzü">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>Atlas Mobile</title>
+<style>
+:root{color-scheme:dark;--bg:#090b10;--panel:#121722;--line:#273142;--text:#edf2fa;--muted:#98a4b7;--accent:#8eb6ff;--green:#6fe0ae;--red:#ff8585}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px system-ui,-apple-system,sans-serif;min-height:100vh}
+main{width:min(100%,620px);margin:auto;padding:env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom))}
+header{padding:28px 4px 20px}header small{color:var(--accent);letter-spacing:.18em;font-weight:700}h1{font-size:30px;margin:5px 0}header p{color:var(--muted);margin:0;font-size:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px;margin:12px 0}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:8px}input{width:100%;border-radius:12px;border:1px solid var(--line);background:#090d15;color:var(--text);padding:15px;font-size:17px;outline:none}
+button{border:0;border-radius:12px;padding:14px 16px;font-size:15px;font-weight:700;cursor:pointer}
+.primary{background:var(--accent);color:#08101d;width:100%;margin-top:10px}.secondary{background:#202a3a;color:var(--text);width:100%;margin-top:8px}
+.quick{display:flex;gap:8px;margin-top:10px}.quick button{flex:1;background:#202a3a;color:var(--text);padding:11px}
+#status{color:var(--muted);font-size:14px;min-height:22px;margin:8px 2px}
+#result h2{font-size:19px;margin:0 0 6px}#result p{color:var(--muted);line-height:1.5} .direction{font-weight:800;font-size:18px;margin:8px 0 14px}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px}.metric{padding:12px;background:#0b1018;border:1px solid var(--line);border-radius:12px;min-width:0}.metric span{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}.metric strong{font-size:16px;overflow-wrap:anywhere}
+.note{color:var(--muted);font-size:12px;line-height:1.5;margin:16px 4px}footer{font-size:12px;color:var(--muted);text-align:center;padding:12px}
+</style>
+</head>
+<body><main>
+<header><small>SMC / MARKET ANALYSIS</small><h1>ATLAS</h1><p>Mobil analiz terminali · Emir gönderimi kapalı</p></header>
+<section class="panel">
+<label for="command">Coin veya komut</label><input id="command" autocomplete="off" autocapitalize="characters" placeholder="BTC, ETH, BRC..." maxlength="40">
+<div class="quick"><button data-cmd="BTC">BTC</button><button data-cmd="ETH">ETH</button><button data-cmd="BRC">BRC</button></div>
+<button class="primary" id="analyze">COİN ANALİZ ET</button><button class="secondary" id="best">İŞLEM VER</button>
+</section>
+<div id="status" role="status">Hazır. Analiz için coin seç.</div>
+<section class="panel" id="result" aria-live="polite"><h2>Atlas hazır</h2><p>Sonuçlar gerçek piyasa verisi geldiğinde gösterilir. Kurulum yoksa işlem zorlanmaz.</p></section>
+<p class="note">Atlas yalnızca analiz yapar. İşlem puanı kazanma olasılığı değildir; sonuçlar kâr garantisi vermez. Bu arayüz, analiz motoru bu telefonda çalışırken kullanılabilir.</p>
+<footer>Atlas Mobile · Yerel bağlantı</footer>
+</main>
+<script>
+const $=s=>document.querySelector(s), statusEl=$("#status"), resultEl=$("#result"), input=$("#command");
+document.querySelectorAll("[data-cmd]").forEach(b=>b.addEventListener("click",()=>{input.value=b.dataset.cmd;run(b.dataset.cmd)}));
+$("#analyze").addEventListener("click",()=>run(input.value.trim()));
+$("#best").addEventListener("click",()=>run("işlem ver"));
+input.addEventListener("keydown",e=>{if(e.key==="Enter")run(input.value.trim())});
+function fmt(v){if(v===null||v===undefined||v==="")return "—";return typeof v==="number"?v.toLocaleString("en-US",{maximumFractionDigits:8}):String(v)}
+function metric(label,value){return '<div class="metric"><span>'+label+'</span><strong>'+fmt(value)+'</strong></div>'}
+function escapeHtml(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function render(data){
+ if(data.kind==="help"||data.kind==="none"||data.kind==="error"||!data.card){resultEl.innerHTML='<h2>'+escapeHtml(data.kind==="none"?"Şu an geçerli işlem yok":data.kind==="error"?"Analiz edilemedi":"Atlas")+'</h2><p>'+escapeHtml(data.message||"")+'</p>';return}
+ const c=data.card, d=c.direction||c.verdict||"BEKLE", color=d==="LONG"||d==="AL"?"var(--green)":d==="SHORT"||d==="SAT"?"var(--red)":"var(--muted)";
+ const tps=c.tp_levels||[];
+ resultEl.innerHTML='<h2>'+escapeHtml(c.symbol||"ANALİZ")+'</h2><div class="direction" style="color:'+color+'">'+escapeHtml(d)+' · '+escapeHtml(c.grade||"")+'</div><p>'+escapeHtml(c.summary||data.message||"")+'</p><div class="metrics">'+metric("Entry",c.entry)+metric("Stop Loss",c.stop_loss)+metric("TP1",tps[0])+metric("TP2",tps[1])+metric("TP3",tps[2])+metric("Risk / Reward",c.rr)+metric("Güven skoru",c.confidence===null?null:(c.confidence+"%"))+metric("Kurulum puanı",c.setup_quality)+'</div><p>'+escapeHtml(data.message||"")+'</p>';
+}
+async function run(command){
+ if(!command){statusEl.textContent="Bir coin sembolü yaz.";return}
+ statusEl.textContent="Analiz ediliyor; piyasa verisi bekleniyor…";
+ $("#analyze").disabled=$("#best").disabled=true;
+ try{const res=await fetch("/api/command",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({command})});const data=await res.json();render(data);statusEl.textContent=data.ok?"Analiz tamamlandı.":"İşlem başarısız."; }
+ catch(e){statusEl.textContent="Atlas sunucusuna bağlanılamadı. UserLAnd içinde python3 atlas_mobile.py çalışıyor mu kontrol et.";resultEl.innerHTML="<h2>Bağlantı yok</h2><p>Terminalde Atlas mobil sunucusunu başlat, sonra sayfayı yenile.</p>";}
+ finally{$("#analyze").disabled=$("#best").disabled=false}
+}
+if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));
+</script></body></html>
