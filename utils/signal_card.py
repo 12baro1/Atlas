@@ -70,6 +70,7 @@ def build_signal_card(result):
         "entry": None,
         "entry_type": str(entry.get("entry_type") or "BELİRSİZ").upper(),
         "entry_type_reason": entry.get("entry_type_reason") or "",
+        "synthetic_tp_targets": bool(dynamic_tp.get("synthetic_targets", False)),
         "stop_loss": None,
         "tp_levels": [],
         "rr": None,
@@ -137,7 +138,8 @@ def format_card_text(card):
         lines.append(f"  Giriş nedeni: {card['entry_type_reason']}")
     lines.append(f"  Stop       : {card['stop_loss']}")
     if card["tp_levels"]:
-        lines.append(f"  TP1/2/3    : {' / '.join(str(t) for t in card['tp_levels'])}")
+        tp_label = "TP1/2/3 (sentetik RR)" if card.get("synthetic_tp_targets") else "TP1/2/3"
+        lines.append(f"  {tp_label:<12}: {' / '.join(str(t) for t in card['tp_levels'])}")
     lines.append(f"  RR         : {card['rr']}")
     lines.append(f"  Kalite     : {card['setup_quality']}/100  (Confluence {card['confluence']})")
     confidence = card.get("confidence")
