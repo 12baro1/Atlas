@@ -16,15 +16,17 @@ android {
 }
 chaquopy {
     defaultConfig {
-        // Include Atlas engine modules from the repository root in the APK.
         version = "3.11"
         pip {
-            // Pin a compatible CCXT release: newer releases pull orjson,
-            // which currently cannot be built by Chaquopy for Android.
-            install "ccxt==4.4.98"
+            // Atlas only uses CCXT's synchronous REST API. Skip optional async
+            // dependencies (aiodns/aiohttp/orjson) which aren't Android-buildable.
+            install "ccxt==4.4.98 --no-deps"
+            install "certifi>=2024.0.0"
+            install "cryptography>=42.0.0"
+            install "requests>=2.31.0"
+            install "typing_extensions>=4.4.0"
             install "pandas>=2.0.0"
             install "numpy>=1.24.0"
-            install "requests>=2.31.0"
             install "python-dotenv>=1.0.0"
         }
     }
