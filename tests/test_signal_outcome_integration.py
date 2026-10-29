@@ -77,6 +77,55 @@ def test_signal_outcome_expires_after_expiry(tmp_path, monkeypatch):
     journal._signal_outcome_expiry_hours = old_factory
 
 
+
+def test_expired_signal_outcomes_are_not_learning_examples(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT", direction="LONG",
+        entry=100.0, stop_loss=99.0, tp1=101.0,
+        opened_at=1_700_000_000_000,
+    )
+    outcome["status"] = "EXPIRED"
+    outcome["resolved_at"] = 1_700_003_600_000
+    journal._persist_signal_outcome(outcome)
+
+    assert journal.learning_records(source="signal") == []
+
+
+def test_signal_outcomes_are_preferred_for_learning(tmp_path):
+    from engine import AtlasEngine
+
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT", direction="LONG",
+        entry=100.0, stop_loss=99.0, tp1=101.0,
+        opened_at=1_700_000_000_000,
+    )
+    outcome.update({
+        "status": "TP1", "resolved_at": 1_700_000_060_000,
+        "final_result": "WIN", "realized_r": 1.0,
+        "payload": {"setup_features": ["fvg"]},
+    })
+    journal._persist_signal_outcome(outcome)
+    # Manual outcome is intentionally different: learning must reflect the
+    # bot's emitted signal TP/SL result, not overwrite it with manual behavior.
+    journal._manual_trades.append({
+        "id": "manual-test", "signal_id": outcome["signal_id"],
+        "symbol": "BTC/USDT:USDT", "side": "LONG", "status": "CLOSED",
+        "opened_at": 1_700_000_000_000, "closed_at": 1_700_000_060_000,
+        "result": "LOSS", "pnl_rr": -1.0, "setup_fingerprint": "fvg",
+        "regime": "Expansion", "confidence": 80, "timeframe": "15m",
+    })
+
+    engine = AtlasEngine()
+    engine.trade_journal = journal
+    engine.learning = LearningEngine(tmp_path / "learning.json")
+    engine.refresh_learning()
+
+    assert engine.learning.stats["feed_meta"]["selected"] == "signal"
+    assert engine.learning.stats["feed_meta"]["signal"] == 1
+
+
 def test_manual_trade_open_close_and_reflection(tmp_path):
     journal = TradeJournal(db_path=tmp_path / "j.sqlite")
     outcome = journal.register_signal_outcome(
