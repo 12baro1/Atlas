@@ -88,6 +88,8 @@ class Config:
     MINIMUM_RR = 3.0
     # In live analysis, do not fabricate TP levels when structure has no valid targets.
     DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK = os.getenv("ATLAS_ALLOW_SYNTHETIC_TP_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
+    # Require higher-timeframe direction by default; 15m-only direction is legacy opt-in.
+    ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK = os.getenv("ATLAS_ENTRY_ALLOW_STRUCTURE_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
     ROUND_TRIP_COST_RATE = 0.0020
     ATR_PERIOD = 14
     MIN_STOP_ATR_MULTIPLIER = 0.25
