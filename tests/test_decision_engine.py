@@ -224,3 +224,27 @@ def test_decision_mtf_alignment_missing_is_soft_penalty_not_hard_blocker():
     assert not any("alignment" in b for b in result["critical_blockers"])
     assert "-40 HTF + LTF alignment missing" in result["reason"]
     assert result["action"] != "SKIP"
+
+
+def test_waiting_signal_is_wait_not_critical_trade_failure():
+    engine = DecisionEngine()
+
+    result = engine.decide(
+        **_supportive_context(
+            signal={
+                "signal": "WAIT",
+                "confidence": 59,
+                "grade": "D",
+                "strength": "VERY WEAK",
+                "wait_reason": "entry_not_confirmed",
+            },
+            entry={"valid": False},
+            risk={},
+        )
+    )
+
+    assert result["action"] == "WAIT"
+    assert result["critical_blockers"] == []
+    assert result["signal"] == "WAIT"
+    assert result["entry_valid"] is False
+    assert result["risk_valid"] is False
