@@ -70,3 +70,12 @@ def test_parser_uses_configured_default_symbol(monkeypatch):
     monkeypatch.setenv("ATLAS_DEFAULT_SYMBOL", "ETH")
     args = build_parser().parse_args([])
     assert args.symbol == "ETH"
+
+def test_parser_reads_default_symbol_from_dotenv(monkeypatch, tmp_path):
+    monkeypatch.delenv("ATLAS_DEFAULT_SYMBOL", raising=False)
+    (tmp_path / ".env").write_text("ATLAS_DEFAULT_SYMBOL=SOL\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    args = build_parser().parse_args([])
+
+    assert args.symbol == "SOL"
