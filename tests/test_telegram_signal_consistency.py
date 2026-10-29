@@ -157,6 +157,7 @@ def test_telegram_message_compact_mode_reduces_clutter():
 
 
 def test_notify_if_elite_deduplicates_same_signal(monkeypatch):
+    monkeypatch.setenv("ATLAS_TELEGRAM_ENABLED", "1")
     engine = AtlasEngine()
     import engine as engine_module
     monkeypatch.setattr(engine_module.Config, "TELEGRAM_ENABLED", True)
@@ -206,6 +207,7 @@ def test_notify_if_elite_deduplicates_same_signal(monkeypatch):
 
 
 def test_notify_if_elite_accepts_execute_action_when_decision_required(monkeypatch):
+    monkeypatch.setenv("ATLAS_TELEGRAM_ENABLED", "1")
     engine = AtlasEngine()
 
     called = {"count": 0}
