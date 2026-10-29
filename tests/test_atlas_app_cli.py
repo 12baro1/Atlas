@@ -8,34 +8,49 @@ import atlas_app
 from atlas_app import build_parser, install_cli
 
 
-def test_parser_background_flag():
-    parser = build_parser()
-    args = parser.parse_args(["--background"])
-    assert args.background is True
-    assert args.stop is False
+def test_parser_opens_command_screen_without_default_symbol(monkeypatch):
+    monkeypatch.delenv("ATLAS_DEFAULT_SYMBOL", raising=False)
+    args = build_parser().parse_args([])
+    assert args.symbol is None
 
 
-def test_parser_symbol_and_full_scan_flags():
-    parser = build_parser()
-    args = parser.parse_args(["BTC", "--full-scan"])
-    assert args.symbol == "BTC"
-    assert args.full_scan is True
+def test_parser_accepts_symbol_for_immediate_analysis():
+    args = build_parser().parse_args(["BRC"])
+    assert args.symbol == "BRC"
+
+
+def test_parser_has_only_cli_install_option():
+    options = {option for action in build_parser()._actions for option in action.option_strings}
+    assert "--install-cli" in options
+    assert "--background" not in options
+    assert "--full-scan" not in options
+    assert "--status" not in options
 
 
 def test_main_passes_symbol_to_tui(monkeypatch):
     captured = {}
 
-    def _fake_run_tui(initial_symbol=None, full_scan=False):
+    def _fake_run_tui(initial_symbol=None):
         captured["initial_symbol"] = initial_symbol
-        captured["full_scan"] = full_scan
         return 7
 
     monkeypatch.setattr(atlas_app, "run_tui", _fake_run_tui)
-    code = atlas_app.main(["BTC/USDT:USDT"])
+    code = atlas_app.main(["BRC"])
 
     assert code == 7
-    assert captured["initial_symbol"] == "BTC/USDT:USDT"
-    assert captured["full_scan"] is False
+    assert captured["initial_symbol"] == "BRC"
+
+
+def test_main_opens_empty_command_screen(monkeypatch):
+    captured = {}
+
+    def _fake_run_tui(initial_symbol=None):
+        captured["initial_symbol"] = initial_symbol
+        return 0
+
+    monkeypatch.setattr(atlas_app, "run_tui", _fake_run_tui)
+    assert atlas_app.main([]) == 0
+    assert captured["initial_symbol"] is None
 
 
 def test_install_cli_creates_symlink(monkeypatch, tmp_path):
@@ -58,24 +73,3 @@ def test_install_cli_creates_symlink(monkeypatch, tmp_path):
 
     mode = os.stat(source).st_mode
     assert mode & stat.S_IXUSR
-
-
-def test_parser_defaults_to_btc_for_first_analysis(monkeypatch):
-    monkeypatch.delenv("ATLAS_DEFAULT_SYMBOL", raising=False)
-    args = build_parser().parse_args([])
-    assert args.symbol == "BTC"
-
-
-def test_parser_uses_configured_default_symbol(monkeypatch):
-    monkeypatch.setenv("ATLAS_DEFAULT_SYMBOL", "ETH")
-    args = build_parser().parse_args([])
-    assert args.symbol == "ETH"
-
-def test_parser_reads_default_symbol_from_dotenv(monkeypatch, tmp_path):
-    monkeypatch.delenv("ATLAS_DEFAULT_SYMBOL", raising=False)
-    (tmp_path / ".env").write_text("ATLAS_DEFAULT_SYMBOL=SOL\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-
-    args = build_parser().parse_args([])
-
-    assert args.symbol == "SOL"
