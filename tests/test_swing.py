@@ -1,37 +1,39 @@
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import ccxt
-
-from core.candle import convert
+from core.candle import Candle
 from core.swing_engine import detect
 
-exchange=ccxt.bybit({
-    "options":{"defaultType":"swap"},
-    "enableRateLimit":True
-})
 
-markets = exchange.load_markets()
-symbol = next((item for item in markets if item.endswith("/USDT:USDT")), "BTC/USDT:USDT")
+def _swing_candles(count=72):
+    pattern = [100, 102, 104, 106, 108, 110, 108, 106, 104, 102, 100, 98]
+    candles = []
+    for index in range(count):
+        center = float(pattern[index % len(pattern)])
+        candles.append(
+            Candle(
+                time=index * 15 * 60 * 1000,
+                open=center - 0.25,
+                high=center + 1.0,
+                low=center - 1.0,
+                close=center + 0.25,
+                volume=100.0 + index,
+            )
+        )
+    return candles
 
-raw=exchange.fetch_ohlcv(
-    symbol,
-    "15m",
-    limit=300
-)
 
-candles=convert(raw)
+def test_swing_detection_is_deterministic_and_offline():
+    candles = _swing_candles()
 
-swings=detect(candles)
+    first = detect(candles)
+    second = detect(candles)
 
-print()
-
-print("Swing Sayısı:",len(swings))
-
-print()
-
-for s in swings:
-
-    print(s.kind,s.index,round(s.price,2))
-
+    assert len(first) >= 2
+    assert [(item.index, item.price, item.kind) for item in first] == [
+        (item.index, item.price, item.kind) for item in second
+    ]
+    assert all(0 <= item.index < len(candles) for item in first)
+    assert all(item.kind in {"HIGH", "LOW"} for item in first)
