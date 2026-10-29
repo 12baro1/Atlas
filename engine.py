@@ -1061,18 +1061,23 @@ class AtlasEngine:
             structure=entry_structure,
         )
 
-        # Reject stale setups when the market has already crossed TP1 before entry.
+        # TP1 can be crossed while a LIMIT entry is still waiting for a pullback.
+        # Preserve that limit setup; only block a late market/confirmation entry.
         current_price = candles[-1].close if candles else None
-        if (
+        tp1_reached = (
             entry.get("valid")
             and current_price is not None
             and _tp1_already_reached(entry.get("direction"), current_price, dynamic_tp.get("tp1"))
-        ):
+        )
+        entry_type = str(entry.get("entry_type") or "").upper()
+        if tp1_reached and entry_type != "LIMIT":
             entry["valid"] = False
-            entry["reason"] = "Stale setup: TP1 already reached before entry"
-            entry.setdefault("checks", []).append("✗ TP1 already reached")
+            entry["reason"] = "TP1 already reached; do not chase with a market entry"
+            entry.setdefault("checks", []).append("✗ TP1 already reached; market entry blocked")
             confirmation["confirmed"] = False
-            confirmation["reason"] = "TP1 already reached before entry; wait for a new setup"
+            confirmation["reason"] = "TP1 already reached; wait for a fresh setup"
+        elif tp1_reached and entry_type == "LIMIT":
+            entry.setdefault("checks", []).append("✓ LIMIT entry preserved; TP1 already crossed")
 
         risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles)
 
