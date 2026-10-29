@@ -151,7 +151,7 @@ def test_refresh_learning_falls_back_to_signal(tmp_path):
         market_phase="Expansion",
     )
     outcome = journal._signal_outcomes[0]
-    outcome["status"] = "CLOSED"
+    outcome["status"] = "TP1"
     outcome["resolved_at"] = 2000
     outcome["final_result"] = "WIN"
     outcome["realized_r"] = 2.0

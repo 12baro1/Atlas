@@ -1540,7 +1540,10 @@ class TradeJournal:
             return records
         records = []
         for outcome in self._signal_outcomes:
-            if outcome.get("status") == "PENDING":
+            # Yalnızca gerçek TP/SL ile sonuçlanmış sinyaller öğrenmeye girer.
+            # Süresi dolan (EXPIRED) veya hâlâ açık kayıtlar kazanma/kaybetme
+            # etiketi taşımadığından performansı çarpıtmamalıdır.
+            if outcome.get("status") not in {"TP1", "TP2", "TP3", "SL"}:
                 continue
             closed_at = int(outcome.get("resolved_at") or outcome.get("opened_at") or 0)
             if as_of_ms is not None and closed_at > as_of_ms:
@@ -1667,8 +1670,12 @@ class TradeJournal:
         )
 
     def _signal_to_learning_record(self, outcome):
-        win = outcome.get("final_result") == "WIN"
         r_value = self._num(outcome.get("realized_r"), 0.0)
+        final_result = str(outcome.get("final_result") or "").upper()
+        # TP ardından SL ile kapanan kısmi işlemler, gerçekleşen R pozitifse
+        # öğrenme istatistiğinde zarar sayılmamalı. Sonuç etiketi PARTIAL olarak
+        # korunur; ikili win/loss metriği net pozitif getiriyi esas alır.
+        win = final_result == "WIN" or (final_result == "PARTIAL" and r_value > 0)
         payload = outcome.get("payload") or {}
         if not isinstance(payload, dict):
             payload = {}
