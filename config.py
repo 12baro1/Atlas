@@ -167,8 +167,10 @@ class Config:
     MAX_SYMBOLS = int(os.getenv("ATLAS_MAX_SYMBOLS", "0").strip() or "0")
 
     # Bybit / Auto Trading
-    AUTO_TRADING_ENABLED = os.getenv("ATLAS_AUTO_TRADING_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
-    AUTO_TRADING_AUTO_ENABLE_WITH_KEYS = os.getenv("ATLAS_AUTO_TRADING_AUTO_ENABLE_WITH_KEYS", "1").strip().lower() in {"1", "true", "yes"}
+    # Atlas is analysis + Telegram only. Keep exchange order execution hard-disabled.
+    # Environment variables must not be able to turn live trading on.
+    AUTO_TRADING_ENABLED = False
+    AUTO_TRADING_AUTO_ENABLE_WITH_KEYS = False
     AUTO_TRADING_MIN_CONFIDENCE = float(os.getenv("ATLAS_AUTO_TRADING_MIN_CONFIDENCE", "85"))
     AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION = os.getenv("ATLAS_AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION", "0").strip().lower() in {"1", "true", "yes"}
     AUTO_TRADING_MIN_LEVERAGE = int(float(os.getenv("ATLAS_AUTO_TRADING_MIN_LEVERAGE", "1")))
