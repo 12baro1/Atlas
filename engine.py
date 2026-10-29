@@ -483,7 +483,13 @@ class AtlasEngine:
         elif manual_records:
             records, source = manual_records, "manual"
         else:
-            return None
+            # Geçerli kayıt kalmadıysa eski öğrenme index'ini tutma; aksi
+            # halde EXPIRED/PENDING sinyallerden kalma istatistikler etkili olur.
+            self.learning.stats["source"] = None
+            self.learning.stats["feed_meta"] = {
+                "signal": 0, "tracked": 0, "manual": 0, "selected": None,
+            }
+            return self.learning.rebuild_from_records([])
 
         self.learning.stats["source"] = source
         self.learning.stats["feed_meta"] = {
