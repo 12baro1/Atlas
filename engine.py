@@ -983,7 +983,14 @@ class AtlasEngine:
         internal_structure=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
-        entry = self.entry.generate(mtf, entry_structure, fvg, orderblocks, current_price=candles[-1].close if candles else None)
+        entry = self.entry.generate(
+            mtf,
+            entry_structure,
+            fvg,
+            orderblocks,
+            current_price=candles[-1].close if candles else None,
+            allow_structure_fallback=bool(getattr(Config, "ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK", False)),
+        )
         confirmation = self.entry_confirmation.confirm(mtf, entry_structure, fvg, entry)
 
         setup_quality = self.setup_quality.evaluate(
@@ -1060,6 +1067,14 @@ class AtlasEngine:
             candles=candles,
             structure=entry_structure,
         )
+
+        # A tradable setup must have structural targets; do not present fabricated RR levels as market targets.
+        if entry.get("valid") and not all(dynamic_tp.get(key) is not None for key in ("tp1", "tp2", "tp3")):
+            entry["valid"] = False
+            entry["reason"] = dynamic_tp.get("reason") or "No valid structural TP targets"
+            entry.setdefault("checks", []).append("✗ No valid structural TP targets; setup blocked")
+            confirmation["confirmed"] = False
+            confirmation["reason"] = "No valid structural TP targets; wait for a clearer liquidity objective"
 
         # TP1 can be crossed while a LIMIT entry is still waiting for a pullback.
         # Preserve that limit setup; only block a late market/confirmation entry.
@@ -1526,6 +1541,7 @@ class AtlasEngine:
                 orderblocks=orderblocks,
                 structure=structure,
                 candles=candles,
+                allow_rr_fallback=bool(getattr(Config, "DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK", False)),
             )
             self.logger.info(
                 "TP calculated | direction=%s stop=%s tp1=%s tp2=%s tp3=%s reason=%s",

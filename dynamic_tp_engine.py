@@ -20,6 +20,7 @@ class DynamicTPEngine:
         structure=None,
         candles=None,
         atr_value=None,
+        allow_rr_fallback=True,
     ):
 
         if direction not in {"LONG", "SHORT"}:
@@ -47,6 +48,16 @@ class DynamicTPEngine:
                 atr_snapshot=atr_snapshot,
             )
 
+            if target is None and not allow_rr_fallback:
+                return {
+                    "tp1": None,
+                    "tp2": None,
+                    "tp3": None,
+                    "reason": "no_valid_structural_targets",
+                    "sources": selected_sources + ["missing_structural_target"],
+                    "synthetic_targets": True,
+                    "atr": round(atr_snapshot, 8),
+                }
             if target is None:
                 target = self._fallback_rr_level(entry, risk, direction, rr_multiple)
                 source = "rr_fallback"
@@ -69,6 +80,7 @@ class DynamicTPEngine:
             "tp3": tp3,
             "reason": ",".join(selected_sources),
             "sources": selected_sources,
+            "synthetic_targets": any(source == "rr_fallback" for source in selected_sources),
             "atr": round(atr_snapshot, 8),
         }
 

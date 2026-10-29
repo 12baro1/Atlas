@@ -26,6 +26,7 @@ def test_uses_structure_direction_fallback_when_mtf_none():
         [],
         [],
         current_price=106.0,
+        allow_structure_fallback=True,
     )
     assert result["direction"] == "LONG"
     assert result["valid"] is True
@@ -39,6 +40,7 @@ def test_fallback_direction_respects_bearish_structure():
         [],
         [],
         current_price=93.0,
+        allow_structure_fallback=True,
     )
     assert result["direction"] == "SHORT"
 
