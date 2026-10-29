@@ -61,6 +61,20 @@ from volume_profile_engine import VolumeProfileEngine
 from utils.structure_labels import label_swings
 
 
+def _tp1_already_reached(direction, current_price, tp1):
+    """Return True when price has already crossed TP1 before the proposed entry."""
+    try:
+        current = float(current_price)
+        target = float(tp1)
+    except (TypeError, ValueError):
+        return False
+    if direction == "LONG":
+        return current >= target
+    if direction == "SHORT":
+        return current <= target
+    return False
+
+
 class AtlasEngine:
     """Atlas'ın tüm analiz motorlarını yöneten ana sınıf."""
 
@@ -1046,6 +1060,20 @@ class AtlasEngine:
             candles=candles,
             structure=entry_structure,
         )
+
+        # Reject stale setups when the market has already crossed TP1 before entry.
+        current_price = candles[-1].close if candles else None
+        if (
+            entry.get("valid")
+            and current_price is not None
+            and _tp1_already_reached(entry.get("direction"), current_price, dynamic_tp.get("tp1"))
+        ):
+            entry["valid"] = False
+            entry["reason"] = "Stale setup: TP1 already reached before entry"
+            entry.setdefault("checks", []).append("✗ TP1 already reached")
+            confirmation["confirmed"] = False
+            confirmation["reason"] = "TP1 already reached before entry; wait for a new setup"
+
         risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles)
 
         # Profesyonel SMC kalitesi: SL otomatik olarak genişletildiyse (AUTO_EXPAND)
