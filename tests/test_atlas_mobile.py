@@ -28,3 +28,7 @@ def test_mobile_manifest_is_installable_web_app():
     assert manifest["name"] == "Atlas Mobile"
     assert manifest["display"] == "standalone"
     assert manifest["start_url"] == "/"
+
+def test_mobile_server_is_loopback_only():
+    assert atlas_mobile.HOST == "127.0.0.1"
+    assert 1 <= atlas_mobile.PORT <= 65535
