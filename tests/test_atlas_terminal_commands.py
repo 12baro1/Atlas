@@ -53,3 +53,12 @@ def test_symbol_input_rejects_free_text_and_malformed_symbols():
     assert not atlas_tui._is_symbol_input("BTC USDT")
     assert not atlas_tui._is_symbol_input("")
     assert not atlas_tui._is_symbol_input("BTC; rm -rf")
+
+
+def test_supported_input_accepts_best_trade_commands():
+    for command in ("işlem ver", "islem ver", "en iyi işlem", "best trade"):
+        assert atlas_tui._is_supported_input(command)
+
+
+def test_supported_input_rejects_unknown_free_text():
+    assert not atlas_tui._is_supported_input("bana işlem ver")
