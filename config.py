@@ -86,6 +86,8 @@ class Config:
     # Risk
     RISK_PERCENT = 1.0
     MINIMUM_RR = 3.0
+    # In live analysis, do not fabricate TP levels when structure has no valid targets.
+    DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK = os.getenv("ATLAS_ALLOW_SYNTHETIC_TP_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
     ROUND_TRIP_COST_RATE = 0.0020
     ATR_PERIOD = 14
     MIN_STOP_ATR_MULTIPLIER = 0.25
@@ -183,7 +185,8 @@ class Config:
     BYBIT_LOG_HTTP = _env_or_rc("ATLAS_BYBIT_LOG_HTTP", "0").strip().lower() in {"1", "true", "yes"}
 
     # Telegram
-    TELEGRAM_ENABLED = True
+    # Atlas is terminal-first by default; Telegram is opt-in.
+    TELEGRAM_ENABLED = os.getenv("ATLAS_TELEGRAM_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
     TELEGRAM_COMPACT_MODE = True
     TELEGRAM_MINIMAL_LAYOUT = os.getenv("ATLAS_TELEGRAM_MINIMAL_LAYOUT", "1").strip().lower() in {"1", "true", "yes"}
     TELEGRAM_MAX_DECISION_REASON_LENGTH = 140
