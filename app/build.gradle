@@ -1,0 +1,45 @@
+plugins {
+    id "com.android.application"
+    id "com.chaquo.python"
+}
+android {
+    namespace "com.atlas.mobile"
+    compileSdk 35
+    defaultConfig {
+        applicationId "com.atlas.mobile"
+        minSdk 24
+        targetSdk 28
+        versionCode 1
+        versionName "1.0"
+    }
+}
+chaquopy {
+    defaultConfig {
+        version = "3.11"
+        pip {
+            install "ccxt>=4.2.0"
+            install "pandas>=2.0.0"
+            install "numpy>=1.24.0"
+            install "requests>=2.31.0"
+            install "python-dotenv>=1.0.0"
+        }
+    }
+}
+tasks.register("generateAtlasMobileAssets") {
+    def output = file("src/main/python/mobile_assets.py")
+    inputs.files(fileTree("../mobile"))
+    outputs.file(output)
+    doLast {
+        def assets = [:]
+        ["index.html", "manifest.webmanifest", "sw.js"].each { assetName ->
+            def source = file("../mobile/${assetName}")
+            if (!source.exists()) throw new GradleException("Missing mobile asset: ${source}")
+            assets[assetName] = java.util.Base64.encoder.encodeToString(source.bytes)
+        }
+        output.parentFile.mkdirs()
+        output.text = "import base64\nASSETS = {\n" +
+            assets.collect { assetName, encoded -> "    ${assetName.inspect()}: base64.b64decode(${encoded.inspect()}),\n" }.join("") +
+            "}\n"
+    }
+}
+tasks.named("preBuild").configure { dependsOn("generateAtlasMobileAssets") }
