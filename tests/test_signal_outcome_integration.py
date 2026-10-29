@@ -78,6 +78,51 @@ def test_signal_outcome_expires_after_expiry(tmp_path, monkeypatch):
 
 
 
+
+def test_profitable_partial_signal_outcome_is_not_learned_as_loss(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT", direction="LONG",
+        entry=100.0, stop_loss=99.0, tp1=101.0,
+        opened_at=1_700_000_000_000,
+    )
+    outcome.update({
+        "status": "SL",
+        "final_result": "PARTIAL",
+        "realized_r": 0.3,
+        "resolved_at": 1_700_000_060_000,
+    })
+    journal._persist_signal_outcome(outcome)
+
+    records = journal.learning_records(source="signal")
+    assert len(records) == 1
+    assert records[0]["result"] == "PARTIAL"
+    assert records[0]["r"] == 0.3
+    assert records[0]["win"] is True
+
+
+def test_losing_partial_signal_outcome_remains_loss_in_learning(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT", direction="LONG",
+        entry=100.0, stop_loss=99.0, tp1=101.0,
+        opened_at=1_700_000_000_000,
+    )
+    outcome.update({
+        "status": "SL",
+        "final_result": "PARTIAL",
+        "realized_r": -0.2,
+        "resolved_at": 1_700_000_060_000,
+    })
+    journal._persist_signal_outcome(outcome)
+
+    records = journal.learning_records(source="signal")
+    assert len(records) == 1
+    assert records[0]["result"] == "PARTIAL"
+    assert records[0]["r"] == -0.2
+    assert records[0]["win"] is False
+
+
 def test_expired_signal_outcomes_are_not_learning_examples(tmp_path):
     journal = TradeJournal(db_path=tmp_path / "j.sqlite")
     outcome = journal.register_signal_outcome(
