@@ -13,7 +13,19 @@ python3 atlas_app.py --install-cli
 source ~/.bashrc
 ```
 
-## Kullanım
+## Telefon ekranından uygulama gibi kullanma
+
+Atlas'ın Python analiz motoru UserLAnd içinde çalışır; mobil arayüz Android tarayıcısında açılır. Proje klasöründe:
+
+```bash
+python3 atlas_mobile.py
+```
+
+Aynı telefonda Chrome'u açıp `http://127.0.0.1:8765` adresine gir. Chrome menüsünden **Ana ekrana ekle** seçeneğini kullanarak Atlas'ı uygulama simgesi gibi açabilirsin. Analiz motorunun çalışması için UserLAnd'deki terminal süreci açık kalmalıdır. Durdurmak için terminalde `Ctrl+C`.
+
+Bu yerel arayüz yalnızca `127.0.0.1` adresine bağlanır; başka cihazlardan erişime açılmaz. Bu yöntem APK değildir, ancak ana ekrandan açılan mobil uygulama deneyimi sağlar.
+
+## Terminal kullanımı
 
 ```bash
 atlas
