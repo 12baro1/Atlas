@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import threading
 
@@ -186,7 +187,7 @@ class AtlasTUIApp(App):
 
     def _find_best_trade(self) -> str:
         try:
-            scan_limit = max(0, int(__import__('os').getenv('ATLAS_SCAN_LIMIT', '30')))
+            scan_limit = max(0, int(os.getenv('ATLAS_SCAN_LIMIT', '30')))
         except (TypeError, ValueError):
             scan_limit = 30
         symbols = _best_symbols(limit=scan_limit)
