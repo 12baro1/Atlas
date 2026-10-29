@@ -65,3 +65,18 @@ def test_backtest_runner_uses_same_rule():
 def test_empty_inputs():
     assert closed_htf_candles([], 123, "1h") == []
     assert closed_htf_candles(None, 123, "1h") == []
+def test_closed_m15_excludes_currently_forming_candle():
+    # The 10:00 candle closes at 10:15; at 10:12 it must not enter analysis.
+    candles = [
+        _candle(10 * 3600_000 - 15 * 60_000),
+        _candle(10 * 3600_000),
+    ]
+    ref = 10 * 3600_000 + 12 * 60_000
+    out = closed_htf_candles(candles, ref, "15m")
+    assert [c.time for c in out] == [10 * 3600_000 - 15 * 60_000]
+
+
+def test_closed_m15_includes_candle_at_exact_close_boundary():
+    candles = [_candle(10 * 3600_000)]
+    ref = 10 * 3600_000 + 15 * 60_000
+    assert [c.time for c in closed_htf_candles(candles, ref, "15m")] == [10 * 3600_000]
