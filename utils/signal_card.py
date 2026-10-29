@@ -69,6 +69,7 @@ def build_signal_card(result):
         "setup_allowed": bool(setup_quality.get("trade_allowed", False)),
         "entry": None,
         "entry_type": str(entry.get("entry_type") or "BELİRSİZ").upper(),
+        "entry_type_reason": entry.get("entry_type_reason") or "",
         "stop_loss": None,
         "tp_levels": [],
         "rr": None,
@@ -132,6 +133,8 @@ def format_card_text(card):
         lines.append(f"  Yön        : {card['direction']}")
     lines.append(f"  Girdi      : {card['entry']}")
     lines.append(f"  Emir türü  : {card.get('entry_type', 'BELİRSİZ')} (öneri; otomatik emir gönderilmez)")
+    if card.get("entry_type_reason"):
+        lines.append(f"  Giriş nedeni: {card['entry_type_reason']}")
     lines.append(f"  Stop       : {card['stop_loss']}")
     if card["tp_levels"]:
         lines.append(f"  TP1/2/3    : {' / '.join(str(t) for t in card['tp_levels'])}")
