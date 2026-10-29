@@ -86,3 +86,16 @@ def test_card_format_single_line_verdict():
 def test_card_no_raise_on_missing_keys():
     card = build_signal_card({"symbol": "X/USDT:USDT", "signal": {}, "decision": {}, "risk": None, "analysis": {}})
     assert card["verdict"] in ("ATLA", "BEKLE")
+def test_signal_card_labels_confidence_as_score_not_probability():
+    card = build_signal_card({
+        "symbol": "BTC/USDT:USDT",
+        "signal": {"signal": "WAIT", "confidence": 92},
+        "decision": {"action": "WAIT", "reason": "No confirmed setup"},
+        "risk": {},
+        "analysis": {},
+    })
+
+    rendered = format_card_text(card)
+
+    assert "skor 92/100" in rendered
+    assert "92%" not in rendered
