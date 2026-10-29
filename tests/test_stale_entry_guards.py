@@ -24,24 +24,28 @@ def test_invalid_numeric_tp_does_not_crash():
 
 
 def test_long_rejects_stop_loss_above_entry():
-    result = EntryEngine().generate(
+    engine = EntryEngine()
+    engine._structure_fallback_levels = lambda direction, structure: (100.0, 101.0)
+    result = engine.generate(
         {"entry": "LONG"},
         [{"label": "HH", "price": 110, "kind": "HIGH"}],
         [],
-        [{"low": 105.0, "high": 104.0, "type": "BULLISH", "filled": False, "mitigated": False}],
-        current_price=103.0,
+        [],
+        current_price=None,
     )
     assert result["valid"] is False
     assert "stop-loss must be below entry" in result["reason"]
 
 
 def test_short_rejects_stop_loss_below_entry():
-    result = EntryEngine().generate(
+    engine = EntryEngine()
+    engine._structure_fallback_levels = lambda direction, structure: (100.0, 99.0)
+    result = engine.generate(
         {"entry": "SHORT"},
         [{"label": "LL", "price": 90, "kind": "LOW"}],
         [],
-        [{"low": 105.0, "high": 104.0, "type": "BEARISH", "filled": False, "mitigated": False}],
-        current_price=106.0,
+        [],
+        current_price=None,
     )
     assert result["valid"] is False
     assert "stop-loss must be above entry" in result["reason"]
@@ -60,3 +64,18 @@ def test_signal_card_displays_recommended_entry_type():
     })
     assert card["entry_type"] == "LIMIT"
     assert "Emir türü  : LIMIT" in format_card_text(card)
+
+
+def test_signal_card_labels_synthetic_tp_targets():
+    from utils.signal_card import build_signal_card, format_card_text
+
+    card = build_signal_card({
+        "symbol": "BTC/USDT:USDT",
+        "signal": {"signal": "LONG", "confidence": 80},
+        "decision": {"action": "EXECUTE"},
+        "risk": {"entry": 100.0, "stop_loss": 99.0, "tp1": 101.0, "tp2": 102.0, "tp3": 103.0},
+        "dynamic_tp": {"synthetic_targets": True},
+        "rr": {"rr": 3.0},
+        "analysis": {"entry": {"entry": 100.0, "entry_type": "LIMIT"}},
+    })
+    assert "TP1/2/3 (sentetik RR)" in format_card_text(card)
