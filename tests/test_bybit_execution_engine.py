@@ -72,12 +72,13 @@ def test_validate_rejects_bad_symbol_and_side():
     assert any("yön" in i.lower() or "Yön" in i.lower() for i in issues)
 
 
-def test_create_order_success():
-    engine = _engine()
+def test_create_order_is_hard_disabled_even_with_enabled_config():
+    client = _FakeClient()
+    engine = BybitExecutionEngine(exchange=client, config=_ConfigStub)
     result = engine.create_order("BTC/USDT:USDT", "buy", 0.5, order_type="market")
-    assert result.success is True
-    assert result.order_id == "order-1"
-    assert result.filled == 0.5
+    assert result.success is False
+    assert "AUTO_TRADING_ENABLED" in result.error
+    assert client.calls == []
 
 
 def test_create_order_blocked_when_disabled():
@@ -90,11 +91,12 @@ def test_create_order_blocked_when_disabled():
     assert result.error
 
 
-def test_open_position_clamps_leverage():
-    engine = _engine()
-    # max leverage 20; 999 -> clamp
+def test_open_position_is_blocked_but_leverage_validation_remains_available():
+    client = _FakeClient()
+    engine = BybitExecutionEngine(exchange=client, config=_ConfigStub)
     result = engine.open_position("BTC/USDT:USDT", "buy", 0.5, leverage=999)
-    assert result.success is True
+    assert result.success is False
+    assert client.calls == []
     assert engine._clamp_leverage(999) == 20
 
 
