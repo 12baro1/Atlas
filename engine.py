@@ -460,57 +460,36 @@ class AtlasEngine:
             return None
 
     def refresh_learning(self, symbol=None):
-        """Journal'daki kapanmış sonuçları meta öğrenme katmanına işler.
+        """Kapanmış sinyal sonuçlarını öncelikli kullanarak öğrenme indeksini yeniler.
 
-        Kaynak önceliği (LEARNING_MANUAL_TRADE_PRIMARY): önce manuel işlemler,
-        yoksa gerçek kapanmış (scanner) işlemler, o da yoksa teorik sinyal
-        sonuçları fallback olarak yüklenir.
+        Atlas'ın gönderdiği sinyallerin teorik TP/SL sonuçları ana öğrenme
+        kaynağıdır. Manuel ve takip edilen gerçek işlemler yalnızca sinyal
+        sonucu verisi yoksa yedek kaynak olur; böylece aynı setup'ın manuel
+        kaydı teorik sinyal geçmişini gölgelemez.
         """
         if not bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
             return None
         if self.trade_journal is None:
             return None
-        source = "manual"
-        use_manual_primary = bool(getattr(Config, "LEARNING_MANUAL_TRADE_PRIMARY", True))
-        manual_records = self.trade_journal.learning_records(source="manual", symbol=symbol)
-        tracked_records = self.trade_journal.learning_records(source="tracked", symbol=symbol)
+
         signal_records = self.trade_journal.learning_records(source="signal", symbol=symbol)
-        min_fallback = int(getattr(Config, "LEARNING_MIN_SIGNAL_FALLBACK_SAMPLES", 50))
+        tracked_records = self.trade_journal.learning_records(source="tracked", symbol=symbol)
+        manual_records = self.trade_journal.learning_records(source="manual", symbol=symbol)
 
-        records = manual_records
-        if use_manual_primary:
-            # Manuel veri yetersizse gerçek kapanan işlemler, o da yoksa
-            # teorik sinyal sonuçları yedek olarak kullanılır.
-            if not records and tracked_records:
-                records = tracked_records
-                source = "tracked"
-            elif not records and signal_records:
-                records = signal_records
-                source = "signal"
+        if signal_records:
+            records, source = signal_records, "signal"
+        elif tracked_records:
+            records, source = tracked_records, "tracked"
+        elif manual_records:
+            records, source = manual_records, "manual"
         else:
-            # Manuel veri önceliği yoksa sinyal kayıtları doğrudan kullanılır.
-            if not records and tracked_records:
-                records = tracked_records
-                source = "tracked"
-            elif not records and signal_records:
-                records = signal_records
-                source = "signal"
-            elif not records:
-                pass
-            elif len(records) < min_fallback and tracked_records and len(tracked_records) >= len(records):
-                records = tracked_records
-                source = "tracked"
-            elif len(records) < min_fallback and signal_records:
-                records = signal_records
-                source = "signal"
-
-        if not records:
             return None
+
         self.learning.stats["source"] = source
         self.learning.stats["feed_meta"] = {
-            "manual": len(manual_records),
-            "tracked": len(tracked_records),
             "signal": len(signal_records),
+            "tracked": len(tracked_records),
+            "manual": len(manual_records),
             "selected": source,
         }
         return self.learning.rebuild_from_records(records)
