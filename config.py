@@ -340,8 +340,9 @@ class Config:
         """Runtime'da environment değişikliklerini Config sınıfına yeniden yükler."""
         cls.MIN_STOP_PERCENT = float(_env_or_rc("ATLAS_MIN_STOP_PERCENT", str(cls.MIN_STOP_PERCENT)))
         cls.REJECT_TIGHT_STOPS = _env_or_rc("ATLAS_REJECT_TIGHT_STOPS", "1").strip().lower() in {"1", "true", "yes"}
-        cls.AUTO_TRADING_ENABLED = _env_or_rc("ATLAS_AUTO_TRADING_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
-        cls.AUTO_TRADING_AUTO_ENABLE_WITH_KEYS = _env_or_rc("ATLAS_AUTO_TRADING_AUTO_ENABLE_WITH_KEYS", "1").strip().lower() in {"1", "true", "yes"}
+        # Analysis-only mode: never re-enable exchange order execution from environment.
+        cls.AUTO_TRADING_ENABLED = False
+        cls.AUTO_TRADING_AUTO_ENABLE_WITH_KEYS = False
         cls.AUTO_TRADING_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_AUTO_TRADING_MIN_CONFIDENCE", "85"))
         cls.AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION = _env_or_rc("ATLAS_AUTO_TRADING_ALLOW_EXECUTE_WITH_CAUTION", "0").strip().lower() in {"1", "true", "yes"}
         cls.AUTO_TRADING_MIN_LEVERAGE = int(float(_env_or_rc("ATLAS_AUTO_TRADING_MIN_LEVERAGE", "1")))
