@@ -12,11 +12,6 @@ android {
         versionCode 1
         versionName "1.0"
     }
-    sourceSets {
-        main {
-            python.srcDir("../")
-        }
-    }
 }
 chaquopy {
     defaultConfig {
@@ -31,7 +26,15 @@ chaquopy {
         }
     }
 }
+tasks.register("bundleAtlasPython", Copy) {
+    from("..") {
+        include "**/*.py"
+        exclude "app/**", "tests/**", ".git/**", ".venv/**", "**/__pycache__/**"
+    }
+    into("src/main/python")
+}
 tasks.register("generateAtlasMobileAssets") {
+    dependsOn("bundleAtlasPython")
     def output = file("src/main/python/mobile_assets.py")
     inputs.files(fileTree("../mobile"))
     outputs.file(output)
