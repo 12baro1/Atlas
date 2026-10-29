@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from config import Config
+from config import Config, _env_or_rc
 from data_engine import ccxt, exchange
 from universe_engine import select_symbols
 
@@ -191,7 +191,7 @@ def build_parser():
     parser.add_argument(
         "symbol",
         nargs="?",
-        default=(os.getenv("ATLAS_DEFAULT_SYMBOL", "BTC").strip() or "BTC"),
+        default=(_env_or_rc("ATLAS_DEFAULT_SYMBOL", "BTC").strip() or "BTC"),
         help="symbol to analyze first (default: ATLAS_DEFAULT_SYMBOL or BTC; e.g. BTC or ETH)",
     )
     parser.add_argument("--background", action="store_true", help="run scanner in background via run_bot.sh")
