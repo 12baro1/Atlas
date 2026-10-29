@@ -73,3 +73,8 @@ def test_validate_rejects_bad_session_hours(monkeypatch):
     monkeypatch.setattr(Config, "LONDON_END", 40)
     errors, _ = Config.validate(logger=_silent_logger())
     assert errors >= 1
+
+def test_auto_trading_is_hard_disabled_for_analysis_only_mode():
+    # Environment variables must not enable exchange order execution.
+    assert Config.AUTO_TRADING_ENABLED is False
+    assert Config.AUTO_TRADING_AUTO_ENABLE_WITH_KEYS is False
