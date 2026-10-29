@@ -1,0 +1,9 @@
+{
+  "name": "Atlas Mobile",
+  "short_name": "Atlas",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090b10",
+  "theme_color": "#090b10",
+  "description": "Atlas SMC kripto analiz arayüzü"
+}
