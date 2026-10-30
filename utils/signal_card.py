@@ -159,7 +159,7 @@ def format_card_text(card):
     pending_limit = entry_type == "LIMIT" and "wait for pullback" in str(card.get("entry_type_reason") or "").lower()
     executable = action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and card.get("direction") in ("LONG", "SHORT")
     if pending_limit and not executable:
-        headline = "KARAR: ŞİMDİ GİRME | EMİR: LIMIT BEKLE"
+        headline = "KARAR: ŞİMDİ GİRME | EMİR: LIMIT (FİYAT GELİNCE)"
     elif executable:
         headline = "KARAR: İŞLEME GİR | EMİR: " + (entry_type if entry_type in ("MARKET", "LIMIT") else "GİRİŞİ TEYİT ET")
     else:
@@ -168,7 +168,13 @@ def format_card_text(card):
     if card["direction"]:
         lines.append(f"  Yön        : {card['direction']}")
     lines.append(f"  Girdi      : {card['entry']}")
-    lines.append(f"  Emir türü  : {card.get('entry_type', 'BELİRSİZ')} (öneri; otomatik emir gönderilmez)")
+    if executable:
+        shown_entry_type = entry_type if entry_type in ("MARKET", "LIMIT") else "GİRİŞİ TEYİT ET"
+    elif pending_limit:
+        shown_entry_type = "LIMIT (fiyat bölgesine gelirse)"
+    else:
+        shown_entry_type = "YOK (işlem açma)"
+    lines.append(f"  Emir türü  : {shown_entry_type}")
     if card.get("entry_type_reason"):
         lines.append(f"  Giriş nedeni: {card['entry_type_reason']}")
     lines.append(f"  Stop       : {card['stop_loss']}")
@@ -182,7 +188,13 @@ def format_card_text(card):
         confidence_text = f"{float(confidence):g}"
     except (TypeError, ValueError):
         confidence_text = "-"
-    lines.append(f"  Piyasa Fz  : {card['market_phase']}  |  Sinyal {card['signal']} (skor {confidence_text}/100)")
+    if executable:
+        phase_summary = f"{card['market_phase']} | Yön {card['direction']} (skor {confidence_text}/100)"
+    elif pending_limit:
+        phase_summary = f"{card['market_phase']} | LIMIT fiyat bölgesi bekleniyor"
+    else:
+        phase_summary = f"{card['market_phase']} | Uygun işlem yok"
+    lines.append(f"  Piyasa Fz  : {phase_summary}")
     if card["selected_tp"]:
         lines.append(f"  Hedef TP   : {card['selected_tp']}")
     if card["position_size"]:
