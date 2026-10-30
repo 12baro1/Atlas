@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import threading
@@ -17,6 +18,26 @@ from utils.signal_card import build_signal_card, format_card_text
 
 _SYMBOL_INPUT_RE = re.compile(r"[A-Z0-9]{2,24}(?:/USDT(?::USDT)?)?\Z")
 _BEST_TRADE_COMMANDS = {"işlem ver", "islem ver", "en iyi işlem", "en iyi islem", "best", "best trade"}
+DEFAULT_SCAN_LIMIT = 30
+MAX_SCAN_LIMIT = 100
+
+
+def _normalize_scan_limit(value, default=DEFAULT_SCAN_LIMIT, maximum=MAX_SCAN_LIMIT):
+    try:
+        limit = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if limit <= 0:
+        return default
+    return min(limit, maximum)
+
+
+def _finite_number(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def _is_symbol_input(value: str) -> bool:
@@ -30,7 +51,8 @@ def _is_supported_input(value: str) -> bool:
     return normalized in _BEST_TRADE_COMMANDS or _is_symbol_input(value)
 
 
-def _best_symbols(limit=30):
+def _best_symbols(limit=DEFAULT_SCAN_LIMIT):
+    limit = _normalize_scan_limit(limit)
     markets = exchange.load_markets()
     symbols, _ = select_symbols(
         markets=markets,
@@ -44,14 +66,11 @@ def _best_symbols(limit=30):
     for symbol in symbols:
         ticker = (tickers or {}).get(symbol) or {}
         quote_volume = ticker.get("quoteVolume")
-        try:
-            quote_volume = float(quote_volume or 0)
-        except (TypeError, ValueError):
-            quote_volume = 0
-        if quote_volume > 0:
+        quote_volume = _finite_number(quote_volume or 0)
+        if quote_volume is not None and quote_volume > 0:
             ranked.append((quote_volume, symbol))
     ranked.sort(reverse=True)
-    selected = ranked[:limit] if limit and limit > 0 else ranked
+    selected = ranked[:limit]
     return [symbol for _, symbol in selected]
 
 
@@ -186,10 +205,7 @@ class AtlasTUIApp(App):
             self.call_from_thread(self._finish, f"ANALİZ HATASI\n\n{type(exc).__name__}: {exc}")
 
     def _find_best_trade(self) -> str:
-        try:
-            scan_limit = max(0, int(os.getenv('ATLAS_SCAN_LIMIT', '30')))
-        except (TypeError, ValueError):
-            scan_limit = 30
+        scan_limit = _normalize_scan_limit(os.getenv("ATLAS_SCAN_LIMIT", str(DEFAULT_SCAN_LIMIT)))
         symbols = _best_symbols(limit=scan_limit)
         if not symbols:
             return "Uygun piyasa bulunamadı. Veri sağlayıcısını kontrol et."
@@ -209,11 +225,10 @@ class AtlasTUIApp(App):
             card = build_signal_card(raw)
             if card.get("decision_action") != "EXECUTE" or card.get("direction") not in {"LONG", "SHORT"}:
                 continue
-            try:
-                rr = float(card.get("rr") or 0)
-                quality = float(card.get("setup_quality") or 0)
-                confidence = float(card.get("confidence") or 0)
-            except (TypeError, ValueError):
+            rr = _finite_number(card.get("rr") or 0)
+            quality = _finite_number(card.get("setup_quality") or 0)
+            confidence = _finite_number(card.get("confidence") or 0)
+            if rr is None or quality is None or confidence is None:
                 continue
             if not card.get("entry") or not card.get("stop_loss") or rr <= 0:
                 continue
@@ -224,7 +239,7 @@ class AtlasTUIApp(App):
             message = (
                 "ŞU AN GEÇERLİ İŞLEM YOK\n\n"
                 "Taranan piyasalarda Atlas'ın işlem koşullarını geçen kurulum bulunmadı. "
-                "Zorla LONG/SHORT üretmek yerine BEKLE."
+                "Zorla LONG/SHORT üretmek yerine İŞLEME GİRME."
             )
             if errors:
                 message += "\n\nAnaliz edilemeyenler: " + "; ".join(errors[:3])

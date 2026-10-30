@@ -4,12 +4,17 @@ Atlas için tek yönlü, net ve okunabilir işlem önerisi (sinyal kartı) üret
 Manuel işlem kullanıcısına: YÖN, giriş/stop/TP, kalite puanı ve çelişkileri tek bakışta sunar.
 """
 
+import math
+
 
 def _num(value, digits=2):
     try:
-        return round(float(value), digits)
-    except (TypeError, ValueError):
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+    if not math.isfinite(number):
+        return None
+    return round(number, digits)
 
 
 def _verdict(decision, signal, entry):
@@ -21,13 +26,14 @@ def _verdict(decision, signal, entry):
 
     if action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and signal_dir in ("LONG", "SHORT"):
         return ("AL" if signal_dir == "LONG" else "SAT", signal_dir, None)
+    # A pending LIMIT pullback is conditional, never an executable market entry.
+    if entry_type == "LIMIT" and "wait for pullback" in entry_reason:
+        return ("BEKLE", None, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
+
+    # WAIT is not an actionable terminal decision; show it as no-entry.
     if action == "WAIT":
         wait_reason = (signal or {}).get("wait_reason") or (decision or {}).get("reason")
-        return ("BEKLE", None, wait_reason)
-
-    # A pending LIMIT pullback is not an executable trade or a broken setup.
-    if entry_type == "LIMIT" and "wait for pullback" in entry_reason:
-        return ("BEKLE", None, (entry or {}).get("entry_type_reason") or "Geri çekilme bekleniyor")
+        return ("ATLA", None, wait_reason)
 
     return ("ATLA", None, (decision or {}).get("reason"))
 
@@ -159,7 +165,7 @@ def format_card_text(card):
     pending_limit = entry_type == "LIMIT" and "wait for pullback" in str(card.get("entry_type_reason") or "").lower()
     executable = action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and card.get("direction") in ("LONG", "SHORT")
     if pending_limit and not executable:
-        headline = "KARAR: ŞİMDİ GİRME | EMİR: LIMIT BEKLE"
+        headline = "KARAR: ŞİMDİ GİRME | EMİR: LIMIT (FİYAT GELİNCE)"
     elif executable:
         headline = "KARAR: İŞLEME GİR | EMİR: " + (entry_type if entry_type in ("MARKET", "LIMIT") else "GİRİŞİ TEYİT ET")
     else:
@@ -168,9 +174,18 @@ def format_card_text(card):
     if card["direction"]:
         lines.append(f"  Yön        : {card['direction']}")
     lines.append(f"  Girdi      : {card['entry']}")
-    lines.append(f"  Emir türü  : {card.get('entry_type', 'BELİRSİZ')} (öneri; otomatik emir gönderilmez)")
+    if executable:
+        shown_entry_type = entry_type if entry_type in ("MARKET", "LIMIT") else "GİRİŞİ TEYİT ET"
+    elif pending_limit:
+        shown_entry_type = "LIMIT (fiyat bölgesine gelirse)"
+    else:
+        shown_entry_type = "YOK (işlem açma)"
+    lines.append(f"  Emir türü  : {shown_entry_type}")
     if card.get("entry_type_reason"):
-        lines.append(f"  Giriş nedeni: {card['entry_type_reason']}")
+        entry_reason = str(card["entry_type_reason"])
+        if "wait for pullback" in entry_reason.lower():
+            entry_reason = "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor"
+        lines.append(f"  Giriş nedeni: {entry_reason}")
     lines.append(f"  Stop       : {card['stop_loss']}")
     if card["tp_levels"]:
         tp_label = "TP1/2/3 (sentetik RR)" if card.get("synthetic_tp_targets") else "TP1/2/3"
@@ -182,13 +197,26 @@ def format_card_text(card):
         confidence_text = f"{float(confidence):g}"
     except (TypeError, ValueError):
         confidence_text = "-"
-    lines.append(f"  Piyasa Fz  : {card['market_phase']}  |  Sinyal {card['signal']} (skor {confidence_text}/100)")
+    if executable:
+        phase_summary = f"{card['market_phase']} | Yön {card['direction']}"
+    elif pending_limit:
+        phase_summary = f"{card['market_phase']} | LIMIT fiyat bölgesi bekleniyor"
+    else:
+        phase_summary = f"{card['market_phase']} | Uygun işlem yok"
+    phase_summary += f" | skor {confidence_text}/100"
+    lines.append(f"  Piyasa Fz  : {phase_summary}")
     if card["selected_tp"]:
         lines.append(f"  Hedef TP   : {card['selected_tp']}")
     if card["position_size"]:
         lines.append(f"  Pozisyon   : {card['position_size']} birim | Risk {card['capital_at_risk']} USD")
     if card["critical_blocks"]:
-        lines.append("  ENGELLER   : " + "; ".join(card["critical_blocks"]))
+        reasons = []
+        for item in card["critical_blocks"]:
+            reason = str(item)
+            if "wait for pullback" in reason.lower():
+                reason = "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor"
+            reasons.append(reason)
+        lines.append("  ENGELLER   : " + "; ".join(reasons))
     if card["soft_adjustments"]:
         parts = []
         for item in card["soft_adjustments"]:
