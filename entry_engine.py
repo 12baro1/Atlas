@@ -5,6 +5,9 @@ Atlas Entry Engine v5
 
 import math
 
+from config import Config
+from utils.atr import atr as calculate_atr
+
 
 class EntryEngine:
 
@@ -83,7 +86,7 @@ class EntryEngine:
             return None
         return price if math.isfinite(price) and price > 0 else None
 
-    def generate(self, mtf, structure, fvg, orderblocks, current_price=None, allow_structure_fallback=False):
+    def generate(self, mtf, structure, fvg, orderblocks, current_price=None, allow_structure_fallback=False, candles=None):
         mtf = mtf if isinstance(mtf, dict) else {}
         structure = structure if isinstance(structure, list) else []
         fvg = fvg if isinstance(fvg, list) else []
@@ -98,6 +101,8 @@ class EntryEngine:
             "entry_type": "NONE",
             "entry_type_reason": "No valid directional setup",
             "entry_zone_crossed": False,
+            "entry_too_far": False,
+            "requires_pullback": False,
             "score": 0,
             "reason": "",
             "checks": []
@@ -215,6 +220,7 @@ class EntryEngine:
                 elif limit_entry is not None and current_price > limit_entry:
                     result["entry"] = limit_entry
                     result["entry_type"] = "LIMIT"
+                    result["requires_pullback"] = True
                     result["entry_type_reason"] = "Wait for pullback to bullish POI"
                 else:
                     result["entry"] = None
@@ -244,6 +250,7 @@ class EntryEngine:
                 elif limit_entry is not None and current_price < limit_entry:
                     result["entry"] = limit_entry
                     result["entry_type"] = "LIMIT"
+                    result["requires_pullback"] = True
                     result["entry_type_reason"] = "Wait for pullback to bearish POI"
                 else:
                     result["entry"] = None
@@ -255,7 +262,38 @@ class EntryEngine:
                 result["entry_type"] = "LIMIT" if limit_entry is not None else "NONE"
                 result["entry_type_reason"] = "Bearish POI limit level" if limit_entry is not None else "No valid bearish POI"
 
-        if (result["entry"] is None or result["stop_loss"] is None) and not result.get("entry_zone_crossed"):
+        # Reject pending POIs that are too far from the live market.
+        if result.get("requires_pullback") and result.get("entry") is not None and current_price is not None:
+            distance = abs(result["entry"] - current_price)
+            distance_pct = distance / current_price if current_price > 0 else None
+            atr_value = 0.0
+            try:
+                if candles:
+                    atr_value = float(calculate_atr(candles, period=int(getattr(Config, "ATR_PERIOD", 14))))
+            except (TypeError, ValueError, OverflowError):
+                atr_value = 0.0
+            max_pct = float(getattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_PERCENT", 0.03))
+            max_atr = float(getattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_ATR", 2.0))
+            limits = [current_price * max_pct]
+            if math.isfinite(atr_value) and atr_value > 0:
+                limits.append(atr_value * max_atr)
+            max_distance = min(limits)
+            result["entry_distance_pct"] = round(distance_pct * 100.0, 4) if distance_pct is not None else None
+            result["entry_distance_atr"] = round(distance / atr_value, 3) if atr_value > 0 else None
+            if distance > max_distance:
+                result["entry"] = None
+                result["entry_type"] = "NONE"
+                result["entry_too_far"] = True
+                result["requires_pullback"] = False
+                result["entry_type_reason"] = f"LIMIT POI too far from market ({distance_pct * 100.0:.2f}%); wait for a fresh setup"
+                result["reason"] = "Limit entry too far from current market"
+                result["checks"].append("✗ LIMIT entry too far from current market")
+
+        if (
+            (result["entry"] is None or result["stop_loss"] is None)
+            and not result.get("entry_zone_crossed")
+            and not result.get("entry_too_far")
+        ):
             fallback_entry, fallback_sl = self._structure_fallback_levels(direction, structure)
             market_side_valid = (
                 current_price is not None
@@ -330,7 +368,8 @@ class EntryEngine:
                 return result
 
         result["valid"] = (
-            result["score"] >= 60
+            not result.get("entry_too_far")
+            and result["score"] >= 60
             and result["entry_type"] in {"MARKET", "LIMIT"}
             and result["entry"] is not None
             and result["stop_loss"] is not None

@@ -39,11 +39,12 @@ def _verdict(decision, signal, entry):
     entry_type = str((entry or {}).get("entry_type") or "").upper()
     entry_reason = str((entry or {}).get("entry_type_reason") or "").lower()
 
+    # LIMIT orders are conditional and must never be shown as immediate entry permission.
+    pending_limit = entry_type == "LIMIT"
+    if pending_limit:
+        return ("BEKLE", None, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
     if action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and signal_dir in ("LONG", "SHORT"):
         return ("AL" if signal_dir == "LONG" else "SAT", signal_dir, None)
-    # A pending LIMIT pullback is conditional, never an executable market entry.
-    if entry_type == "LIMIT" and "wait for pullback" in entry_reason:
-        return ("BEKLE", None, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
 
     # WAIT is not an actionable terminal decision; show it as no-entry.
     if action == "WAIT":
@@ -81,11 +82,7 @@ def build_signal_card(result):
     symbol = result.get("symbol", "UNKNOWN")
 
     verdict_label, direction, verdict_reason = _verdict(decision, signal, entry)
-    pending_pullback = (
-        verdict_label == "BEKLE"
-        and str(entry.get("entry_type") or "").upper() == "LIMIT"
-        and "wait for pullback" in str(entry.get("entry_type_reason") or "").lower()
-    )
+    pending_pullback = str(entry.get("entry_type") or "").upper() == "LIMIT"
 
     card = {
         "symbol": symbol,
@@ -103,6 +100,7 @@ def build_signal_card(result):
         "entry": None,
         "entry_type": str(entry.get("entry_type") or "BELİRSİZ").upper(),
         "entry_type_reason": entry.get("entry_type_reason") or "",
+        "requires_pullback": str(entry.get("entry_type") or "").upper() == "LIMIT",
         "synthetic_tp_targets": bool(dynamic_tp.get("synthetic_targets", False)),
         "stop_loss": None,
         "tp_levels": [],
@@ -177,9 +175,9 @@ def format_card_text(card):
     line = "=" * 46
     action = str(card.get("decision_action") or "").upper()
     entry_type = str(card.get("entry_type") or "").upper()
-    pending_limit = entry_type == "LIMIT" and "wait for pullback" in str(card.get("entry_type_reason") or "").lower()
+    pending_limit = entry_type == "LIMIT"
     executable = action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and card.get("direction") in ("LONG", "SHORT")
-    if pending_limit and not executable:
+    if pending_limit:
         headline = "KARAR: ŞİMDİ GİRME | EMİR: LIMIT (FİYAT GELİNCE)"
     elif executable:
         headline = "KARAR: İŞLEME GİR | EMİR: " + (entry_type if entry_type in ("MARKET", "LIMIT") else "GİRİŞİ TEYİT ET")
@@ -189,10 +187,10 @@ def format_card_text(card):
     if card["direction"]:
         lines.append(f"  Yön        : {card['direction']}")
     lines.append(f"  Girdi      : {card['entry']}")
-    if executable:
-        shown_entry_type = entry_type if entry_type in ("MARKET", "LIMIT") else "GİRİŞİ TEYİT ET"
-    elif pending_limit:
+    if pending_limit:
         shown_entry_type = "LIMIT (fiyat bölgesine gelirse)"
+    elif executable:
+        shown_entry_type = entry_type if entry_type in ("MARKET", "LIMIT") else "GİRİŞİ TEYİT ET"
     else:
         shown_entry_type = "YOK (işlem açma)"
     lines.append(f"  Emir türü  : {shown_entry_type}")
