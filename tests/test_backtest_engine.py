@@ -54,3 +54,29 @@ def test_backtest_monte_carlo_and_walk_forward_outputs():
     assert walk_forward["windows"]
     assert analytics["total"] == 12
     assert analytics["profit_factor"] >= 0
+
+
+
+def test_pending_live_signal_does_not_pollute_realized_statistics():
+    engine = BacktestEngine()
+    engine.record({
+        "signal": {"signal": "LONG", "confidence": 90},
+        "risk": {"entry": 100.0, "stop_loss": 99.0},
+        "rr": {"rr": 3.0},
+    })
+
+    stats = engine.statistics()
+    assert stats["total"] == 0
+    assert stats["pending"] == 1
+    assert stats["wins"] == 0
+    assert stats["losses"] == 0
+    assert stats["winrate"] == 0
+    assert engine.monte_carlo()["iterations"] == 0
+    assert engine.walk_forward()["windows"] == []
+
+    engine.record({"result": "WIN", "rr": 2.0, "tp": 2})
+    stats = engine.statistics()
+    assert stats["total"] == 1
+    assert stats["pending"] == 1
+    assert stats["wins"] == 1
+    assert stats["winrate"] == 100.0

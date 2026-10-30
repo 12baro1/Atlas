@@ -8,6 +8,7 @@ class BacktestEngine:
     def __init__(self):
 
         self.total = 0
+        self.pending = 0
         self.wins = 0
         self.losses = 0
 
@@ -26,15 +27,20 @@ class BacktestEngine:
         if trade is None:
             return
 
-        self.total += 1
-
-        # Canlı engine.analyze() çıktısı: "signal"/"risk"/"rr" içerir
+        # Live analysis payloads have no realized outcome yet. Keep them
+        # visible as pending records, but never include them in closed-trade
+        # win rate, expectancy, or profit-factor denominators.
         if "signal" in trade and "rr" in trade and "risk" in trade:
             self._record_payload(trade)
             return
 
-        result = trade.get("result", "LOSS")
+        result = str(trade.get("result", "") or "").upper()
+        if result not in {"WIN", "LOSS"}:
+            self.pending += 1
+            self.history.append(dict(trade, result="PENDING"))
+            return
 
+        self.total += 1
         rr = abs(trade.get("rr", 0) if isinstance(trade.get("rr"), (int, float)) else 0)
         signed_rr = rr if result == "WIN" else -rr
         self.net_rr += signed_rr
@@ -66,10 +72,8 @@ class BacktestEngine:
         risk = result_payload.get("risk") or {}
         rr = result_payload.get("rr") or {}
 
-        value = rr.get("rr") if isinstance(rr, dict) else rr
-        value = abs(value) if isinstance(value, (int, float)) else 0
-
         entry = {"signal": signal, "risk": risk, "rr": rr, "result": "PENDING"}
+        self.pending += 1
         if signal.get("signal") == "LONG":
             entry["side"] = "LONG"
         elif signal.get("signal") == "SHORT":
@@ -85,6 +89,7 @@ class BacktestEngine:
 
             return {
                 "total": 0,
+                "pending": self.pending,
                 "wins": 0,
                 "losses": 0,
                 "winrate": 0,
@@ -103,6 +108,8 @@ class BacktestEngine:
         return {
 
             "total": self.total,
+
+            "pending": self.pending,
 
             "wins": self.wins,
 
@@ -145,7 +152,16 @@ class BacktestEngine:
                 "best_case_rr": 0,
             }
 
-        outcomes = [abs(trade.get("rr", 0)) if trade.get("result") == "WIN" else -abs(trade.get("rr", 0)) for trade in self.history]
+        closed = self._closed_history()
+        if not closed:
+            return {
+                "iterations": 0,
+                "sample_size": 0,
+                "expected_rr": 0,
+                "worst_case_rr": 0,
+                "best_case_rr": 0,
+            }
+        outcomes = [abs(trade.get("rr", 0)) if trade.get("result") == "WIN" else -abs(trade.get("rr", 0)) for trade in closed]
         sample_size = sample_size or min(20, len(outcomes))
         sample_size = max(1, min(sample_size, len(outcomes)))
 
@@ -167,22 +183,23 @@ class BacktestEngine:
 
     def walk_forward(self, window=20, step=10):
         """Kaydırmalı pencere ile walk-forward performansı hesaplar."""
-        if not self.history:
+        closed = self._closed_history()
+        if not closed:
             return {"windows": [], "average_rr": 0, "average_winrate": 0}
 
         window = max(5, window)
         step = max(1, step)
         windows = []
 
-        for start in range(0, len(self.history) - window + 1, step):
-            chunk = self.history[start:start + window]
+        for start in range(0, len(closed) - window + 1, step):
+            chunk = closed[start:start + window]
             stats = self._chunk_stats(chunk)
             stats["start"] = start
             stats["end"] = start + window
             windows.append(stats)
 
         if not windows:
-            windows = [self._chunk_stats(self.history)]
+            windows = [self._chunk_stats(closed)]
 
         average_rr = sum(item["avg_rr"] for item in windows) / len(windows)
         average_winrate = sum(item["winrate"] for item in windows) / len(windows)
@@ -195,9 +212,11 @@ class BacktestEngine:
 
     def trade_analytics(self):
         """Trade geçmişinden kalite ve dağılım analitiği üretir."""
-        if not self.history:
+        closed = self._closed_history()
+        if not closed:
             return {
                 "total": 0,
+                "pending": self.pending,
                 "long_trades": 0,
                 "short_trades": 0,
                 "winrate": 0,
@@ -206,9 +225,9 @@ class BacktestEngine:
                 "expectancy": 0,
             }
 
-        rr_values = [abs(trade.get("rr", 0)) if trade.get("result") == "WIN" else -abs(trade.get("rr", 0)) for trade in self.history]
-        long_trades = len([trade for trade in self.history if trade.get("side") == "LONG"])
-        short_trades = len([trade for trade in self.history if trade.get("side") == "SHORT"])
+        rr_values = [abs(trade.get("rr", 0)) if trade.get("result") == "WIN" else -abs(trade.get("rr", 0)) for trade in closed]
+        long_trades = len([trade for trade in closed if trade.get("side") == "LONG"])
+        short_trades = len([trade for trade in closed if trade.get("side") == "SHORT"])
         ordered_rr = sorted(rr_values)
         middle = len(ordered_rr) // 2
         if len(ordered_rr) % 2 == 0:
@@ -218,7 +237,8 @@ class BacktestEngine:
 
         stats = self.statistics()
         return {
-            "total": len(self.history),
+            "total": len(closed),
+            "pending": self.pending,
             "long_trades": long_trades,
             "short_trades": short_trades,
             "winrate": stats["winrate"],
@@ -227,6 +247,13 @@ class BacktestEngine:
             "expectancy": stats["expectancy"],
             "profit_factor": stats["profit_factor"],
         }
+
+    def _closed_history(self):
+        """Return only trades with a realized WIN/LOSS outcome."""
+        return [
+            trade for trade in self.history
+            if str(trade.get("result", "")).upper() in {"WIN", "LOSS"}
+        ]
 
     def _chunk_stats(self, chunk):
         total = len(chunk)
