@@ -94,8 +94,8 @@ class Config:
     ATR_PERIOD = 14
     MIN_STOP_ATR_MULTIPLIER = 0.75
     # Maximum distance for pending LIMIT entries from the current market.
-    MAX_LIMIT_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_ATR", "2.0"))
-    MAX_LIMIT_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_PERCENT", "0.03"))
+    MAX_LIMIT_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_ATR", "3.0"))
+    MAX_LIMIT_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_PERCENT", "0.05"))
     # Refuse actionable output when the latest closed 15m candle is too old.
     MAX_15M_CANDLE_AGE_SECONDS = 1800
     MIN_STOP_PERCENT = 0.0005
