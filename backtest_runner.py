@@ -13,15 +13,19 @@ Amacı: "Bu sinyal filtresi gerçekten edge (beklenti) üretiyor mu?" sorusunu y
 """
 
 import logging
+import math
 
 logger = logging.getLogger("atlas.backtest_runner")
 
 
 def _num(value, digits=4):
     try:
-        return round(float(value), digits)
-    except (TypeError, ValueError):
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+    if not math.isfinite(number):
+        return None
+    return round(number, digits)
 
 
 def _tps(targets):
@@ -181,6 +185,22 @@ def simulate_trade_partial(
             elif next_level_idx == n:
                 trailing_stop = levels[0][1] if n >= 2 else entry
 
+            if closed_frac >= 1.0 - 1e-9:
+                break
+
+            # A newly moved stop can also be touched in this candle. OHLC data
+            # cannot reveal the intrabar path, so close the remainder at that
+            # protective stop instead of optimistically counting later targets.
+            if _candle_touched_stop(is_long, trailing_stop, low, high):
+                remaining = 1.0 - closed_frac
+                if is_long:
+                    rr_stop = (trailing_stop - entry) / risk_distance
+                else:
+                    rr_stop = (entry - trailing_stop) / risk_distance
+                realized_rr += remaining * rr_stop
+                closed_frac = 1.0
+                break
+
         if closed_frac >= 1.0 - 1e-9:
             break
 
@@ -272,13 +292,66 @@ class BacktestRunner:
         if isinstance(risk, dict) and risk.get("risk_setup_valid") is False:
             return None
 
-        entry_price = risk.get("entry")
+        planned_entry = risk.get("entry")
         stop = risk.get("stop_loss")
-        if entry_price is None or stop is None:
+        if planned_entry is None or stop is None or entry_index >= len(candles):
             return None
 
-        tps = [risk.get("tp1"), risk.get("tp2"), risk.get("tp3")]
-        future = candles[entry_index:]
+        analysis = (result or {}).get("analysis") or {}
+        entry_meta = analysis.get("entry") or {}
+        entry_type = str(entry_meta.get("entry_type") or "MARKET").upper()
+        if entry_type not in {"MARKET", "LIMIT"}:
+            return None
+
+        # Simulate the order type Atlas actually recommends. A LIMIT order is
+        # not filled merely because a signal exists; price must trade at its
+        # level. MARKET orders fill at the next candle open, not the old signal
+        # candle close.
+        fill_index = None
+        entry_price = None
+        if entry_type == "MARKET":
+            fill_index = entry_index
+            entry_price = _num(candles[fill_index].open)
+            if entry_price is None:
+                return None
+        else:
+            limit_price = _num(planned_entry)
+            if limit_price is None:
+                return None
+            is_long = signal_dir == "LONG"
+            for candidate_index in range(entry_index, len(candles)):
+                candle = candles[candidate_index]
+                touched = candle.low <= limit_price if is_long else candle.high >= limit_price
+                if not touched:
+                    continue
+                # A gap through a limit order receives the opening price when
+                # that is better than the requested limit.
+                opened = _num(candle.open)
+                if opened is None:
+                    continue
+                entry_price = min(limit_price, opened) if is_long else max(limit_price, opened)
+                fill_index = candidate_index
+                break
+            if fill_index is None:
+                return None
+
+        stop = _num(stop)
+        if stop is None:
+            return None
+        tps = [_num(risk.get("tp1")), _num(risk.get("tp2")), _num(risk.get("tp3"))]
+        valid_tps = [target for target in tps if target is not None]
+        if signal_dir == "LONG":
+            if stop >= entry_price or any(target <= entry_price for target in valid_tps):
+                return None
+            if valid_tps != sorted(valid_tps):
+                return None
+        else:
+            if stop <= entry_price or any(target >= entry_price for target in valid_tps):
+                return None
+            if valid_tps != sorted(valid_tps, reverse=True):
+                return None
+
+        future = candles[fill_index:]
         use_partial = bool(getattr(self, "partial_exits", True))
         if use_partial:
             outcome = simulate_trade_partial(
@@ -320,7 +393,9 @@ class BacktestRunner:
         net_rr = base_rr
 
         return {
-            "entry_index": entry_index,
+            "entry_index": fill_index,
+            "entry_type": entry_type,
+            "planned_entry": planned_entry,
             "direction": signal_dir,
             "entry": entry_price,
             "stop_loss": stop,
