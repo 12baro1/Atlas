@@ -18,11 +18,15 @@ def test_combined_profit_factor_uses_gross_wins_and_losses_not_net_symbol_totals
         ("BTC", {
             "total": 2, "wins": 1, "net_rr": 1.0,
             "gross_profit_rr": 2.0, "gross_loss_rr": 1.0,
+            "candidate_signals": 3, "unfilled_limits": 1, "open_trades": 1,
+            "invalid_candidates": 0, "no_followup_data": 0,
             "tp1": 1, "tp2": 0, "tp3": 0,
         }),
         ("ETH", {
             "total": 2, "wins": 1, "net_rr": -0.5,
             "gross_profit_rr": 1.0, "gross_loss_rr": 1.5,
+            "candidate_signals": 4, "unfilled_limits": 2, "open_trades": 0,
+            "invalid_candidates": 1, "no_followup_data": 0,
             "tp1": 0, "tp2": 1, "tp3": 0,
         }),
     ])
@@ -35,3 +39,7 @@ def test_combined_profit_factor_uses_gross_wins_and_losses_not_net_symbol_totals
     assert combined["gross_profit_rr"] == 3.0
     assert combined["gross_loss_rr"] == 2.5
     assert combined["profit_factor"] == 1.2
+    assert combined["candidate_signals"] == 7
+    assert combined["unfilled_limits"] == 3
+    assert combined["open_trades"] == 1
+    assert combined["invalid_candidates"] == 1

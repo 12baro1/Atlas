@@ -229,6 +229,11 @@ class BacktestRunner:
         self.history = []
         self.total = 0
         self.wins = 0
+        self.candidate_signals = 0
+        self.unfilled_limits = 0
+        self.open_trades = 0
+        self.invalid_candidates = 0
+        self.no_followup_data = 0
         self.tp1 = 0
         self.tp2 = 0
         self.tp3 = 0
@@ -287,20 +292,27 @@ class BacktestRunner:
             tradeable_dir = signal_dir in ("LONG", "SHORT") and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
         if not tradeable_dir:
             return None
+        self.candidate_signals += 1
 
         risk = (result or {}).get("risk") or {}
         if isinstance(risk, dict) and risk.get("risk_setup_valid") is False:
+            self.invalid_candidates += 1
             return None
 
         planned_entry = risk.get("entry")
         stop = risk.get("stop_loss")
-        if planned_entry is None or stop is None or entry_index >= len(candles):
+        if entry_index >= len(candles):
+            self.no_followup_data += 1
+            return None
+        if planned_entry is None or stop is None:
+            self.invalid_candidates += 1
             return None
 
         analysis = (result or {}).get("analysis") or {}
         entry_meta = analysis.get("entry") or {}
         entry_type = str(entry_meta.get("entry_type") or "MARKET").upper()
         if entry_type not in {"MARKET", "LIMIT"}:
+            self.invalid_candidates += 1
             return None
 
         # Simulate the order type Atlas actually recommends. A LIMIT order is
@@ -313,10 +325,12 @@ class BacktestRunner:
             fill_index = entry_index
             entry_price = _num(candles[fill_index].open)
             if entry_price is None:
+                self.invalid_candidates += 1
                 return None
         else:
             limit_price = _num(planned_entry)
             if limit_price is None:
+                self.invalid_candidates += 1
                 return None
             is_long = signal_dir == "LONG"
             for candidate_index in range(entry_index, len(candles)):
@@ -333,22 +347,28 @@ class BacktestRunner:
                 fill_index = candidate_index
                 break
             if fill_index is None:
+                self.unfilled_limits += 1
                 return None
 
         stop = _num(stop)
         if stop is None:
+            self.invalid_candidates += 1
             return None
         tps = [_num(risk.get("tp1")), _num(risk.get("tp2")), _num(risk.get("tp3"))]
         valid_tps = [target for target in tps if target is not None]
         if signal_dir == "LONG":
             if stop >= entry_price or any(target <= entry_price for target in valid_tps):
+                self.invalid_candidates += 1
                 return None
             if valid_tps != sorted(valid_tps):
+                self.invalid_candidates += 1
                 return None
         else:
             if stop <= entry_price or any(target >= entry_price for target in valid_tps):
+                self.invalid_candidates += 1
                 return None
             if valid_tps != sorted(valid_tps, reverse=True):
+                self.invalid_candidates += 1
                 return None
 
         future = candles[fill_index:]
@@ -374,6 +394,7 @@ class BacktestRunner:
 
         # Pencere içinde çözülemeyen (ne SL ne TP) işlemleri istatistiğe katma.
         if outcome.get("result") == "OPEN":
+            self.open_trades += 1
             return None
 
         risk_distance = abs(entry_price - stop)
@@ -427,6 +448,11 @@ class BacktestRunner:
         if not self.total:
             return {
                 "total": 0, "wins": 0, "losses": 0, "winrate": 0,
+                "candidate_signals": self.candidate_signals,
+                "unfilled_limits": self.unfilled_limits,
+                "open_trades": self.open_trades,
+                "invalid_candidates": self.invalid_candidates,
+                "no_followup_data": self.no_followup_data,
                 "expectancy": 0, "avg_r": 0, "max_drawdown": 0,
                 "profit_factor": 0, "net_rr": 0,
                 "gross_profit_rr": 0, "gross_loss_rr": 0,
@@ -456,6 +482,11 @@ class BacktestRunner:
         return {
             "total": self.total,
             "wins": wins,
+            "candidate_signals": self.candidate_signals,
+            "unfilled_limits": self.unfilled_limits,
+            "open_trades": self.open_trades,
+            "invalid_candidates": self.invalid_candidates,
+            "no_followup_data": self.no_followup_data,
             "losses": losses,
             "winrate": round(winrate, 2),
             "expectancy": round(self.net_rr / self.total, 4) if self.total else 0,
