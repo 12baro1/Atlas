@@ -79,11 +79,12 @@ def _is_symbol_input(value: str) -> bool:
 def _is_supported_input(value: str) -> bool:
     """Recognize supported commands before treating input as a coin ticker."""
     normalized = str(value or "").strip().lower()
-    return normalized in _BEST_TRADE_COMMANDS or _is_symbol_input(value)
+    return _parse_scan_command(value) is not None or _is_symbol_input(value)
 
 
 def _best_symbols(limit=DEFAULT_SCAN_LIMIT):
-    limit = _normalize_scan_limit(limit)
+    if limit is not None:
+        limit = _normalize_scan_limit(limit)
     markets = exchange.load_markets()
     symbols, _ = select_symbols(
         markets=markets,
@@ -101,7 +102,7 @@ def _best_symbols(limit=DEFAULT_SCAN_LIMIT):
         if quote_volume is not None and quote_volume > 0:
             ranked.append((quote_volume, symbol))
     ranked.sort(reverse=True)
-    selected = ranked[:limit]
+    selected = ranked if limit is None else ranked[:limit]
     return [symbol for _, symbol in selected]
 
 
@@ -157,9 +158,11 @@ class AtlasTUIApp(App):
         with Vertical(id="main"):
             yield Static("ATLAS  /  SMC ANALİZ TERMİNALİ", id="brand")
             yield Static(
-                "Bir coin yaz: BRC, BTC, ETH\n"
-                "'işlem ver' yaz: en yüksek hacimli 30 USDT perpetual piyasasını tara\n"
-                "'yardım' yaz: komutları göster",
+                "Bir coin yaz: BTC / ETH — tek coin analizi\n"
+                "'50 analiz et' — 50 piyasayı tara, en iyi 5 kurulumu göster\n"
+                "'en iyi 5 işlem' — 100 piyasadan en iyi 5 kurulumu seç\n"
+                "'tüm piyasayı tara' — uygun tüm USDT perpetual piyasaları tara\n"
+                "'yardım' — komutların tamamı",
                 id="help",
             )
             yield Static(
@@ -194,11 +197,18 @@ class AtlasTUIApp(App):
         if normalized in {"yardım", "yardim", "help", "?"}:
             self._show(
                 "KOMUTLAR\n"
-                "• BRC / BTC / ETH — seçilen coin'i analiz et\n"
-                "• işlem ver / en iyi işlem — varsayılan en yüksek hacimli 30 piyasayı tara\n"
-                "• ATLAS_SCAN_LIMIT=0 ayarıyla tüm uygun piyasaları analiz et (telefonu yavaşlatabilir)\n"
-                "• çıkış — Atlas'ı kapat\n\n"
-                "Atlas emir göndermez. İşlem önerisi oluşmazsa BEKLE gösterir."
+                "TEK COIN\n"
+                "• BTC / ETH / BRC — seçilen coini analiz et\n\n"
+                "PIYASA TARAMA\n"
+                "• işlem ver — 30 piyasayı tara, en iyi 1 kurulumu göster\n"
+                "• 50 analiz et — 50 piyasayı tara, en iyi 5 kurulumu göster\n"
+                "• 100 tara — 100 piyasayı tara, en iyi 5 kurulumu göster\n"
+                "• en iyi 5 işlem — 100 piyasadan en iyi 5 kurulumu göster\n"
+                "• tüm piyasayı tara — tüm uygun USDT perpetual piyasalarını tara\n"
+                "• en iyi 10 işlem — 100 piyasadan en iyi 10 kurulumu göster\n\n"
+                "Sayısal tarama en fazla 500 piyasa; tüm piyasa taraması uzun sürebilir.\n"
+                "Atlas emir göndermez. Sıralama puanı kazanma olasılığı değildir.\n"
+                "• çıkış — Atlas'ı kapat"
             )
             return
         if normalized in {"çıkış", "cikis", "exit", "quit"}:
@@ -207,7 +217,7 @@ class AtlasTUIApp(App):
         if not _is_supported_input(command):
             self._show(
                 "KOMUT TANINMADI\n\n"
-                "Bir coin sembolü (BTC, ETH, BRC), 'işlem ver' veya 'yardım' yaz."
+                "Örnek: BTC | 50 analiz et | en iyi 5 işlem | tüm piyasayı tara | yardım"
             )
             return
         self._busy = True
@@ -217,8 +227,9 @@ class AtlasTUIApp(App):
     def _run_command(self, command: str) -> None:
         try:
             lowered = command.strip().lower()
-            if lowered in _BEST_TRADE_COMMANDS:
-                result_text = self._find_best_trade()
+            scan_request = _parse_scan_command(lowered)
+            if scan_request is not None:
+                result_text = self._find_best_trade(*scan_request)
             else:
                 outcome = self.runtime.analyze_symbol(command, force_refresh=True)
                 if not outcome.get("ok"):
@@ -235,8 +246,7 @@ class AtlasTUIApp(App):
         except Exception as exc:
             self.call_from_thread(self._finish, f"ANALİZ HATASI\n\n{type(exc).__name__}: {exc}")
 
-    def _find_best_trade(self) -> str:
-        scan_limit = _normalize_scan_limit(os.getenv("ATLAS_SCAN_LIMIT", str(DEFAULT_SCAN_LIMIT)))
+    def _find_best_trade(self, scan_limit=DEFAULT_SCAN_LIMIT, result_limit=1) -> str:
         symbols = _best_symbols(limit=scan_limit)
         if not symbols:
             return "Uygun piyasa bulunamadı. Veri sağlayıcısını kontrol et."
