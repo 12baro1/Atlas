@@ -7,6 +7,7 @@ Kod İngilizce, açıklamalar Türkçe tutulmuştur.
 """
 
 from importlib import import_module
+import math
 import logging
 import threading
 import time
@@ -1423,10 +1424,59 @@ class AtlasEngine:
         )
 
     def _validate_market_data(self, data):
-        """Gerekli veri setlerinin varlığını ve boş olmadığını doğrular."""
-        missing = [tf for tf in self.REQUIRED_TIMEFRAMES if not data.get(tf)]
+        """Reject missing, malformed, non-finite, or out-of-order OHLCV data."""
+        if not isinstance(data, dict):
+            raise ValueError("Market data must be a dictionary")
+
+        missing = [
+            tf for tf in self.REQUIRED_TIMEFRAMES
+            if not isinstance(data.get(tf), (list, tuple)) or not data.get(tf)
+        ]
         if missing:
             raise ValueError(f"Missing or empty market data timeframes: {', '.join(missing)}")
+
+        timeframes = list(self.REQUIRED_TIMEFRAMES)
+        if isinstance(data.get("1h"), (list, tuple)) and data.get("1h"):
+            timeframes.append("1h")
+
+        for timeframe in timeframes:
+            candles = data[timeframe]
+            previous_time = None
+            for index, candle in enumerate(candles):
+                try:
+                    timestamp = float(candle.time)
+                    open_price = float(candle.open)
+                    high = float(candle.high)
+                    low = float(candle.low)
+                    close = float(candle.close)
+                    volume = float(candle.volume)
+                except (AttributeError, TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(
+                        f"Malformed OHLCV candle: timeframe={timeframe} index={index}"
+                    ) from exc
+
+                values = (timestamp, open_price, high, low, close, volume)
+                if not all(math.isfinite(value) for value in values):
+                    raise ValueError(
+                        f"Non-finite OHLCV value: timeframe={timeframe} index={index}"
+                    )
+                if timestamp < 0 or not timestamp.is_integer():
+                    raise ValueError(
+                        f"Invalid candle timestamp: timeframe={timeframe} index={index}"
+                    )
+                if min(open_price, high, low, close) <= 0 or volume < 0:
+                    raise ValueError(
+                        f"Invalid OHLCV range: timeframe={timeframe} index={index}"
+                    )
+                if high < max(open_price, close, low) or low > min(open_price, close, high):
+                    raise ValueError(
+                        f"Inconsistent OHLC prices: timeframe={timeframe} index={index}"
+                    )
+                if previous_time is not None and timestamp <= previous_time:
+                    raise ValueError(
+                        f"Candle timestamps must be strictly increasing: timeframe={timeframe} index={index}"
+                    )
+                previous_time = timestamp
 
     def _price_context(self, candles):
         """Geçerli fiyat ve işlem aralığını hesaplar."""
