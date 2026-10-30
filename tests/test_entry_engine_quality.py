@@ -176,7 +176,7 @@ def test_entry_engine_safe_price_rejects_non_finite_values():
     assert engine._safe_price(float("-inf")) is None
 
 
-def test_entry_engine_rejects_distant_limit_pullback_using_percent_cap():
+def test_entry_engine_keeps_distant_limit_pullback_and_labels_distance():
     result = EntryEngine().generate(
         mtf={"entry": "SHORT"},
         structure=[{"label": "LH", "kind": "HIGH", "price": 105.0}],
@@ -184,11 +184,12 @@ def test_entry_engine_rejects_distant_limit_pullback_using_percent_cap():
         orderblocks=[],
         current_price=100.0,
     )
-    assert result["valid"] is False
-    assert result["entry"] is None
-    assert result["entry_type"] == "NONE"
-    assert result["entry_too_far"] is True
-    assert "too far" in result["entry_type_reason"].lower()
+    assert result["entry"] == 106.0
+    assert result["entry_type"] == "LIMIT"
+    assert result["requires_pullback"] is True
+    assert result["entry_too_far"] is False
+    assert result["entry_distance_label"] == "UZAK GİRİŞ"
+    assert result["entry_distance_pct"] == 6.0
 
 
 def test_entry_engine_keeps_nearby_limit_pullback():
