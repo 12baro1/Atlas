@@ -120,4 +120,13 @@ def test_pending_limit_card_explains_conditional_limit_entry():
     assert "KARAR: ŞİMDİ GİRME" in output
     assert "EMİR: LIMIT (FİYAT GELİNCE)" in output
     assert "Emir türü  : LIMIT (fiyat bölgesine gelirse)" in output
+    assert "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor" in output
+    assert "wait for pullback" not in output
     assert "Sinyal WAIT" not in output
+
+
+
+def test_signal_card_numeric_formatter_rejects_nan_and_infinity():
+    from utils.signal_card import _num
+    assert _num(float("nan")) is None
+    assert _num(float("inf")) is None
