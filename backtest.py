@@ -27,6 +27,58 @@ from engine import AtlasEngine
 from config import Config
 
 
+TIMEFRAME_DURATION_MS = {
+    "15m": 15 * 60 * 1000,
+    "1h": 60 * 60 * 1000,
+    "4h": 4 * 60 * 60 * 1000,
+    "1d": 24 * 60 * 60 * 1000,
+    "1w": 7 * 24 * 60 * 60 * 1000,
+}
+BACKTEST_WARMUP_CANDLES = {
+    "15m": 300,
+    "1h": 1000,
+    "4h": 1000,
+    "1d": 500,
+    "1w": 300,
+}
+
+
+def _history_days_for_timeframe(days, timeframe):
+    """Fetch enough prehistory for each timeframe's structure warmup."""
+    days = float(days)
+    if not days > 0:
+        raise ValueError("Backtest days must be greater than zero")
+    if timeframe not in TIMEFRAME_DURATION_MS:
+        raise ValueError(f"Unsupported backtest timeframe: {timeframe}")
+    warmup_days = (
+        BACKTEST_WARMUP_CANDLES[timeframe]
+        * TIMEFRAME_DURATION_MS[timeframe]
+        / 86_400_000
+    )
+    # The 15m series also needs its warmup before the requested evaluation
+    # window; higher timeframes need at least their own structural context.
+    if timeframe == "15m":
+        return days + warmup_days
+    return max(days, warmup_days)
+
+
+def _disable_backtest_live_features():
+    """Disable all live-only side effects through the environment config source."""
+    disabled = (
+        "ATLAS_STATE_ENGINE_ENABLED",
+        "ATLAS_INCREMENTAL_ANALYSIS_ENABLED",
+        "ATLAS_TELEGRAM_ENABLED",
+        "ATLAS_CORRELATION_ENGINE_ENABLED",
+        "ATLAS_ECONOMIC_NEWS_FILTER_ENABLED",
+        "ATLAS_LEARNING_ENGINE_ENABLED",
+        "ATLAS_SIGNAL_TRACKING_ENABLED",
+    )
+    for name in disabled:
+        os.environ[name] = "0"
+    os.environ["ATLAS_TRADE_COOLDOWN_MINUTES"] = "0"
+    Config.refresh_from_env()
+
+
 def _fetch_history(symbol, timeframe, since_ms, limit=1000):
     candles = []
     cursor = since_ms
@@ -62,15 +114,24 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
     return ordered
 
 
-def load_historical(symbol, days=60):
-    """days kadar geriye gidip 15m + üst TF mumlarını toplar."""
-    now = time.time() * 1000
-    since = now - int(days * 86400 * 1000)
+def load_historical(symbol, days=60, now_ms=None):
+    """Load the evaluation window plus sufficient timeframe-specific warmup."""
+    if float(days) <= 0:
+        raise ValueError("Backtest days must be greater than zero")
+    now = time.time() * 1000 if now_ms is None else float(now_ms)
     data = {"symbol": symbol}
     for tf, limit in TIMEFRAMES.items():
+        history_days = _history_days_for_timeframe(days, tf)
+        since = now - int(history_days * 86_400_000)
         candles = _fetch_history(symbol, tf, since_ms=since, limit=limit)
         data[tf] = candles
-        logging.info("%s %s -> %s mum", symbol, tf, len(candles))
+        logging.info(
+            "%s %s -> %s candles (history %.1f days)",
+            symbol,
+            tf,
+            len(candles),
+            history_days,
+        )
     return data
 
 
@@ -113,7 +174,7 @@ def main():
     parser.add_argument("--symbol", default="BTC/USDT:USDT", help="Tek sembol (Bybit swap)")
     parser.add_argument("--symbols", help="Virgülle ayrılmış sembol listesi (çoklu tarama; --symbol'dan öncelikli)")
     parser.add_argument("--days", type=int, default=60, help="Kaç gün geriye gidilecek")
-    parser.add_argument("--tf", default="15m", help="Giriş zaman dilimi")
+    parser.add_argument("--tf", choices=("15m",), default="15m", help="Giriş zaman dilimi (şimdilik yalnızca 15m)")
     parser.add_argument(
         "--lenient",
         action="store_true",
@@ -121,17 +182,12 @@ def main():
     )
     args = parser.parse_args()
 
-    # State/telegram/korelasyon gibi canlı mod bağımlılıklarını kapat
-    Config.STATE_ENGINE_ENABLED = False
-    Config.INCREMENTAL_ANALYSIS_ENABLED = False
-    Config.TELEGRAM_ENABLED = False
-    Config.CORRELATION_ENGINE_ENABLED = False
-    Config.ECONOMIC_NEWS_FILTER_ENABLED = False
-    Config.LEARNING_ENGINE_ENABLED = False
-    Config.SIGNAL_TRACKING_ENABLED = False
-    # Sembol bazlı işlem yasağı sinyal üretimini gerçek backtestte bastırmasın
-    Config.TRADE_COOLDOWN_MINUTES = 0.0
-    Config.refresh_from_env()
+    if args.days <= 0:
+        parser.error("--days must be greater than zero")
+
+    # Config.refresh_from_env() runs again inside AtlasEngine.__init__, so
+    # disable live-only features in the environment before constructing it.
+    _disable_backtest_live_features()
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()] if args.symbols else [args.symbol]
 
