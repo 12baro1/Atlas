@@ -265,6 +265,11 @@ class AtlasTUIApp(App):
             return "Uygun piyasa bulunamadı. Veri sağlayıcısını kontrol et."
         candidates = []
         errors = []
+        diagnostics = {
+            "long": 0, "short": 0, "execute": 0,
+            "entry_too_far": 0, "entry_zone_crossed": 0,
+            "no_entry": 0, "wait_or_skip": 0,
+        }
         for index, symbol in enumerate(symbols, start=1):
             self.call_from_thread(
                 self._show,
@@ -276,9 +281,25 @@ class AtlasTUIApp(App):
                 errors.append(f"{symbol}: {outcome.get('error', 'analiz başarısız')}")
                 continue
             raw = outcome["result"]
+            signal_data = raw.get("signal") or {}
+            analysis_data = raw.get("analysis") or {}
+            entry_data = analysis_data.get("entry") or {}
+            direction = str(signal_data.get("signal") or "").upper()
+            if direction == "LONG":
+                diagnostics["long"] += 1
+            elif direction == "SHORT":
+                diagnostics["short"] += 1
+            if entry_data.get("entry_too_far"):
+                diagnostics["entry_too_far"] += 1
+            if entry_data.get("entry_zone_crossed"):
+                diagnostics["entry_zone_crossed"] += 1
+            if not entry_data.get("entry"):
+                diagnostics["no_entry"] += 1
             card = build_signal_card(raw)
             if card.get("decision_action") != "EXECUTE" or card.get("direction") not in {"LONG", "SHORT"}:
+                diagnostics["wait_or_skip"] += 1
                 continue
+            diagnostics["execute"] += 1
             rr = _finite_number(card.get("rr") or 0)
             quality = _finite_number(card.get("setup_quality") or 0)
             confidence = _finite_number(card.get("confidence") or 0)
@@ -294,6 +315,15 @@ class AtlasTUIApp(App):
                 "ŞU AN GEÇERLİ İŞLEM YOK\n\n"
                 "Taranan piyasalarda Atlas'ın işlem koşullarını geçen kurulum bulunmadı. "
                 "Zorla LONG/SHORT üretmek yerine İŞLEME GİRME."
+            )
+            message += (
+                "\n\nTARAMA TEŞHİSİ"
+                f"\nLONG yön adayı: {diagnostics['long']}"
+                f"\nSHORT yön adayı: {diagnostics['short']}"
+                f"\nUzak LIMIT nedeniyle elenen: {diagnostics['entry_too_far']}"
+                f"\nPOI geçilmiş: {diagnostics['entry_zone_crossed']}"
+                f"\nGiriş seviyesi üretilemeyen: {diagnostics['no_entry']}"
+                f"\nKarar filtresinde kalan: {diagnostics['wait_or_skip']}"
             )
             if errors:
                 message += "\n\nAnaliz edilemeyenler: " + "; ".join(errors[:3])
