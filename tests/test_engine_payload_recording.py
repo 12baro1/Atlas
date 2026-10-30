@@ -56,4 +56,7 @@ def test_backtest_engine_record_payload():
     bt.record(make_payload(signal="LONG", rr=5.0))
 
     result = bt.statistics()
-    assert result["total"] == 1
+    assert result["total"] == 0
+    assert result["pending"] == 1
+    assert result["wins"] == 0
+    assert result["losses"] == 0
