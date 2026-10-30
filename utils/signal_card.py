@@ -17,6 +17,21 @@ def _num(value, digits=2):
     return round(number, digits)
 
 
+def _price(value):
+    """Keep small-market price precision visible in terminal output.
+
+    Two-decimal rounding made valid prices such as 0.173846 look like 0.17,
+    hiding the actual stop distance and sometimes making SL equal to entry.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return round(number, 12)
+
+
 def _verdict(decision, signal, entry):
     """Tek bir net karar döndürür: AL, SAT, BEKLE veya ATLA."""
     action = str((decision or {}).get("action", "WAIT") or "").upper()
@@ -104,16 +119,16 @@ def build_signal_card(result):
 
     entry_price = entry.get("entry")
     if entry_price is not None:
-        card["entry"] = _num(entry_price)
+        card["entry"] = _price(entry_price)
     stop = risk.get("stop_loss") or entry.get("stop_loss")
     if stop is not None:
-        card["stop_loss"] = _num(stop)
+        card["stop_loss"] = _price(stop)
 
     for tp in (risk.get("tp1") or dynamic_tp.get("tp1"),
                risk.get("tp2") or dynamic_tp.get("tp2"),
                risk.get("tp3") or dynamic_tp.get("tp3")):
         if tp is not None:
-            card["tp_levels"].append(_num(tp))
+            card["tp_levels"].append(_price(tp))
 
     card["rr"] = _num(risk.get("rr") or rr.get("rr"))
     card["selected_tp"] = risk.get("selected_tp") or rr.get("selected_tp")

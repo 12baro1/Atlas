@@ -145,6 +145,10 @@ class AtlasTUIApp(App):
     BINDINGS = [
         ("ctrl+c", "quit", "Çıkış"),
         ("escape", "clear_command", "Komutu temizle"),
+        ("pageup", "scroll_output_up", "Yukarı"),
+        ("pagedown", "scroll_output_down", "Aşağı"),
+        ("ctrl+u", "scroll_output_up", "Yukarı"),
+        ("ctrl+d", "scroll_output_down", "Aşağı"),
     ]
 
     def __init__(self, runtime, initial_symbol=None):
@@ -186,8 +190,16 @@ class AtlasTUIApp(App):
     def action_clear_command(self) -> None:
         self.query_one("#command", Input).value = ""
 
+    def action_scroll_output_up(self) -> None:
+        self.query_one("#output", Static).scroll_relative(y=-10, animate=False)
+
+    def action_scroll_output_down(self) -> None:
+        self.query_one("#output", Static).scroll_relative(y=10, animate=False)
+
     def _show(self, message: str) -> None:
-        self.query_one("#output", Static).update(message)
+        output = self.query_one("#output", Static)
+        output.update(message)
+        output.scroll_end(animate=False)
 
     def _start_command(self, command: str) -> None:
         if self._busy:
@@ -208,6 +220,7 @@ class AtlasTUIApp(App):
                 "• en iyi 10 işlem — 100 piyasadan en iyi 10 kurulumu göster\n\n"
                 "Sayısal tarama en fazla 500 piyasa; tüm piyasa taraması uzun sürebilir.\n"
                 "Atlas emir göndermez. Sıralama puanı kazanma olasılığı değildir.\n"
+                "Çıktıda gezinme: PageUp / PageDown veya Ctrl+U / Ctrl+D.\n"
                 "• çıkış — Atlas'ı kapat"
             )
             return
