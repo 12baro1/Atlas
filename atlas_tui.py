@@ -19,7 +19,38 @@ from utils.signal_card import build_signal_card, format_card_text
 _SYMBOL_INPUT_RE = re.compile(r"[A-Z0-9]{2,24}(?:/USDT(?::USDT)?)?\Z")
 _BEST_TRADE_COMMANDS = {"işlem ver", "islem ver", "en iyi işlem", "en iyi islem", "best", "best trade"}
 DEFAULT_SCAN_LIMIT = 30
-MAX_SCAN_LIMIT = 100
+DEFAULT_RANK_SCAN_LIMIT = 100
+MAX_SCAN_LIMIT = 500
+
+
+def _configured_scan_limit(default=DEFAULT_SCAN_LIMIT):
+    raw = os.getenv("ATLAS_SCAN_LIMIT", str(default)).strip().lower()
+    if raw in {"all", "tümü", "tumu", "0"}:
+        return None
+    return _normalize_scan_limit(raw, default=default, maximum=MAX_SCAN_LIMIT)
+
+
+def _parse_scan_command(value: str):
+    """Return (scan_limit, result_limit) for supported market scan commands."""
+    normalized = " ".join(str(value or "").strip().lower().split())
+    if normalized in _BEST_TRADE_COMMANDS:
+        return _configured_scan_limit(), 1
+    if normalized in {"tüm piyasa", "tum piyasa", "tüm piyasayı tara", "tum piyasayi tara",
+                      "tüm piyasayı analiz et", "tum piyasayi analiz et", "full scan", "scan all"}:
+        return None, 5
+    match = re.fullmatch(r"(?:en iyi )?(\d+)\s+(?:işlem|islem)(?:leri)?", normalized)
+    if match:
+        count = _normalize_scan_limit(match.group(1), default=1, maximum=20)
+        return _configured_scan_limit(default=DEFAULT_RANK_SCAN_LIMIT), count
+    match = re.fullmatch(r"(\d+)\s+(?:(?:coin|piyasa|sembol)\s+)?(?:analiz et|tara)", normalized)
+    if match:
+        count = _normalize_scan_limit(match.group(1), default=DEFAULT_SCAN_LIMIT, maximum=MAX_SCAN_LIMIT)
+        return count, 5
+    match = re.fullmatch(r"(?:ilk )?(\d+)\s+(?:piyasa|coin)(?:yı|yi)?\s+tara", normalized)
+    if match:
+        count = _normalize_scan_limit(match.group(1), default=DEFAULT_SCAN_LIMIT, maximum=MAX_SCAN_LIMIT)
+        return count, 5
+    return None
 
 
 def _normalize_scan_limit(value, default=DEFAULT_SCAN_LIMIT, maximum=MAX_SCAN_LIMIT):
