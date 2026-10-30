@@ -50,7 +50,23 @@ def test_backtest_disables_live_features_through_environment(monkeypatch):
         "ATLAS_LEARNING_ENGINE_ENABLED",
         "ATLAS_SIGNAL_TRACKING_ENABLED",
         "ATLAS_TRADE_COOLDOWN_MINUTES",
+        "ATLAS_AUTO_TRADING_ENABLED",
     )
+    config_attrs = (
+        "STATE_ENGINE_ENABLED",
+        "INCREMENTAL_ANALYSIS_ENABLED",
+        "TELEGRAM_ENABLED",
+        "CORRELATION_ENGINE_ENABLED",
+        "ECONOMIC_NEWS_FILTER_ENABLED",
+        "LEARNING_ENGINE_ENABLED",
+        "SIGNAL_TRACKING_ENABLED",
+        "TRADE_COOLDOWN_MINUTES",
+        "AUTO_TRADING_ENABLED",
+    )
+    # Restore process-wide Config state after this test; the real CLI exits
+    # after backtest, while pytest continues running unrelated tests.
+    for attr in config_attrs:
+        monkeypatch.setattr(Config, attr, getattr(Config, attr))
     for name in names:
         monkeypatch.setenv(name, "1")
 
@@ -64,6 +80,7 @@ def test_backtest_disables_live_features_through_environment(monkeypatch):
     assert Config.LEARNING_ENGINE_ENABLED is False
     assert Config.SIGNAL_TRACKING_ENABLED is False
     assert Config.TRADE_COOLDOWN_MINUTES == 0.0
+    assert Config.AUTO_TRADING_ENABLED is False
 
 
 def test_history_days_rejects_invalid_values():
