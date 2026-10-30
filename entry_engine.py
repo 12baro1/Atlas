@@ -31,6 +31,53 @@ class EntryEngine:
             entry = stop_loss * 0.998
         return entry, stop_loss
 
+    def _select_structural_stop(self, direction, structure, selected_fvg, selected_ob):
+        """Choose the outermost relevant swing/POI invalidation level."""
+        candidates = []
+        if direction == "LONG":
+            if selected_ob:
+                value = self._safe_price(selected_ob.get("low"))
+                if value is not None:
+                    candidates.append(("order_block", value))
+            if selected_fvg:
+                value = self._safe_price(selected_fvg.get("from"))
+                if value is not None:
+                    candidates.append(("fvg", value))
+            for item in reversed(structure or []):
+                kind = str(item.get("kind", "")).upper()
+                label = str(item.get("label", "")).upper()
+                if kind == "LOW" or label in {"HL", "LL"}:
+                    value = self._safe_price(item.get("price", item.get("low")))
+                    if value is not None:
+                        candidates.append(("swing_low", value))
+                        break
+            return (min(candidates, key=lambda item: item[1])[1], min(candidates, key=lambda item: item[1])[0]) if candidates else (None, None)
+
+        if selected_ob:
+            value = self._safe_price(selected_ob.get("high"))
+            if value is not None:
+                candidates.append(("order_block", value))
+        if selected_fvg:
+            value = self._safe_price(selected_fvg.get("to"))
+            if value is not None:
+                candidates.append(("fvg", value))
+        for item in reversed(structure or []):
+            kind = str(item.get("kind", "")).upper()
+            label = str(item.get("label", "")).upper()
+            if kind == "HIGH" or label in {"LH", "HH"}:
+                value = self._safe_price(item.get("price", item.get("high")))
+                if value is not None:
+                    candidates.append(("swing_high", value))
+                    break
+        return (max(candidates, key=lambda item: item[1])[1], max(candidates, key=lambda item: item[1])[0]) if candidates else (None, None)
+
+    def _safe_price(self, value):
+        try:
+            price = float(value)
+        except (TypeError, ValueError):
+            return None
+        return price if price > 0 else None
+
     def generate(self, mtf, structure, fvg, orderblocks, current_price=None, allow_structure_fallback=False):
 
         result = {
@@ -142,10 +189,9 @@ class EntryEngine:
 
         if direction == "LONG":
 
-            if selected_ob:
-                result["stop_loss"] = selected_ob["low"]
-            elif selected_fvg:
-                result["stop_loss"] = selected_fvg["from"]
+            result["stop_loss"], result["stop_source"] = self._select_structural_stop(
+                direction, structure, selected_fvg, selected_ob
+            )
 
             limit_entry = selected_fvg["to"] if selected_fvg else (selected_ob["high"] if selected_ob else None)
             if current_price is not None and result["stop_loss"] is not None:
@@ -172,10 +218,9 @@ class EntryEngine:
 
         else:
 
-            if selected_ob:
-                result["stop_loss"] = selected_ob["high"]
-            elif selected_fvg:
-                result["stop_loss"] = selected_fvg["to"]
+            result["stop_loss"], result["stop_source"] = self._select_structural_stop(
+                direction, structure, selected_fvg, selected_ob
+            )
 
             limit_entry = selected_fvg["from"] if selected_fvg else (selected_ob["low"] if selected_ob else None)
             if current_price is not None and result["stop_loss"] is not None:
@@ -205,6 +250,7 @@ class EntryEngine:
             if fallback_entry is not None and fallback_sl is not None:
                 result["entry"] = fallback_entry
                 result["stop_loss"] = fallback_sl
+                result["stop_source"] = "swing_fallback"
                 result["score"] += 15
                 result["entry_type"] = "CONFIRMATION"
                 if current_price is not None and ((direction == "LONG" and current_price > fallback_sl) or (direction == "SHORT" and current_price < fallback_sl)):
