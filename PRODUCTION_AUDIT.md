@@ -1,5 +1,7 @@
 # FINAL PRODUCTION AUDIT v2 — Atlas Sinyal Motoru
 
+> **DURUM NOTU — 30.10.2026:** Bu belge 08.08.2026 tarihli tarihsel bir denetim anlık görüntüsüdür; güncel sürüm için üretim onayı değildir. Sonraki incelemede backtest'in LIMIT emirlerini fiyat seviyesine dokunmadan dolmuş varsayabildiği ve MARKET girişlerini sinyal fiyatından simüle ettiği bulundu. Bu davranış PR #32 ile düzeltildi. Bu nedenle aşağıdaki eski performans rakamları güncel edge kanıtı olarak kullanılamaz; yeni gerçekçi fill modeliyle yeniden backtest ve out-of-sample doğrulama yapılmadan gerçek sermayeyle işlem önerilmez.
+
 Tarih: 2026-08-08 (ikinci inceleme)
 Kapsam: look-ahead bias, backtest gerçekçiliği, filtre kalibrasyonu, DB büyüme kontrolü
 
@@ -7,7 +9,7 @@ Kapsam: look-ahead bias, backtest gerçekçiliği, filtre kalibrasyonu, DB büy�
 
 ## 0. Karar
 
-**PRODUCTION AUDIT PASSED** (kritik sorun kalmadı — gözlem maddeleri dipnotta).
+**TARİHSEL SONUÇ: 08.08.2026 tarihinde o sürüm için geçti.** Güncel main dalı bu belgedeki onayın kapsamı dışındadır.
 
 ---
 
