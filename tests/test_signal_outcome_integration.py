@@ -563,3 +563,24 @@ def test_resolve_ignores_candles_before_opened_at(tmp_path):
     pre_open = Candle(1_699_000_000_000, 102.0, 103.0, 101.0, 102.5, 100)
     resolved = journal.resolve_signal_outcome(o, [pre_open])
     assert resolved is None or resolved.get("status") == "PENDING"
+
+
+def test_same_candle_sl_and_tp_is_resolved_conservatively_as_loss(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp2=102.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+    )
+    both_hit = _precise_candle(1, high=101.5, low=98.5, close=100.5)
+    resolved = journal.resolve_signal_outcome(outcome, [both_hit])
+    assert resolved is not None
+    assert resolved["status"] == "SL"
+    assert resolved["final_result"] == "LOSS"
+    assert resolved.get("tps_hit") == []
+    assert resolved["realized_r"] == -1.0
