@@ -51,7 +51,8 @@ class EntryEngine:
                     if value is not None:
                         candidates.append(("swing_low", value))
                         break
-            return (min(candidates, key=lambda item: item[1])[1], min(candidates, key=lambda item: item[1])[0]) if candidates else (None, None)
+            selected = min(candidates, key=lambda item: item[1]) if candidates else None
+            return (selected[1], selected[0]) if selected else (None, None)
 
         if selected_ob:
             value = self._safe_price(selected_ob.get("high"))
@@ -69,7 +70,8 @@ class EntryEngine:
                 if value is not None:
                     candidates.append(("swing_high", value))
                     break
-        return (max(candidates, key=lambda item: item[1])[1], max(candidates, key=lambda item: item[1])[0]) if candidates else (None, None)
+        selected = max(candidates, key=lambda item: item[1]) if candidates else None
+        return (selected[1], selected[0]) if selected else (None, None)
 
     def _safe_price(self, value):
         try:
