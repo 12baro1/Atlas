@@ -259,3 +259,27 @@ def test_rr_engine_rejects_non_finite_precomputed_rr():
         "tp2": None,
         "tp3": None,
     }) is None
+
+
+def test_waiting_signal_is_wait_not_critical_trade_failure():
+    engine = DecisionEngine()
+
+    result = engine.decide(
+        **_supportive_context(
+            signal={
+                "signal": "WAIT",
+                "confidence": 59,
+                "grade": "D",
+                "strength": "VERY WEAK",
+                "wait_reason": "entry_not_confirmed",
+            },
+            entry={"valid": False},
+            risk={},
+        )
+    )
+
+    assert result["action"] == "WAIT"
+    assert result["critical_blockers"] == []
+    assert result["signal"] == "WAIT"
+    assert result["entry_valid"] is False
+    assert result["risk_valid"] is False
