@@ -180,7 +180,7 @@ def test_entry_engine_rejects_distant_limit_pullback_using_percent_cap():
     result = EntryEngine().generate(
         mtf={"entry": "SHORT"},
         structure=[{"label": "LH", "kind": "HIGH", "price": 105.0}],
-        fvg=[{"type": "BEARISH", "from": 104.0, "to": 103.8, "filled": False}],
+        fvg=[{"type": "BEARISH", "from": 106.0, "to": 105.8, "filled": False}],
         orderblocks=[],
         current_price=100.0,
     )
