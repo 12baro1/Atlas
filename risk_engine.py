@@ -298,8 +298,9 @@ class RiskEngine:
     def _resolve_atr(self, atr_value=None, candles=None, atr_period=14):
         if atr_value is not None:
             try:
-                return max(0.0, float(atr_value))
-            except (TypeError, ValueError):
+                value = float(atr_value)
+                return max(0.0, value) if math.isfinite(value) else 0.0
+            except (TypeError, ValueError, OverflowError):
                 return 0.0
 
         if candles:
