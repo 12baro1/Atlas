@@ -190,6 +190,10 @@ def test_limit_order_is_not_filled_without_price_touch():
         "analysis": {"entry": {"entry_type": "LIMIT"}},
     }
     assert runner._to_trade(result, candles, entry_index=0) is None
+    stats = runner.statistics()
+    assert stats["candidate_signals"] == 1
+    assert stats["unfilled_limits"] == 1
+    assert stats["total"] == 0
 
 
 def test_limit_order_fills_only_after_touching_level():
@@ -253,3 +257,20 @@ def test_runner_exposes_gross_profit_and_loss_components():
     assert stats["gross_profit_rr"] == 2.0
     assert stats["gross_loss_rr"] == 1.0
     assert stats["profit_factor"] == 2.0
+
+
+
+def test_backtest_reports_unresolved_open_trade_separately():
+    runner = BacktestRunner(partial_exits=False)
+    candles = [_candle(1, 100.0, 105.0, 95.0, 102.0)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 100.0, "stop_loss": 90.0, "tp1": 110.0, "tp2": 120.0, "tp3": 130.0},
+        "analysis": {"entry": {"entry_type": "MARKET"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=0) is None
+    stats = runner.statistics()
+    assert stats["candidate_signals"] == 1
+    assert stats["open_trades"] == 1
+    assert stats["total"] == 0
