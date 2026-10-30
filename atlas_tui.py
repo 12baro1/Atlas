@@ -239,7 +239,7 @@ class AtlasTUIApp(App):
             message = (
                 "ŞU AN GEÇERLİ İŞLEM YOK\n\n"
                 "Taranan piyasalarda Atlas'ın işlem koşullarını geçen kurulum bulunmadı. "
-                "Zorla LONG/SHORT üretmek yerine BEKLE."
+                "Zorla LONG/SHORT üretmek yerine İŞLEME GİRME."
             )
             if errors:
                 message += "\n\nAnaliz edilemeyenler: " + "; ".join(errors[:3])
