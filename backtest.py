@@ -55,11 +55,10 @@ def _history_days_for_timeframe(days, timeframe):
         * TIMEFRAME_DURATION_MS[timeframe]
         / 86_400_000
     )
-    # The 15m series also needs its warmup before the requested evaluation
-    # window; higher timeframes need at least their own structural context.
-    if timeframe == "15m":
-        return days + warmup_days
-    return max(days, warmup_days)
+    # Every timeframe needs its warmup BEFORE the requested evaluation
+    # window. The 15m warmup controls the runner start; HTF warmups must also
+    # precede that same historical start so MTF context matches live analysis.
+    return days + warmup_days
 
 
 def _disable_backtest_live_features():
