@@ -268,7 +268,22 @@ class EntryEngine:
             # A swing midpoint is not itself an executable order. Only recommend
             # the fallback as MARKET when a finite live price is available and
             # remains on the valid side of structural invalidation.
-            if fallback_entry is not None and fallback_sl is not None and market_side_valid:
+            fallback_stop_invalid = (
+                fallback_entry is not None
+                and fallback_sl is not None
+                and (
+                    (direction == "LONG" and fallback_sl >= fallback_entry)
+                    or (direction == "SHORT" and fallback_sl <= fallback_entry)
+                )
+            )
+            if fallback_stop_invalid:
+                # Preserve the invalid levels long enough for the directional
+                # stop guard below to report the precise structural error.
+                result["entry"] = fallback_entry
+                result["stop_loss"] = fallback_sl
+                result["stop_source"] = "swing_fallback"
+                result["checks"].append("✗ SL direction")
+            elif fallback_entry is not None and fallback_sl is not None and market_side_valid:
                 result["entry"] = current_price
                 result["stop_loss"] = fallback_sl
                 result["stop_source"] = "swing_fallback"
