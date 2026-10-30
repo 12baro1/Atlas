@@ -274,3 +274,30 @@ def test_backtest_reports_unresolved_open_trade_separately():
     assert stats["candidate_signals"] == 1
     assert stats["open_trades"] == 1
     assert stats["total"] == 0
+
+
+
+def test_runner_counts_final_candidate_without_followup_candle():
+    candles = _rising_series(301)
+
+    def fake_analyze(window):
+        if len(window["15m"]) == 301:
+            return {
+                "decision": {"action": "EXECUTE"},
+                "signal": {"signal": "LONG"},
+                "risk": {
+                    "entry": 500.0,
+                    "stop_loss": 400.0,
+                    "tp1": 600.0,
+                    "tp2": 700.0,
+                    "tp3": 800.0,
+                },
+                "analysis": {"entry": {"entry_type": "MARKET"}},
+            }
+        return None
+
+    stats = BacktestRunner(analyze_fn=fake_analyze).run({"15m": candles})
+
+    assert stats["candidate_signals"] == 1
+    assert stats["no_followup_data"] == 1
+    assert stats["total"] == 0
