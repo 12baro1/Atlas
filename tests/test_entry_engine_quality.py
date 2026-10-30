@@ -115,3 +115,62 @@ def test_entry_engine_short_stop_uses_outer_swing_and_poi_invalidation():
     )
     assert result["stop_loss"] == 101.2
     assert result["stop_source"] == "swing_high"
+
+
+
+def test_structure_fallback_without_live_price_is_not_executable():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[
+            {"label": "HL", "kind": "LOW", "price": 99.5},
+            {"label": "HH", "kind": "HIGH", "price": 101.0},
+        ],
+        fvg=[],
+        orderblocks=[],
+        current_price=None,
+    )
+
+    assert result["valid"] is False
+    assert result["entry"] is None
+    assert result["entry_type"] == "NONE"
+
+
+def test_structure_fallback_with_finite_live_price_uses_market_order():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[
+            {"label": "HL", "kind": "LOW", "price": 99.5},
+            {"label": "HH", "kind": "HIGH", "price": 101.0},
+        ],
+        fvg=[],
+        orderblocks=[],
+        current_price=100.5,
+    )
+
+    assert result["valid"] is True
+    assert result["entry_type"] == "MARKET"
+    assert result["entry"] == 100.5
+
+
+def test_entry_engine_rejects_non_finite_current_price():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[
+            {"label": "HL", "kind": "LOW", "price": 99.5},
+            {"label": "HH", "kind": "HIGH", "price": 101.0},
+        ],
+        fvg=[],
+        orderblocks=[],
+        current_price=float("inf"),
+    )
+
+    assert result["valid"] is False
+    assert result["entry"] is None
+    assert result["entry_type"] == "NONE"
+
+
+def test_entry_engine_safe_price_rejects_non_finite_values():
+    engine = EntryEngine()
+    assert engine._safe_price(float("nan")) is None
+    assert engine._safe_price(float("inf")) is None
+    assert engine._safe_price(float("-inf")) is None

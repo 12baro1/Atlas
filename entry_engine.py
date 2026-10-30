@@ -3,6 +3,9 @@ entry_engine.py
 Atlas Entry Engine v5
 """
 
+import math
+
+
 class EntryEngine:
 
     def _structure_fallback_levels(self, direction, structure):
@@ -78,9 +81,14 @@ class EntryEngine:
             price = float(value)
         except (TypeError, ValueError):
             return None
-        return price if price > 0 else None
+        return price if math.isfinite(price) and price > 0 else None
 
     def generate(self, mtf, structure, fvg, orderblocks, current_price=None, allow_structure_fallback=False):
+        mtf = mtf if isinstance(mtf, dict) else {}
+        structure = structure if isinstance(structure, list) else []
+        fvg = fvg if isinstance(fvg, list) else []
+        orderblocks = orderblocks if isinstance(orderblocks, list) else []
+        current_price = self._safe_price(current_price)
 
         result = {
             "valid": False,
@@ -249,20 +257,47 @@ class EntryEngine:
 
         if (result["entry"] is None or result["stop_loss"] is None) and not result.get("entry_zone_crossed"):
             fallback_entry, fallback_sl = self._structure_fallback_levels(direction, structure)
-            if fallback_entry is not None and fallback_sl is not None:
+            market_side_valid = (
+                current_price is not None
+                and fallback_sl is not None
+                and (
+                    (direction == "LONG" and current_price > fallback_sl)
+                    or (direction == "SHORT" and current_price < fallback_sl)
+                )
+            )
+            # A swing midpoint is not itself an executable order. Only recommend
+            # the fallback as MARKET when a finite live price is available and
+            # remains on the valid side of structural invalidation.
+            fallback_stop_invalid = (
+                fallback_entry is not None
+                and fallback_sl is not None
+                and (
+                    (direction == "LONG" and fallback_sl >= fallback_entry)
+                    or (direction == "SHORT" and fallback_sl <= fallback_entry)
+                )
+            )
+            if fallback_stop_invalid:
+                # Preserve the invalid levels long enough for the directional
+                # stop guard below to report the precise structural error.
                 result["entry"] = fallback_entry
                 result["stop_loss"] = fallback_sl
                 result["stop_source"] = "swing_fallback"
-                result["score"] += 15
-                result["entry_type"] = "CONFIRMATION"
-                if current_price is not None and ((direction == "LONG" and current_price > fallback_sl) or (direction == "SHORT" and current_price < fallback_sl)):
-                    result["entry"] = current_price
-                    result["entry_type"] = "MARKET"
-                    result["score"] += 5
-                    result["checks"].append("✓ Market Structure Entry")
+                result["checks"].append("✗ SL direction")
+            elif fallback_entry is not None and fallback_sl is not None and market_side_valid:
+                result["entry"] = current_price
+                result["stop_loss"] = fallback_sl
+                result["stop_source"] = "swing_fallback"
+                result["score"] += 20
+                result["entry_type"] = "MARKET"
+                result["entry_type_reason"] = "Market entry from valid structural fallback"
+                result["checks"].append("✓ Market Structure Entry")
                 result["checks"].append("✓ Structure Fallback Levels")
             else:
-                result["checks"].append("✗ Structure Fallback Levels")
+                result["entry"] = None
+                result["stop_loss"] = None
+                result["entry_type"] = "NONE"
+                result["entry_type_reason"] = "No executable MARKET/LIMIT entry available"
+                result["checks"].append("✗ Executable Structure Fallback Entry")
 
         # -------------------------
         # Risk Filter
@@ -296,6 +331,7 @@ class EntryEngine:
 
         result["valid"] = (
             result["score"] >= 60
+            and result["entry_type"] in {"MARKET", "LIMIT"}
             and result["entry"] is not None
             and result["stop_loss"] is not None
         )
