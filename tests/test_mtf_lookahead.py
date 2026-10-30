@@ -44,7 +44,8 @@ def _build(price_shift=0.0, include_future_htf=True):
     # Kapanmış HTF mumları: c.time + period <= last15_t
     def closed_list(period_ms, n=30):
         # last15_t'den geriye doğru bölümlenmiş kapalı mumlar üret.
-        return [
+        # Engine inputs follow exchange OHLCV order: oldest candle first.
+        return list(reversed([
             Candle(
                 time=last15_t - (k + 1) * period_ms,
                 open=100.0 + price_shift,
@@ -54,7 +55,7 @@ def _build(price_shift=0.0, include_future_htf=True):
                 volume=1000.0,
             )
             for k in range(n)
-        ]
+        ]))
 
     data = {
         "symbol": "BTC/USDT:USDT",
