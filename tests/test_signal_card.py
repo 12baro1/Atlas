@@ -141,3 +141,29 @@ def test_market_trade_card_shows_clear_entry_permission():
     result["analysis"]["entry"]["entry_type"] = "MARKET"
     rendered = format_card_text(build_signal_card(result))
     assert "KARAR: İŞLEME GİR | EMİR: MARKET" in rendered
+
+
+
+def test_signal_card_preserves_small_coin_price_precision():
+    result = _result()
+    result["symbol"] = "ARB/USDT:USDT"
+    result["signal"] = {"signal": "SHORT", "confidence": 90}
+    result["decision"] = {"action": "EXECUTE", "critical_blockers": []}
+    result["analysis"]["entry"] = {"entry": 0.173846, "entry_type": "LIMIT"}
+    result["risk"] = {
+        "entry": 0.173846,
+        "stop_loss": 0.176214,
+        "tp1": 0.171478,
+        "tp2": 0.169110,
+        "tp3": 0.166742,
+        "rr": 3.0,
+    }
+
+    card = build_signal_card(result)
+
+    assert card["entry"] == 0.173846
+    assert card["stop_loss"] == 0.176214
+    assert card["tp_levels"] == [0.171478, 0.169110, 0.166742]
+    rendered = format_card_text(card)
+    assert "0.173846" in rendered
+    assert "0.176214" in rendered
