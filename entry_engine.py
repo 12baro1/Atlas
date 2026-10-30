@@ -262,7 +262,8 @@ class EntryEngine:
                 result["entry_type"] = "LIMIT" if limit_entry is not None else "NONE"
                 result["entry_type_reason"] = "Bearish POI limit level" if limit_entry is not None else "No valid bearish POI"
 
-        # Reject pending POIs that are too far from the live market.
+        # Keep valid pending LIMIT POIs regardless of distance. Distance is
+        # informational so the user can distinguish near vs far entries.
         if result.get("requires_pullback") and result.get("entry") is not None and current_price is not None:
             distance = abs(result["entry"] - current_price)
             distance_pct = distance / current_price if current_price > 0 else None
@@ -272,22 +273,17 @@ class EntryEngine:
                     atr_value = float(calculate_atr(candles, period=int(getattr(Config, "ATR_PERIOD", 14))))
             except (TypeError, ValueError, OverflowError):
                 atr_value = 0.0
-            max_pct = float(getattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_PERCENT", 0.03))
-            max_atr = float(getattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_ATR", 2.0))
-            limits = [current_price * max_pct]
-            if math.isfinite(atr_value) and atr_value > 0:
-                limits.append(atr_value * max_atr)
-            max_distance = min(limits)
             result["entry_distance_pct"] = round(distance_pct * 100.0, 4) if distance_pct is not None else None
             result["entry_distance_atr"] = round(distance / atr_value, 3) if atr_value > 0 else None
-            if distance > max_distance:
-                result["entry"] = None
-                result["entry_type"] = "NONE"
-                result["entry_too_far"] = True
-                result["requires_pullback"] = False
-                result["entry_type_reason"] = f"LIMIT POI too far from market ({distance_pct * 100.0:.2f}%); wait for a fresh setup"
-                result["reason"] = "Limit entry too far from current market"
-                result["checks"].append("✗ LIMIT entry too far from current market")
+            is_near = (
+                distance_pct is not None
+                and distance_pct <= 0.01
+                and (atr_value <= 0 or distance <= atr_value)
+            )
+            result["entry_distance_label"] = "YAKIN GİRİŞ" if is_near else "UZAK GİRİŞ"
+            result["entry_type_reason"] = (
+                "Fiyat LIMIT giriş bölgesine dönünce emir tetiklenir; " + result["entry_distance_label"].lower()
+            )
 
         if (
             (result["entry"] is None or result["stop_loss"] is None)
