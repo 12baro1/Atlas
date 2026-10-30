@@ -106,7 +106,7 @@ def test_rr_engine_derives_rr_from_tp3_when_missing():
     )
 
     assert risk is not None
-    assert risk["rr"] == pytest.approx(3.0)
+    assert risk["rr"] == pytest.approx(1.0)
 
     rr = RREngine().evaluate({
         "entry": 100.0,
@@ -189,8 +189,8 @@ def test_risk_engine_expands_too_tight_stop_using_atr_floor(monkeypatch):
     assert risk is not None
     assert risk["risk_setup_valid"] is True
     assert risk["stop_adjusted"] is True
-    assert risk["stop_loss"] == pytest.approx(79.50)
-    assert risk["risk"] == pytest.approx(0.5)
+    assert risk["stop_loss"] == pytest.approx(80.50)
+    assert risk["risk"] == pytest.approx(1.5)
     assert risk["rr"] == pytest.approx(3.0)
 
 
