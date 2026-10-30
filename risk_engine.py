@@ -349,7 +349,9 @@ class RiskEngine:
                 continue
             try:
                 numeric = float(price)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not math.isfinite(numeric) or numeric <= 0:
                 continue
 
             text = f"{numeric:.10f}".rstrip("0").rstrip(".")
