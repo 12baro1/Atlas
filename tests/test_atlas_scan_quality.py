@@ -11,7 +11,8 @@ def test_scan_limit_is_always_bounded():
     assert atlas_tui._normalize_scan_limit("-5") == 30
     assert atlas_tui._normalize_scan_limit("not-a-number") == 30
     assert atlas_tui._normalize_scan_limit("12") == 12
-    assert atlas_tui._normalize_scan_limit("500") == 100
+    assert atlas_tui._normalize_scan_limit("500") == 500
+    assert atlas_tui._normalize_scan_limit("501") == 500
 
 
 def test_best_symbols_never_turn_zero_limit_into_full_market_scan(monkeypatch):

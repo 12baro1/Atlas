@@ -19,7 +19,38 @@ from utils.signal_card import build_signal_card, format_card_text
 _SYMBOL_INPUT_RE = re.compile(r"[A-Z0-9]{2,24}(?:/USDT(?::USDT)?)?\Z")
 _BEST_TRADE_COMMANDS = {"işlem ver", "islem ver", "en iyi işlem", "en iyi islem", "best", "best trade"}
 DEFAULT_SCAN_LIMIT = 30
-MAX_SCAN_LIMIT = 100
+DEFAULT_RANK_SCAN_LIMIT = 100
+MAX_SCAN_LIMIT = 500
+
+
+def _configured_scan_limit(default=DEFAULT_SCAN_LIMIT):
+    raw = os.getenv("ATLAS_SCAN_LIMIT", str(default)).strip().lower()
+    if raw in {"all", "tümü", "tumu", "0"}:
+        return None
+    return _normalize_scan_limit(raw, default=default, maximum=MAX_SCAN_LIMIT)
+
+
+def _parse_scan_command(value: str):
+    """Return (scan_limit, result_limit) for supported market scan commands."""
+    normalized = " ".join(str(value or "").strip().lower().split())
+    if normalized in _BEST_TRADE_COMMANDS:
+        return _configured_scan_limit(), 1
+    if normalized in {"tüm piyasa", "tum piyasa", "tüm piyasayı tara", "tum piyasayi tara",
+                      "tüm piyasayı analiz et", "tum piyasayi analiz et", "full scan", "scan all"}:
+        return None, 5
+    match = re.fullmatch(r"(?:en iyi )?(\d+)\s+(?:tane\s+)?(?:işlem|islem)(?:i|leri)?(?:\s+ver)?", normalized)
+    if match:
+        count = _normalize_scan_limit(match.group(1), default=1, maximum=20)
+        return _configured_scan_limit(default=DEFAULT_RANK_SCAN_LIMIT), count
+    match = re.fullmatch(r"(\d+)\s+(?:tane\s+)?(?:(?:coin|piyasa|sembol)\s+)?(?:analiz et|tara)", normalized)
+    if match:
+        count = _normalize_scan_limit(match.group(1), default=DEFAULT_SCAN_LIMIT, maximum=MAX_SCAN_LIMIT)
+        return count, 5
+    match = re.fullmatch(r"(?:ilk )?(\d+)\s+(?:piyasa|coin)(?:yı|yi)?\s+tara", normalized)
+    if match:
+        count = _normalize_scan_limit(match.group(1), default=DEFAULT_SCAN_LIMIT, maximum=MAX_SCAN_LIMIT)
+        return count, 5
+    return None
 
 
 def _normalize_scan_limit(value, default=DEFAULT_SCAN_LIMIT, maximum=MAX_SCAN_LIMIT):
@@ -48,11 +79,12 @@ def _is_symbol_input(value: str) -> bool:
 def _is_supported_input(value: str) -> bool:
     """Recognize supported commands before treating input as a coin ticker."""
     normalized = str(value or "").strip().lower()
-    return normalized in _BEST_TRADE_COMMANDS or _is_symbol_input(value)
+    return _parse_scan_command(value) is not None or _is_symbol_input(value)
 
 
 def _best_symbols(limit=DEFAULT_SCAN_LIMIT):
-    limit = _normalize_scan_limit(limit)
+    if limit is not None:
+        limit = _normalize_scan_limit(limit)
     markets = exchange.load_markets()
     symbols, _ = select_symbols(
         markets=markets,
@@ -70,7 +102,7 @@ def _best_symbols(limit=DEFAULT_SCAN_LIMIT):
         if quote_volume is not None and quote_volume > 0:
             ranked.append((quote_volume, symbol))
     ranked.sort(reverse=True)
-    selected = ranked[:limit]
+    selected = ranked if limit is None else ranked[:limit]
     return [symbol for _, symbol in selected]
 
 
@@ -126,9 +158,11 @@ class AtlasTUIApp(App):
         with Vertical(id="main"):
             yield Static("ATLAS  /  SMC ANALİZ TERMİNALİ", id="brand")
             yield Static(
-                "Bir coin yaz: BRC, BTC, ETH\n"
-                "'işlem ver' yaz: en yüksek hacimli 30 USDT perpetual piyasasını tara\n"
-                "'yardım' yaz: komutları göster",
+                "Bir coin yaz: BTC / ETH — tek coin analizi\n"
+                "'50 analiz et' — 50 piyasayı tara, en iyi 5 kurulumu göster\n"
+                "'en iyi 5 işlem' — 100 piyasadan en iyi 5 kurulumu seç\n"
+                "'tüm piyasayı tara' — uygun tüm USDT perpetual piyasaları tara\n"
+                "'yardım' — komutların tamamı",
                 id="help",
             )
             yield Static(
@@ -163,11 +197,18 @@ class AtlasTUIApp(App):
         if normalized in {"yardım", "yardim", "help", "?"}:
             self._show(
                 "KOMUTLAR\n"
-                "• BRC / BTC / ETH — seçilen coin'i analiz et\n"
-                "• işlem ver / en iyi işlem — varsayılan en yüksek hacimli 30 piyasayı tara\n"
-                "• ATLAS_SCAN_LIMIT=0 ayarıyla tüm uygun piyasaları analiz et (telefonu yavaşlatabilir)\n"
-                "• çıkış — Atlas'ı kapat\n\n"
-                "Atlas emir göndermez. İşlem önerisi oluşmazsa BEKLE gösterir."
+                "TEK COIN\n"
+                "• BTC / ETH / BRC — seçilen coini analiz et\n\n"
+                "PIYASA TARAMA\n"
+                "• işlem ver — 30 piyasayı tara, en iyi 1 kurulumu göster\n"
+                "• 50 analiz et — 50 piyasayı tara, en iyi 5 kurulumu göster\n"
+                "• 100 tara — 100 piyasayı tara, en iyi 5 kurulumu göster\n"
+                "• en iyi 5 işlem — 100 piyasadan en iyi 5 kurulumu göster\n"
+                "• tüm piyasayı tara — tüm uygun USDT perpetual piyasalarını tara\n"
+                "• en iyi 10 işlem — 100 piyasadan en iyi 10 kurulumu göster\n\n"
+                "Sayısal tarama en fazla 500 piyasa; tüm piyasa taraması uzun sürebilir.\n"
+                "Atlas emir göndermez. Sıralama puanı kazanma olasılığı değildir.\n"
+                "• çıkış — Atlas'ı kapat"
             )
             return
         if normalized in {"çıkış", "cikis", "exit", "quit"}:
@@ -176,7 +217,7 @@ class AtlasTUIApp(App):
         if not _is_supported_input(command):
             self._show(
                 "KOMUT TANINMADI\n\n"
-                "Bir coin sembolü (BTC, ETH, BRC), 'işlem ver' veya 'yardım' yaz."
+                "Örnek: BTC | 50 analiz et | en iyi 5 işlem | tüm piyasayı tara | yardım"
             )
             return
         self._busy = True
@@ -186,8 +227,9 @@ class AtlasTUIApp(App):
     def _run_command(self, command: str) -> None:
         try:
             lowered = command.strip().lower()
-            if lowered in _BEST_TRADE_COMMANDS:
-                result_text = self._find_best_trade()
+            scan_request = _parse_scan_command(lowered)
+            if scan_request is not None:
+                result_text = self._find_best_trade(*scan_request)
             else:
                 outcome = self.runtime.analyze_symbol(command, force_refresh=True)
                 if not outcome.get("ok"):
@@ -204,8 +246,7 @@ class AtlasTUIApp(App):
         except Exception as exc:
             self.call_from_thread(self._finish, f"ANALİZ HATASI\n\n{type(exc).__name__}: {exc}")
 
-    def _find_best_trade(self) -> str:
-        scan_limit = _normalize_scan_limit(os.getenv("ATLAS_SCAN_LIMIT", str(DEFAULT_SCAN_LIMIT)))
+    def _find_best_trade(self, scan_limit=DEFAULT_SCAN_LIMIT, result_limit=1) -> str:
         symbols = _best_symbols(limit=scan_limit)
         if not symbols:
             return "Uygun piyasa bulunamadı. Veri sağlayıcısını kontrol et."
@@ -245,14 +286,24 @@ class AtlasTUIApp(App):
                 message += "\n\nAnaliz edilemeyenler: " + "; ".join(errors[:3])
             return message
         candidates.sort(key=lambda item: item[0], reverse=True)
-        _, card, elapsed = candidates[0]
-        return (
-            "EN İYİ BULUNAN KURULUM (seçilenler arasında)\n"
-            + format_card_text(card)
-            + f"\n\nTarama: {len(symbols)} piyasa | Geçerli kurulum: {len(candidates)}"
-            + f"\nSıralama puanı: {candidates[0][0]:.1f} (olasılık değildir)"
-            + f"\nSeçilen analiz süresi: {elapsed / 1000:.1f} sn"
+        shown = candidates[:max(1, min(int(result_limit), 20))]
+        heading = "EN İYİ KURULUMLAR" if len(shown) > 1 else "EN İYİ BULUNAN KURULUM"
+        sections = [heading]
+        for rank, (score, card, elapsed) in enumerate(shown, start=1):
+            sections.append(
+                "\n============ #" + str(rank) + " | SIRALAMA PUANI "
+                + f"{score:.1f}" + " ============\n"
+                + format_card_text(card)
+                + f"\nAnaliz süresi: {elapsed / 1000:.1f} sn"
+            )
+        sections.append(
+            f"\nTarama: {len(symbols)} piyasa | Geçerli kurulum: {len(candidates)}"
+            + f" | Gösterilen: {len(shown)}"
+            + "\nSıralama puanı kazanma olasılığı değildir."
         )
+        if errors:
+            sections.append("Analiz hatası: " + "; ".join(errors[:3]))
+        return "\n".join(sections)
 
     def _finish(self, message: str) -> None:
         self._show(message)

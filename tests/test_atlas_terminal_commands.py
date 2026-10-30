@@ -62,3 +62,51 @@ def test_supported_input_accepts_best_trade_commands():
 
 def test_supported_input_rejects_unknown_free_text():
     assert not atlas_tui._is_supported_input("bana işlem ver")
+
+
+def test_parse_numeric_scan_commands():
+    assert atlas_tui._parse_scan_command("50 analiz et") == (50, 5)
+    assert atlas_tui._parse_scan_command("100 tara") == (100, 5)
+    assert atlas_tui._parse_scan_command("ilk 75 piyasayı tara") == (75, 5)
+
+
+def test_parse_top_n_commands():
+    assert atlas_tui._parse_scan_command("en iyi 5 işlem") == (100, 5)
+    assert atlas_tui._parse_scan_command("10 işlem") == (100, 10)
+    assert atlas_tui._parse_scan_command("en iyi 25 işlem") == (100, 20)
+
+
+def test_parse_full_market_commands():
+    assert atlas_tui._parse_scan_command("tüm piyasayı tara") == (None, 5)
+    assert atlas_tui._parse_scan_command("tum piyasayi tara") == (None, 5)
+    assert atlas_tui._parse_scan_command("full scan") == (None, 5)
+
+
+def test_parse_scan_command_caps_numeric_requests(monkeypatch):
+    assert atlas_tui._parse_scan_command("999 analiz et") == (500, 5)
+
+
+def test_best_symbols_can_return_entire_eligible_universe(monkeypatch):
+    markets = {
+        "BTC/USDT:USDT": {"active": True, "swap": True},
+        "ETH/USDT:USDT": {"active": True, "swap": True},
+        "BRC/USDT:USDT": {"active": True, "swap": True},
+    }
+    tickers = {
+        "BTC/USDT:USDT": {"quoteVolume": 9000},
+        "ETH/USDT:USDT": {"quoteVolume": 4000},
+        "BRC/USDT:USDT": {"quoteVolume": 1200},
+    }
+    monkeypatch.setattr(atlas_tui.exchange, "load_markets", lambda: markets)
+    monkeypatch.setattr(atlas_tui.exchange, "fetch_tickers", lambda symbols: tickers)
+
+    assert atlas_tui._best_symbols(limit=None) == [
+        "BTC/USDT:USDT", "ETH/USDT:USDT", "BRC/USDT:USDT"
+    ]
+
+
+
+def test_parse_everyday_turkish_scan_phrases():
+    assert atlas_tui._parse_scan_command("50 tane analiz et") == (50, 5)
+    assert atlas_tui._parse_scan_command("en iyi 5 işlemi ver") == (100, 5)
+    assert atlas_tui._parse_scan_command("5 tane işlem ver") == (100, 5)
