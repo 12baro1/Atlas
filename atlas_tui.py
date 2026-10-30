@@ -296,10 +296,13 @@ class AtlasTUIApp(App):
             if not entry_data.get("entry"):
                 diagnostics["no_entry"] += 1
             card = build_signal_card(raw)
-            if card.get("decision_action") != "EXECUTE" or card.get("direction") not in {"LONG", "SHORT"}:
+            pending_limit = card.get("entry_type") == "LIMIT" and card.get("direction") in {"LONG", "SHORT"} and bool(card.get("entry")) and bool(card.get("stop_loss"))
+            executable_market = card.get("decision_action") == "EXECUTE" and card.get("direction") in {"LONG", "SHORT"}
+            if not (executable_market or pending_limit):
                 diagnostics["wait_or_skip"] += 1
                 continue
-            diagnostics["execute"] += 1
+            if executable_market:
+                diagnostics["execute"] += 1
             rr = _finite_number(card.get("rr") or 0)
             quality = _finite_number(card.get("setup_quality") or 0)
             confidence = _finite_number(card.get("confidence") or 0)
