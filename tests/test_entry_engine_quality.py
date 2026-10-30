@@ -91,3 +91,27 @@ def test_entry_engine_blocks_far_price_after_bearish_poi_was_crossed():
     assert result["entry_type"] == "NONE"
     assert result["entry_zone_crossed"] is True
     assert "already crossed" in result["entry_type_reason"]
+
+
+def test_entry_engine_long_stop_uses_outer_swing_and_poi_invalidation():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 98.9}],
+        fvg=[{"type": "BULLISH", "from": 99.2, "to": 100.0, "filled": False}],
+        orderblocks=[{"type": "BULLISH", "low": 99.4, "high": 100.1, "mitigated": False}],
+        current_price=100.05,
+    )
+    assert result["stop_loss"] == 98.9
+    assert result["stop_source"] == "swing_low"
+
+
+def test_entry_engine_short_stop_uses_outer_swing_and_poi_invalidation():
+    result = EntryEngine().generate(
+        mtf={"entry": "SHORT"},
+        structure=[{"label": "LH", "kind": "HIGH", "price": 101.2}],
+        fvg=[{"type": "BEARISH", "from": 100.0, "to": 101.0, "filled": False}],
+        orderblocks=[{"type": "BEARISH", "low": 99.9, "high": 100.8, "mitigated": False}],
+        current_price=99.95,
+    )
+    assert result["stop_loss"] == 101.2
+    assert result["stop_source"] == "swing_high"

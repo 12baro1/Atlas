@@ -319,3 +319,34 @@ def test_dynamic_tp_long_sl_behind_entry_rejected():
     tps = [r["tp1"], r["tp2"], r["tp3"]]
     assert r["tp1"] == 11.0
     assert all(tp > 10.0 for tp in tps), f"LONG TP'leri entry altina dusemez: {tps}"
+
+
+
+
+def test_dynamic_tp_and_rr_recalculate_for_wider_structural_stop():
+    engine = DynamicTPEngine()
+    targets = [{"price": 102.0}, {"price": 104.0}, {"price": 106.0}]
+    original = engine.calculate(
+        direction="LONG", entry=100.0, stop_loss=99.0,
+        liquidity=targets, fvg=[], orderblocks=[], structure=[],
+        allow_rr_fallback=False,
+    )
+    widened = engine.calculate(
+        direction="LONG", entry=100.0, stop_loss=98.0,
+        liquidity=targets, fvg=[], orderblocks=[], structure=[],
+        allow_rr_fallback=False,
+    )
+    original_risk = RiskEngine().calculate(
+        entry=100.0, stop_loss=99.0, dynamic_tp=original,
+        atr_value=0.0, spread=0.0, slippage=0.0,
+    )
+    widened_risk = RiskEngine().calculate(
+        entry=100.0, stop_loss=98.0, dynamic_tp=widened,
+        atr_value=0.0, spread=0.0, slippage=0.0,
+    )
+
+    assert original["tp1"] == pytest.approx(102.0)
+    assert widened["tp1"] == pytest.approx(102.0)
+    assert original_risk["rr"] == pytest.approx(6.0)
+    assert widened_risk["rr"] == pytest.approx(3.0)
+    assert widened_risk["risk"] == pytest.approx(2.0)
