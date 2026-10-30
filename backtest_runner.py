@@ -13,15 +13,19 @@ Amacı: "Bu sinyal filtresi gerçekten edge (beklenti) üretiyor mu?" sorusunu y
 """
 
 import logging
+import math
 
 logger = logging.getLogger("atlas.backtest_runner")
 
 
 def _num(value, digits=4):
     try:
-        return round(float(value), digits)
-    except (TypeError, ValueError):
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+    if not math.isfinite(number):
+        return None
+    return round(number, digits)
 
 
 def _tps(targets):
