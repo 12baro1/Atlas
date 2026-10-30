@@ -154,7 +154,17 @@ def _summarize(card):
 def format_card_text(card):
     """Kartı terminalde yazdırılabilir, tek bakışta okunan metne çevirir."""
     line = "=" * 46
-    lines = [line, f"  {card['symbol']}  ->  {card['verdict']}", line]
+    action = str(card.get("decision_action") or "").upper()
+    entry_type = str(card.get("entry_type") or "").upper()
+    pending_limit = entry_type == "LIMIT" and "wait for pullback" in str(card.get("entry_type_reason") or "").lower()
+    executable = action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and card.get("direction") in ("LONG", "SHORT")
+    if pending_limit and not executable:
+        headline = "KARAR: ŞİMDİ GİRME | EMİR: LIMIT BEKLE"
+    elif executable:
+        headline = "KARAR: İŞLEME GİR | EMİR: " + (entry_type if entry_type in ("MARKET", "LIMIT") else "GİRİŞİ TEYİT ET")
+    else:
+        headline = "KARAR: İŞLEME GİRME"
+    lines = [line, "  " + str(card["symbol"]) + "  |  " + headline, line]
     if card["direction"]:
         lines.append(f"  Yön        : {card['direction']}")
     lines.append(f"  Girdi      : {card['entry']}")
