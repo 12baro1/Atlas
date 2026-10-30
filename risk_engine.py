@@ -34,6 +34,13 @@ class RiskEngine:
 
         if entry is None or stop_loss is None:
             return None
+        try:
+            entry = float(entry)
+            stop_loss = float(stop_loss)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(entry) or not math.isfinite(stop_loss) or entry <= 0 or stop_loss <= 0:
+            return None
 
         side = "LONG" if entry > stop_loss else "SHORT"
         if entry == stop_loss:
@@ -291,8 +298,9 @@ class RiskEngine:
     def _resolve_atr(self, atr_value=None, candles=None, atr_period=14):
         if atr_value is not None:
             try:
-                return max(0.0, float(atr_value))
-            except (TypeError, ValueError):
+                value = float(atr_value)
+                return max(0.0, value) if math.isfinite(value) else 0.0
+            except (TypeError, ValueError, OverflowError):
                 return 0.0
 
         if candles:
@@ -314,9 +322,9 @@ class RiskEngine:
         for candidate in (tick_size, inferred_tick_size, minimum_fallback):
             try:
                 numeric = float(candidate)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 continue
-            if numeric > 0:
+            if math.isfinite(numeric) and numeric > 0:
                 return numeric
 
         return 1e-12
@@ -327,7 +335,9 @@ class RiskEngine:
         else:
             try:
                 resolved = abs(float(buffer_value))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
+                resolved = abs(entry) * rate
+            if not math.isfinite(resolved):
                 resolved = abs(entry) * rate
 
         return max(resolved, minimum_tick_distance if resolved > 0 else 0.0)
@@ -339,7 +349,9 @@ class RiskEngine:
                 continue
             try:
                 numeric = float(price)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not math.isfinite(numeric) or numeric <= 0:
                 continue
 
             text = f"{numeric:.10f}".rstrip("0").rstrip(".")

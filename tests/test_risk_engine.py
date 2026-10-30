@@ -350,3 +350,20 @@ def test_dynamic_tp_and_rr_recalculate_for_wider_structural_stop():
     assert original_risk["rr"] == pytest.approx(6.0)
     assert widened_risk["rr"] == pytest.approx(3.0)
     assert widened_risk["risk"] == pytest.approx(2.0)
+
+
+
+def test_risk_engine_rejects_non_finite_or_non_positive_entry_levels():
+    engine = RiskEngine()
+    assert engine.calculate(float("nan"), 99.0, dynamic_tp={"tp1": 101.0}) is None
+    assert engine.calculate(100.0, float("inf"), dynamic_tp={"tp1": 101.0}) is None
+    assert engine.calculate(0.0, 99.0, dynamic_tp={"tp1": 101.0}) is None
+
+
+def test_risk_engine_accepts_numeric_string_prices():
+    risk = RiskEngine().calculate(
+        "100.0", "99.0",
+        dynamic_tp={"tp1": 101.0, "tp2": 102.0, "tp3": 103.0},
+    )
+    assert risk is not None
+    assert risk["side"] == "LONG"

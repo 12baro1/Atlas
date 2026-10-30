@@ -224,3 +224,38 @@ def test_decision_mtf_alignment_missing_is_soft_penalty_not_hard_blocker():
     assert not any("alignment" in b for b in result["critical_blockers"])
     assert "-40 HTF + LTF alignment missing" in result["reason"]
     assert result["action"] != "SKIP"
+
+
+
+def test_decision_fails_closed_on_nan_confidence_and_risk_values():
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            signal={"signal": "LONG", "confidence": float("nan"), "grade": "S+", "strength": "ELITE"},
+            confluence={"score": float("nan"), "checks": []},
+            risk={
+                "entry": 100.0,
+                "stop_loss": 99.0,
+                "risk": float("nan"),
+                "position_size": float("nan"),
+                "rr": float("nan"),
+            },
+        )
+    )
+    assert result["action"] == "SKIP"
+    assert result["confidence"] == 0.0
+    assert result["rr"] is None
+    assert result["risk_valid"] is False
+    assert any("Confidence below minimum" in item for item in result["critical_blockers"])
+    assert any("Risk cannot be calculated" in item for item in result["critical_blockers"])
+
+
+def test_rr_engine_rejects_non_finite_precomputed_rr():
+    from rr_engine import RREngine
+    assert RREngine().evaluate({
+        "entry": 100.0,
+        "stop_loss": 99.0,
+        "rr": float("nan"),
+        "tp1": None,
+        "tp2": None,
+        "tp3": None,
+    }) is None

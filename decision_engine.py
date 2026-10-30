@@ -3,6 +3,8 @@ decision_engine.py
 Atlas Decision Engine v3
 """
 
+import math
+
 from config import Config
 from rr_engine import RREngine
 
@@ -561,12 +563,11 @@ class DecisionEngine:
     def _safe_number(self, value, default=None):
         if isinstance(value, bool):
             return default
-        if isinstance(value, (int, float)):
-            return float(value)
         try:
-            return float(value)
-        except (TypeError, ValueError):
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
             return default
+        return number if math.isfinite(number) else default
 
     def _fmt_number(self, value, force_int=False):
         if value is None:
