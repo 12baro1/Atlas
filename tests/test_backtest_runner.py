@@ -168,3 +168,70 @@ def test_runner_applies_round_trip_fee_rate_once():
     # 0.2% round-trip cost at entry 100 = 0.20 price units = 0.20R.
     assert trade is not None
     assert trade["net_rr"] == 0.8
+
+
+
+def test_partial_tp1_and_breakeven_in_same_candle_does_not_count_tp2():
+    # OHLC cannot prove TP2 came before the newly moved breakeven stop.
+    candle = _tl(10.5, o=10.0, h=12.5, l=9.9, cl=10.5)
+    out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], [candle], "LONG")
+    assert out["result"] == "WIN"
+    assert out["tp"] == 1
+    assert out["net_rr"] == 0.5
+
+
+def test_limit_order_is_not_filled_without_price_touch():
+    runner = BacktestRunner(partial_exits=False)
+    candles = [_candle(1, 100.0, 101.0, 98.0, 99.0)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 100.0, "tp2": 105.0, "tp3": 110.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=0) is None
+
+
+def test_limit_order_fills_only_after_touching_level():
+    runner = BacktestRunner(partial_exits=False)
+    candles = [
+        _candle(1, 97.0, 99.0, 94.0, 96.0),
+        _candle(2, 96.0, 101.5, 95.5, 101.0),
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 100.0, "tp2": 105.0, "tp3": 110.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    trade = runner._to_trade(result, candles, entry_index=0)
+    assert trade is not None
+    assert trade["entry_type"] == "LIMIT"
+    assert trade["entry"] == 95.0
+    assert trade["entry_index"] == 0
+
+
+def test_market_order_uses_next_candle_open_as_fill_price():
+    runner = BacktestRunner(partial_exits=False)
+    candles = [_candle(1, 101.0, 102.5, 100.5, 102.0)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 100.0, "stop_loss": 99.0, "tp1": 103.0, "tp2": 104.0, "tp3": 105.0},
+        "analysis": {"entry": {"entry_type": "MARKET"}},
+    }
+    trade = runner._to_trade(result, candles, entry_index=0)
+    assert trade is not None
+    assert trade["entry"] == 101.0
+
+
+def test_market_order_is_rejected_when_gap_has_already_crossed_tp1():
+    runner = BacktestRunner(partial_exits=False)
+    candles = [_candle(1, 102.0, 103.0, 101.5, 102.5)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 100.0, "stop_loss": 99.0, "tp1": 101.0, "tp2": 102.0, "tp3": 103.0},
+        "analysis": {"entry": {"entry_type": "MARKET"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=0) is None
