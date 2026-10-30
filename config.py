@@ -93,6 +93,8 @@ class Config:
     ROUND_TRIP_COST_RATE = 0.0020
     ATR_PERIOD = 14
     MIN_STOP_ATR_MULTIPLIER = 0.75
+    # Refuse actionable output when the latest closed 15m candle is too old.
+    MAX_15M_CANDLE_AGE_SECONDS = 1800
     MIN_STOP_PERCENT = 0.0005
     MIN_TICK_DISTANCE_FALLBACK = 0.01
     STOP_SPREAD_BUFFER_RATE = 0.0002
