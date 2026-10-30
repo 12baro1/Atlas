@@ -322,9 +322,9 @@ class RiskEngine:
         for candidate in (tick_size, inferred_tick_size, minimum_fallback):
             try:
                 numeric = float(candidate)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 continue
-            if numeric > 0:
+            if math.isfinite(numeric) and numeric > 0:
                 return numeric
 
         return 1e-12
