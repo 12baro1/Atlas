@@ -34,6 +34,13 @@ class RiskEngine:
 
         if entry is None or stop_loss is None:
             return None
+        try:
+            entry = float(entry)
+            stop_loss = float(stop_loss)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(entry) or not math.isfinite(stop_loss) or entry <= 0 or stop_loss <= 0:
+            return None
 
         side = "LONG" if entry > stop_loss else "SHORT"
         if entry == stop_loss:
