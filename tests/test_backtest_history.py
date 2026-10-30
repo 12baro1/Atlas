@@ -3,7 +3,14 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import backtest
+import importlib.util
+from pathlib import Path
+
+BACKTEST_SCRIPT = Path(__file__).resolve().parents[1] / "backtest.py"
+spec = importlib.util.spec_from_file_location("atlas_backtest_cli", BACKTEST_SCRIPT)
+backtest = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(backtest)
+
 from config import Config
 
 
