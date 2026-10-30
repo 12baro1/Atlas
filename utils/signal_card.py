@@ -4,12 +4,17 @@ Atlas için tek yönlü, net ve okunabilir işlem önerisi (sinyal kartı) üret
 Manuel işlem kullanıcısına: YÖN, giriş/stop/TP, kalite puanı ve çelişkileri tek bakışta sunar.
 """
 
+import math
+
 
 def _num(value, digits=2):
     try:
-        return round(float(value), digits)
-    except (TypeError, ValueError):
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+    if not math.isfinite(number):
+        return None
+    return round(number, digits)
 
 
 def _verdict(decision, signal, entry):
@@ -176,7 +181,10 @@ def format_card_text(card):
         shown_entry_type = "YOK (işlem açma)"
     lines.append(f"  Emir türü  : {shown_entry_type}")
     if card.get("entry_type_reason"):
-        lines.append(f"  Giriş nedeni: {card['entry_type_reason']}")
+        entry_reason = str(card["entry_type_reason"])
+        if "wait for pullback" in entry_reason.lower():
+            entry_reason = "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor"
+        lines.append(f"  Giriş nedeni: {entry_reason}")
     lines.append(f"  Stop       : {card['stop_loss']}")
     if card["tp_levels"]:
         tp_label = "TP1/2/3 (sentetik RR)" if card.get("synthetic_tp_targets") else "TP1/2/3"
