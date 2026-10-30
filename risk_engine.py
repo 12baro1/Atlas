@@ -335,7 +335,9 @@ class RiskEngine:
         else:
             try:
                 resolved = abs(float(buffer_value))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
+                resolved = abs(entry) * rate
+            if not math.isfinite(resolved):
                 resolved = abs(entry) * rate
 
         return max(resolved, minimum_tick_distance if resolved > 0 else 0.0)
