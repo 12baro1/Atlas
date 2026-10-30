@@ -286,14 +286,24 @@ class AtlasTUIApp(App):
                 message += "\n\nAnaliz edilemeyenler: " + "; ".join(errors[:3])
             return message
         candidates.sort(key=lambda item: item[0], reverse=True)
-        _, card, elapsed = candidates[0]
-        return (
-            "EN İYİ BULUNAN KURULUM (seçilenler arasında)\n"
-            + format_card_text(card)
-            + f"\n\nTarama: {len(symbols)} piyasa | Geçerli kurulum: {len(candidates)}"
-            + f"\nSıralama puanı: {candidates[0][0]:.1f} (olasılık değildir)"
-            + f"\nSeçilen analiz süresi: {elapsed / 1000:.1f} sn"
+        shown = candidates[:max(1, min(int(result_limit), 20))]
+        heading = "EN İYİ KURULUMLAR" if len(shown) > 1 else "EN İYİ BULUNAN KURULUM"
+        sections = [heading]
+        for rank, (score, card, elapsed) in enumerate(shown, start=1):
+            sections.append(
+                "\\n============ #" + str(rank) + " | SIRALAMA PUANI "
+                + f"{score:.1f}" + " ============\\n"
+                + format_card_text(card)
+                + f"\\nAnaliz süresi: {elapsed / 1000:.1f} sn"
+            )
+        sections.append(
+            f"\\nTarama: {len(symbols)} piyasa | Geçerli kurulum: {len(candidates)}"
+            + f" | Gösterilen: {len(shown)}"
+            + "\\nSıralama puanı kazanma olasılığı değildir."
         )
+        if errors:
+            sections.append("Analiz hatası: " + "; ".join(errors[:3]))
+        return "\\n".join(sections)
 
     def _finish(self, message: str) -> None:
         self._show(message)
