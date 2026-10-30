@@ -116,7 +116,7 @@ def test_partial_tp1_then_sl_at_breakeven():
 def test_partial_tp1_then_tp2_scenario():
     """TP scenario: TP1 kapanır, ardından TP2'ye devam → net = 0.5*1+0.5*2=+1.5R."""
     candles = [
-        _tl(100.0, l=99.5, h=101.5, cl=100.5),   # TP1(101) kapanır
+        _tl(100.0, l=100.1, h=101.5, cl=100.5),   # TP1(101) kapanır
         _tl(100.5, l=100.2, h=102.5, cl=102.0),  # TP2(102) kapanır
     ]
     out = simulate_trade_partial(100.0, 99.0, [101.0, 102.0], candles, "LONG")
@@ -127,8 +127,8 @@ def test_partial_tp1_then_tp2_scenario():
 
 def test_partial_three_levels_runs_to_tp3():
     candles = [
-        _tl(100.0, l=99.4, h=101.5),   # TP1 %33.3 → +1/3R
-        _tl(100.5, l=100.2, h=102.5),  # TP2 %33.3 → +2/3R
+        _tl(100.0, l=100.1, h=101.5),   # TP1 %33.3 → +1/3R
+        _tl(100.5, l=101.2, h=102.5),  # TP2 %33.3 → +2/3R
         _tl(101.5, l=101.2, h=104.5),  # TP3 %33.3 → +4/3R
     ]
     out = simulate_trade_partial(100.0, 99.0, [101.0, 102.0, 104.0], candles, "LONG")
@@ -149,7 +149,7 @@ def test_partial_first_touch_is_stop_loss():
 def test_partial_remaining_open_returns_open():
     # Pencere kapanmadan tüm pozisyon kapanmadı → istatistiğe girmez.
     candles = [
-        _tl(100.0, l=99.0, h=101.0, cl=100.5),  # yalnız TP1 kapanır
+        _tl(100.0, l=100.1, h=101.0, cl=100.5),  # yalnız TP1 kapanır
     ]
     out = simulate_trade_partial(100.0, 98.0, [101.0, 102.0], candles, "LONG")
     assert out["result"] == "OPEN"
