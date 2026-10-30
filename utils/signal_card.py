@@ -26,13 +26,14 @@ def _verdict(decision, signal, entry):
 
     if action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and signal_dir in ("LONG", "SHORT"):
         return ("AL" if signal_dir == "LONG" else "SAT", signal_dir, None)
+    # A pending LIMIT pullback is conditional, never an executable market entry.
+    if entry_type == "LIMIT" and "wait for pullback" in entry_reason:
+        return ("BEKLE", None, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
+
+    # WAIT is not an actionable terminal decision; show it as no-entry.
     if action == "WAIT":
         wait_reason = (signal or {}).get("wait_reason") or (decision or {}).get("reason")
-        return ("BEKLE", None, wait_reason)
-
-    # A pending LIMIT pullback is not an executable trade or a broken setup.
-    if entry_type == "LIMIT" and "wait for pullback" in entry_reason:
-        return ("BEKLE", None, (entry or {}).get("entry_type_reason") or "Geri çekilme bekleniyor")
+        return ("ATLA", None, wait_reason)
 
     return ("ATLA", None, (decision or {}).get("reason"))
 
@@ -202,7 +203,7 @@ def format_card_text(card):
         phase_summary = f"{card['market_phase']} | LIMIT fiyat bölgesi bekleniyor"
     else:
         phase_summary = f"{card['market_phase']} | Uygun işlem yok"
-    phase_summary += f" | Sinyal skoru {confidence_text}/100"
+    phase_summary += f" | skor {confidence_text}/100"
     lines.append(f"  Piyasa Fz  : {phase_summary}")
     if card["selected_tp"]:
         lines.append(f"  Hedef TP   : {card['selected_tp']}")
