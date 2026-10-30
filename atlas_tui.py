@@ -291,19 +291,19 @@ class AtlasTUIApp(App):
         sections = [heading]
         for rank, (score, card, elapsed) in enumerate(shown, start=1):
             sections.append(
-                "\\n============ #" + str(rank) + " | SIRALAMA PUANI "
-                + f"{score:.1f}" + " ============\\n"
+                "\n============ #" + str(rank) + " | SIRALAMA PUANI "
+                + f"{score:.1f}" + " ============\n"
                 + format_card_text(card)
-                + f"\\nAnaliz süresi: {elapsed / 1000:.1f} sn"
+                + f"\nAnaliz süresi: {elapsed / 1000:.1f} sn"
             )
         sections.append(
-            f"\\nTarama: {len(symbols)} piyasa | Geçerli kurulum: {len(candidates)}"
+            f"\nTarama: {len(symbols)} piyasa | Geçerli kurulum: {len(candidates)}"
             + f" | Gösterilen: {len(shown)}"
-            + "\\nSıralama puanı kazanma olasılığı değildir."
+            + "\nSıralama puanı kazanma olasılığı değildir."
         )
         if errors:
             sections.append("Analiz hatası: " + "; ".join(errors[:3]))
-        return "\\n".join(sections)
+        return "\n".join(sections)
 
     def _finish(self, message: str) -> None:
         self._show(message)
