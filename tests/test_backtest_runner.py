@@ -242,3 +242,14 @@ def test_backtest_numeric_parser_rejects_non_finite_values():
     from backtest_runner import _num
     assert _num(float("nan")) is None
     assert _num(float("inf")) is None
+
+
+
+def test_runner_exposes_gross_profit_and_loss_components():
+    runner = BacktestRunner()
+    runner._record({"_w": True, "net_rr": 2.0, "_levels": [1]})
+    runner._record({"_w": False, "net_rr": -1.0, "_levels": []})
+    stats = runner.statistics()
+    assert stats["gross_profit_rr"] == 2.0
+    assert stats["gross_loss_rr"] == 1.0
+    assert stats["profit_factor"] == 2.0

@@ -429,6 +429,7 @@ class BacktestRunner:
                 "total": 0, "wins": 0, "losses": 0, "winrate": 0,
                 "expectancy": 0, "avg_r": 0, "max_drawdown": 0,
                 "profit_factor": 0, "net_rr": 0,
+                "gross_profit_rr": 0, "gross_loss_rr": 0,
                 "tp1": 0, "tp2": 0, "tp3": 0,
                 "sample_base": "realized_closed_trades",
             }
@@ -461,6 +462,8 @@ class BacktestRunner:
             "avg_r": round(avg_r, 4),
             "max_drawdown": round(max_dd, 4),
             "profit_factor": round(pf, 2),
+            "gross_profit_rr": round(gross_win, 4),
+            "gross_loss_rr": round(gross_loss, 4),
             "net_rr": round(self.net_rr, 2),
             "tp1": self.tp1,
             "tp2": self.tp2,

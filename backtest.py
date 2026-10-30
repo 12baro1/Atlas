@@ -84,6 +84,42 @@ def build_analyze_fn(engine):
     return analyze
 
 
+def _combine_stats(all_stats):
+    """Aggregate realized trade metrics from gross R, not net symbol totals."""
+    combined = {
+        "total": 0,
+        "wins": 0,
+        "losses": 0,
+        "winrate": 0,
+        "expectancy": 0,
+        "profit_factor": 0,
+        "net_rr": 0,
+        "gross_profit_rr": 0,
+        "gross_loss_rr": 0,
+        "tp1": 0,
+        "tp2": 0,
+        "tp3": 0,
+    }
+    for _, stats in all_stats:
+        for key in ("total", "wins", "tp1", "tp2", "tp3"):
+            combined[key] += int(stats.get(key, 0) or 0)
+        combined["net_rr"] += float(stats.get("net_rr", 0) or 0)
+        combined["gross_profit_rr"] += float(stats.get("gross_profit_rr", 0) or 0)
+        combined["gross_loss_rr"] += float(stats.get("gross_loss_rr", 0) or 0)
+
+    combined["losses"] = combined["total"] - combined["wins"]
+    if combined["total"]:
+        combined["winrate"] = round(combined["wins"] / combined["total"] * 100, 2)
+        combined["expectancy"] = round(combined["net_rr"] / combined["total"], 4)
+    if combined["gross_loss_rr"] > 0:
+        combined["profit_factor"] = round(
+            combined["gross_profit_rr"] / combined["gross_loss_rr"], 2
+        )
+    elif combined["gross_profit_rr"] > 0:
+        combined["profit_factor"] = round(combined["gross_profit_rr"], 2)
+    return combined
+
+
 def _report(stats, name):
     print("=" * 52)
     print(f"SONUÇ | {name}")
@@ -145,19 +181,10 @@ def main():
     # Semboller arası signal durumunu izole et: runner tek örnekte yok, engine'deki
     # cooldown 0 olduğu için ardışık tarama bir sonraki sembolü etkilemez.
     all_stats = []
-    combined = {
-        "total": 0, "wins": 0, "losses": 0, "winrate": 0,
-        "expectancy": 0, "profit_factor": 0, "net_rr": 0,
-        "tp1": 0, "tp2": 0, "tp3": 0,
-    }
-
     for symbol in symbols:
         data = load_historical(symbol, days=args.days)
         runner = BacktestRunner(analyze_fn=build_analyze_fn(engine), fee_rate=float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.002)))
         stats = runner.run(data, step=5, lenient=args.lenient)
-        for key in ("total", "wins", "losses", "tp1", "tp2", "tp3"):
-            combined[key] += stats[key]
-        combined["net_rr"] += stats["net_rr"]
         _report(stats, symbol)
         all_stats.append((symbol, stats))
 
@@ -166,13 +193,8 @@ def main():
     for symbol, stats in all_stats:
         print(f"{symbol:<22} {stats['total']:>7} {stats['winrate']:>8}% {stats['profit_factor']:>6} {stats['net_rr']:>8.2f}")
 
+    combined = _combine_stats(all_stats)
     if combined["total"] > 0:
-        combined["losses"] = combined["total"] - combined["wins"]
-        combined["winrate"] = round(combined["wins"] / combined["total"] * 100, 2)
-        combined["expectancy"] = round(combined["net_rr"] / combined["total"], 4) if combined["total"] else 0
-        gross_loss = abs(sum(s[1]["net_rr"] for s in all_stats if s[1]["net_rr"] < 0))
-        gross_win = sum(s[1]["net_rr"] for s in all_stats if s[1]["net_rr"] > 0)
-        combined["profit_factor"] = round(gross_win / gross_loss, 2) if gross_loss > 0 else (round(gross_win, 2) if gross_win else 0.0)
         _report(combined, "BİRLEŞİK")
 
 
