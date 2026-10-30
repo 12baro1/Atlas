@@ -3,7 +3,14 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backtest import _combine_stats
+import importlib.util
+from pathlib import Path
+
+BACKTEST_SCRIPT = Path(__file__).resolve().parents[1] / "backtest.py"
+spec = importlib.util.spec_from_file_location("atlas_backtest_cli", BACKTEST_SCRIPT)
+backtest = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(backtest)
+_combine_stats = backtest._combine_stats
 
 
 def test_combined_profit_factor_uses_gross_wins_and_losses_not_net_symbol_totals():
