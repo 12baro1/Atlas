@@ -259,7 +259,7 @@ class BacktestRunner:
 
         total = len(candles)
         warmup = 300
-        for idx in range(warmup, total - 1, max(1, step)):
+        for idx in range(warmup, total, max(1, step)):
             # Signal decision is made at the close of the current 15m candle.
             decision_time_ms = candles[idx].time + 15 * 60 * 1000
             window = {
