@@ -197,18 +197,25 @@ def format_card_text(card):
     except (TypeError, ValueError):
         confidence_text = "-"
     if executable:
-        phase_summary = f"{card['market_phase']} | Yön {card['direction']} (skor {confidence_text}/100)"
+        phase_summary = f"{card['market_phase']} | Yön {card['direction']}"
     elif pending_limit:
         phase_summary = f"{card['market_phase']} | LIMIT fiyat bölgesi bekleniyor"
     else:
         phase_summary = f"{card['market_phase']} | Uygun işlem yok"
+    phase_summary += f" | Sinyal skoru {confidence_text}/100"
     lines.append(f"  Piyasa Fz  : {phase_summary}")
     if card["selected_tp"]:
         lines.append(f"  Hedef TP   : {card['selected_tp']}")
     if card["position_size"]:
         lines.append(f"  Pozisyon   : {card['position_size']} birim | Risk {card['capital_at_risk']} USD")
     if card["critical_blocks"]:
-        lines.append("  ENGELLER   : " + "; ".join(card["critical_blocks"]))
+        reasons = []
+        for item in card["critical_blocks"]:
+            reason = str(item)
+            if "wait for pullback" in reason.lower():
+                reason = "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor"
+            reasons.append(reason)
+        lines.append("  ENGELLER   : " + "; ".join(reasons))
     if card["soft_adjustments"]:
         parts = []
         for item in card["soft_adjustments"]:
