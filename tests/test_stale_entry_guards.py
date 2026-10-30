@@ -79,3 +79,45 @@ def test_signal_card_labels_synthetic_tp_targets():
         "analysis": {"entry": {"entry": 100.0, "entry_type": "LIMIT"}},
     })
     assert "TP1/2/3 (sentetik RR)" in format_card_text(card)
+
+
+
+def test_terminal_card_uses_only_clear_no_entry_decision():
+    from utils.signal_card import build_signal_card, format_card_text
+
+    card = build_signal_card({
+        "symbol": "BTC/USDT:USDT",
+        "signal": {"signal": "WAIT", "confidence": 22},
+        "decision": {"action": "SKIP", "reason": "No valid setup"},
+        "risk": {},
+        "analysis": {"entry": {"valid": False, "entry_type": "NONE"}},
+    })
+    output = format_card_text(card)
+    assert "KARAR: İŞLEME GİRME" in output
+    assert "Emir türü  : YOK (işlem açma)" in output
+    assert "Sinyal WAIT" not in output
+    assert "ATLA" not in output
+    assert "BEKLE" not in output
+
+
+def test_pending_limit_card_explains_conditional_limit_entry():
+    from utils.signal_card import build_signal_card, format_card_text
+
+    card = build_signal_card({
+        "symbol": "BTC/USDT:USDT",
+        "signal": {"signal": "WAIT", "confidence": 60},
+        "decision": {"action": "SKIP", "reason": "Entry not confirmed"},
+        "risk": {},
+        "analysis": {
+            "entry": {
+                "valid": False,
+                "entry_type": "LIMIT",
+                "entry_type_reason": "wait for pullback",
+            }
+        },
+    })
+    output = format_card_text(card)
+    assert "KARAR: ŞİMDİ GİRME" in output
+    assert "EMİR: LIMIT (FİYAT GELİNCE)" in output
+    assert "Emir türü  : LIMIT (fiyat bölgesine gelirse)" in output
+    assert "Sinyal WAIT" not in output
