@@ -13,6 +13,19 @@ from data_engine import exchange, get_correlation_universe, get_market_data
 from engine import AtlasEngine
 from manual_trade_service import ManualTradeService
 
+def _is_fresh_15m_data(candles, now_ms, max_age_seconds):
+    """Return False for absent, future, or stale last-closed 15m candles."""
+    if not candles:
+        return False
+    try:
+        latest_close_ms = int(candles[-1].time) + 15 * 60 * 1000
+        age_ms = int(now_ms) - latest_close_ms
+        max_age_ms = max(0, int(float(max_age_seconds) * 1000))
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return False
+    return 0 <= age_ms <= max_age_ms
+
+
 
 class AtlasRuntime:
     """Background scanner runtime that feeds UI without flooding stdout."""
@@ -366,6 +379,21 @@ class AtlasRuntime:
                     self._inc("skipped")
                     self._log(f"WAIT {symbol}: no fully closed 15m candle available")
                     return {"ok": False, "symbol": symbol, "error": "no_closed_15m_candle"}
+                max_age_seconds = getattr(Config, "MAX_15M_CANDLE_AGE_SECONDS", 1800)
+                if not _is_fresh_15m_data(closed_15m, now_ms, max_age_seconds):
+                    self._inc("skipped")
+                    latest_close_ms = closed_15m[-1].time + 15 * 60 * 1000
+                    age_seconds = max(0, (now_ms - latest_close_ms) / 1000)
+                    self._log(
+                        f"WAIT {symbol}: stale 15m market data "
+                        f"(age={age_seconds:.0f}s max={float(max_age_seconds):.0f}s)"
+                    )
+                    return {
+                        "ok": False,
+                        "symbol": symbol,
+                        "error": "stale_15m_market_data",
+                        "age_seconds": age_seconds,
+                    }
                 data = dict(data)
                 data["15m"] = closed_15m
                 if universe:
