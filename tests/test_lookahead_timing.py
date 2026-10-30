@@ -83,10 +83,8 @@ def test_closed_m15_includes_candle_at_exact_close_boundary():
 
 def test_backtest_runner_includes_htf_candle_closed_at_15m_close():
     m15_period = TF_PERIOD_MS["15m"]
-    # Include one candle after the decision candle so the runner can
-    # simulate the next-open MARKET entry without using the final data candle.
-    m15 = [_candle(i * m15_period) for i in range(302)]
-    decision_time = m15[300].time + m15_period
+    m15 = [_candle(i * m15_period) for i in range(301)]
+    decision_time = m15[-1].time + m15_period
     h4 = [_candle(decision_time - TF_PERIOD_MS["4h"])]
 
     captured = {}
