@@ -103,3 +103,10 @@ def test_best_symbols_can_return_entire_eligible_universe(monkeypatch):
     assert atlas_tui._best_symbols(limit=None) == [
         "BTC/USDT:USDT", "ETH/USDT:USDT", "BRC/USDT:USDT"
     ]
+
+
+
+def test_parse_everyday_turkish_scan_phrases():
+    assert atlas_tui._parse_scan_command("50 tane analiz et") == (50, 5)
+    assert atlas_tui._parse_scan_command("en iyi 5 işlemi ver") == (100, 5)
+    assert atlas_tui._parse_scan_command("5 tane işlem ver") == (100, 5)
