@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+import math
 
 
 class ManualTradeQualityGate:
@@ -26,12 +26,10 @@ class ManualTradeQualityGate:
         confidence = self._num(signal.get("confidence"), 0)
         confluence_score = self._num(confluence.get("score"), 0)
         rr = self._resolve_rr(risk)
-        decision_score = self._num(decision.get("score"), 0)
         min_rr = max(float(getattr(self.config, "TELEGRAM_MIN_RR", 3.0)), 0.01)
 
-        # Bileşen tavanları bilinçli olarak 95'te toplanacak şekilde normalize
-        # edilir: 100'e yalnızca öğrenme (learning) + geçmiş (historical) etkisi
-        # eklendiğinde çok yaklaşılabilir; sıradan güçlü setup'lar 100'e yapışmaz.
+        # A setup score is a heuristic quality score, not a win probability.
+        # Keep the base components below 90 so unproven history cannot inflate it.
         components["confidence"] = min(25, confidence * 0.25)
         components["confluence"] = min(16, confluence_score * 0.16)
         components["rr"] = min(12, (rr or 0) / min_rr * 9)
@@ -39,7 +37,13 @@ class ManualTradeQualityGate:
         components["phase"] = 8 if self._phase_allowed(market_phase, decision) else 0
         components["risk"] = 7 if decision.get("risk_valid", True) and entry.get("valid", False) else 0
 
-        historical = self._historical_context(symbol=symbol, decision=decision, market_phase=market_phase, trade_journal=trade_journal)
+        historical = self._historical_context(
+            symbol=symbol,
+            direction=signal.get("signal"),
+            decision=decision,
+            market_phase=market_phase,
+            trade_journal=trade_journal,
+        )
         components["historical"] = self._rescale_historical(historical["score"])
         warnings.extend(historical["warnings"])
         blockers.extend(historical["blockers"])
@@ -68,25 +72,17 @@ class ManualTradeQualityGate:
         }
 
     def _learning_component(self, learning):
-        """Öğrenilen geçmiş başarıyı skor bileşenine çevirir (-5..+5).
-
-        Eşleşme yoksa nötr (0); eşleşme varsa score_delta ile doğru orantılı
-        sınırlı bir katkı verilir. Böylece skorun 100 olması istisnai kalırken
-        öğrenme gerçekçi şekilde skoru etkiler.
-        """
+        """Convert a matched historical learning delta into a bounded score contribution."""
         if not isinstance(learning, dict) or not learning.get("matched"):
             return 0
         delta = int(learning.get("score_delta") or 0)
-        if delta < 0:
-            points = delta // 2
-        else:
-            points = (delta + 1) // 2
+        points = delta // 2 if delta < 0 else (delta + 1) // 2
         return max(-5, min(5, points))
 
     def _rescale_historical(self, raw_score):
         return {15: 10, 7: 6, 5: 4, 0: 0}.get(int(raw_score), min(10, int(raw_score)))
 
-    def _historical_context(self, *, symbol, decision, market_phase, trade_journal):
+    def _historical_context(self, *, symbol, direction, decision, market_phase, trade_journal):
         min_trades = int(getattr(self.config, "TELEGRAM_HISTORICAL_MIN_TRADES", 20))
         min_expectancy = float(getattr(self.config, "TELEGRAM_HISTORICAL_MIN_EXPECTANCY", 0.30))
         min_profit_factor = float(getattr(self.config, "TELEGRAM_HISTORICAL_MIN_PROFIT_FACTOR", 1.30))
@@ -100,6 +96,7 @@ class ManualTradeQualityGate:
             "score": 5,
             "blockers": [],
             "warnings": [],
+            "scope": "symbol_and_direction",
         }
 
         if trade_journal is None or not hasattr(trade_journal, "_closed_trades"):
@@ -111,16 +108,24 @@ class ManualTradeQualityGate:
             result["warnings"].append("no closed trades for historical filter")
             return result
 
-        setup = decision.get("action") or "UNKNOWN"
-        phase = (market_phase or {}).get("phase") or decision.get("market_phase") or "UNKNOWN"
-        candidates = [
-            trade for trade in closed
-            if trade.get("symbol") == symbol
-            or (trade.get("analysis", {}).get("decision", {}).get("action") or trade.get("side")) == setup
-            or trade.get("market_phase") == phase
-        ]
-        if not candidates:
-            candidates = closed
+        # Never mix unrelated coins merely because they share a market phase or
+        # decision label. Prefer same-symbol, same-direction history; if there
+        # is no directional sample yet, use only this symbol's own closed trades.
+        symbol_trades = [trade for trade in closed if trade.get("symbol") == symbol]
+        if not symbol_trades:
+            result["warnings"].append(f"no closed trades for symbol {symbol}; historical score remains neutral")
+            result["scope"] = "no_matching_symbol_history"
+            return result
+
+        direction_key = str(direction or "").strip().upper()
+        directional = [
+            trade for trade in symbol_trades
+            if str(trade.get("side") or trade.get("direction") or "").strip().upper() == direction_key
+        ] if direction_key else []
+        candidates = directional or symbol_trades
+        result["scope"] = "symbol_and_direction" if directional else "symbol_only"
+        if direction_key and not directional:
+            result["warnings"].append("no matching direction history; using this symbol's history only")
 
         metrics = self._metrics(candidates)
         result.update(metrics)
@@ -193,9 +198,10 @@ class ManualTradeQualityGate:
 
     def _num(self, value, default=0):
         try:
-            return float(value)
-        except (TypeError, ValueError):
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
             return default
+        return number if math.isfinite(number) else default
 
     def _fmt(self, value):
         return f"{float(value):.2f}".rstrip("0").rstrip(".")
