@@ -106,7 +106,7 @@ def test_rr_engine_derives_rr_from_tp3_when_missing():
     )
 
     assert risk is not None
-    assert risk["rr"] == pytest.approx(1.0)
+    assert risk["rr"] == pytest.approx(3.0)
 
     rr = RREngine().evaluate({
         "entry": 100.0,
