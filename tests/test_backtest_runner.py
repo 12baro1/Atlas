@@ -235,3 +235,10 @@ def test_market_order_is_rejected_when_gap_has_already_crossed_tp1():
         "analysis": {"entry": {"entry_type": "MARKET"}},
     }
     assert runner._to_trade(result, candles, entry_index=0) is None
+
+
+
+def test_backtest_numeric_parser_rejects_non_finite_values():
+    from backtest_runner import _num
+    assert _num(float("nan")) is None
+    assert _num(float("inf")) is None
