@@ -167,3 +167,16 @@ def test_signal_card_preserves_small_coin_price_precision():
     rendered = format_card_text(card)
     assert "0.173846" in rendered
     assert "0.176214" in rendered
+
+
+def test_pending_limit_is_never_presented_as_immediate_entry_even_if_decision_executes():
+    result = _result()
+    result["decision"]["action"] = "EXECUTE"
+    result["analysis"]["entry"].update({
+        "entry_type": "LIMIT",
+        "requires_pullback": True,
+        "entry_type_reason": "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor",
+    })
+    rendered = format_card_text(build_signal_card(result))
+    assert "KARAR: ŞİMDİ GİRME | EMİR: LIMIT (FİYAT GELİNCE)" in rendered
+    assert "KARAR: İŞLEME GİR" not in rendered
