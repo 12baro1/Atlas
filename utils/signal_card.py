@@ -100,6 +100,9 @@ def build_signal_card(result):
         "entry": None,
         "entry_type": str(entry.get("entry_type") or "BELİRSİZ").upper(),
         "entry_type_reason": entry.get("entry_type_reason") or "",
+        "entry_distance_label": entry.get("entry_distance_label") or "",
+        "entry_distance_pct": _num(entry.get("entry_distance_pct"), 3),
+        "entry_distance_atr": _num(entry.get("entry_distance_atr"), 2),
         "requires_pullback": str(entry.get("entry_type") or "").upper() == "LIMIT",
         "synthetic_tp_targets": bool(dynamic_tp.get("synthetic_targets", False)),
         "stop_loss": None,
@@ -194,6 +197,13 @@ def format_card_text(card):
     else:
         shown_entry_type = "YOK (işlem açma)"
     lines.append(f"  Emir türü  : {shown_entry_type}")
+    if pending_limit and card.get("entry_distance_label"):
+        distance_parts = [card["entry_distance_label"]]
+        if card.get("entry_distance_pct") is not None:
+            distance_parts.append(f"%{card['entry_distance_pct']}")
+        if card.get("entry_distance_atr") is not None:
+            distance_parts.append(f"{card['entry_distance_atr']} ATR")
+        lines.append("  Giriş mesafesi: " + " | ".join(distance_parts))
     if card.get("entry_type_reason"):
         entry_reason = str(card["entry_type_reason"])
         if "wait for pullback" in entry_reason.lower():
