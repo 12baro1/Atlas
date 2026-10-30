@@ -168,12 +168,21 @@ def _combine_stats(all_stats):
         "net_rr": 0,
         "gross_profit_rr": 0,
         "gross_loss_rr": 0,
+        "candidate_signals": 0,
+        "unfilled_limits": 0,
+        "open_trades": 0,
+        "invalid_candidates": 0,
+        "no_followup_data": 0,
         "tp1": 0,
         "tp2": 0,
         "tp3": 0,
     }
     for _, stats in all_stats:
-        for key in ("total", "wins", "tp1", "tp2", "tp3"):
+        for key in (
+            "total", "wins", "tp1", "tp2", "tp3",
+            "candidate_signals", "unfilled_limits", "open_trades",
+            "invalid_candidates", "no_followup_data",
+        ):
             combined[key] += int(stats.get(key, 0) or 0)
         combined["net_rr"] += float(stats.get("net_rr", 0) or 0)
         combined["gross_profit_rr"] += float(stats.get("gross_profit_rr", 0) or 0)
@@ -196,7 +205,16 @@ def _report(stats, name):
     print("=" * 52)
     print(f"SONUÇ | {name}")
     print("=" * 52)
-    print(f"  Toplam sinyal  : {stats['total']}")
+    print(f"  Aday sinyal    : {stats.get('candidate_signals', 0)}")
+    print(f"  Kapanan işlem  : {stats['total']}")
+    print(f"  Açık işlem     : {stats.get('open_trades', 0)}")
+    print(f"  Dolmayan LIMIT : {stats.get('unfilled_limits', 0)}")
+    print(f"  Geçersiz aday  : {stats.get('invalid_candidates', 0)}")
+    print(f"  Takipsiz son mum: {stats.get('no_followup_data', 0)}")
+    if not stats["total"]:
+        print("  SONUÇ: Kapanmış işlem yok; kârlılık ölçülemez.")
+        print("=" * 52)
+        return
     print(f"  Kazanç (WIN)   : {stats['wins']}")
     print(f"  Kayıp (LOSS)   : {stats['losses']}")
     print(f"  Winrate        : %{stats['winrate']}")
@@ -261,7 +279,7 @@ def main():
         print(f"{symbol:<22} {stats['total']:>7} {stats['winrate']:>8}% {stats['profit_factor']:>6} {stats['net_rr']:>8.2f}")
 
     combined = _combine_stats(all_stats)
-    if combined["total"] > 0:
+    if combined["candidate_signals"] > 0 or combined["total"] > 0:
         _report(combined, "BİRLEŞİK")
 
 
