@@ -213,7 +213,7 @@ def test_limit_order_fills_only_after_touching_level():
 
 def test_market_order_uses_next_candle_open_as_fill_price():
     runner = BacktestRunner(partial_exits=False)
-    candles = [_candle(1, 101.0, 102.5, 100.5, 102.0)]
+    candles = [_candle(1, 101.0, 103.5, 100.5, 103.0)]
     result = {
         "decision": {"action": "EXECUTE"},
         "signal": {"signal": "LONG"},
