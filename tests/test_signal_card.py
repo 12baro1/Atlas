@@ -78,7 +78,8 @@ def test_card_atla_verdict_and_blocks():
 
 def test_card_format_single_line_verdict():
     text = format_card_text(build_signal_card(_result()))
-    assert "->  AL" in text
+    assert "KARAR: İŞLEME GİR" in text
+    assert "EMİR:" in text
     assert "67000" in text
     assert "TP1/2/3" in text
 
