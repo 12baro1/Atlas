@@ -76,7 +76,19 @@ def _disable_backtest_live_features():
     for name in disabled:
         os.environ[name] = "0"
     os.environ["ATLAS_TRADE_COOLDOWN_MINUTES"] = "0"
+    os.environ["ATLAS_AUTO_TRADING_ENABLED"] = "0"
     Config.refresh_from_env()
+
+    # Several legacy flags are read at Config import time and are not refreshed
+    # by refresh_from_env(); pin them after refresh as well.
+    Config.STATE_ENGINE_ENABLED = False
+    Config.INCREMENTAL_ANALYSIS_ENABLED = False
+    Config.TELEGRAM_ENABLED = False
+    Config.CORRELATION_ENGINE_ENABLED = False
+    Config.ECONOMIC_NEWS_FILTER_ENABLED = False
+    Config.LEARNING_ENGINE_ENABLED = False
+    Config.SIGNAL_TRACKING_ENABLED = False
+    Config.TRADE_COOLDOWN_MINUTES = 0.0
 
 
 def _fetch_history(symbol, timeframe, since_ms, limit=1000):
