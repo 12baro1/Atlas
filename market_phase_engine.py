@@ -96,7 +96,7 @@ class MarketPhaseEngine:
         discount = premium_discount.get("discount", False)
         
         # Volatility check (optional)
-        volatility = self._calculate_volatility(candles) if candles else "NORMAL"
+        _volatility = self._calculate_volatility(candles) if candles else "NORMAL"
         
         # Phase determination logic
         phase = "RANGING"  # Default

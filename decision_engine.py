@@ -74,19 +74,23 @@ class DecisionEngine:
             confluence=confluence,
         )
 
+        # WAIT means the setup is not ready yet, not that its trade geometry is broken.
+        # Keep execution blocked, but avoid reporting missing direction/entry/RR as failures.
+        waiting_for_setup = signal_dir == "WAIT"
         critical_blockers = []
-        self._append_unique(critical_blockers, "Signal direction invalid" if signal_dir not in ["LONG", "SHORT"] else None)
-        self._append_unique(critical_blockers, "Entry invalid" if not entry_valid else None)
-        self._append_unique(
-            critical_blockers,
-            f"Confidence below minimum: {self._fmt_number(signal_confidence)} < {self._fmt_number(minimum_confidence)}"
-            if signal_confidence < minimum_confidence
-            else None,
-        )
-        for blocker in risk_blockers:
-            self._append_unique(critical_blockers, blocker)
-        for blocker in quality_blockers:
-            self._append_unique(critical_blockers, blocker)
+        if not waiting_for_setup:
+            self._append_unique(critical_blockers, "Signal direction invalid" if signal_dir not in ["LONG", "SHORT"] else None)
+            self._append_unique(critical_blockers, "Entry invalid" if not entry_valid else None)
+            self._append_unique(
+                critical_blockers,
+                f"Confidence below minimum: {self._fmt_number(signal_confidence)} < {self._fmt_number(minimum_confidence)}"
+                if signal_confidence < minimum_confidence
+                else None,
+            )
+            for blocker in risk_blockers:
+                self._append_unique(critical_blockers, blocker)
+            for blocker in quality_blockers:
+                self._append_unique(critical_blockers, blocker)
 
         adjustments = self._collect_adjustments(
             signal_grade=signal_grade,
@@ -119,7 +123,9 @@ class DecisionEngine:
             soft_blockers=soft_blockers,
         )
 
-        if critical_blockers:
+        if waiting_for_setup:
+            action = self.ACTION_WAIT
+        elif critical_blockers:
             action = self.ACTION_SKIP
         elif override_applies:
             action = self.ACTION_EXECUTE

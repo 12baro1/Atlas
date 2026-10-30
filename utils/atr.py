@@ -1,4 +1,3 @@
-from core.candle import Candle
 
 def atr(candles, period=14):
 
