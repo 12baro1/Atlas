@@ -133,3 +133,10 @@ def test_pending_pullback_is_wait_not_invalid_signal():
     assert "Risk cannot be calculated" not in card["critical_blocks"]
     assert not any(item.startswith("RR below quality minimum:") for item in card["critical_blocks"])
     assert "Wait for pullback to bearish POI" in card["critical_blocks"]
+
+
+def test_market_trade_card_shows_clear_entry_permission():
+    result = _result()
+    result["analysis"]["entry"]["entry_type"] = "MARKET"
+    rendered = format_card_text(build_signal_card(result))
+    assert "KARAR: İŞLEME GİR | EMİR: MARKET" in rendered
