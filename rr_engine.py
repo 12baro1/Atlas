@@ -113,8 +113,9 @@ class RREngine:
 
         if rr is not None:
             try:
-                rr = round(float(rr), 2)
-            except (TypeError, ValueError):
+                rr = float(rr)
+                rr = round(rr, 2) if math.isfinite(rr) else None
+            except (TypeError, ValueError, OverflowError):
                 rr = None
 
         if rr is None:
