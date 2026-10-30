@@ -38,11 +38,11 @@ def _parse_scan_command(value: str):
     if normalized in {"tüm piyasa", "tum piyasa", "tüm piyasayı tara", "tum piyasayi tara",
                       "tüm piyasayı analiz et", "tum piyasayi analiz et", "full scan", "scan all"}:
         return None, 5
-    match = re.fullmatch(r"(?:en iyi )?(\d+)\s+(?:işlem|islem)(?:leri)?", normalized)
+    match = re.fullmatch(r"(?:en iyi )?(\d+)\s+(?:tane\s+)?(?:işlem|islem)(?:i|leri)?(?:\s+ver)?", normalized)
     if match:
         count = _normalize_scan_limit(match.group(1), default=1, maximum=20)
         return _configured_scan_limit(default=DEFAULT_RANK_SCAN_LIMIT), count
-    match = re.fullmatch(r"(\d+)\s+(?:(?:coin|piyasa|sembol)\s+)?(?:analiz et|tara)", normalized)
+    match = re.fullmatch(r"(\d+)\s+(?:tane\s+)?(?:(?:coin|piyasa|sembol)\s+)?(?:analiz et|tara)", normalized)
     if match:
         count = _normalize_scan_limit(match.group(1), default=DEFAULT_SCAN_LIMIT, maximum=MAX_SCAN_LIMIT)
         return count, 5
