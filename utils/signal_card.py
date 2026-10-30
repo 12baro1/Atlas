@@ -42,7 +42,8 @@ def _verdict(decision, signal, entry):
     # LIMIT orders are conditional and must never be shown as immediate entry permission.
     pending_limit = entry_type == "LIMIT"
     if pending_limit:
-        return ("BEKLE", None, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
+        pending_direction = signal_dir if signal_dir in ("LONG", "SHORT") else None
+        return ("BEKLE", pending_direction, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
     if action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and signal_dir in ("LONG", "SHORT"):
         return ("AL" if signal_dir == "LONG" else "SAT", signal_dir, None)
 
