@@ -289,8 +289,11 @@ class EntryEngine:
                 result["reason"] = "Limit entry too far from current market"
                 result["checks"].append("✗ LIMIT entry too far from current market")
 
-        if (result["entry"] is None or result["stop_loss"] is None) and not result.get("entry_zone_crossed")
-            and not result.get("entry_too_far"):
+        if (
+            (result["entry"] is None or result["stop_loss"] is None)
+            and not result.get("entry_zone_crossed")
+            and not result.get("entry_too_far")
+        ):
             fallback_entry, fallback_sl = self._structure_fallback_levels(direction, structure)
             market_side_valid = (
                 current_price is not None
