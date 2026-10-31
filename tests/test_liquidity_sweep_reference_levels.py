@@ -262,11 +262,11 @@ def test_expanded_outer_edge_price_is_not_available_before_its_own_confirmation(
     structure = [
         {"kind": "HIGH", "price": 100.0, "index": 2, "confirmation_index": 7},
         {"kind": "HIGH", "price": 100.05, "index": 8, "confirmation_index": 13},
-        {"kind": "HIGH", "price": 100.2, "index": 14, "confirmation_index": 19},
+        {"kind": "HIGH", "price": 100.1, "index": 14, "confirmation_index": 19},
     ]
 
     [cluster] = engine.detect(structure)
 
-    assert cluster["price"] == 100.2
+    assert cluster["price"] == 100.1
     assert cluster["formed_at"] == 13
     assert cluster["price_formed_at"] == 19
