@@ -344,10 +344,11 @@ class AtlasTUIApp(App):
                     f"katman: {item.get('liquidity_kind', 'UNKNOWN')}"
                 )
         post = sweep.get("post_structure") or {}
+        sweep_direction = "BEARISH" if sweep.get("buy_side") else ("BULLISH" if sweep.get("sell_side") else "YOK")
         lines.extend([
             "",
             "SON LİKİDİTE SÜPÜRMESİ",
-            f"Sweep: {'EVET' if sweep.get('is_sweep') else 'HAYIR'} | Yön: {sweep.get('direction') or 'YOK'} | Güç: {sweep.get('strength_score', 0)}",
+            f"Sweep: {'EVET' if sweep.get('is_sweep') else 'HAYIR'} | Yön: {sweep_direction} | Güç: {sweep.get('strength_score', 0)}",
             f"BSL süpürüldü: {'EVET' if sweep.get('buy_side') else 'HAYIR'} | SSL süpürüldü: {'EVET' if sweep.get('sell_side') else 'HAYIR'}",
             f"Sonraki yapı teyidi: {'VAR' if post.get('confirmed') else 'YOK'}",
             "",
