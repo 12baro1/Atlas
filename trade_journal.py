@@ -1195,14 +1195,11 @@ class TradeJournal:
             # TP sonrası SL: '%WIN' değil, gerçekleşen kısmi R işaretlenir.
             outcome["status"] = "SL"
             outcome["final_result"] = "PARTIAL"
-        elif len(outcome.get("tps_hit") or []) >= 3:
-            outcome["status"] = "TP3"
-            outcome["final_result"] = "WIN"
-        elif len(outcome.get("tps_hit") or []) == 2:
-            outcome["status"] = "TP2"
-            outcome["final_result"] = "WIN"
-        elif len(outcome.get("tps_hit") or []) == 1:
-            outcome["status"] = "TP1"
+        elif outcome.get("tps_hit"):
+            # TP status is the highest numbered target actually reached, not
+            # the count of targets. TP1+TP3 with no TP2 must still report TP3.
+            highest_hit = max(int(level) for level in outcome.get("tps_hit") if int(level) in (1, 2, 3))
+            outcome["status"] = f"TP{highest_hit}"
             outcome["final_result"] = "WIN"
         else:
             outcome["status"] = "PENDING"
