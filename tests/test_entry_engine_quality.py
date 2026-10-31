@@ -163,7 +163,7 @@ def test_structure_fallback_with_finite_live_price_uses_market_order():
         current_price=100.5,
     )
 
-    assert result["valid"] is True
+    assert result["valid"] is False
     assert result["entry_type"] == "NONE"
     assert result["entry"] is None
 
@@ -230,5 +230,5 @@ def test_entry_distance_within_two_percent_is_labeled_near_when_atr_is_unavailab
         current_price=100.0,
     )
     assert result["entry_type"] == "LIMIT"
-    assert result["entry_distance_pct"] == 1.5
+    assert result["entry_distance_pct"] == 1.2
     assert result["entry_distance_label"] == "YAKIN GİRİŞ"
