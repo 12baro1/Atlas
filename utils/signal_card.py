@@ -178,7 +178,7 @@ def _summarize(card):
 
 
 def format_card_text(card):
-    """Terminalde yalnızca karar vermek için gereken bilgileri göster."""
+    """Terminalde yalnızca işlem kararına yarayan bilgileri göster."""
     line = "=" * 42
     action = str(card.get("decision_action") or "").upper()
     entry_type = str(card.get("entry_type") or "").upper()
@@ -194,19 +194,21 @@ def format_card_text(card):
         headline = "İŞLEME GİRME"
 
     lines = [line, f"  {card['symbol']}  |  {headline}", line]
+    if card.get("direction") in ("LONG", "SHORT"):
+        lines.append(f"  Yön       : {card['direction']}")
 
     if no_trade:
         reason = card.get("reason") or "Giriş şartları oluşmadı."
-        lines.append(f"  Neden: {reason}")
+        lines.append(f"  Neden     : {reason}")
         lines.append(line)
-        return "\\n".join(lines)
+        return "\n".join(lines)
 
-    if card.get("direction") in ("LONG", "SHORT"):
-        lines.append(f"  Yön       : {card['direction']}")
     if pending_limit:
         lines.append("  Emir      : LIMIT (fiyat giriş seviyesine gelirse)")
+    elif entry_type in ("MARKET", "LIMIT"):
+        lines.append(f"  Emir      : {entry_type}")
     else:
-        lines.append(f"  Emir      : {entry_type if entry_type in ('MARKET', 'LIMIT') else 'MARKET'}")
+        lines.append("  Emir      : BELİRSİZ (teyit gerekli)")
 
     if card.get("entry") is not None:
         lines.append(f"  Giriş     : {card['entry']}")
@@ -218,10 +220,12 @@ def format_card_text(card):
     if card.get("stop_loss") is not None:
         lines.append(f"  Stop Loss : {card['stop_loss']}")
     if card.get("tp_levels"):
+        label = "TP (sentetik RR)" if card.get("synthetic_tp_targets") else "TP"
         for index, target in enumerate(card["tp_levels"][:3], start=1):
-            lines.append(f"  TP{index}       : {target}")
+            lines.append(f"  {label}{index} : {target}")
     if card.get("rr") is not None:
         lines.append(f"  Risk/Ödül : {card['rr']}")
-
+    if card.get("setup_quality") is not None:
+        lines.append(f"  Kalite    : {card['setup_quality']}/100")
     lines.append(line)
-    return "\\n".join(lines)
+    return "\n".join(lines)
