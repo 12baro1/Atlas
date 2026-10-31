@@ -41,7 +41,7 @@ def test_classifies_real_sweep_vs_breakout_and_scores_strength():
 
     layers = {
         "swing": [
-            {"price": 100.0, "touches": 3, "type": "BUY_SIDE", "liquidity_kind": "SWING"},
+            {"price": 100.5, "touches": 3, "type": "BUY_SIDE", "liquidity_kind": "SWING"},
             {"price": 98.0, "touches": 2, "type": "SELL_SIDE", "liquidity_kind": "SWING"},
         ],
         "internal": [],
@@ -110,7 +110,7 @@ def test_post_structure_confirmation_requires_break_after_sweep():
         "break_index": 1,
     }]
     layers = {
-        "swing": [{"price": 100.0, "touches": 3, "type": "BUY_SIDE", "liquidity_kind": "SWING"}],
+        "swing": [{"price": 100.5, "touches": 3, "type": "BUY_SIDE", "liquidity_kind": "SWING"}],
         "internal": [],
     }
     result = engine.detect(candles, structure, layers)
@@ -132,7 +132,7 @@ def test_post_structure_confirmation_rejects_unobserved_future_break_index():
         "break_index": 3,
     }]
     layers = {
-        "swing": [{"price": 100.0, "touches": 3, "type": "BUY_SIDE", "liquidity_kind": "SWING"}],
+        "swing": [{"price": 100.5, "touches": 3, "type": "BUY_SIDE", "liquidity_kind": "SWING"}],
         "internal": [],
     }
     result = engine.detect(candles, structure, layers)
