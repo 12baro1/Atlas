@@ -34,7 +34,7 @@ class LiquiditySweepEngine:
         buy_side_event = self._classify_side("BUY_SIDE", last, swing_buy or internal_buy)
         sell_side_event = self._classify_side("SELL_SIDE", last, swing_sell or internal_sell)
         post_structure = self._post_structure_confirmation(
-            structure, buy_side_event, sell_side_event, sweep_index=len(candles) - 1
+            structure, buy_side_event, sell_side_event, sweep_index=len(candles) - 1, current_index=len(candles) - 1
         )
         strength = self._strength_score(buy_side_event, sell_side_event, post_structure, timeframe)
 
@@ -123,7 +123,7 @@ class LiquiditySweepEngine:
             "liquidity_kind": reference.get("liquidity_kind", "SWING"),
         }
 
-    def _post_structure_confirmation(self, structure, buy_side_event, sell_side_event, sweep_index=None):
+    def _post_structure_confirmation(self, structure, buy_side_event, sell_side_event, sweep_index=None, current_index=None):
         if not structure:
             return {"confirmed": False, "type": None, "direction": None, "reason": "no_structure"}
         last = structure[-1]
@@ -140,6 +140,7 @@ class LiquiditySweepEngine:
         try:
             confirmation_index = int(confirmation_index)
             sweep_index = int(sweep_index)
+            current_index = int(current_index)
         except (TypeError, ValueError):
             return {
                 "confirmed": False, "type": None, "direction": trigger,
@@ -149,6 +150,11 @@ class LiquiditySweepEngine:
             return {
                 "confirmed": False, "type": None, "direction": trigger,
                 "reason": "structure_not_after_sweep",
+            }
+        if confirmation_index > current_index:
+            return {
+                "confirmed": False, "type": None, "direction": trigger,
+                "reason": "confirmation_not_observed_yet",
             }
         if last.get("choch") and last.get("direction") == trigger:
             return {"confirmed": True, "type": "CHOCH", "direction": trigger, "confirmation_index": confirmation_index}
