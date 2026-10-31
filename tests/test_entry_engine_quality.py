@@ -232,3 +232,33 @@ def test_entry_distance_within_two_percent_is_labeled_near_when_atr_is_unavailab
     assert result["entry_type"] == "LIMIT"
     assert result["entry_distance_pct"] == 1.2
     assert result["entry_distance_label"] == "YAKIN GİRİŞ"
+
+
+def test_long_stop_places_atr_buffer_beyond_structural_invalidation(monkeypatch):
+    import entry_engine
+    monkeypatch.setattr(entry_engine, "calculate_atr", lambda candles, period=14: 2.0)
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 98.9}],
+        fvg=[{"type": "BULLISH", "from": 99.2, "to": 100.0, "filled": False}],
+        orderblocks=[{"type": "BULLISH", "low": 99.4, "high": 100.1, "mitigated": False}],
+        current_price=100.05,
+        candles=[object()],
+    )
+    assert result["stop_loss"] == 98.7
+    assert result["stop_buffer"] == 0.2
+
+
+def test_short_stop_places_atr_buffer_beyond_structural_invalidation(monkeypatch):
+    import entry_engine
+    monkeypatch.setattr(entry_engine, "calculate_atr", lambda candles, period=14: 2.0)
+    result = EntryEngine().generate(
+        mtf={"entry": "SHORT"},
+        structure=[{"label": "LH", "kind": "HIGH", "price": 101.2}],
+        fvg=[{"type": "BEARISH", "from": 100.0, "to": 101.0, "filled": False}],
+        orderblocks=[{"type": "BEARISH", "low": 99.9, "high": 100.8, "mitigated": False}],
+        current_price=99.95,
+        candles=[object()],
+    )
+    assert result["stop_loss"] == 101.4
+    assert result["stop_buffer"] == 0.2
