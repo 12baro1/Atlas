@@ -3,7 +3,7 @@
 
 class EntryConfirmationEngine:
 
-    def confirm(self, mtf, structure, fvg, entry):
+    def confirm(self, mtf, structure, fvg, entry, current_price=None):
         result = {"confirmed": False, "reason": "Weak confirmation"}
 
         mtf = mtf if isinstance(mtf, dict) else {}
@@ -44,12 +44,33 @@ class EntryConfirmationEngine:
             return result
 
         expected_fvg = "BULLISH" if direction == "LONG" else "BEARISH"
-        active_fvg = any(
-            isinstance(gap, dict)
-            and str(gap.get("type", "")).upper() == expected_fvg
-            and not bool(gap.get("filled", False))
-            for gap in fvg
-        )
+        # Confirmation must use an FVG that is actually reachable as a
+        # pullback zone, matching EntryEngine's price-side selection rule.
+        try:
+            price = float(current_price) if current_price is not None else None
+        except (TypeError, ValueError):
+            price = None
+
+        active_fvg = False
+        for gap in fvg:
+            if not isinstance(gap, dict):
+                continue
+            if str(gap.get("type", "")).upper() != expected_fvg or bool(gap.get("filled", False)):
+                continue
+            try:
+                lower = min(float(gap.get("from")), float(gap.get("to")))
+                upper = max(float(gap.get("from")), float(gap.get("to")))
+            except (TypeError, ValueError):
+                continue
+            if lower <= 0 or lower >= upper:
+                continue
+            if price is not None:
+                if direction == "LONG" and lower > price:
+                    continue
+                if direction == "SHORT" and upper < price:
+                    continue
+            active_fvg = True
+            break
         if not active_fvg:
             result["reason"] = "No unfilled directional FVG"
             return result
