@@ -51,3 +51,29 @@ def test_fvg_on_wrong_side_of_market_cannot_confirm_pullback_entry():
     )
     assert result["confirmed"] is False
     assert result["reason"] == "No unfilled directional FVG"
+
+
+def test_bullish_break_confirmation_survives_later_higher_low_pullback():
+    structure = [
+        {"index": 10, "label": "HH", "bos": True, "choch": False, "direction": "BULLISH"},
+        {"index": 12, "label": "HL", "bos": False, "choch": False, "direction": None},
+    ]
+    fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
+    )
+    assert result["confirmed"] is True
+
+
+def test_bullish_confirmation_expires_after_newer_bearish_break():
+    structure = [
+        {"index": 10, "label": "HH", "bos": True, "choch": False, "direction": "BULLISH"},
+        {"index": 12, "label": "HL", "bos": False, "choch": False, "direction": None},
+        {"index": 14, "label": "LL", "bos": True, "choch": False, "direction": "BEARISH"},
+    ]
+    fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
+    )
+    assert result["confirmed"] is False
+    assert result["reason"] == "Latest 15m break opposes entry direction"
