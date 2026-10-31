@@ -112,6 +112,9 @@ def test_pending_limit_card_explains_conditional_limit_entry():
             "entry": {
                 "valid": False,
                 "entry_type": "LIMIT",
+                "direction": "SHORT",
+                "entry": 100.0,
+                "stop_loss": 102.0,
                 "entry_type_reason": "wait for pullback",
             }
         },
