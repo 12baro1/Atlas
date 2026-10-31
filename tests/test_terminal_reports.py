@@ -1,6 +1,5 @@
 import os
 
-from atlas_tui import AtlasTUIApp
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -76,7 +75,7 @@ def test_liquidity_report_shows_clusters_and_sweep_confirmation():
 
 
 def test_liquidity_report_displays_breakout_levels():
-    app = AtlasTUIApp.__new__(AtlasTUIApp)
+    app = object.__new__(atlas_tui.AtlasTUIApp)
     outcome = {
         "ok": True,
         "symbol": "BTC/USDT:USDT",
