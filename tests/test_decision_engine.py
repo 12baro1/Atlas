@@ -331,3 +331,27 @@ def test_decision_accepts_positive_weighted_net_rr_when_target_rr_passes():
         "Net RR after costs is non-positive" in item
         for item in result["critical_blockers"]
     )
+
+
+
+def test_decision_fails_closed_when_weighted_net_rr_is_unavailable():
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            risk={
+                "entry": 100.0,
+                "stop_loss": 99.0,
+                "rr": 3.5,
+                "selected_rr": 3.5,
+                "weighted_rr": 2.0,
+                "weighted_net_rr": float("nan"),
+                "risk": 1.0,
+                "position_size": 1.0,
+            }
+        )
+    )
+
+    assert result["action"] == "SKIP"
+    assert any(
+        "Net RR after costs cannot be calculated" in item
+        for item in result["critical_blockers"]
+    )
