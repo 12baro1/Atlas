@@ -400,7 +400,11 @@ class AtlasTUIApp(App):
                 continue
             if executable_market:
                 diagnostics["execute"] += 1
-            rr = _finite_number(card.get("rr") or 0)
+            rr = _finite_number(
+                card.get("net_rr")
+                if card.get("net_rr") is not None
+                else card.get("rr")
+            )
             quality = _finite_number(card.get("setup_quality") or 0)
             confidence = _finite_number(card.get("confidence") or 0)
             if rr is None or quality is None or confidence is None:
