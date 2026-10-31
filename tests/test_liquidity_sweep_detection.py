@@ -464,3 +464,65 @@ def test_dual_sided_sweep_is_ambiguous_and_not_scored_as_directional():
     assert result["sell_side"] is False
     assert result["strength_score"] == 0
     assert result["post_structure"]["confirmed"] is False
+
+
+
+def test_bearish_sweep_confirmation_is_invalidated_when_broken_low_is_reclaimed():
+    engine = LiquiditySweepEngine()
+    candles = _multi_candle_sweep_series()
+    # Break below the post-sweep low, then close back above that low.
+    candles.append(_candle(9, 98.9, 99.3, 98.8, 99.1))
+    result = engine.detect(
+        candles=candles,
+        structure=[{
+            "index": 5, "price": 99.0, "kind": "LOW",
+            "confirmation_index": 7,
+        }],
+        liquidity_layers={
+            "swing": [{
+                "price": 100.0, "touches": 2, "type": "BUY_SIDE",
+                "formed_at": 1,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is True
+    assert result["post_structure"]["confirmed"] is False
+    assert result["post_structure"]["reason"] == "post_sweep_structure_break_reclaimed"
+    assert result["post_structure"]["reclaimed_index"] == 9
+
+
+def test_bullish_sweep_confirmation_is_invalidated_when_broken_high_is_reclaimed():
+    engine = LiquiditySweepEngine()
+    candles = [
+        _candle(0, 100.3, 100.8, 100.1, 100.4),
+        _candle(1, 100.4, 100.9, 100.2, 100.5),
+        _candle(2, 100.5, 100.8, 100.1, 100.4),
+        _candle(3, 100.4, 100.6, 99.5, 100.2),   # SSL sweep
+        _candle(4, 100.2, 100.6, 100.0, 100.3),
+        _candle(5, 100.6, 101.0, 100.2, 100.6),  # post-sweep swing high
+        _candle(6, 100.6, 100.8, 100.4, 100.7),
+        _candle(7, 100.7, 100.9, 100.5, 100.8),
+        _candle(8, 100.8, 101.3, 100.6, 101.1),  # bullish close-break
+        _candle(9, 101.1, 101.2, 100.7, 100.9),  # close back below broken high
+    ]
+    result = engine.detect(
+        candles=candles,
+        structure=[{
+            "index": 5, "price": 101.0, "kind": "HIGH",
+            "confirmation_index": 7,
+        }],
+        liquidity_layers={
+            "swing": [{
+                "price": 100.0, "touches": 2, "type": "SELL_SIDE",
+                "formed_at": 1,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is True
+    assert result["post_structure"]["confirmed"] is False
+    assert result["post_structure"]["reason"] == "post_sweep_structure_break_reclaimed"
+    assert result["post_structure"]["reclaimed_index"] == 9
