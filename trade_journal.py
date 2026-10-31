@@ -1796,13 +1796,30 @@ class TradeJournal:
         return 1.0
 
     def _signal_partial_weights(self):
-        try:
-            from config import Config
-            raw = str(getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0"))
-            parts = [float(item.strip()) for item in raw.split(",") if item.strip()]
-            return parts or [1.0, 1.0, 1.0]
-        except Exception:
+        from config import Config
+
+        raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+        if isinstance(raw, dict):
+            supplied = [raw.get(f"tp{i}", 1.0) for i in range(1, 4)]
+        elif isinstance(raw, str):
+            supplied = raw.split(",")
+        elif isinstance(raw, (list, tuple)):
+            supplied = list(raw)
+        else:
+            supplied = []
+
+        weights = []
+        for index in range(3):
+            value = supplied[index] if index < len(supplied) else 1.0
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                number = 0.0
+            weights.append(number if math.isfinite(number) and number > 0 else 0.0)
+
+        if sum(weights) <= 0:
             return [1.0, 1.0, 1.0]
+        return weights
 
     def _signal_outcome_expiry_hours(self):
         try:
