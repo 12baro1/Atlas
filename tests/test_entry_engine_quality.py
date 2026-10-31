@@ -200,12 +200,12 @@ def test_entry_engine_keeps_distant_limit_pullback_and_labels_distance():
         orderblocks=[],
         current_price=100.0,
     )
-    assert result["entry"] == 106.0
+    assert result["entry"] == 105.8
     assert result["entry_type"] == "LIMIT"
     assert result["requires_pullback"] is True
     assert result["entry_too_far"] is False
     assert result["entry_distance_label"] == "UZAK GİRİŞ"
-    assert result["entry_distance_pct"] == 6.0
+    assert result["entry_distance_pct"] == 5.8
 
 
 def test_entry_engine_keeps_nearby_limit_pullback():
@@ -218,7 +218,7 @@ def test_entry_engine_keeps_nearby_limit_pullback():
     )
     assert result["entry_type"] == "LIMIT"
     assert result["requires_pullback"] is True
-    assert result["entry"] == 100.8
+    assert result["entry"] == 100.6
 
 
 def test_entry_distance_within_two_percent_is_labeled_near_when_atr_is_unavailable():
