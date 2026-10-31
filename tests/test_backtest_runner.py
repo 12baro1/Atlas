@@ -382,7 +382,7 @@ def test_partial_tp2_moves_remaining_stop_to_tp1():
 
 def test_partial_tp2_moves_short_stop_to_tp1():
     candles = [
-        _tl(100.0, o=100.0, h=99.9, l=98.8, cl=99.0, t=1),
+        _tl(100.0, o=99.8, h=99.9, l=98.8, cl=99.0, t=1),
         _tl(98.0, o=98.8, h=98.8, l=97.8, cl=98.0, t=2),
         _tl(99.0, o=99.0, h=99.1, l=98.5, cl=99.0, t=3),
     ]
