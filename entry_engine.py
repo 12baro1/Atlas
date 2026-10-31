@@ -279,7 +279,7 @@ class EntryEngine:
         else:
 
             result["stop_loss"], result["stop_source"] = self._select_structural_stop(
-                direction, structure, selected_fvg, selected_ob
+                direction, structure, selected_fvg, selected_ob, atr_buffer=atr_buffer
             )
 
             limit_entry = min(float(selected_fvg["from"]), float(selected_fvg["to"])) if selected_fvg else (self._safe_price(selected_ob.get("low")) if selected_ob else None)
