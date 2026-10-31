@@ -33,7 +33,9 @@ class LiquiditySweepEngine:
 
         buy_side_event = self._classify_side("BUY_SIDE", last, swing_buy or internal_buy)
         sell_side_event = self._classify_side("SELL_SIDE", last, swing_sell or internal_sell)
-        post_structure = self._post_structure_confirmation(structure, buy_side_event, sell_side_event)
+        post_structure = self._post_structure_confirmation(
+            structure, buy_side_event, sell_side_event, sweep_index=len(candles) - 1
+        )
         strength = self._strength_score(buy_side_event, sell_side_event, post_structure, timeframe)
 
         buy_side = buy_side_event["is_sweep"] if buy_side_event else False
@@ -121,9 +123,9 @@ class LiquiditySweepEngine:
             "liquidity_kind": reference.get("liquidity_kind", "SWING"),
         }
 
-    def _post_structure_confirmation(self, structure, buy_side_event, sell_side_event):
+    def _post_structure_confirmation(self, structure, buy_side_event, sell_side_event, sweep_index=None):
         if not structure:
-            return {"confirmed": False, "type": None, "direction": None}
+            return {"confirmed": False, "type": None, "direction": None, "reason": "no_structure"}
         last = structure[-1]
         trigger = None
         if buy_side_event and buy_side_event["is_sweep"]:
@@ -131,12 +133,28 @@ class LiquiditySweepEngine:
         elif sell_side_event and sell_side_event["is_sweep"]:
             trigger = "BULLISH"
         if trigger is None:
-            return {"confirmed": False, "type": None, "direction": None}
+            return {"confirmed": False, "type": None, "direction": None, "reason": "no_sweep"}
+        # A pivot index is not the candle on which its BOS was confirmed.
+        # Require explicit post-sweep chronology; never reuse an older BOS/CHoCH.
+        confirmation_index = last.get("confirmation_index", last.get("break_index"))
+        try:
+            confirmation_index = int(confirmation_index)
+            sweep_index = int(sweep_index)
+        except (TypeError, ValueError):
+            return {
+                "confirmed": False, "type": None, "direction": trigger,
+                "reason": "chronology_unavailable",
+            }
+        if confirmation_index <= sweep_index:
+            return {
+                "confirmed": False, "type": None, "direction": trigger,
+                "reason": "structure_not_after_sweep",
+            }
         if last.get("choch") and last.get("direction") == trigger:
-            return {"confirmed": True, "type": "CHOCH", "direction": trigger}
+            return {"confirmed": True, "type": "CHOCH", "direction": trigger, "confirmation_index": confirmation_index}
         if last.get("bos") and last.get("direction") == trigger:
-            return {"confirmed": True, "type": "BOS", "direction": trigger}
-        return {"confirmed": False, "type": None, "direction": trigger}
+            return {"confirmed": True, "type": "BOS", "direction": trigger, "confirmation_index": confirmation_index}
+        return {"confirmed": False, "type": None, "direction": trigger, "reason": "directional_break_missing"}
 
     def _strength_score(self, buy_side_event, sell_side_event, post_structure, timeframe):
         event = None
