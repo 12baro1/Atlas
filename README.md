@@ -49,7 +49,7 @@ Bu tarama tüm coinleri kapsamlı biçimde taramaz; ilk beş yüksek hacimli piy
 - Canlı piyasa verisi için internet bağlantısı gerekir.
 - Analiz koşulları oluşmazsa sonuç BEKLE/ATLA olabilir. Zorla sinyal üretmez.
 
-## Test ve backtest
+## Performans ve öğrenme\n\nTerminalde `performans` komutu otomatik sinyal sonuçlarını (teorik) ve manuel işlem kayıtlarını (kullanıcının gerçek işlemleri) ayrı gösterir. `öğrenme` komutu geçmiş manuel işlem örnekleminin setup eşleşme özetini verir. 20 kapanan işlemden az örneklemde geçmiş performansın güvenilir olmadığı açıkça belirtilir. `likidite BTC` komutu seçilen sembolün BSL/SSL, EQH/EQL kümelerini ve son likidite süpürmesini gösterir.\n\n## Test ve backtest
 
 ```bash
 python3 -m pytest -q
