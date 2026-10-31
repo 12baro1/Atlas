@@ -1217,7 +1217,8 @@ class TradeJournal:
             # the count of targets. TP1+TP3 with no TP2 must still report TP3.
             highest_hit = max(int(level) for level in outcome.get("tps_hit") if int(level) in (1, 2, 3))
             outcome["status"] = f"TP{highest_hit}"
-            outcome["final_result"] = "WIN"
+            # A target can be touched while fees still make the whole trade net-negative.
+            outcome["final_result"] = "WIN" if realized > 0 else "LOSS"
         else:
             outcome["status"] = "PENDING"
             outcome["final_result"] = None
@@ -1732,7 +1733,7 @@ class TradeJournal:
         # TP ardından SL ile kapanan kısmi işlemler, gerçekleşen R pozitifse
         # öğrenme istatistiğinde zarar sayılmamalı. Sonuç etiketi PARTIAL olarak
         # korunur; ikili win/loss metriği net pozitif getiriyi esas alır.
-        win = final_result == "WIN" or (final_result == "PARTIAL" and r_value > 0)
+        win = r_value > 0
         payload = outcome.get("payload") or {}
         if not isinstance(payload, dict):
             payload = {}
