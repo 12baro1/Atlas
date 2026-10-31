@@ -182,6 +182,42 @@ def test_refresh_learning_prefers_manual(tmp_path):
     assert engine.learning.stats["feed_meta"]["selected"] == "manual"
 
 
+def test_refresh_learning_manual_records_override_tracked_and_signal(tmp_path, monkeypatch):
+    monkeypatch.setattr(Config, "LEARNING_MANUAL_TRADE_PRIMARY", True)
+    journal = _journal_with_closed_trades()
+    journal._manual_trades.append(
+        {
+            "id": "manual-primary", "status": "CLOSED",
+            "side": "LONG", "symbol": "BTC/USDT:USDT",
+            "opened_at": 1000, "closed_at": 3000, "result": "LOSS",
+            "pnl_rr": -1.0, "regime": "Expansion", "grade": "A",
+            "confidence": 75, "setup_fingerprint": build_fingerprint(FEATURES),
+            "features": list(FEATURES), "payload": {},
+        }
+    )
+    journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT", direction="LONG", entry=100, stop_loss=99,
+        opened_at=1000, setup_fingerprint=build_fingerprint(FEATURES),
+        market_phase="Expansion",
+    )
+    signal = journal._signal_outcomes[-1]
+    signal.update({
+        "status": "TP1", "resolved_at": 4000, "final_result": "WIN",
+        "realized_r": 2.0, "payload": {"setup_features": list(FEATURES)},
+    })
+
+    engine = AtlasEngine()
+    engine.trade_journal = journal
+    engine.learning = _learning_engine(tmp_path)
+    engine.refresh_learning()
+
+    assert engine.learning.stats["feed_meta"]["manual"] == 1
+    assert engine.learning.stats["feed_meta"]["tracked"] == 3
+    assert engine.learning.stats["feed_meta"]["signal"] == 1
+    assert engine.learning.stats["feed_meta"]["selected"] == "manual"
+    assert engine.learning.stats["meta"]["records_fed"] == 1
+
+
 def test_live_match_with_learned_fingerprint(tmp_path):
     journal = _journal_with_closed_trades()
     engine = AtlasEngine()
