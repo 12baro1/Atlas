@@ -425,7 +425,7 @@ def test_full_exit_backtest_preserves_sparse_tp3_number():
     out = simulate_trade(
         entry=100.0,
         stop_loss=99.0,
-        targets=[101.0, None, 103.0],
+        targets=[None, None, 103.0],
         future_candles=candles,
         direction="LONG",
     )
