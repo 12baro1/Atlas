@@ -88,15 +88,19 @@ class LiquiditySweepEngine:
 
     def _nearest_levels(self, levels, reference_candle):
         reference_price = float(reference_candle.close)
+        previous_high = float(reference_candle.high)
+        previous_low = float(reference_candle.low)
         buy_candidates = [
             item for item in levels
             if item.get("type") == "BUY_SIDE"
             and float(item.get("price", 0)) > reference_price
+            and previous_high < float(item.get("price", 0))
         ]
         sell_candidates = [
             item for item in levels
             if item.get("type") == "SELL_SIDE"
             and 0 < float(item.get("price", 0)) < reference_price
+            and previous_low > float(item.get("price", 0))
         ]
         buy = min(buy_candidates, key=lambda item: float(item["price"]) - reference_price, default=None)
         sell = min(sell_candidates, key=lambda item: reference_price - float(item["price"]), default=None)
