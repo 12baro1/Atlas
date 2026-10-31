@@ -105,3 +105,17 @@ def test_filtered_old_sell_side_liquidity_does_not_trigger_legacy_fallback():
 
     assert result["sell_side"] is False
     assert result["is_sweep"] is False
+
+
+def test_exact_level_touch_does_not_consume_liquidity_pool():
+    engine = LiquiditySweepEngine()
+    previous = _candle(99.0, 100.0, 98.0, 99.5)
+    levels = [
+        {"type": "BUY_SIDE", "price": 100.0},
+        {"type": "SELL_SIDE", "price": 98.0},
+    ]
+
+    buy, sell = engine._nearest_levels(levels, previous)
+
+    assert buy["price"] == 100.0
+    assert sell["price"] == 98.0
