@@ -206,8 +206,10 @@ def test_sweep_does_not_confirm_on_wick_only_break_of_post_sweep_pivot():
 
 def test_sweep_confirmation_rejects_pivot_not_yet_confirmed():
     engine = LiquiditySweepEngine()
+    # The sweep is present, but the post-sweep low pivot is the last candle:
+    # there is no right-hand candle yet, so the mini-structure is unconfirmed.
     result = engine.detect(
-        candles=_multi_candle_sweep_series(),
+        candles=_multi_candle_sweep_series()[:6],
         structure=[{
             "index": 5, "price": 99.0, "kind": "LOW",
             "confirmation_index": 10,
