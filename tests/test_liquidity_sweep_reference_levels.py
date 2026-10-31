@@ -153,3 +153,33 @@ def test_internal_liquidity_points_include_confirmation_index():
     assert points
     assert all("index" in point for point in points)
     assert all(point["confirmation_index"] == point["index"] + 1 for point in points)
+
+
+
+def test_pool_swept_while_equal_high_cluster_is_forming_is_not_reused():
+    engine = LiquiditySweepEngine()
+    candles = [
+        _candle(99.0, 100.0, 98.8, 99.5),   # first equal-high touch
+        _candle(99.5, 99.8, 99.0, 99.4),
+        _candle(99.4, 100.3, 99.1, 99.5),   # pool taken before confirmation
+        _candle(99.5, 99.8, 99.0, 99.4),
+        _candle(99.4, 99.7, 99.1, 99.5),
+        _candle(99.5, 100.0, 99.2, 99.6),   # second equal-high touch
+        _candle(99.6, 99.9, 99.3, 99.7),    # pool becomes confirmed
+        _candle(99.7, 100.4, 99.4, 99.6),   # looks like a fresh sweep, but isn't
+    ]
+    layers = {
+        "swing": [{
+            "type": "BUY_SIDE",
+            "price": 100.0,
+            "touches": 2,
+            "indices": [0, 5],
+            "formed_at": 6,
+            "liquidity_kind": "SWING",
+        }],
+        "internal": [],
+    }
+
+    result = engine.detect(candles, liquidity_layers=layers)
+
+    assert result["is_sweep"] is False
