@@ -357,3 +357,82 @@ def test_retained_sell_side_sweep_expires_when_price_closes_back_below_pool():
     )
 
     assert result["is_sweep"] is False
+
+
+
+def test_buy_side_close_through_level_is_reported_as_breakout_not_sweep():
+    engine = LiquiditySweepEngine()
+    candles = [
+        _candle(0, 99.0, 99.4, 98.8, 99.2),
+        _candle(1, 99.2, 99.6, 99.0, 99.4),
+        _candle(2, 99.5, 100.5, 99.4, 100.3),
+    ]
+    result = engine.detect(
+        candles=candles,
+        liquidity_layers={
+            "swing": [{
+                "type": "BUY_SIDE",
+                "price": 100.0,
+                "touches": 2,
+                "formed_at": 0,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is False
+    assert result["is_breakout"] is True
+    assert result["buy_side"] is False
+    assert result["breakout_high"] == 100.0
+    assert result["breakout_low"] is None
+
+
+def test_sell_side_close_through_level_is_reported_as_breakout_not_sweep():
+    engine = LiquiditySweepEngine()
+    candles = [
+        _candle(0, 99.0, 99.4, 98.8, 99.2),
+        _candle(1, 99.2, 99.6, 98.5, 99.0),
+        _candle(2, 98.5, 98.6, 97.5, 97.7),
+    ]
+    result = engine.detect(
+        candles=candles,
+        liquidity_layers={
+            "swing": [{
+                "type": "SELL_SIDE",
+                "price": 98.0,
+                "touches": 2,
+                "formed_at": 0,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is False
+    assert result["is_breakout"] is True
+    assert result["sell_side"] is False
+    assert result["breakout_low"] == 98.0
+    assert result["breakout_high"] is None
+
+
+def test_historical_breakout_is_not_kept_as_a_current_breakout():
+    engine = LiquiditySweepEngine()
+    candles = [
+        _candle(0, 99.0, 99.4, 98.8, 99.2),
+        _candle(1, 99.2, 99.6, 99.0, 99.4),
+        _candle(2, 99.5, 100.5, 99.4, 100.3),  # breakout
+        _candle(3, 100.3, 100.4, 99.5, 99.7),  # back below pool
+    ]
+    result = engine.detect(
+        candles=candles,
+        liquidity_layers={
+            "swing": [{
+                "type": "BUY_SIDE",
+                "price": 100.0,
+                "touches": 2,
+                "formed_at": 0,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_breakout"] is False
