@@ -22,7 +22,7 @@ def test_strict_mode_does_not_fabricate_rr_targets():
     assert result["tp2"] is None
     assert result["tp3"] is None
     assert result["reason"] == "no_valid_structural_targets"
-    assert result["synthetic_targets"] is True
+    assert result["synthetic_targets"] is False
 
 
 def test_legacy_fallback_is_explicitly_marked_synthetic():
