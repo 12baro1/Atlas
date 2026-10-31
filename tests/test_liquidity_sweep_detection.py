@@ -57,7 +57,8 @@ def test_classifies_real_sweep_vs_breakout_and_scores_strength():
     assert result["is_sweep"] is True
     assert result["is_breakout"] is False
     assert result["buy_side"] is True
-    assert result["post_structure"]["confirmed"] is True
+    assert result["post_structure"]["confirmed"] is False
+    assert result["post_structure"]["reason"] == "chronology_unavailable"
     assert result["strength_score"] >= 60
     assert 0 <= result["strength_score"] <= 100
 
@@ -94,3 +95,46 @@ def test_detect_multi_supports_required_timeframes():
     assert "1h" in result["timeframes"]
     assert "4h" in result["timeframes"]
     assert "1d" in result["timeframes"]
+
+
+def test_post_structure_confirmation_requires_break_after_sweep():
+    engine = LiquiditySweepEngine()
+    candles = [
+        _candle(0, 99.6, 100.0, 99.2, 99.8),
+        _candle(1, 99.8, 100.2, 99.5, 99.9),
+        _candle(2, 99.9, 101.2, 99.6, 99.7),
+    ]
+    structure = [{
+        "index": 20, "price": 98.5, "kind": "LOW", "label": "LL",
+        "bos": True, "choch": False, "direction": "BEARISH",
+        "break_index": 1,
+    }]
+    layers = {
+        "swing": [{"price": 100.0, "touches": 3, "type": "BUY_SIDE", "liquidity_kind": "SWING"}],
+        "internal": [],
+    }
+    result = engine.detect(candles, structure, layers)
+    assert result["buy_side"] is True
+    assert result["post_structure"]["confirmed"] is False
+    assert result["post_structure"]["reason"] == "structure_not_after_sweep"
+
+
+def test_post_structure_confirmation_accepts_explicit_later_break_index():
+    engine = LiquiditySweepEngine()
+    candles = [
+        _candle(0, 99.6, 100.0, 99.2, 99.8),
+        _candle(1, 99.8, 100.2, 99.5, 99.9),
+        _candle(2, 99.9, 101.2, 99.6, 99.7),
+    ]
+    structure = [{
+        "index": 20, "price": 98.5, "kind": "LOW", "label": "LL",
+        "bos": True, "choch": False, "direction": "BEARISH",
+        "break_index": 3,
+    }]
+    layers = {
+        "swing": [{"price": 100.0, "touches": 3, "type": "BUY_SIDE", "liquidity_kind": "SWING"}],
+        "internal": [],
+    }
+    result = engine.detect(candles, structure, layers)
+    assert result["post_structure"]["confirmed"] is True
+    assert result["post_structure"]["confirmation_index"] == 3
