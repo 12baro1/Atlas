@@ -1111,7 +1111,33 @@ class TradeJournal:
                         trailing_stop = tp1
                 else:
                     trailing_stop = current_stop
+
                 if len(reached) >= len(tps):
+                    closed_all = True
+                    break
+
+                # OHLC cannot prove that a later TP was reached before the
+                # protective stop moved by an earlier TP. Be conservative:
+                # once the new stop is inside this candle's range, close the
+                # remaining fraction here and do not count further targets.
+                remaining = max(
+                    0.0,
+                    1.0 - sum(self._weight_for(weights, level) for level in reached),
+                )
+                moved_stop_hit = (
+                    remaining > 0.0
+                    and (
+                        (side == "LONG" and trailing_stop is not None and low <= trailing_stop)
+                        or (side != "LONG" and trailing_stop is not None and high >= trailing_stop)
+                    )
+                )
+                if moved_stop_hit:
+                    if side == "LONG":
+                        rr_stop = (trailing_stop - entry) / risk
+                    else:
+                        rr_stop = (entry - trailing_stop) / risk
+                    realized += remaining * rr_stop
+                    hit_sl = True
                     closed_all = True
                     break
 
