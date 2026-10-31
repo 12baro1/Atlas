@@ -186,9 +186,15 @@ class LiquiditySweepEngine:
             return False
 
         side = level.get("type")
-        # A liquidity pool is consumed by any strict wick-through after it
-        # becomes observable, even when price closes back on the original side.
-        for candle in candles[max(0, formed_at):sweep_index]:
+        # Start at the first touch, not only at the time the cluster becomes
+        # confirmed. A wick-through while the pool is still forming also
+        # consumes the would-be equal-high/low liquidity.
+        try:
+            touch_indices = [int(value) for value in (level.get("indices") or [])]
+        except (TypeError, ValueError, OverflowError):
+            return False
+        first_touch = min(touch_indices) if touch_indices else max(0, formed_at)
+        for candle in candles[first_touch:sweep_index]:
             if side == "BUY_SIDE" and float(candle.high) > price:
                 return False
             if side == "SELL_SIDE" and float(candle.low) < price:
