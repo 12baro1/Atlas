@@ -25,7 +25,7 @@ def test_short_confirmation_requires_latest_bearish_break_and_bearish_fvg():
 
 def test_higher_low_label_without_break_is_not_an_entry_confirmation():
     structure = [{"label": "HL", "bos": False, "choch": False, "direction": None}]
-    fvg = [{"type": "BULLISH", "filled": False}]
+    fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
     result = EntryConfirmationEngine().confirm(_mtf(), structure, fvg, _entry("LONG"), current_price=100.0)
     assert result["confirmed"] is False
     assert "BOS/CHoCH" in result["reason"]
@@ -34,10 +34,20 @@ def test_higher_low_label_without_break_is_not_an_entry_confirmation():
 def test_wrong_direction_or_filled_fvg_does_not_confirm():
     structure = [{"label": "HH", "bos": True, "choch": False, "direction": "BULLISH"}]
     result = EntryConfirmationEngine().confirm(
-        _mtf(), structure, [{"type": "BEARISH", "filled": False}], _entry("LONG"), current_price=100.0
+        _mtf(), structure, [{"type": "BEARISH", "from": 103.0, "to": 105.0, "filled": False}], _entry("LONG"), current_price=100.0
     )
     assert result["confirmed"] is False
     result = EntryConfirmationEngine().confirm(
-        _mtf(), structure, [{"type": "BULLISH", "filled": True}], _entry("LONG")
+        _mtf(), structure, [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": True}], _entry("LONG"), current_price=100.0
     )
     assert result["confirmed"] is False
+
+
+def test_fvg_on_wrong_side_of_market_cannot_confirm_pullback_entry():
+    structure = [{"label": "HH", "bos": True, "choch": False, "direction": "BULLISH"}]
+    fvg = [{"type": "BULLISH", "from": 103.0, "to": 105.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
+    )
+    assert result["confirmed"] is False
+    assert result["reason"] == "No unfilled directional FVG"
