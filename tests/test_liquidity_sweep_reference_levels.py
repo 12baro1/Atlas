@@ -221,3 +221,20 @@ def test_sell_side_cluster_records_confirmation_metadata_too():
     assert cluster["indices"] == [2, 8]
     assert cluster["confirmation_indices"] == [7, 13]
     assert cluster["formed_at"] == 13
+
+
+
+def test_equal_high_and_low_clusters_keep_outermost_liquidity_price():
+    engine = LiquidityEngine()
+    structure = [
+        {"kind": "HIGH", "price": 100.0, "index": 2, "confirmation_index": 12},
+        {"kind": "HIGH", "price": 100.05, "index": 8, "confirmation_index": 18},
+        {"kind": "LOW", "price": 98.0, "index": 3, "confirmation_index": 13},
+        {"kind": "LOW", "price": 97.95, "index": 9, "confirmation_index": 19},
+    ]
+
+    buy_clusters = [item for item in engine._build_clusters(structure, 0.001, "SWING") if item["type"] == "BUY_SIDE"]
+    sell_clusters = [item for item in engine._build_clusters(structure, 0.001, "SWING") if item["type"] == "SELL_SIDE"]
+
+    assert buy_clusters[0]["price"] == 100.05
+    assert sell_clusters[0]["price"] == 97.95
