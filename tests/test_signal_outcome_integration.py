@@ -57,7 +57,9 @@ def test_signal_outcome_resolves_tp1_to_sl(tmp_path):
     assert resolved["status"] == "SL"
     assert len(resolved.get("tps_hit") or []) == 1
     # Default 1,1,1 weights are normalized to thirds: TP1 closes one third.
-    assert resolved.get("realized_r", 0.0) == pytest.approx(1.0 / 3, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+    assert resolved["fee_rr"] == pytest.approx(0.2, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx((1.0 / 3) - 0.2, abs=1e-4)
 
 
 def test_signal_outcome_expires_after_expiry(tmp_path, monkeypatch):
@@ -587,7 +589,9 @@ def test_same_candle_sl_and_tp_is_resolved_conservatively_as_loss(tmp_path):
     assert resolved["status"] == "SL"
     assert resolved["final_result"] == "LOSS"
     assert resolved.get("tps_hit") == []
-    assert resolved["realized_r"] == -1.0
+    assert resolved["gross_realized_r"] == -1.0
+    assert resolved["fee_rr"] == pytest.approx(0.2, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(-1.2, abs=1e-4)
 
 
 
@@ -614,7 +618,8 @@ def test_signal_outcome_normalizes_custom_partial_weights(tmp_path):
     assert resolved is not None
     assert resolved["status"] == "SL"
     assert resolved["tps_hit"] == [1]
-    assert resolved["realized_r"] == pytest.approx(0.5, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(0.3, abs=1e-4)
 
 
 def test_signal_outcome_normalizes_weights_over_only_present_tp_levels(tmp_path):
@@ -657,7 +662,8 @@ def test_signal_outcome_does_not_count_later_tp_after_same_candle_breakeven_stop
     assert resolved is not None
     assert resolved["tps_hit"] == [1]
     assert resolved["hit_sl"] is True
-    assert resolved["realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx((1.0 / 3) - 0.2, abs=1e-4)
 
 
 
@@ -699,7 +705,8 @@ def test_signal_outcome_accumulates_realized_r_across_incremental_candle_batches
     assert resolved is not None
     assert resolved["status"] == "TP3"
     assert resolved["tps_hit"] == [1, 2, 3]
-    assert resolved["realized_r"] == pytest.approx(2.0, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(2.0, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(1.8, abs=1e-4)
 
 
 
@@ -724,7 +731,8 @@ def test_signal_outcome_labels_sparse_tp_levels_by_highest_hit(tmp_path):
     assert resolved["tps_hit"] == [1, 3]
     assert resolved["status"] == "TP3"
     assert resolved["final_result"] == "WIN"
-    assert resolved["realized_r"] == pytest.approx(2.0, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(2.0, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(1.8, abs=1e-4)
 
 
 
