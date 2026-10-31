@@ -399,3 +399,21 @@ def test_partial_tp2_moves_short_stop_to_tp1():
     assert out["tp"] == 2
     assert out["levels"] == [1, 2]
     assert out["net_rr"] == pytest.approx(4.0 / 3.0, abs=1e-4)
+
+
+
+def test_sparse_tp2_tp3_backtest_does_not_treat_tp2_as_tp1():
+    candles = [
+        _tl(100.0, o=100.0, h=98.8, l=98.0, cl=98.5, t=1),
+    ]
+    out = simulate_trade_partial(
+        entry=100.0,
+        stop_loss=101.0,
+        targets=[None, 98.0, 97.0],
+        future_candles=candles,
+        direction="SHORT",
+    )
+
+    # The trade is still open after TP2; there is no TP1 price to trail to.
+    assert out["result"] == "OPEN"
+    assert out["tp"] == 0
