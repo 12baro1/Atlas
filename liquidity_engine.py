@@ -107,23 +107,32 @@ class LiquidityEngine:
 
     def _record_cluster_touch(self, level, item):
         level["touches"] += 1
-        # Use the outer edge of the equal-level cluster as its liquidity line:
-        # highest high for BSL and lowest low for SSL. This prevents a later
-        # constituent pivot from falsely consuming its own cluster reference.
-        price = float(item["price"])
-        if level["type"] == "BUY_SIDE":
-            level["price"] = max(float(level["price"]), price)
-        else:
-            level["price"] = min(float(level["price"]), price)
         index = item.get("index")
         confirmation_index = item.get("confirmation_index", index)
         if index is not None:
             level["indices"].append(int(index))
+
+        # Use the outer edge of the equal-level cluster as its liquidity line.
+        # If a later touch extends that edge, the new price is not observable
+        # until that later pivot has itself been confirmed.
+        price = float(item["price"])
+        previous_price = float(level["price"])
+        extends_pool = (
+            (level["type"] == "BUY_SIDE" and price > previous_price)
+            or (level["type"] == "SELL_SIDE" and price < previous_price)
+        )
+        if extends_pool:
+            level["price"] = price
+            if confirmation_index is not None:
+                level["price_formed_at"] = int(confirmation_index)
+        elif "price_formed_at" not in level and confirmation_index is not None:
+            level["price_formed_at"] = int(confirmation_index)
+
         if confirmation_index is not None:
             confirmation_index = int(confirmation_index)
             level["confirmation_indices"].append(confirmation_index)
             # The pool becomes usable at the second confirmed touch. Later
-            # retests add strength, but must not move its formation time forward.
+            # retests add strength, but do not move pool formation forward.
             if len(level["confirmation_indices"]) >= 2 and "formed_at" not in level:
                 level["formed_at"] = confirmation_index
 
