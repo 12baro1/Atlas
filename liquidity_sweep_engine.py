@@ -163,9 +163,14 @@ class LiquiditySweepEngine:
                 }
 
             event = buy_event if buy_swept else sell_event
+            swept_side = "BUY_SIDE" if buy_swept else "SELL_SIDE"
+            if self._sweep_reclaimed_after_event(
+                candles, sweep_index, float(event["level"]), swept_side
+            ):
+                continue
             return {
                 "sweep_index": sweep_index,
-                "side": "BUY_SIDE" if buy_swept else "SELL_SIDE",
+                "side": swept_side,
                 "level": event["level"],
                 "buy_event": buy_event if buy_swept else None,
                 "sell_event": sell_event if sell_swept else None,
@@ -175,6 +180,16 @@ class LiquiditySweepEngine:
                 "internal_sell": internal_sell,
             }
         return None
+
+    def _sweep_reclaimed_after_event(self, candles, sweep_index, level, swept_side):
+        """A later close back through the swept pool invalidates the old reversal."""
+        for candle in candles[sweep_index + 1:]:
+            close = float(candle.close)
+            if swept_side == "BUY_SIDE" and close >= level:
+                return True
+            if swept_side == "SELL_SIDE" and close <= level:
+                return True
+        return False
 
     def _level_available_and_unconsumed(self, candles, level, sweep_index):
         try:
