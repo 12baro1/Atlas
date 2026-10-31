@@ -139,10 +139,6 @@ def test_expired_signal_outcomes_are_not_learning_examples(tmp_path):
 
 def test_signal_outcomes_are_preferred_for_learning(tmp_path, monkeypatch):
     from engine import AtlasEngine
-    # This test covers the explicit signal-primary configuration. The default
-    # production behavior intentionally gives manually closed trades priority.
-    monkeypatch.setattr(Config, "LEARNING_MANUAL_TRADE_PRIMARY", False)
-
     journal = TradeJournal(db_path=tmp_path / "j.sqlite")
     outcome = journal.register_signal_outcome(
         symbol="BTC/USDT:USDT", direction="LONG",
@@ -166,6 +162,9 @@ def test_signal_outcomes_are_preferred_for_learning(tmp_path, monkeypatch):
     })
 
     engine = AtlasEngine()
+    # AtlasEngine initialization refreshes Config from environment; set the
+    # test override after construction so this test truly exercises signal-first.
+    monkeypatch.setattr(Config, "LEARNING_MANUAL_TRADE_PRIMARY", False)
     engine.trade_journal = journal
     engine.learning = LearningEngine(tmp_path / "learning.json")
     engine.refresh_learning()
