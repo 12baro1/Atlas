@@ -182,7 +182,12 @@ def format_card_text(card):
     line = "=" * 42
     action = str(card.get("decision_action") or "").upper()
     entry_type = str(card.get("entry_type") or "").upper()
-    pending_limit = entry_type == "LIMIT"
+    pending_limit = (
+        entry_type == "LIMIT"
+        and card.get("direction") in ("LONG", "SHORT")
+        and card.get("entry") is not None
+        and card.get("stop_loss") is not None
+    )
     executable = action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and card.get("direction") in ("LONG", "SHORT")
     no_trade = not pending_limit and not executable
 
@@ -205,6 +210,7 @@ def format_card_text(card):
 
     if pending_limit:
         lines.append("  Emir      : LIMIT (fiyat giriş seviyesine gelirse)")
+        lines.append("  Koşul     : Fiyat LIMIT giriş seviyesine gelmeden işlem açma")
     elif entry_type in ("MARKET", "LIMIT"):
         lines.append(f"  Emir      : {entry_type}")
     else:
