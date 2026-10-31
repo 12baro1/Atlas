@@ -54,8 +54,8 @@ def test_signal_outcome_resolves_tp1_to_sl(tmp_path):
     assert resolved is not None
     assert resolved["status"] == "SL"
     assert len(resolved.get("tps_hit") or []) == 1
-    assert resolved.get("realized_r", 0.0) > 0.2
-    assert resolved.get("realized_r", 0.0) > 0.5
+    # Default 1,1,1 weights are normalized to thirds: TP1 closes one third.
+    assert resolved.get("realized_r", 0.0) == pytest.approx(1.0 / 3, abs=1e-4)
 
 
 def test_signal_outcome_expires_after_expiry(tmp_path, monkeypatch):
@@ -586,3 +586,48 @@ def test_same_candle_sl_and_tp_is_resolved_conservatively_as_loss(tmp_path):
     assert resolved["final_result"] == "LOSS"
     assert resolved.get("tps_hit") == []
     assert resolved["realized_r"] == -1.0
+
+
+
+def test_signal_outcome_normalizes_custom_partial_weights(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp2=102.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+    )
+    outcome["partial_weights"] = [0.5, 0.3, 0.2]
+    candles = [
+        _precise_candle(1, high=101.2, low=100.1, close=101.0),
+        _precise_candle(2, high=100.5, low=99.8, close=100.0),
+    ]
+
+    resolved = journal.resolve_signal_outcome(outcome, candles)
+
+    assert resolved is not None
+    assert resolved["status"] == "SL"
+    assert resolved["tps_hit"] == [1]
+    assert resolved["realized_r"] == pytest.approx(0.5, abs=1e-4)
+
+
+def test_signal_outcome_normalizes_weights_over_only_present_tp_levels(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+    )
+    outcome["partial_weights"] = [1.0, 1.0, 1.0]
+
+    weights = journal._norm_partial_weights(outcome)
+
+    assert weights == pytest.approx([0.5, 0.0, 0.5])
