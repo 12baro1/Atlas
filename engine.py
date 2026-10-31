@@ -1531,7 +1531,19 @@ class AtlasEngine:
                 high_price, low_price = float(high.get("price")), float(low.get("price"))
             except (TypeError, ValueError):
                 return None, None
-            return (high_price, low_price) if high_price > low_price > 0 else (None, None)
+            if not high_price > low_price > 0:
+                return None, None
+            # A later lower-low below the selected HL invalidates this impulse leg.
+            invalidated = any(
+                str(item.get("kind", "")).upper() == "LOW"
+                and str(item.get("label", "")).upper() == "LL"
+                and _index(item) is not None
+                and _index(item) > _index(high)
+                and self._safe_float(item.get("price")) is not None
+                and float(item.get("price")) < low_price
+                for item in structure
+            )
+            return (None, None) if invalidated else (high_price, low_price)
 
         if direction == "SHORT":
             lows = [
@@ -1557,9 +1569,29 @@ class AtlasEngine:
                 high_price, low_price = float(high.get("price")), float(low.get("price"))
             except (TypeError, ValueError):
                 return None, None
-            return (high_price, low_price) if high_price > low_price > 0 else (None, None)
+            if not high_price > low_price > 0:
+                return None, None
+            # A later higher-high above the selected LH invalidates this impulse leg.
+            invalidated = any(
+                str(item.get("kind", "")).upper() == "HIGH"
+                and str(item.get("label", "")).upper() == "HH"
+                and _index(item) is not None
+                and _index(item) > _index(low)
+                and self._safe_float(item.get("price")) is not None
+                and float(item.get("price")) > high_price
+                for item in structure
+            )
+            return (None, None) if invalidated else (high_price, low_price)
 
         return None, None
+
+    @staticmethod
+    def _safe_float(value):
+        try:
+            number = float(value)
+            return number if math.isfinite(number) else None
+        except (TypeError, ValueError, OverflowError):
+            return None
 
     def _price_context(self, candles):
         """Geçerli fiyat ve işlem aralığını hesaplar."""
