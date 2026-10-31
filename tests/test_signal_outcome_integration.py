@@ -725,3 +725,22 @@ def test_signal_outcome_labels_sparse_tp_levels_by_highest_hit(tmp_path):
     assert resolved["status"] == "TP3"
     assert resolved["final_result"] == "WIN"
     assert resolved["realized_r"] == pytest.approx(2.0, abs=1e-4)
+
+
+
+def test_signal_partial_weight_parser_keeps_valid_values_when_one_is_invalid(monkeypatch, tmp_path):
+    monkeypatch.setattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,invalid,1.0")
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+
+    assert journal._signal_partial_weights() == [1.0, 0.0, 1.0]
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp2=102.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+    )
+    assert journal._norm_partial_weights(outcome) == pytest.approx([0.5, 0.0, 0.5])
