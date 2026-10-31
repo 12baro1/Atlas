@@ -42,7 +42,8 @@ def label_swings(swings):
             "index": swing.index,
             "price": swing.price,
             "type": swing.kind,
-            "label": tag
+            "label": tag,
+            "confirmation_index": getattr(swing, "confirmation_index", None)
         })
 
     return labels
