@@ -1,5 +1,6 @@
 from core.candle import Candle
 from liquidity_sweep_engine import LiquiditySweepEngine
+from liquidity_engine import LiquidityEngine
 
 
 def _candle(open_price, high, low, close):
@@ -119,3 +120,36 @@ def test_exact_level_touch_does_not_consume_liquidity_pool():
 
     assert buy["price"] == 100.0
     assert sell["price"] == 98.0
+
+
+
+def test_liquidity_cluster_records_second_touch_confirmation_index():
+    engine = LiquidityEngine()
+    structure = [
+        {"kind": "HIGH", "price": 100.0, "index": 2, "confirmation_index": 7},
+        {"kind": "HIGH", "price": 100.05, "index": 8, "confirmation_index": 13},
+    ]
+
+    [cluster] = engine.detect(structure)
+
+    assert cluster["touches"] == 2
+    assert cluster["indices"] == [2, 8]
+    assert cluster["confirmation_indices"] == [7, 13]
+    assert cluster["formed_at"] == 13
+
+
+def test_internal_liquidity_points_include_confirmation_index():
+    engine = LiquidityEngine()
+    candles = [
+        _candle(100, 102, 99, 101),
+        _candle(101, 104, 100, 103),
+        _candle(103, 103, 98, 100),
+        _candle(100, 102, 99, 101),
+        _candle(101, 103, 100, 102),
+    ]
+
+    points = engine._extract_internal_points(candles)
+
+    assert points
+    assert all("index" in point for point in points)
+    assert all(point["confirmation_index"] == point["index"] + 1 for point in points)
