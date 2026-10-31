@@ -99,3 +99,26 @@ def test_liquidity_report_displays_breakout_levels():
     assert "Kırılım: EVET" in rendered
     assert "BSL üstü: 100.5" in rendered
     assert "SSL altı: -" in rendered
+
+
+
+def test_liquidity_report_marks_dual_sweep_as_ambiguous():
+    app = object.__new__(atlas_tui.AtlasTUIApp)
+    rendered = app._format_liquidity({
+        "ok": True,
+        "symbol": "BTC/USDT:USDT",
+        "result": {
+            "symbol": "BTC/USDT:USDT",
+            "analysis": {
+                "liquidity_layers": {"bsl": [], "ssl": [], "eqh": [], "eql": []},
+                "liquidity_sweep": {
+                    "is_sweep": False,
+                    "is_breakout": False,
+                    "ambiguous_sweep": True,
+                    "post_structure": {"confirmed": False},
+                },
+            },
+        },
+    })
+
+    assert "Çift taraflı süpürme: EVET — yön belirsiz" in rendered
