@@ -119,6 +119,7 @@ def test_pending_limit_card_explains_conditional_limit_entry():
     output = format_card_text(card)
     assert "LIMIT BEKLE" in output
     assert "LIMIT (fiyat giriş seviyesine gelirse)" in output
+    assert "Koşul" in output
     assert "Emir      : LIMIT" in output
     assert "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor" in output
     assert "wait for pullback" not in output
@@ -130,3 +131,20 @@ def test_signal_card_numeric_formatter_rejects_nan_and_infinity():
     from utils.signal_card import _num
     assert _num(float("nan")) is None
     assert _num(float("inf")) is None
+
+
+def test_invalid_pending_limit_hides_hypothetical_levels():
+    from utils.signal_card import build_signal_card, format_card_text
+
+    card = build_signal_card({
+        "symbol": "BTC/USDT:USDT",
+        "signal": {"signal": "WAIT"},
+        "decision": {"action": "SKIP", "reason": "Entry not confirmed"},
+        "risk": {"entry": 100.0, "stop_loss": 102.0, "tp1": 96.0},
+        "analysis": {"entry": {"entry": 100.0, "stop_loss": 102.0, "entry_type": "LIMIT"}},
+    })
+    output = format_card_text(card)
+    assert "İŞLEME GİRME" in output
+    assert "Giriş" not in output
+    assert "Stop Loss" not in output
+    assert "TP1" not in output
