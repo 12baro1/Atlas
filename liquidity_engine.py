@@ -83,7 +83,7 @@ class LiquidityEngine:
 
                 for level in lows:
                     if abs(level["price"] - item["price"]) / max(abs(level["price"]), 1e-9) <= tolerance:
-                        level["touches"] += 1
+                        self._record_cluster_touch(level, item)
                         matched = True
                         break
 
