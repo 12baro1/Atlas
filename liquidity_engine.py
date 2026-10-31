@@ -107,6 +107,14 @@ class LiquidityEngine:
 
     def _record_cluster_touch(self, level, item):
         level["touches"] += 1
+        # Use the outer edge of the equal-level cluster as its liquidity line:
+        # highest high for BSL and lowest low for SSL. This prevents a later
+        # constituent pivot from falsely consuming its own cluster reference.
+        price = float(item["price"])
+        if level["type"] == "BUY_SIDE":
+            level["price"] = max(float(level["price"]), price)
+        else:
+            level["price"] = min(float(level["price"]), price)
         index = item.get("index")
         confirmation_index = item.get("confirmation_index", index)
         if index is not None:
