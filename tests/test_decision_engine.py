@@ -283,3 +283,51 @@ def test_waiting_signal_is_wait_not_critical_trade_failure():
     assert result["signal"] == "WAIT"
     assert result["entry_valid"] is False
     assert result["risk_valid"] is False
+
+
+
+def test_decision_blocks_setup_when_weighted_net_rr_after_costs_is_non_positive():
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            risk={
+                "entry": 100.0,
+                "stop_loss": 99.0,
+                "rr": 3.5,
+                "selected_rr": 3.5,
+                "weighted_rr": 0.1,
+                "weighted_net_rr": -0.1,
+                "risk": 1.0,
+                "position_size": 1.0,
+            }
+        )
+    )
+
+    assert result["rr"] == pytest.approx(3.5)
+    assert result["action"] == "SKIP"
+    assert any(
+        "Net RR after costs is non-positive" in item
+        for item in result["critical_blockers"]
+    )
+
+
+def test_decision_accepts_positive_weighted_net_rr_when_target_rr_passes():
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            risk={
+                "entry": 100.0,
+                "stop_loss": 99.0,
+                "rr": 3.5,
+                "selected_rr": 3.5,
+                "weighted_rr": 1.0,
+                "weighted_net_rr": 0.8,
+                "risk": 1.0,
+                "position_size": 1.0,
+            }
+        )
+    )
+
+    assert result["action"] == "EXECUTE"
+    assert not any(
+        "Net RR after costs is non-positive" in item
+        for item in result["critical_blockers"]
+    )
