@@ -183,3 +183,25 @@ def test_pool_swept_while_equal_high_cluster_is_forming_is_not_reused():
     result = engine.detect(candles, liquidity_layers=layers)
 
     assert result["is_sweep"] is False
+
+
+
+def test_pool_is_rejected_when_it_was_wicked_before_cluster_confirmation():
+    engine = LiquiditySweepEngine()
+    level = {
+        "type": "BUY_SIDE",
+        "price": 100.0,
+        "indices": [0, 5],
+        "formed_at": 6,
+    }
+    candles = [
+        _candle(99.0, 100.0, 98.8, 99.5),
+        _candle(99.5, 99.8, 99.0, 99.4),
+        _candle(99.4, 100.3, 99.1, 99.5),  # crossed before pool was confirmed
+        _candle(99.5, 99.8, 99.0, 99.4),
+        _candle(99.4, 99.7, 99.1, 99.5),
+        _candle(99.5, 100.0, 99.2, 99.6),
+        _candle(99.6, 99.9, 99.3, 99.7),
+    ]
+
+    assert engine._level_available_and_unconsumed(candles, level, sweep_index=7) is False
