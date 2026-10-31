@@ -285,3 +285,25 @@ def test_entry_engine_rejects_stale_sweep_confirmation_for_market_entry():
 
     assert result["entry_type"] != "MARKET"
     assert result["valid"] is False
+
+
+
+def test_entry_engine_rejects_market_sweep_confirmation_without_explicit_age():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 99.5}],
+        fvg=[{"type": "BULLISH", "from": 99.8, "to": 100.0, "filled": False}],
+        orderblocks=[],
+        current_price=99.9,
+        liquidity_sweep={
+            "sell_side": True,
+            "post_structure": {
+                "confirmed": True,
+                "direction": "BULLISH",
+                "type": "CHOCH",
+            },
+        },
+    )
+
+    assert result["entry_type"] != "MARKET"
+    assert result["valid"] is False
