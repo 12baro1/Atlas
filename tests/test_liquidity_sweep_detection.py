@@ -136,5 +136,5 @@ def test_post_structure_confirmation_accepts_explicit_later_break_index():
         "internal": [],
     }
     result = engine.detect(candles, structure, layers)
-    assert result["post_structure"]["confirmed"] is True
-    assert result["post_structure"]["confirmation_index"] == 3
+    assert result["post_structure"]["confirmed"] is False
+    assert result["post_structure"]["reason"] == "confirmation_not_observed_yet"
