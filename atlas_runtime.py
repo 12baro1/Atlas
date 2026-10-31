@@ -247,7 +247,9 @@ class AtlasRuntime:
             "historical_edge": round(historical_edge, 4),
             "reliability": round(reliability, 4),
             "matched_setups": matched_setups,
-            "learning_adjustment": round(adjustment, 4),
+            "learning_adjustment": round(adjustment, 2),
+            "records_fed": int((learning_stats.get("meta") or {}).get("records_fed", 0)),
+            "buckets": int((learning_stats.get("meta") or {}).get("buckets", 0)),
             "open_manual": int(manual_perf.get("open", 0)),
             "not_traded": int(manual_perf.get("not_traded", 0)),
             "feed_meta": feed_meta,
@@ -411,7 +413,13 @@ class AtlasRuntime:
 
                     if Config.SIGNAL_TRACKING_ENABLED:
                         candles_15m = data.get("15m") or data.get("15M") or []
-                        self.engine.trade_journal.resolve_signal_outcomes({symbol: candles_15m})
+                        resolved_outcomes = self.engine.trade_journal.resolve_signal_outcomes(
+                            {symbol: candles_15m}
+                        )
+                        # Kapanan sinyal sonuçları aynı tarama döngüsünde öğrenme
+                        # indeksine aktarılır; bir sonraki analiz eski istatistikle kalmaz.
+                        if resolved_outcomes:
+                            self.engine.refresh_learning()
 
             if from_scan:
                 self._log(f"[{scan_index}/{scan_total}] analyzed {symbol}")
