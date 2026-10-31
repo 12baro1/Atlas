@@ -33,7 +33,7 @@ def _result():
         "rr": {"rr": 4.0},
         "dynamic_tp": {"tp1": 69000, "tp2": 71000, "tp3": 73000},
         "analysis": {
-            "entry": {"valid": True, "entry": 67000, "stop_loss": 65800},
+            "entry": {"valid": True, "entry": 67000, "stop_loss": 65800, "entry_type": "MARKET"},
             "setup_quality": {"score": 82, "trade_allowed": True},
             "confluence": {"score": 92},
             "market_phase": {"phase": "Expansion"},
@@ -99,7 +99,7 @@ def test_signal_card_labels_confidence_as_score_not_probability():
     rendered = format_card_text(card)
 
     assert "İŞLEME GİRME" in rendered
-    assert "correlation block" in rendered
+    assert "No confirmed setup" in rendered
     assert "92%" not in rendered
 
 
