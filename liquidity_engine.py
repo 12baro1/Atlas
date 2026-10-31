@@ -60,18 +60,22 @@ class LiquidityEngine:
 
                 for level in highs:
                     if abs(level["price"] - item["price"]) / max(abs(level["price"]), 1e-9) <= tolerance:
-                        level["touches"] += 1
+                        self._record_cluster_touch(level, item)
                         matched = True
                         break
 
                 if not matched:
-                    highs.append({
+                    level = {
                         "price": item["price"],
-                        "touches": 1,
+                        "touches": 0,
                         "type": "BUY_SIDE",
                         "eq": "EQH",
                         "liquidity_kind": liquidity_kind,
-                    })
+                        "indices": [],
+                        "confirmation_indices": [],
+                    }
+                    self._record_cluster_touch(level, item)
+                    highs.append(level)
 
             else:
 
@@ -84,18 +88,33 @@ class LiquidityEngine:
                         break
 
                 if not matched:
-                    lows.append({
+                    level = {
                         "price": item["price"],
-                        "touches": 1,
+                        "touches": 0,
                         "type": "SELL_SIDE",
                         "eq": "EQL",
                         "liquidity_kind": liquidity_kind,
-                    })
+                        "indices": [],
+                        "confirmation_indices": [],
+                    }
+                    self._record_cluster_touch(level, item)
+                    lows.append(level)
 
         for level in highs + lows:
             zones.append(level)
 
         return zones
+
+    def _record_cluster_touch(self, level, item):
+        level["touches"] += 1
+        index = item.get("index")
+        confirmation_index = item.get("confirmation_index", index)
+        if index is not None:
+            level["indices"].append(int(index))
+        if confirmation_index is not None:
+            confirmation_index = int(confirmation_index)
+            level["confirmation_indices"].append(confirmation_index)
+            level["formed_at"] = max(level.get("formed_at", confirmation_index), confirmation_index)
 
     def _extract_internal_points(self, candles):
 
@@ -111,6 +130,8 @@ class LiquidityEngine:
                     {
                         "kind": "HIGH",
                         "price": center.high,
+                        "index": index,
+                        "confirmation_index": index + 1,
                     }
                 )
 
@@ -119,6 +140,8 @@ class LiquidityEngine:
                     {
                         "kind": "LOW",
                         "price": center.low,
+                        "index": index,
+                        "confirmation_index": index + 1,
                     }
                 )
 
