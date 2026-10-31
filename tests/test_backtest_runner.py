@@ -301,3 +301,35 @@ def test_runner_counts_final_candidate_without_followup_candle():
     assert stats["candidate_signals"] == 1
     assert stats["no_followup_data"] == 1
     assert stats["total"] == 0
+
+
+def test_intrabar_limit_fill_does_not_count_target_touched_before_fill():
+    runner = BacktestRunner(partial_exits=False)
+    # The high reaches TP before price later trades down to the LONG limit.
+    # OHLC cannot prove a second TP touch after the fill, so result stays OPEN.
+    candles = [_candle(1, 100.0, 105.0, 94.0, 95.0)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 101.0, "tp2": 103.0, "tp3": 104.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=0) is None
+    stats = runner.statistics()
+    assert stats["total"] == 0
+    assert stats["open_trades"] == 1
+
+
+def test_intrabar_limit_fill_candle_stop_is_counted_conservatively():
+    runner = BacktestRunner(partial_exits=False)
+    candles = [_candle(1, 100.0, 102.0, 89.0, 91.0)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 101.0, "tp2": 103.0, "tp3": 104.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    trade = runner._to_trade(result, candles, entry_index=0)
+    assert trade is not None
+    assert trade["result"] == "LOSS"
+    assert trade["net_rr"] < -1.0
