@@ -131,13 +131,19 @@ def simulate_trade_partial(
     # Ağırlıklar: geçilmezse TP sayısına göre eşit bölünür (toplam = 1.0).
     n = len(levels)
     if tp_weights and isinstance(tp_weights, dict):
-        weights = [float(tp_weights.get(f"tp{level_no}", 0.0)) for level_no, _ in levels]
+        weights = []
+        for level_no, _ in levels:
+            try:
+                weight = float(tp_weights.get(f"tp{level_no}", 1.0))
+            except (TypeError, ValueError, OverflowError):
+                weight = 0.0
+            weights.append(weight if math.isfinite(weight) and weight > 0 else 0.0)
     else:
-        weights = [1.0 / n] * n
+        weights = [1.0] * n
     total_w = sum(weights)
-    if total_w <= 0:
-        weights = [1.0 / n] * n
-        total_w = 1.0
+    if not math.isfinite(total_w) or total_w <= 0:
+        weights = [1.0] * n
+        total_w = float(n)
     weights = [w / total_w for w in weights]  # normalize
 
     is_long = direction in ("LONG", "BUY")
