@@ -417,3 +417,18 @@ def test_sparse_tp2_tp3_backtest_does_not_treat_tp2_as_tp1():
     # The trade is still open after TP2; there is no TP1 price to trail to.
     assert out["result"] == "OPEN"
     assert out["tp"] == 0
+
+
+
+def test_full_exit_backtest_preserves_sparse_tp3_number():
+    candles = [_tl(100.0, o=100.0, h=103.2, l=100.1, cl=103.0)]
+    out = simulate_trade(
+        entry=100.0,
+        stop_loss=99.0,
+        targets=[101.0, None, 103.0],
+        future_candles=candles,
+        direction="LONG",
+    )
+
+    assert out["result"] == "WIN"
+    assert out["tp"] == 3
