@@ -3,6 +3,9 @@ position_manager.py
 Atlas SMC Engine v2
 """
 
+from config import Config
+
+
 class PositionManager:
 
     def __init__(self):
