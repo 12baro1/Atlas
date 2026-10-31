@@ -78,10 +78,10 @@ def test_card_atla_verdict_and_blocks():
 
 def test_card_format_single_line_verdict():
     text = format_card_text(build_signal_card(_result()))
-    assert "KARAR: İŞLEME GİR" in text
-    assert "EMİR:" in text
+    assert "İŞLEME GİR" in text
+    assert "Emir      : MARKET" in text
     assert "67000" in text
-    assert "TP1/2/3" in text
+    assert "TP1" in text and "TP2" in text and "TP3" in text
 
 
 def test_card_no_raise_on_missing_keys():
@@ -98,7 +98,8 @@ def test_signal_card_labels_confidence_as_score_not_probability():
 
     rendered = format_card_text(card)
 
-    assert "skor 92/100" in rendered
+    assert "İŞLEME GİRME" in rendered
+    assert "Giriş şartları oluşmadı." in rendered
     assert "92%" not in rendered
 
 
@@ -140,7 +141,8 @@ def test_market_trade_card_shows_clear_entry_permission():
     result = _result()
     result["analysis"]["entry"]["entry_type"] = "MARKET"
     rendered = format_card_text(build_signal_card(result))
-    assert "KARAR: İŞLEME GİR | EMİR: MARKET" in rendered
+    assert "İŞLEME GİR" in rendered
+    assert "Emir      : MARKET" in rendered
 
 
 
@@ -178,5 +180,17 @@ def test_pending_limit_is_never_presented_as_immediate_entry_even_if_decision_ex
         "entry_type_reason": "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor",
     })
     rendered = format_card_text(build_signal_card(result))
-    assert "KARAR: ŞİMDİ GİRME | EMİR: LIMIT (FİYAT GELİNCE)" in rendered
+    assert "LIMIT BEKLE" in rendered
+    assert "Emir      : LIMIT" in rendered
     assert "KARAR: İŞLEME GİR" not in rendered
+
+def test_no_trade_hides_calculated_entry_stop_and_targets():
+    result = _blocked_result()
+    result["risk"] = {"entry": 100, "stop_loss": 105, "tp1": 95, "tp2": 90, "tp3": 85, "rr": 3}
+    result["analysis"]["entry"] = {"entry": 100, "stop_loss": 105}
+    rendered = format_card_text(build_signal_card(result))
+    assert "İŞLEME GİRME" in rendered
+    assert "Giriş" not in rendered
+    assert "Stop Loss" not in rendered
+    assert "TP1" not in rendered
+    assert "Risk/Ödül" not in rendered
