@@ -195,9 +195,11 @@ class LiquiditySweepEngine:
         try:
             price = float(level.get("price", 0))
             formed_at = int(level.get("formed_at", -1))
+            price_formed_at = int(level.get("price_formed_at", formed_at))
         except (TypeError, ValueError, AttributeError):
             return False
-        if price <= 0 or formed_at >= sweep_index:
+        available_at = max(formed_at, price_formed_at)
+        if price <= 0 or available_at >= sweep_index:
             return False
 
         side = level.get("type")
