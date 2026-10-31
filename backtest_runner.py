@@ -321,6 +321,7 @@ class BacktestRunner:
         # candle close.
         fill_index = None
         entry_price = None
+        limit_intrabar_fill = False
         if entry_type == "MARKET":
             fill_index = entry_index
             entry_price = _num(candles[fill_index].open)
@@ -344,6 +345,14 @@ class BacktestRunner:
                 if opened is None:
                     continue
                 entry_price = min(limit_price, opened) if is_long else max(limit_price, opened)
+                # If price opens through the limit, fill is at the open and
+                # the candle's later range can be simulated. Otherwise the
+                # intrabar path is unknown: do not count a TP touched before
+                # the limit fill as a win.
+                limit_intrabar_fill = not (
+                    (is_long and opened <= limit_price)
+                    or (not is_long and opened >= limit_price)
+                )
                 fill_index = candidate_index
                 break
             if fill_index is None:
@@ -371,26 +380,57 @@ class BacktestRunner:
                 self.invalid_candidates += 1
                 return None
 
-        future = candles[fill_index:]
         use_partial = bool(getattr(self, "partial_exits", True))
-        if use_partial:
-            outcome = simulate_trade_partial(
-                entry=entry_price,
-                stop_loss=stop,
-                targets=tps,
-                future_candles=future,
-                direction=signal_dir,
-                tp_weights=self.tp_weights,
+        if limit_intrabar_fill:
+            fill_candle = candles[fill_index]
+            fill_stop_hit = _candle_touched_stop(
+                signal_dir == "LONG", stop, fill_candle.low, fill_candle.high
             )
+            if fill_stop_hit:
+                outcome = {"result": "LOSS", "tp": 0, "net_rr": -1.0, "levels": []}
+            else:
+                # Exclude the fill candle from target simulation. Its high/low
+                # may have occurred before the intrabar limit order was filled.
+                future = candles[fill_index + 1:]
+                if use_partial:
+                    outcome = simulate_trade_partial(
+                        entry=entry_price,
+                        stop_loss=stop,
+                        targets=tps,
+                        future_candles=future,
+                        direction=signal_dir,
+                        tp_weights=self.tp_weights,
+                    )
+                else:
+                    outcome = simulate_trade(
+                        entry=entry_price,
+                        stop_loss=stop,
+                        targets=tps,
+                        future_candles=future,
+                        direction=signal_dir,
+                        round_trip_cost_rate=self.fee_rate,
+                    )
         else:
-            outcome = simulate_trade(
-                entry=entry_price,
-                stop_loss=stop,
-                targets=tps,
-                future_candles=future,
-                direction=signal_dir,
-                round_trip_cost_rate=self.fee_rate,
-            )
+            # MARKET and gap-through LIMIT orders fill at candle open.
+            future = candles[fill_index:]
+            if use_partial:
+                outcome = simulate_trade_partial(
+                    entry=entry_price,
+                    stop_loss=stop,
+                    targets=tps,
+                    future_candles=future,
+                    direction=signal_dir,
+                    tp_weights=self.tp_weights,
+                )
+            else:
+                outcome = simulate_trade(
+                    entry=entry_price,
+                    stop_loss=stop,
+                    targets=tps,
+                    future_candles=future,
+                    direction=signal_dir,
+                    round_trip_cost_rate=self.fee_rate,
+                )
 
         # Pencere içinde çözülemeyen (ne SL ne TP) işlemleri istatistiğe katma.
         if outcome.get("result") == "OPEN":
