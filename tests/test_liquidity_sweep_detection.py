@@ -58,7 +58,7 @@ def test_classifies_real_sweep_vs_breakout_and_scores_strength():
     assert result["is_breakout"] is False
     assert result["buy_side"] is True
     assert result["post_structure"]["confirmed"] is False
-    assert result["post_structure"]["reason"] == "chronology_unavailable"
+    assert result["post_structure"]["reason"] == "post_sweep_structure_break_missing"
     assert result["strength_score"] >= 60
     assert 0 <= result["strength_score"] <= 100
 
@@ -116,7 +116,7 @@ def test_post_structure_confirmation_requires_break_after_sweep():
     result = engine.detect(candles, structure, layers)
     assert result["buy_side"] is True
     assert result["post_structure"]["confirmed"] is False
-    assert result["post_structure"]["reason"] == "structure_not_after_sweep"
+    assert result["post_structure"]["reason"] == "post_sweep_structure_break_missing"
 
 
 def test_post_structure_confirmation_rejects_unobserved_future_break_index():
@@ -137,4 +137,133 @@ def test_post_structure_confirmation_rejects_unobserved_future_break_index():
     }
     result = engine.detect(candles, structure, layers)
     assert result["post_structure"]["confirmed"] is False
-    assert result["post_structure"]["reason"] == "confirmation_not_observed_yet"
+    assert result["post_structure"]["reason"] == "post_sweep_structure_break_missing"
+
+
+
+def _multi_candle_sweep_series():
+    return [
+        _candle(0, 99.4, 99.8, 99.0, 99.5),
+        _candle(1, 99.5, 99.9, 99.1, 99.6),
+        _candle(2, 99.6, 99.9, 99.2, 99.7),
+        _candle(3, 99.7, 100.5, 99.4, 99.8),  # BSL sweep
+        _candle(4, 99.8, 100.0, 99.4, 99.7),
+        _candle(5, 99.7, 99.8, 99.0, 99.4),   # post-sweep swing low
+        _candle(6, 99.4, 99.7, 99.2, 99.3),
+        _candle(7, 99.3, 99.6, 99.1, 99.2),   # pivot confirmation window ends
+        _candle(8, 99.2, 99.5, 98.8, 98.9),   # close breaks the swing low
+    ]
+
+
+def test_sweep_is_retained_and_confirmed_by_a_later_close_through_post_sweep_swing():
+    engine = LiquiditySweepEngine()
+    result = engine.detect(
+        candles=_multi_candle_sweep_series(),
+        structure=[{
+            "index": 5, "price": 99.0, "kind": "LOW", "label": "HL",
+            "confirmation_index": 7, "bos": False, "choch": False,
+        }],
+        liquidity_layers={
+            "swing": [{
+                "price": 100.0, "touches": 2, "type": "BUY_SIDE",
+                "liquidity_kind": "SWING", "formed_at": 1,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is True
+    assert result["sweep_index"] == 3
+    assert result["sweep_age_bars"] == 5
+    assert result["post_structure"]["confirmed"] is True
+    assert result["post_structure"]["direction"] == "BEARISH"
+    assert result["post_structure"]["type"] == "CHOCH"
+    assert result["post_structure"]["confirmation_index"] == 8
+
+
+def test_sweep_does_not_confirm_on_wick_only_break_of_post_sweep_pivot():
+    engine = LiquiditySweepEngine()
+    candles = _multi_candle_sweep_series()
+    candles[-1] = _candle(8, 99.2, 99.5, 98.8, 99.05)
+    result = engine.detect(
+        candles=candles,
+        structure=[{
+            "index": 5, "price": 99.0, "kind": "LOW",
+            "confirmation_index": 7,
+        }],
+        liquidity_layers={
+            "swing": [{
+                "price": 100.0, "touches": 2, "type": "BUY_SIDE",
+                "formed_at": 1,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is True
+    assert result["post_structure"]["confirmed"] is False
+
+
+def test_sweep_confirmation_rejects_pivot_not_yet_confirmed():
+    engine = LiquiditySweepEngine()
+    result = engine.detect(
+        candles=_multi_candle_sweep_series(),
+        structure=[{
+            "index": 5, "price": 99.0, "kind": "LOW",
+            "confirmation_index": 10,
+        }],
+        liquidity_layers={
+            "swing": [{
+                "price": 100.0, "touches": 2, "type": "BUY_SIDE",
+                "formed_at": 1,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is True
+    assert result["post_structure"]["confirmed"] is False
+
+
+def test_sweep_expires_after_confirmation_lookback_window():
+    engine = LiquiditySweepEngine()
+    candles = _multi_candle_sweep_series()
+    candles.extend([
+        _candle(9, 98.9, 99.2, 98.7, 99.0),
+        _candle(10, 99.0, 99.3, 98.8, 99.1),
+        _candle(11, 99.1, 99.4, 98.9, 99.2),
+        _candle(12, 99.2, 99.5, 99.0, 99.3),
+    ])
+    result = engine.detect(
+        candles=candles,
+        structure=[{
+            "index": 5, "price": 99.0, "kind": "LOW",
+            "confirmation_index": 7,
+        }],
+        liquidity_layers={
+            "swing": [{
+                "price": 100.0, "touches": 2, "type": "BUY_SIDE",
+                "formed_at": 1,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is False
+
+
+def test_sweep_cannot_use_a_pool_formed_after_the_sweep():
+    engine = LiquiditySweepEngine()
+    result = engine.detect(
+        candles=_multi_candle_sweep_series(),
+        structure=[],
+        liquidity_layers={
+            "swing": [{
+                "price": 100.0, "touches": 2, "type": "BUY_SIDE",
+                "formed_at": 6,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is False
