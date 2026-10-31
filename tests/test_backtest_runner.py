@@ -341,7 +341,7 @@ def test_intrabar_limit_fill_candle_stop_is_counted_conservatively():
 def test_partial_tp_uses_configured_normalized_exit_weights():
     candles = [
         _tl(100.0, o=100.0, h=101.2, l=100.1, cl=101.0, t=1),
-        _tl(101.0, o=101.0, h=102.2, l=100.5, cl=102.0, t=2),
+        _tl(102.0, o=101.2, h=102.2, l=101.1, cl=102.0, t=2),
         _tl(102.0, o=102.0, h=103.2, l=101.5, cl=103.0, t=3),
     ]
     out = simulate_trade_partial(
