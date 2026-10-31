@@ -122,7 +122,10 @@ class LiquidityEngine:
         if confirmation_index is not None:
             confirmation_index = int(confirmation_index)
             level["confirmation_indices"].append(confirmation_index)
-            level["formed_at"] = max(level.get("formed_at", confirmation_index), confirmation_index)
+            # The pool becomes usable at the second confirmed touch. Later
+            # retests add strength, but must not move its formation time forward.
+            if len(level["confirmation_indices"]) >= 2 and "formed_at" not in level:
+                level["formed_at"] = confirmation_index
 
     def _extract_internal_points(self, candles):
 
