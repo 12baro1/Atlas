@@ -76,10 +76,29 @@ def _is_symbol_input(value: str) -> bool:
     return bool(_SYMBOL_INPUT_RE.fullmatch(str(value or "").strip().upper()))
 
 
+def _is_report_command(value: str) -> bool:
+    return str(value or "").strip().lower() in {"performans", "istatistik", "öğrenme", "ogrenme", "öğrenme durumu", "ogrenme durumu"}
+
+
+def _parse_liquidity_command(value: str):
+    normalized = " ".join(str(value or "").strip().upper().split())
+    if normalized in {"LİKİDİTE", "LIKIDITE"}:
+        return None
+    for prefix in ("LİKİDİTE ", "LIKIDITE "):
+        if normalized.startswith(prefix):
+            symbol = normalized[len(prefix):].strip()
+            return symbol if _is_symbol_input(symbol) else False
+    return False
+
+
 def _is_supported_input(value: str) -> bool:
     """Recognize supported commands before treating input as a coin ticker."""
-    normalized = str(value or "").strip().lower()
-    return _parse_scan_command(value) is not None or _is_symbol_input(value)
+    return (
+        _parse_scan_command(value) is not None
+        or _is_report_command(value)
+        or _parse_liquidity_command(value) is not False
+        or _is_symbol_input(value)
+    )
 
 
 def _best_symbols(limit=DEFAULT_SCAN_LIMIT):
@@ -223,6 +242,10 @@ class AtlasTUIApp(App):
                 "• tüm piyasayı tara — tüm uygun USDT perpetual piyasalarını tara\n"
                 "• en iyi 10 işlem — 100 piyasadan en iyi 10 kurulumu göster\n\n"
                 "Sayısal tarama en fazla 500 piyasa; tüm piyasa taraması uzun sürebilir.\n"
+                "PERFORMANS / ANALİZ\n"
+                "• performans — sinyal ve manuel işlem sonuçlarını ayrı göster\n"
+                "• öğrenme — geçmiş işlem öğrenme verisini göster\n"
+                "• likidite BTC — BSL/SSL, EQH/EQL ve sweep haritası\n\n"
                 "Atlas emir göndermez. Sıralama puanı kazanma olasılığı değildir.\n"
                 "Çıktıda gezinme: PageUp / PageDown veya Ctrl+U / Ctrl+D.\n"
                 "• çıkış — Atlas'ı kapat"
@@ -245,7 +268,17 @@ class AtlasTUIApp(App):
         try:
             lowered = command.strip().lower()
             scan_request = _parse_scan_command(lowered)
-            if scan_request is not None:
+            liquidity_symbol = _parse_liquidity_command(command)
+            if _is_report_command(command):
+                result_text = self._format_performance(command)
+            elif liquidity_symbol is not False:
+                symbol = liquidity_symbol or self.runtime.current_symbol()
+                if not symbol:
+                    result_text = "KULLANIM: likidite BTC"
+                else:
+                    outcome = self.runtime.analyze_symbol(symbol, force_refresh=True)
+                    result_text = self._format_liquidity(outcome) if outcome.get("ok") else f"{symbol} likidite analizi yapılamadı: {outcome.get('error')}"
+            elif scan_request is not None:
                 result_text = self._find_best_trade(*scan_request)
             else:
                 outcome = self.runtime.analyze_symbol(command, force_refresh=True)
@@ -262,6 +295,65 @@ class AtlasTUIApp(App):
             self.call_from_thread(self._finish, result_text)
         except Exception as exc:
             self.call_from_thread(self._finish, f"ANALİZ HATASI\n\n{type(exc).__name__}: {exc}")
+
+
+    def _format_performance(self, command: str) -> str:
+        signal = self.runtime.signal_performance()
+        manual = self.runtime.manual_performance()
+        learning = self.runtime.learning_panel()
+        title = "ÖĞRENME DURUMU" if "öğren" in command.lower() or "ogren" in command.lower() else "PERFORMANS"
+        lines = [
+            title,
+            "",
+            "OTOMATİK SİNYAL SONUÇLARI (teorik)",
+            f"Kapanan: {signal.get('closed', 0)} | WIN: {signal.get('wins', 0)} | LOSS: {signal.get('losses', 0)} | PARTIAL: {signal.get('partials', 0)}",
+            f"Winrate: %{signal.get('winrate', 0)} | Expectancy: {signal.get('expectancy', 0)} R | PF: {signal.get('profit_factor', 0)}",
+            f"TP1/TP2/TP3: {signal.get('tp1', 0)}/{signal.get('tp2', 0)}/{signal.get('tp3', 0)} | SL: {signal.get('sl', 0)}",
+            "",
+            "MANUEL İŞLEMLER (gerçek kullanıcı kayıtları)",
+            f"Kapanan: {manual.get('total', 0)} | WIN: {manual.get('wins', 0)} | LOSS: {manual.get('losses', 0)} | Açık: {manual.get('open', 0)}",
+            f"Winrate: %{manual.get('winrate', 0)} | Expectancy: {manual.get('expectancy', 0)} R | PF: {manual.get('profit_factor', 0)}",
+            "",
+            "ÖĞRENME",
+            f"Kaynak: {learning.get('source') or 'henüz yok'} | Kapanan manuel işlem: {learning.get('closed_manual_trades', 0)}",
+            f"Eşleşen setup: {learning.get('matched_setups', 0)} | Güvenilirlik: {learning.get('reliability', 0)}",
+            f"Öğrenme düzeltmesi: {learning.get('learning_adjustment', 0)}",
+            "",
+            "Not: Otomatik sinyal sonuçları ve manuel işlemler ayrı tutulur. Sıralama/kalite puanı kazanma olasılığı değildir.",
+        ]
+        if signal.get("closed", 0) < 20:
+            lines.append("Otomatik sinyal örneklemi 20 kapanan işlemin altında; geçmiş performans kesin sonuç çıkarmaz.")
+        return "\\n".join(lines)
+
+    def _format_liquidity(self, outcome: dict) -> str:
+        result = outcome.get("result") or {}
+        analysis = result.get("analysis") or {}
+        layers = analysis.get("liquidity_layers") or {}
+        sweep = analysis.get("liquidity_sweep") or {}
+        symbol = result.get("symbol") or outcome.get("symbol") or "UNKNOWN"
+        lines = [f"LİKİDİTE HARİTASI | {symbol}", ""]
+        for key, label in (("bsl", "BUY-SIDE LIQUIDITY / BSL"), ("ssl", "SELL-SIDE LIQUIDITY / SSL"), ("eqh", "EQUAL HIGHS / EQH"), ("eql", "EQUAL LOWS / EQL")):
+            levels = layers.get(key) or []
+            lines.append(f"{label}:")
+            if not levels:
+                lines.append("  Bulunamadı")
+                continue
+            for item in sorted(levels, key=lambda row: float(row.get("touches", 0)), reverse=True)[:5]:
+                lines.append(
+                    f"  {item.get('price')} | temas: {item.get('touches', 0)} | "
+                    f"katman: {item.get('liquidity_kind', 'UNKNOWN')}"
+                )
+        post = sweep.get("post_structure") or {}
+        lines.extend([
+            "",
+            "SON LİKİDİTE SÜPÜRMESİ",
+            f"Sweep: {'EVET' if sweep.get('is_sweep') else 'HAYIR'} | Yön: {sweep.get('direction') or 'YOK'} | Güç: {sweep.get('strength_score', 0)}",
+            f"BSL süpürüldü: {'EVET' if sweep.get('buy_side') else 'HAYIR'} | SSL süpürüldü: {'EVET' if sweep.get('sell_side') else 'HAYIR'}",
+            f"Sonraki yapı teyidi: {'VAR' if post.get('confirmed') else 'YOK'}",
+            "",
+            "Bu harita mevcut analiz mumlarına dayanır; tek başına işlem sinyali değildir.",
+        ])
+        return "\\n".join(lines)
 
     def _find_best_trade(self, scan_limit=DEFAULT_SCAN_LIMIT, result_limit=1) -> str:
         symbols = _best_symbols(limit=scan_limit)
