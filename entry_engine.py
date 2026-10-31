@@ -275,10 +275,12 @@ class EntryEngine:
                 atr_value = 0.0
             result["entry_distance_pct"] = round(distance_pct * 100.0, 4) if distance_pct is not None else None
             result["entry_distance_atr"] = round(distance / atr_value, 3) if atr_value > 0 else None
+            # A pending LIMIT within 2% and 2 ATR is still reasonably close.
+            # Keep the distance visible; do not confuse "far" with invalid.
             is_near = (
                 distance_pct is not None
-                and distance_pct <= 0.01
-                and (atr_value <= 0 or distance <= atr_value)
+                and distance_pct <= 0.02
+                and (atr_value <= 0 or distance <= atr_value * 2.0)
             )
             result["entry_distance_label"] = "YAKIN GİRİŞ" if is_near else "UZAK GİRİŞ"
             result["entry_type_reason"] = (

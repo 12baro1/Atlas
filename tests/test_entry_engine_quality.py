@@ -203,3 +203,16 @@ def test_entry_engine_keeps_nearby_limit_pullback():
     assert result["entry_type"] == "LIMIT"
     assert result["requires_pullback"] is True
     assert result["entry"] == 100.8
+
+
+def test_entry_distance_within_two_percent_is_labeled_near_when_atr_is_unavailable():
+    result = EntryEngine().generate(
+        mtf={"entry": "SHORT"},
+        structure=[{"label": "LH", "kind": "HIGH", "price": 101.5}],
+        fvg=[{"type": "BEARISH", "from": 101.5, "to": 101.2, "filled": False}],
+        orderblocks=[],
+        current_price=100.0,
+    )
+    assert result["entry_type"] == "LIMIT"
+    assert result["entry_distance_pct"] == 1.5
+    assert result["entry_distance_label"] == "YAKIN GİRİŞ"

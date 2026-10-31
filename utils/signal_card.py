@@ -37,12 +37,14 @@ def _verdict(decision, signal, entry):
     action = str((decision or {}).get("action", "WAIT") or "").upper()
     signal_dir = str((signal or {}).get("signal", "WAIT") or "").upper()
     entry_type = str((entry or {}).get("entry_type") or "").upper()
-    entry_reason = str((entry or {}).get("entry_type_reason") or "").lower()
+    entry_dir = str((entry or {}).get("direction") or "").upper()
+    if entry_dir not in ("LONG", "SHORT"):
+        entry_dir = None
 
     # LIMIT orders are conditional and must never be shown as immediate entry permission.
     pending_limit = entry_type == "LIMIT"
     if pending_limit:
-        pending_direction = signal_dir if signal_dir in ("LONG", "SHORT") else None
+        pending_direction = signal_dir if signal_dir in ("LONG", "SHORT") else entry_dir
         return ("BEKLE", pending_direction, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
     if action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and signal_dir in ("LONG", "SHORT"):
         return ("AL" if signal_dir == "LONG" else "SAT", signal_dir, None)
@@ -50,7 +52,8 @@ def _verdict(decision, signal, entry):
     # WAIT is not an actionable terminal decision; show it as no-entry.
     if action == "WAIT":
         wait_reason = (signal or {}).get("wait_reason") or (decision or {}).get("reason")
-        return ("ATLA", None, wait_reason)
+        # Keep the analyzed MTF direction visible even when the final decision is WAIT.
+        return ("ATLA", entry_dir, wait_reason)
 
     return ("ATLA", None, (decision or {}).get("reason"))
 
