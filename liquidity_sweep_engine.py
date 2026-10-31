@@ -425,6 +425,35 @@ class LiquiditySweepEngine:
         break_index, pivot_confirmation_index, pivot_index, level = min(
             candidates, key=lambda item: item[0]
         )
+
+        # The break is no longer actionable if a later candle closes back
+        # through the broken mini-swing level, even when the original sweep
+        # pool itself has not been reclaimed.
+        reclaimed_index = None
+        for index in range(break_index + 1, len(candles)):
+            close = float(candles[index].close)
+            reclaimed = (
+                close >= level if trigger == "BEARISH" else close <= level
+            )
+            if reclaimed:
+                reclaimed_index = index
+                break
+
+        if reclaimed_index is not None:
+            return {
+                "confirmed": False,
+                "type": None,
+                "direction": trigger,
+                "confirmation_index": break_index,
+                "confirmation_age_bars": current_index - break_index,
+                "pivot_index": pivot_index,
+                "pivot_confirmation_index": pivot_confirmation_index,
+                "broken_level": level,
+                "reclaimed_index": reclaimed_index,
+                "sweep_index": sweep_index,
+                "reason": "post_sweep_structure_break_reclaimed",
+            }
+
         return {
             "confirmed": True,
             "type": "CHOCH",
