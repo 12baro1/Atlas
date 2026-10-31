@@ -22,6 +22,38 @@ class LiquiditySweepEngine:
 
         candidate = self._find_recent_sweep(candles, swing_levels, internal_levels)
         if candidate:
+            if candidate.get("side") == "DUAL":
+                return {
+                    "buy_side": False,
+                    "sell_side": False,
+                    "swept_high": None,
+                    "swept_low": None,
+                    "breakout_high": None,
+                    "breakout_low": None,
+                    "is_sweep": False,
+                    "is_breakout": False,
+                    "ambiguous_sweep": True,
+                    "strength_score": 0,
+                    "swing": {
+                        "buy_side": candidate.get("swing_buy"),
+                        "sell_side": candidate.get("swing_sell"),
+                    },
+                    "internal": {
+                        "buy_side": candidate.get("internal_buy"),
+                        "sell_side": candidate.get("internal_sell"),
+                    },
+                    "post_structure": {
+                        "confirmed": False,
+                        "type": None,
+                        "direction": None,
+                        "reason": "dual_sided_sweep_ambiguous",
+                    },
+                    "timeframe": timeframe,
+                    "sweep_index": candidate["sweep_index"],
+                    "sweep_age_bars": len(candles) - 1 - candidate["sweep_index"],
+                    "sweep_side": "DUAL",
+                }
+
             if candidate.get("event_type") == "BREAKOUT":
                 buy_event = candidate.get("buy_event")
                 sell_event = candidate.get("sell_event")
