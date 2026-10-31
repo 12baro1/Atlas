@@ -176,6 +176,7 @@ def test_rr_engine_recomputes_when_rr_is_zero():
 def test_risk_engine_expands_too_tight_stop_using_atr_floor(monkeypatch):
     # Sıkı stopları reddetme modu kapalıyken auto-expand davranışı korunur.
     monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", False)
+    monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", True)
     risk = RiskEngine().calculate(
         entry=79.00,
         stop_loss=79.01,
