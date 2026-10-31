@@ -267,3 +267,39 @@ def test_sweep_cannot_use_a_pool_formed_after_the_sweep():
     )
 
     assert result["is_sweep"] is False
+
+
+
+def test_sell_side_sweep_confirms_bullish_market_structure_on_a_later_close():
+    engine = LiquiditySweepEngine()
+    candles = [
+        _candle(0, 100.3, 100.8, 100.1, 100.4),
+        _candle(1, 100.4, 100.9, 100.2, 100.5),
+        _candle(2, 100.5, 100.8, 100.1, 100.4),
+        _candle(3, 100.4, 100.6, 99.5, 100.2),   # SSL sweep
+        _candle(4, 100.2, 100.6, 100.0, 100.3),
+        _candle(5, 100.6, 101.0, 100.2, 100.6),  # post-sweep swing high
+        _candle(6, 100.6, 100.8, 100.4, 100.7),
+        _candle(7, 100.7, 100.9, 100.5, 100.8),  # pivot confirmation
+        _candle(8, 100.8, 101.3, 100.6, 101.1),  # close breaks the swing high
+    ]
+    result = engine.detect(
+        candles=candles,
+        structure=[{
+            "index": 5, "price": 101.0, "kind": "HIGH", "label": "LH",
+            "confirmation_index": 7,
+        }],
+        liquidity_layers={
+            "swing": [{
+                "price": 100.0, "touches": 2, "type": "SELL_SIDE",
+                "liquidity_kind": "SWING", "formed_at": 1,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is True
+    assert result["sweep_side"] == "SELL_SIDE"
+    assert result["post_structure"]["confirmed"] is True
+    assert result["post_structure"]["direction"] == "BULLISH"
+    assert result["post_structure"]["confirmation_index"] == 8
