@@ -43,7 +43,7 @@ def test_entry_engine_market_entry_requires_sweep_and_post_choch():
         current_price=99.9,
         liquidity_sweep={
             "sell_side": True,
-            "post_structure": {"confirmed": True, "direction": "BULLISH", "type": "CHOCH"},
+            "post_structure": {"confirmed": True, "direction": "BULLISH", "type": "CHOCH", "confirmation_age_bars": 0},
         },
     )
     assert result["entry_type"] == "MARKET"
@@ -262,3 +262,26 @@ def test_short_stop_places_atr_buffer_beyond_structural_invalidation(monkeypatch
     )
     assert result["stop_loss"] == 101.4
     assert result["stop_buffer"] == 0.2
+
+
+
+def test_entry_engine_rejects_stale_sweep_confirmation_for_market_entry():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 99.5}],
+        fvg=[{"type": "BULLISH", "from": 99.8, "to": 100.0, "filled": False}],
+        orderblocks=[],
+        current_price=99.9,
+        liquidity_sweep={
+            "sell_side": True,
+            "post_structure": {
+                "confirmed": True,
+                "direction": "BULLISH",
+                "type": "CHOCH",
+                "confirmation_age_bars": 3,
+            },
+        },
+    )
+
+    assert result["entry_type"] != "MARKET"
+    assert result["valid"] is False
