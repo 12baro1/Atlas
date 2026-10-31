@@ -238,3 +238,19 @@ def test_equal_high_and_low_clusters_keep_outermost_liquidity_price():
 
     assert buy_clusters[0]["price"] == 100.05
     assert sell_clusters[0]["price"] == 97.95
+
+
+
+def test_later_equal_level_retests_do_not_delay_pool_formation_time():
+    engine = LiquidityEngine()
+    structure = [
+        {"kind": "HIGH", "price": 100.0, "index": 2, "confirmation_index": 7},
+        {"kind": "HIGH", "price": 100.05, "index": 8, "confirmation_index": 13},
+        {"kind": "HIGH", "price": 100.02, "index": 14, "confirmation_index": 19},
+    ]
+
+    [cluster] = engine.detect(structure)
+
+    assert cluster["touches"] == 3
+    assert cluster["formed_at"] == 13
+    assert cluster["confirmation_indices"] == [7, 13, 19]
