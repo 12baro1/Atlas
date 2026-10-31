@@ -21,7 +21,10 @@ def test_risk_engine_uses_config_balance_and_percent():
     expected_target_capital = Config.INITIAL_BALANCE * (Config.RISK_PERCENT / 100)
 
     assert risk is not None
-    assert risk["capital_at_risk_target"] == round(expected_target_capital, 2)
+    assert risk["capital_at_risk_target"] < round(expected_target_capital, 2)
+    assert risk["weighted_rr"] == pytest.approx((1.5 + 2.5 + 4.0) / 3)
+    assert risk["weighted_net_rr"] == pytest.approx(risk["weighted_rr"] - 0.2)
+    assert risk["partial_exit_weights"] == pytest.approx({"tp1": 1/3, "tp2": 1/3, "tp3": 1/3})
     assert risk["position_size"] > 0
     assert risk["position_size"] < round(expected_target_capital, 4)
     assert risk["effective_risk_per_unit"] > 1.0
@@ -368,3 +371,62 @@ def test_risk_engine_accepts_numeric_string_prices():
     )
     assert risk is not None
     assert risk["side"] == "LONG"
+
+
+
+def test_risk_engine_calculates_weighted_rr_for_equal_partial_exits(monkeypatch):
+    monkeypatch.setattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+    risk = RiskEngine().calculate(
+        entry=100.0,
+        stop_loss=99.0,
+        dynamic_tp={"tp1": 101.0, "tp2": 102.0, "tp3": 103.0},
+        atr_value=0.0,
+        spread=0.0,
+        slippage=0.0,
+    )
+
+    assert risk["rr"] == pytest.approx(3.0)  # highest single target stays explicit
+    assert risk["target_max_rr"] == pytest.approx(3.0)
+    assert risk["weighted_rr"] == pytest.approx(2.0)
+    assert risk["weighted_net_rr"] == pytest.approx(1.8)
+    assert risk["net_rr"] == pytest.approx(1.8)
+
+    report = RREngine().evaluate(risk)
+    assert report["rr"] == pytest.approx(2.0)
+    assert report["selected_rr"] == pytest.approx(2.0)
+    assert report["selected_tp"] == "weighted_partial_exit"
+    assert report["target_max_tp"] == "tp3"
+    assert report["target_max_rr"] == pytest.approx(3.0)
+
+
+def test_risk_engine_uses_configured_partial_weights(monkeypatch):
+    monkeypatch.setattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2")
+    risk = RiskEngine().calculate(
+        entry=100.0,
+        stop_loss=99.0,
+        dynamic_tp={"tp1": 101.0, "tp2": 102.0, "tp3": 103.0},
+        atr_value=0.0,
+        spread=0.0,
+        slippage=0.0,
+    )
+
+    assert risk["partial_exit_weights"] == pytest.approx({
+        "tp1": 0.5, "tp2": 0.3, "tp3": 0.2
+    })
+    assert risk["weighted_rr"] == pytest.approx(1.7)
+    assert risk["weighted_net_rr"] == pytest.approx(1.5)
+
+
+def test_risk_engine_normalizes_weights_only_over_valid_targets(monkeypatch):
+    monkeypatch.setattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1,1,1")
+    risk = RiskEngine().calculate(
+        entry=100.0,
+        stop_loss=99.0,
+        dynamic_tp={"tp1": 101.0, "tp2": None, "tp3": 103.0},
+        atr_value=0.0,
+        spread=0.0,
+        slippage=0.0,
+    )
+
+    assert risk["partial_exit_weights"] == pytest.approx({"tp1": 0.5, "tp3": 0.5})
+    assert risk["weighted_rr"] == pytest.approx(2.0)
