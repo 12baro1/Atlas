@@ -752,3 +752,33 @@ def test_signal_partial_weight_parser_keeps_valid_values_when_one_is_invalid(mon
         opened_at=1_700_000_000_000,
     )
     assert journal._norm_partial_weights(outcome) == pytest.approx([0.5, 0.0, 0.5])
+
+
+
+def test_tp_hit_with_negative_net_r_is_not_learned_as_a_win(monkeypatch, tmp_path):
+    monkeypatch.setattr(Config, "ROUND_TRIP_COST_RATE", 0.002)
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=100.1,
+        opened_at=1_700_000_000_000,
+    )
+    candle = _precise_candle(
+        1, high=100.2, low=100.05, close=100.15
+    )
+
+    resolved = journal.resolve_signal_outcome(outcome, [candle])
+
+    assert resolved is not None
+    assert resolved["status"] == "TP1"
+    assert resolved["gross_realized_r"] == pytest.approx(0.1, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(-0.1, abs=1e-4)
+    assert resolved["final_result"] == "LOSS"
+
+    records = journal.learning_records(source="signal")
+    assert len(records) == 1
+    assert records[0]["r"] == pytest.approx(-0.1, abs=1e-4)
+    assert records[0]["win"] is False
