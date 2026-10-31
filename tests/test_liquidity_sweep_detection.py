@@ -305,3 +305,55 @@ def test_sell_side_sweep_confirms_bullish_market_structure_on_a_later_close():
     assert result["post_structure"]["confirmed"] is True
     assert result["post_structure"]["direction"] == "BULLISH"
     assert result["post_structure"]["confirmation_index"] == 8
+
+
+
+def test_retained_buy_side_sweep_expires_when_price_closes_back_above_pool():
+    engine = LiquiditySweepEngine()
+    candles = _multi_candle_sweep_series()
+    candles.append(_candle(9, 98.9, 100.2, 98.8, 100.1))
+    result = engine.detect(
+        candles=candles,
+        structure=[{
+            "index": 5, "price": 99.0, "kind": "LOW",
+            "confirmation_index": 7,
+        }],
+        liquidity_layers={
+            "swing": [{
+                "price": 100.0, "touches": 2, "type": "BUY_SIDE",
+                "formed_at": 1,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is False
+
+
+def test_retained_sell_side_sweep_expires_when_price_closes_back_below_pool():
+    engine = LiquiditySweepEngine()
+    candles = [
+        _candle(0, 100.3, 100.8, 100.1, 100.4),
+        _candle(1, 100.4, 100.9, 100.2, 100.5),
+        _candle(2, 100.5, 100.8, 100.1, 100.4),
+        _candle(3, 100.4, 100.6, 99.5, 100.2),   # SSL sweep
+        _candle(4, 100.2, 100.6, 100.0, 100.3),
+        _candle(5, 100.6, 101.0, 100.2, 100.6),
+        _candle(6, 100.6, 100.8, 100.4, 100.7),
+        _candle(7, 100.7, 100.9, 100.5, 100.8),
+        _candle(8, 100.8, 101.3, 100.6, 101.1),
+        _candle(9, 101.1, 101.2, 99.8, 99.9),  # close back below SSL
+    ]
+    result = engine.detect(
+        candles=candles,
+        structure=[],
+        liquidity_layers={
+            "swing": [{
+                "price": 100.0, "touches": 2, "type": "SELL_SIDE",
+                "formed_at": 1,
+            }],
+            "internal": [],
+        },
+    )
+
+    assert result["is_sweep"] is False
