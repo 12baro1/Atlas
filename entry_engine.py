@@ -37,7 +37,7 @@ class EntryEngine:
             entry = stop_loss * 0.998
         return entry, stop_loss
 
-    def _select_structural_stop(self, direction, structure, selected_fvg, selected_ob):
+    def _select_structural_stop(self, direction, structure, selected_fvg, selected_ob, atr_buffer=0.0):
         """Choose the outermost relevant swing/POI invalidation level."""
         candidates = []
         if direction == "LONG":
@@ -58,7 +58,7 @@ class EntryEngine:
                         candidates.append(("swing_low", value))
                         break
             selected = min(candidates, key=lambda item: item[1]) if candidates else None
-            return (selected[1], selected[0]) if selected else (None, None)
+            return (selected[1] - max(0.0, atr_buffer), selected[0]) if selected else (None, None)
 
         if selected_ob:
             value = self._safe_price(selected_ob.get("high"))
@@ -77,7 +77,7 @@ class EntryEngine:
                     candidates.append(("swing_high", value))
                     break
         selected = max(candidates, key=lambda item: item[1]) if candidates else None
-        return (selected[1], selected[0]) if selected else (None, None)
+        return (selected[1] + max(0.0, atr_buffer), selected[0]) if selected else (None, None)
 
     def _safe_price(self, value):
         try:
@@ -123,6 +123,20 @@ class EntryEngine:
             return result
 
         result["direction"] = direction
+
+        # Place the stop a small ATR buffer beyond the structural invalidation
+        # level. RiskEngine still rejects stops that remain too tight; it does
+        # not silently widen them into a different setup.
+        atr_buffer = 0.0
+        if candles:
+            try:
+                atr_value = float(calculate_atr(candles, period=int(getattr(Config, "ATR_PERIOD", 14))))
+                buffer_multiplier = float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10))
+                if math.isfinite(atr_value) and atr_value > 0 and math.isfinite(buffer_multiplier):
+                    atr_buffer = atr_value * max(0.0, buffer_multiplier)
+            except (TypeError, ValueError, OverflowError):
+                atr_buffer = 0.0
+        result["stop_buffer"] = atr_buffer
 
         # -------------------------
         # Structure
@@ -226,7 +240,7 @@ class EntryEngine:
         if direction == "LONG":
 
             result["stop_loss"], result["stop_source"] = self._select_structural_stop(
-                direction, structure, selected_fvg, selected_ob
+                direction, structure, selected_fvg, selected_ob, atr_buffer=atr_buffer
             )
 
             limit_entry = max(float(selected_fvg["from"]), float(selected_fvg["to"])) if selected_fvg else (self._safe_price(selected_ob.get("high")) if selected_ob else None)
