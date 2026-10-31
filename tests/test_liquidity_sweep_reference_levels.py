@@ -205,3 +205,19 @@ def test_pool_is_rejected_when_it_was_wicked_before_cluster_confirmation():
     ]
 
     assert engine._level_available_and_unconsumed(candles, level, sweep_index=7) is False
+
+
+
+def test_sell_side_cluster_records_confirmation_metadata_too():
+    engine = LiquidityEngine()
+    structure = [
+        {"kind": "LOW", "price": 98.0, "index": 2, "confirmation_index": 7},
+        {"kind": "LOW", "price": 98.05, "index": 8, "confirmation_index": 13},
+    ]
+
+    [cluster] = engine.detect(structure)
+
+    assert cluster["touches"] == 2
+    assert cluster["indices"] == [2, 8]
+    assert cluster["confirmation_indices"] == [7, 13]
+    assert cluster["formed_at"] == 13
