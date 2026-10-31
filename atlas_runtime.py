@@ -233,11 +233,7 @@ class AtlasRuntime:
             total = len(exact)
             historical_edge = sum(float(item.get("average_r") or 0.0) for item in exact.values()) / max(total, 1)
             reliability = sum(float(item.get("reliability") or 0.0) for item in exact.values()) / max(total, 1)
-            # UI'da gerçek skor düzeltmesini göster: weight-1 yalnızca küçük
-            # meta çarpanıdır ve 4 hanede çoğu zaman 0.0000 görünür.
-            adjustment = sum(
-                self.engine.learning._edge_delta(item) for item in exact.values()
-            ) / max(total, 1)
+            adjustment = sum(float(item.get("weight") or 1.0) - 1.0 for item in exact.values()) / max(total, 1)
 
         return {
             "source": source,
@@ -251,7 +247,9 @@ class AtlasRuntime:
             "historical_edge": round(historical_edge, 4),
             "reliability": round(reliability, 4),
             "matched_setups": matched_setups,
-            "learning_adjustment": round(adjustment, 4),
+            "learning_adjustment": round(adjustment, 2),
+            "records_fed": int((learning_stats.get("meta") or {}).get("records_fed", 0)),
+            "buckets": int((learning_stats.get("meta") or {}).get("buckets", 0)),
             "open_manual": int(manual_perf.get("open", 0)),
             "not_traded": int(manual_perf.get("not_traded", 0)),
             "feed_meta": feed_meta,
