@@ -336,6 +336,7 @@ class LiquiditySweepEngine:
             "type": "CHOCH",
             "direction": trigger,
             "confirmation_index": break_index,
+            "confirmation_age_bars": current_index - break_index,
             "pivot_confirmation_index": pivot_confirmation_index,
             "broken_level": level,
             "sweep_index": sweep_index,
