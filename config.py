@@ -93,6 +93,7 @@ class Config:
     ROUND_TRIP_COST_RATE = 0.0020
     ATR_PERIOD = 14
     MIN_STOP_ATR_MULTIPLIER = 0.75
+    STOP_STRUCTURE_BUFFER_ATR = 0.10
     # Maximum distance for pending LIMIT entries from the current market.
     MAX_LIMIT_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_ATR", "3.0"))
     MAX_LIMIT_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_PERCENT", "0.05"))
