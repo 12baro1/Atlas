@@ -436,3 +436,31 @@ def test_historical_breakout_is_not_kept_as_a_current_breakout():
     )
 
     assert result["is_breakout"] is False
+
+
+
+def test_dual_sided_sweep_is_ambiguous_and_not_scored_as_directional():
+    engine = LiquiditySweepEngine()
+    candles = [
+        _candle(0, 100.0, 100.2, 99.8, 100.0),
+        _candle(1, 100.0, 100.3, 99.7, 100.0),
+        _candle(2, 100.0, 101.2, 98.8, 100.0),
+    ]
+    result = engine.detect(
+        candles=candles,
+        liquidity_layers={
+            "swing": [
+                {"type": "BUY_SIDE", "price": 101.0, "touches": 2, "formed_at": 0},
+                {"type": "SELL_SIDE", "price": 99.0, "touches": 2, "formed_at": 0},
+            ],
+            "internal": [],
+        },
+    )
+
+    assert result["ambiguous_sweep"] is True
+    assert result["sweep_side"] == "DUAL"
+    assert result["is_sweep"] is False
+    assert result["buy_side"] is False
+    assert result["sell_side"] is False
+    assert result["strength_score"] == 0
+    assert result["post_structure"]["confirmed"] is False
