@@ -350,6 +350,8 @@ class AtlasTUIApp(App):
             "SON LİKİDİTE SÜPÜRMESİ",
             f"Sweep: {'EVET' if sweep.get('is_sweep') else 'HAYIR'} | Yön: {sweep_direction} | Güç: {sweep.get('strength_score', 0)}",
             f"BSL süpürüldü: {'EVET' if sweep.get('buy_side') else 'HAYIR'} | SSL süpürüldü: {'EVET' if sweep.get('sell_side') else 'HAYIR'}",
+            f"Kırılım: {'EVET' if sweep.get('is_breakout') else 'HAYIR'} | "
+            f"BSL üstü: {sweep.get('breakout_high') or '-'} | SSL altı: {sweep.get('breakout_low') or '-'}",
             f"Sonraki yapı teyidi: {'VAR' if post.get('confirmed') else 'YOK'}",
             "",
             "Bu harita mevcut analiz mumlarına dayanır; tek başına işlem sinyali değildir.",
