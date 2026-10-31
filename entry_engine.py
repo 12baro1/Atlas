@@ -253,7 +253,19 @@ class EntryEngine:
                 )
                 sweep = liquidity_sweep or {}
                 post = sweep.get("post_structure") or {}
-                sweep_confirmed = bool(sweep.get("sell_side") and post.get("confirmed") and post.get("direction") == "BULLISH")
+                try:
+                    confirmation_age = int(post.get("confirmation_age_bars", 0))
+                    max_confirmation_age = max(
+                        0, int(getattr(Config, "SWEEP_MARKET_ENTRY_MAX_AGE_BARS", 2))
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    confirmation_age = max_confirmation_age = -1
+                sweep_confirmed = bool(
+                    sweep.get("sell_side")
+                    and post.get("confirmed")
+                    and post.get("direction") == "BULLISH"
+                    and 0 <= confirmation_age <= max_confirmation_age
+                )
                 inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high
                 if inside_poi and sweep_confirmed and current_price > result["stop_loss"]:
                     result["entry"] = current_price
@@ -292,7 +304,19 @@ class EntryEngine:
                 )
                 sweep = liquidity_sweep or {}
                 post = sweep.get("post_structure") or {}
-                sweep_confirmed = bool(sweep.get("buy_side") and post.get("confirmed") and post.get("direction") == "BEARISH")
+                try:
+                    confirmation_age = int(post.get("confirmation_age_bars", 0))
+                    max_confirmation_age = max(
+                        0, int(getattr(Config, "SWEEP_MARKET_ENTRY_MAX_AGE_BARS", 2))
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    confirmation_age = max_confirmation_age = -1
+                sweep_confirmed = bool(
+                    sweep.get("buy_side")
+                    and post.get("confirmed")
+                    and post.get("direction") == "BEARISH"
+                    and 0 <= confirmation_age <= max_confirmation_age
+                )
                 inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high
                 if inside_poi and sweep_confirmed and current_price < result["stop_loss"]:
                     result["entry"] = current_price
