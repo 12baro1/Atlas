@@ -299,7 +299,9 @@ class EntryEngine:
             else:
                 result["entry"] = limit_entry
                 result["entry_type"] = "LIMIT" if limit_entry is not None else "NONE"
-                result["entry_type_reason"] = "Bearish POI limit level" if limit_entry is not None else "No valid bearish POI"
+                result["entry_type_reason"] = "Bearish POI limit level" if limit_entry is not None else ("Bearish POI already crossed; wait for a fresh setup" if crossed_matching_fvg else "No valid bearish POI")
+                if limit_entry is None and crossed_matching_fvg:
+                    result["entry_zone_crossed"] = True
 
         # Keep valid pending LIMIT POIs regardless of distance. Distance is
         # informational so the user can distinguish near vs far entries.
