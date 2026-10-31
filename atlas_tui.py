@@ -350,6 +350,9 @@ class AtlasTUIApp(App):
             "SON LİKİDİTE SÜPÜRMESİ",
             f"Sweep: {'EVET' if sweep.get('is_sweep') else 'HAYIR'} | Yön: {sweep_direction} | Güç: {sweep.get('strength_score', 0)}",
             f"BSL süpürüldü: {'EVET' if sweep.get('buy_side') else 'HAYIR'} | SSL süpürüldü: {'EVET' if sweep.get('sell_side') else 'HAYIR'}",
+            f"Kırılım: {'EVET' if sweep.get('is_breakout') else 'HAYIR'} | "
+            f"BSL üstü: {sweep.get('breakout_high') or '-'} | SSL altı: {sweep.get('breakout_low') or '-'}",
+            f"Çift taraflı süpürme: {'EVET — yön belirsiz' if sweep.get('ambiguous_sweep') else 'HAYIR'}",
             f"Sonraki yapı teyidi: {'VAR' if post.get('confirmed') else 'YOK'}",
             "",
             "Bu harita mevcut analiz mumlarına dayanır; tek başına işlem sinyali değildir.",
@@ -400,7 +403,11 @@ class AtlasTUIApp(App):
                 continue
             if executable_market:
                 diagnostics["execute"] += 1
-            rr = _finite_number(card.get("rr") or 0)
+            rr = _finite_number(
+                card.get("net_rr")
+                if card.get("net_rr") is not None
+                else card.get("rr")
+            )
             quality = _finite_number(card.get("setup_quality") or 0)
             confidence = _finite_number(card.get("confidence") or 0)
             if rr is None or quality is None or confidence is None:

@@ -17,6 +17,42 @@ class RiskEngine:
         self.rr_engine = RREngine()
         self.logger = logging.getLogger("atlas.risk")
 
+
+    def _resolve_partial_exit_weights(self, rr_by_tp):
+        """Match the signal journal's normalized TP exit weights."""
+        names = ("tp1", "tp2", "tp3")
+        raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+        if isinstance(raw, dict):
+            supplied = [raw.get(name, 1.0) for name in names]
+        elif isinstance(raw, str):
+            supplied = raw.split(",")
+        elif isinstance(raw, (list, tuple)):
+            supplied = list(raw)
+        else:
+            supplied = []
+
+        parsed = {}
+        for index, name in enumerate(names):
+            value = supplied[index] if index < len(supplied) else 1.0
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                number = 0.0
+            parsed[name] = number if math.isfinite(number) and number > 0 else 0.0
+
+        available = [name for name in names if name in (rr_by_tp or {})]
+        if not available:
+            return {}, None
+
+        total = sum(parsed[name] for name in available)
+        if not math.isfinite(total) or total <= 0:
+            parsed = {name: 1.0 for name in available}
+            total = float(len(available))
+
+        normalized = {name: parsed[name] / total for name in available}
+        weighted_rr = sum(float(rr_by_tp[name]) * normalized[name] for name in available)
+        return normalized, weighted_rr
+
     def calculate(
         self,
         entry,
@@ -141,6 +177,9 @@ class RiskEngine:
         tp3 = None
         rr = None
         net_rr = None
+        weighted_rr = None
+        weighted_net_rr = None
+        partial_exit_weights = {}
         rr_breakdown = None
         rr_selection_rule = "max_rr"
 
@@ -161,14 +200,14 @@ class RiskEngine:
 
             if rr_breakdown is not None:
                 rr = rr_breakdown["selected_rr"]
-                selected_tp = rr_breakdown["selected_tp"]
-                selected_tp_value = dynamic_tp.get(selected_tp) if selected_tp else None
-
-                if selected_tp_value is not None:
-                    gross_reward = abs(selected_tp_value - entry)
-                    transaction_cost = entry * round_trip_cost_rate
-                    net_reward = max(0.0, gross_reward - transaction_cost)
-                    net_rr = round(net_reward / risk, 2)
+                partial_exit_weights, weighted_rr = self._resolve_partial_exit_weights(
+                    rr_breakdown.get("rr_by_tp") or {}
+                )
+                if weighted_rr is not None:
+                    # Match the normalized partial-close weights used by the signal outcome tracker.
+                    fee_in_r = (abs(entry) * max(0.0, round_trip_cost_rate)) / risk
+                    weighted_net_rr = round(weighted_rr - fee_in_r, 4)
+                    net_rr = weighted_net_rr
 
         risk_reduction_factor = 1.0
         if net_rr is not None and minimum_rr > 0 and net_rr < minimum_rr:
@@ -282,6 +321,12 @@ class RiskEngine:
             "rr": rr,
 
             "net_rr": net_rr,
+
+            "target_max_rr": rr_breakdown.get("selected_rr") if rr_breakdown else rr,
+            "weighted_rr": round(weighted_rr, 4) if weighted_rr is not None else None,
+            "weighted_net_rr": weighted_net_rr,
+            "partial_exit_weights": partial_exit_weights,
+            "rr_basis": "max_target" if rr is not None else None,
 
             "round_trip_cost_rate": round_trip_cost_rate,
 

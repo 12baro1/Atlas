@@ -34,7 +34,8 @@ class MarketStructureEngine:
                     Pivot(
                         index=i,
                         price=high,
-                        kind="HIGH"
+                        kind="HIGH",
+                        confirmation_index=i + max(right, 10)
                     )
                 )
 
@@ -44,7 +45,8 @@ class MarketStructureEngine:
                     Pivot(
                         index=i,
                         price=low,
-                        kind="LOW"
+                        kind="LOW",
+                        confirmation_index=i + max(right, 10)
                     )
                 )
 

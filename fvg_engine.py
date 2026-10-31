@@ -87,12 +87,31 @@ class FVGEngine:
         # -------------------------
 
         for gap in gaps:
+            zone_low = min(float(gap["from"]), float(gap["to"]))
+            zone_high = max(float(gap["from"]), float(gap["to"]))
+            size = zone_high - zone_low
+            deepest_price = None
 
             for candle in candles[gap["index"] + 1:]:
+                # Track the deepest penetration. A wick touching the near edge
+                # is mitigation, not a full fill of the entire imbalance.
+                if gap["type"] == "BULLISH":
+                    if candle.low <= zone_high:
+                        deepest_price = candle.low if deepest_price is None else min(deepest_price, candle.low)
+                else:
+                    if candle.high >= zone_low:
+                        deepest_price = candle.high if deepest_price is None else max(deepest_price, candle.high)
 
-                if candle.high >= gap["from"] and candle.low <= gap["to"]:
-                    gap["filled"] = True
-                    break
+            if deepest_price is None or size <= 0:
+                fill_ratio = 0.0
+            elif gap["type"] == "BULLISH":
+                fill_ratio = max(0.0, min(1.0, (zone_high - deepest_price) / size))
+            else:
+                fill_ratio = max(0.0, min(1.0, (deepest_price - zone_low) / size))
+
+            gap["fill_ratio"] = round(fill_ratio, 4)
+            gap["mitigation_pct"] = round(fill_ratio * 100, 2)
+            gap["filled"] = fill_ratio >= 1.0
 
         return gaps
 

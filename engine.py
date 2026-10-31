@@ -901,9 +901,12 @@ class AtlasEngine:
         daily_orderblocks = self.orderblocks.detect(daily, daily_structure)
         h4_orderblocks = self.orderblocks.detect(h4, h4_structure)
 
+        # OTE, 15m verisinin tüm tarihsel tepe/diplerinden değil,
+        # son onaylı 4H impuls bacağından hesaplanır.
+        ote_high, ote_low = self._h4_ote_range(h4_structure, mtf.get("entry", "NONE"))
         ote = self.ote.detect(
-            swing_high,
-            swing_low,
+            ote_high,
+            ote_low,
             current_price,
             mtf.get("entry", "NONE"),
         )
@@ -989,7 +992,10 @@ class AtlasEngine:
             candles=candles,
             liquidity_sweep=liquidity_sweep,
         )
-        confirmation = self.entry_confirmation.confirm(mtf, entry_structure, fvg, entry)
+        confirmation = self.entry_confirmation.confirm(
+            mtf, entry_structure, fvg, entry,
+            current_price=candles[-1].close if candles else None,
+        )
 
         setup_quality = self.setup_quality.evaluate(
             candles=candles,
@@ -1489,6 +1495,103 @@ class AtlasEngine:
                         f"Candle timestamps must be strictly increasing: timeframe={timeframe} index={index}"
                     )
                 previous_time = timestamp
+
+    def _h4_ote_range(self, structure, direction):
+        """Return the latest confirmed 4H impulse leg for OTE, or (None, None)."""
+        if not isinstance(structure, list):
+            return None, None
+
+        def _index(item):
+            try:
+                return int(item.get("index"))
+            except (TypeError, ValueError):
+                return None
+
+        if direction == "LONG":
+            highs = [
+                item for item in structure
+                if str(item.get("kind", "")).upper() == "HIGH"
+                and str(item.get("label", "")).upper() == "HH"
+                and _index(item) is not None
+            ]
+            if not highs:
+                return None, None
+            high = max(highs, key=_index)
+            prior_lows = [
+                item for item in structure
+                if str(item.get("kind", "")).upper() == "LOW"
+                and str(item.get("label", "")).upper() == "HL"
+                and _index(item) is not None
+                and _index(item) < _index(high)
+            ]
+            if not prior_lows:
+                return None, None
+            low = max(prior_lows, key=_index)
+            try:
+                high_price, low_price = float(high.get("price")), float(low.get("price"))
+            except (TypeError, ValueError):
+                return None, None
+            if not high_price > low_price > 0:
+                return None, None
+            # A later lower-low below the selected HL invalidates this impulse leg.
+            invalidated = any(
+                str(item.get("kind", "")).upper() == "LOW"
+                and str(item.get("label", "")).upper() == "LL"
+                and _index(item) is not None
+                and _index(item) > _index(high)
+                and self._safe_float(item.get("price")) is not None
+                and float(item.get("price")) < low_price
+                for item in structure
+            )
+            return (None, None) if invalidated else (high_price, low_price)
+
+        if direction == "SHORT":
+            lows = [
+                item for item in structure
+                if str(item.get("kind", "")).upper() == "LOW"
+                and str(item.get("label", "")).upper() == "LL"
+                and _index(item) is not None
+            ]
+            if not lows:
+                return None, None
+            low = max(lows, key=_index)
+            prior_highs = [
+                item for item in structure
+                if str(item.get("kind", "")).upper() == "HIGH"
+                and str(item.get("label", "")).upper() == "LH"
+                and _index(item) is not None
+                and _index(item) < _index(low)
+            ]
+            if not prior_highs:
+                return None, None
+            high = max(prior_highs, key=_index)
+            try:
+                high_price, low_price = float(high.get("price")), float(low.get("price"))
+            except (TypeError, ValueError):
+                return None, None
+            if not high_price > low_price > 0:
+                return None, None
+            # A later higher-high above the selected LH invalidates this impulse leg.
+            invalidated = any(
+                str(item.get("kind", "")).upper() == "HIGH"
+                and str(item.get("label", "")).upper() == "HH"
+                and _index(item) is not None
+                and _index(item) > _index(low)
+                and self._safe_float(item.get("price")) is not None
+                and float(item.get("price")) > high_price
+                for item in structure
+            )
+            return (None, None) if invalidated else (high_price, low_price)
+
+        return None, None
+
+    @staticmethod
+    def _safe_float(value):
+        try:
+            number = float(value)
+            return number if math.isfinite(number) else None
+        except (TypeError, ValueError, OverflowError):
+            return None
 
     def _price_context(self, candles):
         """Geçerli fiyat ve işlem aralığını hesaplar."""

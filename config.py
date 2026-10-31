@@ -93,6 +93,9 @@ class Config:
     ROUND_TRIP_COST_RATE = 0.0020
     ATR_PERIOD = 14
     MIN_STOP_ATR_MULTIPLIER = 0.75
+    STOP_STRUCTURE_BUFFER_ATR = 0.10
+    # Sweep-triggered MARKET entry expires shortly after the confirmed close break.
+    SWEEP_MARKET_ENTRY_MAX_AGE_BARS = int(os.getenv("ATLAS_SWEEP_MARKET_ENTRY_MAX_AGE_BARS", "2"))
     # Maximum distance for pending LIMIT entries from the current market.
     MAX_LIMIT_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_ATR", "3.0"))
     MAX_LIMIT_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_PERCENT", "0.05"))
@@ -366,6 +369,7 @@ class Config:
         cls.TELEGRAM_ENABLED = _env_or_rc("ATLAS_TELEGRAM_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
         cls.DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK = _env_or_rc("ATLAS_ALLOW_SYNTHETIC_TP_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
         cls.ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK = _env_or_rc("ATLAS_ENTRY_ALLOW_STRUCTURE_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
+        cls.SWEEP_MARKET_ENTRY_MAX_AGE_BARS = max(0, int(float(_env_or_rc("ATLAS_SWEEP_MARKET_ENTRY_MAX_AGE_BARS", str(cls.SWEEP_MARKET_ENTRY_MAX_AGE_BARS)))))
         cls.TELEGRAM_MIN_CONFIDENCE = float(_env_or_rc("ATLAS_TELEGRAM_MIN_CONFIDENCE", "85"))
         cls.TELEGRAM_REQUIRE_DECISION_ACTION = _env_or_rc("ATLAS_TELEGRAM_REQUIRE_DECISION_ACTION", "1").strip().lower() in {"1", "true", "yes"}
         cls.TELEGRAM_QUALITY_FILTERS_ENABLED = _env_or_rc("ATLAS_TELEGRAM_QUALITY_FILTERS_ENABLED", "1").strip().lower() in {"1", "true", "yes"}

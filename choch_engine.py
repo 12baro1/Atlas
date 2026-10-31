@@ -1,42 +1,41 @@
-"""
-choch_engine.py
-Atlas SMC Engine
-"""
+"""CHoCH detection from a confirmed four-swing reversal sequence."""
+
 
 class CHOCHEngine:
 
-    def detect(self, structure):
+    @staticmethod
+    def _kind(item):
+        return str(item.get("kind", item.get("type", ""))).upper()
 
+    def detect(self, structure):
+        if not isinstance(structure, list):
+            return structure
         if len(structure) < 4:
+            for item in structure:
+                item["choch"] = False
             return structure
 
         for item in structure:
             item["choch"] = False
 
         for i in range(3, len(structure)):
+            a, b, c, d = structure[i - 3:i + 1]
+            kinds = [self._kind(item) for item in (a, b, c, d)]
+            labels = [str(item.get("label", "")).upper() for item in (a, b, c, d)]
 
-            a = structure[i - 3]
-            b = structure[i - 2]
-            c = structure[i - 1]
-            d = structure[i]
+            # Only an alternating, confirmed swing sequence can form a shift.
+            if kinds not in (["LOW", "HIGH", "LOW", "HIGH"],
+                             ["HIGH", "LOW", "HIGH", "LOW"]):
+                continue
 
-            # Bearish -> Bullish dönüş
-            if (
-                a["label"] == "LL"
-                and b["label"] == "LH"
-                and c["label"] == "HL"
-                and d["label"] == "HH"
-            ):
+            # The final swing must also be a genuine structural break (BOS).
+            if not bool(d.get("bos")):
+                continue
+
+            if labels == ["LL", "LH", "HL", "HH"]:
                 d["choch"] = True
                 d["direction"] = "BULLISH"
-
-            # Bullish -> Bearish dönüş
-            elif (
-                a["label"] == "HH"
-                and b["label"] == "HL"
-                and c["label"] == "LH"
-                and d["label"] == "LL"
-            ):
+            elif labels == ["HH", "HL", "LH", "LL"]:
                 d["choch"] = True
                 d["direction"] = "BEARISH"
 

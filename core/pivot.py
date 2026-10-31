@@ -22,3 +22,6 @@ class Pivot:
     swept:bool=False
 
     mitigated:bool=False
+
+    # Candle index at which the right-side confirmation window has closed.
+    confirmation_index:int=None

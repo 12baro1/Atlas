@@ -64,6 +64,7 @@ def test_card_al_verdict_and_levels():
     assert card["stop_loss"] == 65800.0
     assert card["tp_levels"] == [69000.0, 71000.0, 73000.0]
     assert card["rr"] == 4.0
+    assert card["target_max_rr"] == 4.0
     assert card["selected_tp"] == "tp3"
     assert card["position_size"] == 100.0
 
@@ -194,3 +195,35 @@ def test_no_trade_hides_calculated_entry_stop_and_targets():
     assert "Stop Loss" not in rendered
     assert "TP1" not in rendered
     assert "Risk/Ödül" not in rendered
+
+
+
+def test_card_prefers_weighted_partial_rr_and_displays_net_and_max_target_rr():
+    result = _result()
+    result["risk"].update({
+        "rr": 3.0,
+        "target_max_rr": 3.0,
+        "weighted_rr": 2.0,
+        "weighted_net_rr": 1.8,
+        "net_rr": 1.8,
+        "partial_exit_weights": {"tp1": 1/3, "tp2": 1/3, "tp3": 1/3},
+    })
+    result["rr"] = {
+        "rr": 2.0,
+        "selected_tp": "weighted_partial_exit",
+        "selected_rr": 2.0,
+        "target_max_rr": 3.0,
+        "target_max_tp": "tp3",
+        "weighted_rr": 2.0,
+        "weighted_net_rr": 1.8,
+    }
+
+    card = build_signal_card(result)
+    rendered = format_card_text(card)
+
+    assert card["rr"] == 2.0
+    assert card["net_rr"] == 1.8
+    assert card["target_max_rr"] == 3.0
+    assert "Ağırlıklı RR : 2.0" in rendered
+    assert "Net RR       : 1.8" in rendered
+    assert "TP max RR    : 3.0" in rendered

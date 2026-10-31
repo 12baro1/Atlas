@@ -1,4 +1,5 @@
 import os
+
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -70,3 +71,54 @@ def test_liquidity_report_shows_clusters_and_sweep_confirmation():
     assert "BUY-SIDE LIQUIDITY / BSL" in report
     assert "BSL süpürüldü: EVET" in report
     assert "Sonraki yapı teyidi: VAR" in report
+
+
+
+def test_liquidity_report_displays_breakout_levels():
+    app = object.__new__(atlas_tui.AtlasTUIApp)
+    outcome = {
+        "ok": True,
+        "symbol": "BTC/USDT:USDT",
+        "result": {
+            "symbol": "BTC/USDT:USDT",
+            "analysis": {
+                "liquidity_layers": {"bsl": [], "ssl": [], "eqh": [], "eql": []},
+                "liquidity_sweep": {
+                    "is_sweep": False,
+                    "is_breakout": True,
+                    "breakout_high": 100.5,
+                    "breakout_low": None,
+                    "post_structure": {"confirmed": False},
+                },
+            },
+        },
+    }
+
+    rendered = app._format_liquidity(outcome)
+
+    assert "Kırılım: EVET" in rendered
+    assert "BSL üstü: 100.5" in rendered
+    assert "SSL altı: -" in rendered
+
+
+
+def test_liquidity_report_marks_dual_sweep_as_ambiguous():
+    app = object.__new__(atlas_tui.AtlasTUIApp)
+    rendered = app._format_liquidity({
+        "ok": True,
+        "symbol": "BTC/USDT:USDT",
+        "result": {
+            "symbol": "BTC/USDT:USDT",
+            "analysis": {
+                "liquidity_layers": {"bsl": [], "ssl": [], "eqh": [], "eql": []},
+                "liquidity_sweep": {
+                    "is_sweep": False,
+                    "is_breakout": False,
+                    "ambiguous_sweep": True,
+                    "post_structure": {"confirmed": False},
+                },
+            },
+        },
+    })
+
+    assert "Çift taraflı süpürme: EVET — yön belirsiz" in rendered

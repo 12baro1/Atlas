@@ -2,6 +2,8 @@ import sys
 import os
 import time
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.candle import Candle
@@ -54,8 +56,10 @@ def test_signal_outcome_resolves_tp1_to_sl(tmp_path):
     assert resolved is not None
     assert resolved["status"] == "SL"
     assert len(resolved.get("tps_hit") or []) == 1
-    assert resolved.get("realized_r", 0.0) > 0.2
-    assert resolved.get("realized_r", 0.0) > 0.5
+    # Default 1,1,1 weights are normalized to thirds: TP1 closes one third.
+    assert resolved["gross_realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+    assert resolved["fee_rr"] == pytest.approx(0.2, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx((1.0 / 3) - 0.2, abs=1e-4)
 
 
 def test_signal_outcome_expires_after_expiry(tmp_path, monkeypatch):
@@ -585,4 +589,196 @@ def test_same_candle_sl_and_tp_is_resolved_conservatively_as_loss(tmp_path):
     assert resolved["status"] == "SL"
     assert resolved["final_result"] == "LOSS"
     assert resolved.get("tps_hit") == []
-    assert resolved["realized_r"] == -1.0
+    assert resolved["gross_realized_r"] == -1.0
+    assert resolved["fee_rr"] == pytest.approx(0.2, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(-1.2, abs=1e-4)
+
+
+
+def test_signal_outcome_normalizes_custom_partial_weights(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp2=102.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+    )
+    outcome["partial_weights"] = [0.5, 0.3, 0.2]
+    candles = [
+        _precise_candle(1, high=101.2, low=100.1, close=101.0),
+        _precise_candle(2, high=100.5, low=99.8, close=100.0),
+    ]
+
+    resolved = journal.resolve_signal_outcome(outcome, candles)
+
+    assert resolved is not None
+    assert resolved["status"] == "SL"
+    assert resolved["tps_hit"] == [1]
+    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(0.3, abs=1e-4)
+
+
+def test_signal_outcome_normalizes_weights_over_only_present_tp_levels(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+    )
+    outcome["partial_weights"] = [1.0, 1.0, 1.0]
+
+    weights = journal._norm_partial_weights(outcome)
+
+    assert weights == pytest.approx([0.5, 0.0, 0.5])
+
+
+
+def test_signal_outcome_does_not_count_later_tp_after_same_candle_breakeven_stop(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp2=102.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+    )
+    candle = _precise_candle(
+        1, high=102.5, low=99.9, close=101.0, open_=100.0
+    )
+
+    resolved = journal.resolve_signal_outcome(outcome, [candle])
+
+    assert resolved is not None
+    assert resolved["tps_hit"] == [1]
+    assert resolved["hit_sl"] is True
+    assert resolved["gross_realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx((1.0 / 3) - 0.2, abs=1e-4)
+
+
+
+def test_signal_outcome_accumulates_realized_r_across_incremental_candle_batches(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    opened = 1_700_000_000_000
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp2=102.0,
+        tp3=103.0,
+        opened_at=opened,
+    )
+
+    first = _precise_candle(1, high=101.2, low=100.1, close=101.1)
+    second = _precise_candle(2, high=102.2, low=101.2, close=102.1)
+    third = _precise_candle(3, high=103.2, low=101.5, close=103.1)
+
+    assert journal.resolve_signal_outcome(outcome, [first]) is None
+    assert outcome["tps_hit"] == [1]
+    assert outcome["realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+    assert outcome["last_processed_candle_time"] == first.time
+
+    # Replaying the same candle batch is idempotent.
+    assert journal.resolve_signal_outcome(outcome, [first]) is None
+    assert outcome["realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+
+    assert journal.resolve_signal_outcome(outcome, [first, second]) is None
+    assert outcome["tps_hit"] == [1, 2]
+    assert outcome["realized_r"] == pytest.approx(1.0, abs=1e-4)
+    assert outcome["last_processed_candle_time"] == second.time
+    assert journal.resolve_signal_outcome(outcome, [first, second]) is None
+    assert outcome["realized_r"] == pytest.approx(1.0, abs=1e-4)
+
+    resolved = journal.resolve_signal_outcome(outcome, [first, second, third])
+    assert resolved is not None
+    assert resolved["status"] == "TP3"
+    assert resolved["tps_hit"] == [1, 2, 3]
+    assert resolved["gross_realized_r"] == pytest.approx(2.0, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(1.8, abs=1e-4)
+
+
+
+def test_signal_outcome_labels_sparse_tp_levels_by_highest_hit(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+    )
+    candle = _precise_candle(
+        1, high=103.2, low=101.2, close=103.1
+    )
+
+    resolved = journal.resolve_signal_outcome(outcome, [candle])
+
+    assert resolved is not None
+    assert resolved["tps_hit"] == [1, 3]
+    assert resolved["status"] == "TP3"
+    assert resolved["final_result"] == "WIN"
+    assert resolved["gross_realized_r"] == pytest.approx(2.0, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(1.8, abs=1e-4)
+
+
+
+def test_signal_partial_weight_parser_keeps_valid_values_when_one_is_invalid(monkeypatch, tmp_path):
+    monkeypatch.setattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,invalid,1.0")
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+
+    assert journal._signal_partial_weights() == [1.0, 0.0, 1.0]
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp2=102.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+    )
+    assert journal._norm_partial_weights(outcome) == pytest.approx([0.5, 0.0, 0.5])
+
+
+
+def test_tp_hit_with_negative_net_r_is_not_learned_as_a_win(monkeypatch, tmp_path):
+    monkeypatch.setattr(Config, "ROUND_TRIP_COST_RATE", 0.002)
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=100.1,
+        opened_at=1_700_000_000_000,
+    )
+    candle = _precise_candle(
+        1, high=100.2, low=100.05, close=100.15
+    )
+
+    resolved = journal.resolve_signal_outcome(outcome, [candle])
+
+    assert resolved is not None
+    assert resolved["status"] == "TP1"
+    assert resolved["gross_realized_r"] == pytest.approx(0.1, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(-0.1, abs=1e-4)
+    assert resolved["final_result"] == "LOSS"
+
+    records = journal.learning_records(source="signal")
+    assert len(records) == 1
+    assert records[0]["r"] == pytest.approx(-0.1, abs=1e-4)
+    assert records[0]["win"] is False

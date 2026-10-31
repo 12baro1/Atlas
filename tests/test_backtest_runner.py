@@ -1,6 +1,8 @@
 import sys
 import os
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.candle import Candle
@@ -301,3 +303,132 @@ def test_runner_counts_final_candidate_without_followup_candle():
     assert stats["candidate_signals"] == 1
     assert stats["no_followup_data"] == 1
     assert stats["total"] == 0
+
+
+def test_intrabar_limit_fill_does_not_count_target_touched_before_fill():
+    runner = BacktestRunner(partial_exits=False)
+    # The high reaches TP before price later trades down to the LONG limit.
+    # OHLC cannot prove a second TP touch after the fill, so result stays OPEN.
+    candles = [_candle(1, 100.0, 105.0, 94.0, 95.0)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 101.0, "tp2": 103.0, "tp3": 104.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=0) is None
+    stats = runner.statistics()
+    assert stats["total"] == 0
+    assert stats["open_trades"] == 1
+
+
+def test_intrabar_limit_fill_candle_stop_is_counted_conservatively():
+    runner = BacktestRunner(partial_exits=False)
+    candles = [_candle(1, 100.0, 102.0, 89.0, 91.0)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 101.0, "tp2": 103.0, "tp3": 104.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    trade = runner._to_trade(result, candles, entry_index=0)
+    assert trade is not None
+    assert trade["result"] == "LOSS"
+    assert trade["net_rr"] < -1.0
+
+
+
+def test_partial_tp_uses_configured_normalized_exit_weights():
+    candles = [
+        _tl(100.0, o=100.0, h=101.2, l=100.1, cl=101.0, t=1),
+        _tl(102.0, o=101.2, h=102.2, l=101.1, cl=102.0, t=2),
+        _tl(102.0, o=102.0, h=103.2, l=101.5, cl=103.0, t=3),
+    ]
+    out = simulate_trade_partial(
+        entry=100.0,
+        stop_loss=99.0,
+        targets=[101.0, 102.0, 103.0],
+        future_candles=candles,
+        direction="LONG",
+        tp_weights={"tp1": 0.5, "tp2": 0.3, "tp3": 0.2},
+    )
+
+    assert out["result"] == "WIN"
+    assert out["tp"] == 3
+    assert out["net_rr"] == pytest.approx(1.7, abs=1e-4)
+
+
+
+def test_partial_tp2_moves_remaining_stop_to_tp1():
+    candles = [
+        _tl(100.0, o=100.0, h=101.2, l=100.1, cl=101.0, t=1),
+        _tl(102.0, o=101.2, h=102.2, l=101.2, cl=102.0, t=2),
+        _tl(101.0, o=101.0, h=101.5, l=100.9, cl=101.0, t=3),
+    ]
+
+    out = simulate_trade_partial(
+        entry=100.0,
+        stop_loss=99.0,
+        targets=[101.0, 102.0, 103.0],
+        future_candles=candles,
+        direction="LONG",
+    )
+
+    assert out["result"] == "WIN"
+    assert out["tp"] == 2
+    assert out["levels"] == [1, 2]
+    assert out["net_rr"] == pytest.approx(4.0 / 3.0, abs=1e-4)
+
+
+def test_partial_tp2_moves_short_stop_to_tp1():
+    candles = [
+        _tl(100.0, o=99.8, h=99.9, l=98.8, cl=99.0, t=1),
+        _tl(98.0, o=98.8, h=98.8, l=97.8, cl=98.0, t=2),
+        _tl(99.0, o=99.0, h=99.1, l=98.5, cl=99.0, t=3),
+    ]
+
+    out = simulate_trade_partial(
+        entry=100.0,
+        stop_loss=101.0,
+        targets=[99.0, 98.0, 97.0],
+        future_candles=candles,
+        direction="SHORT",
+    )
+
+    assert out["result"] == "WIN"
+    assert out["tp"] == 2
+    assert out["levels"] == [1, 2]
+    assert out["net_rr"] == pytest.approx(4.0 / 3.0, abs=1e-4)
+
+
+
+def test_sparse_tp2_tp3_backtest_does_not_treat_tp2_as_tp1():
+    candles = [
+        _tl(100.0, o=100.0, h=98.8, l=98.0, cl=98.5, t=1),
+    ]
+    out = simulate_trade_partial(
+        entry=100.0,
+        stop_loss=101.0,
+        targets=[None, 98.0, 97.0],
+        future_candles=candles,
+        direction="SHORT",
+    )
+
+    # The trade is still open after TP2; there is no TP1 price to trail to.
+    assert out["result"] == "OPEN"
+    assert out["tp"] == 0
+
+
+
+def test_full_exit_backtest_preserves_sparse_tp3_number():
+    candles = [_tl(100.0, o=100.0, h=103.2, l=100.1, cl=103.0)]
+    out = simulate_trade(
+        entry=100.0,
+        stop_loss=99.0,
+        targets=[None, None, 103.0],
+        future_candles=candles,
+        direction="LONG",
+    )
+
+    assert out["result"] == "WIN"
+    assert out["tp"] == 3

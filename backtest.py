@@ -12,6 +12,7 @@ her sinyali SL/TP vuruşuyla simüle eder ve expectancy/winrate/profit factor ra
 
 import argparse
 import logging
+import math
 import time
 import os
 import sys
@@ -234,6 +235,32 @@ def _report(stats, name):
     print("=" * 52)
 
 
+def _configured_partial_tp_weights():
+    """Use the same partial-close proportions as risk and signal tracking."""
+    raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+    if isinstance(raw, dict):
+        values = [raw.get(f"tp{i}", 1.0) for i in range(1, 4)]
+    elif isinstance(raw, str):
+        values = raw.split(",")
+    elif isinstance(raw, (list, tuple)):
+        values = list(raw)
+    else:
+        values = []
+
+    weights = {}
+    for index in range(3):
+        value = values[index] if index < len(values) else 1.0
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            number = 0.0
+        weights[f"tp{index + 1}"] = number if math.isfinite(number) and number > 0 else 0.0
+
+    if sum(weights.values()) <= 0:
+        return {"tp1": 1.0, "tp2": 1.0, "tp3": 1.0}
+    return weights
+
+
 def main():
     parser = argparse.ArgumentParser(description="Atlas sinyal backtest")
     parser.add_argument("--symbol", default="BTC/USDT:USDT", help="Tek sembol (Bybit swap)")
@@ -268,7 +295,11 @@ def main():
     all_stats = []
     for symbol in symbols:
         data = load_historical(symbol, days=args.days)
-        runner = BacktestRunner(analyze_fn=build_analyze_fn(engine), fee_rate=float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.002)))
+        runner = BacktestRunner(
+            analyze_fn=build_analyze_fn(engine),
+            fee_rate=float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.002)),
+            tp_weights=_configured_partial_tp_weights(),
+        )
         stats = runner.run(data, step=5, lenient=args.lenient)
         _report(stats, symbol)
         all_stats.append((symbol, stats))

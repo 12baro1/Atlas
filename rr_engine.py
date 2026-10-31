@@ -88,10 +88,21 @@ class RREngine:
         if risk is None:
             return None
 
-        rr = risk.get("rr")
+        weighted_rr = risk.get("weighted_rr") if isinstance(risk, dict) else None
+        weighted_net_rr = risk.get("weighted_net_rr") if isinstance(risk, dict) else None
+        try:
+            weighted_rr = float(weighted_rr) if weighted_rr is not None else None
+        except (TypeError, ValueError, OverflowError):
+            weighted_rr = None
+        if weighted_rr is not None and not math.isfinite(weighted_rr):
+            weighted_rr = None
+
+        target_max_rr = risk.get("target_max_rr") if isinstance(risk, dict) else None
+        target_max_tp = risk.get("selected_tp") if isinstance(risk, dict) else None
+        rr = weighted_rr if weighted_rr is not None else risk.get("rr")
         rr_by_tp = risk.get("rr_by_tp") if isinstance(risk, dict) else None
-        selected_tp = risk.get("selected_tp") if isinstance(risk, dict) else None
-        selected_rr = risk.get("selected_rr") if isinstance(risk, dict) else None
+        selected_tp = "weighted_partial_exit" if weighted_rr is not None else target_max_tp
+        selected_rr = weighted_rr if weighted_rr is not None else (risk.get("selected_rr") if isinstance(risk, dict) else None)
         selection_rule = risk.get("rr_selection_rule") if isinstance(risk, dict) else None
 
         if (rr is None or rr <= 0) and isinstance(risk, dict):
@@ -158,6 +169,11 @@ class RREngine:
             "selected_tp": selected_tp,
 
             "selected_rr": selected_rr if selected_rr is not None else rr,
+
+            "target_max_rr": target_max_rr if target_max_rr is not None else selected_rr,
+            "target_max_tp": target_max_tp,
+            "weighted_rr": weighted_rr,
+            "weighted_net_rr": weighted_net_rr,
 
             "rr_by_tp": rr_by_tp,
 

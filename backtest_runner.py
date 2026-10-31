@@ -55,9 +55,13 @@ def simulate_trade(entry, stop_loss, targets, future_candles, direction="LONG", 
     entry = _num(entry)
     stop = _num(stop_loss)
     tp1, tp2, tp3 = _tps(targets)
-    tps = [tp for tp in (tp1, tp2, tp3) if tp is not None]
+    levels = [
+        (level_no, target)
+        for level_no, target in enumerate((tp1, tp2, tp3), start=1)
+        if target is not None
+    ]
 
-    if entry is None or stop is None or not future_candles or not tps:
+    if entry is None or stop is None or not future_candles or not levels:
         return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
 
     risk_distance = abs(entry - stop)
@@ -73,17 +77,17 @@ def simulate_trade(entry, stop_loss, targets, future_candles, direction="LONG", 
         if is_long:
             if low <= stop:
                 return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0)}
-            for idx, tp in enumerate(tps, start=1):
-                if tp is not None and high >= tp:
+            for level_no, tp in levels:
+                if high >= tp:
                     rr = abs(tp - entry) / risk_distance
-                    return {"result": "WIN", "tp": idx, "net_rr": _num(rr)}
+                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr)}
         else:
             if high >= stop:
                 return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0)}
-            for idx, tp in enumerate(tps, start=1):
-                if tp is not None and low <= tp:
+            for level_no, tp in levels:
+                if low <= tp:
                     rr = abs(entry - tp) / risk_distance
-                    return {"result": "WIN", "tp": idx, "net_rr": _num(rr)}
+                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr)}
 
     return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
 
@@ -131,13 +135,19 @@ def simulate_trade_partial(
     # Ağırlıklar: geçilmezse TP sayısına göre eşit bölünür (toplam = 1.0).
     n = len(levels)
     if tp_weights and isinstance(tp_weights, dict):
-        weights = [float(tp_weights.get(f"tp{level_no}", 0.0)) for level_no, _ in levels]
+        weights = []
+        for level_no, _ in levels:
+            try:
+                weight = float(tp_weights.get(f"tp{level_no}", 1.0))
+            except (TypeError, ValueError, OverflowError):
+                weight = 0.0
+            weights.append(weight if math.isfinite(weight) and weight > 0 else 0.0)
     else:
-        weights = [1.0 / n] * n
+        weights = [1.0] * n
     total_w = sum(weights)
-    if total_w <= 0:
-        weights = [1.0 / n] * n
-        total_w = 1.0
+    if not math.isfinite(total_w) or total_w <= 0:
+        weights = [1.0] * n
+        total_w = float(n)
     weights = [w / total_w for w in weights]  # normalize
 
     is_long = direction in ("LONG", "BUY")
@@ -180,10 +190,13 @@ def simulate_trade_partial(
             reached_tp = level_no
             next_level_idx += 1
             # Koruma stopunu taşınma: TP1 → breakeven, TP2 → TP1 seviyesi.
-            if next_level_idx == 1 and len(levels) > 1:
+            available_level_numbers = {number for number, _ in levels}
+            if level_no == 1 and len(levels) > 1:
                 trailing_stop = entry
-            elif next_level_idx == n:
-                trailing_stop = levels[0][1] if n >= 2 else entry
+            elif level_no == 2 and 1 in available_level_numbers and 3 in available_level_numbers:
+                # After the actual TP2 (not simply the second listed target),
+                # protect the remaining position at the actual TP1 price.
+                trailing_stop = next(price for number, price in levels if number == 1)
 
             if closed_frac >= 1.0 - 1e-9:
                 break
@@ -321,6 +334,7 @@ class BacktestRunner:
         # candle close.
         fill_index = None
         entry_price = None
+        limit_intrabar_fill = False
         if entry_type == "MARKET":
             fill_index = entry_index
             entry_price = _num(candles[fill_index].open)
@@ -344,6 +358,14 @@ class BacktestRunner:
                 if opened is None:
                     continue
                 entry_price = min(limit_price, opened) if is_long else max(limit_price, opened)
+                # If price opens through the limit, fill is at the open and
+                # the candle's later range can be simulated. Otherwise the
+                # intrabar path is unknown: do not count a TP touched before
+                # the limit fill as a win.
+                limit_intrabar_fill = not (
+                    (is_long and opened <= limit_price)
+                    or (not is_long and opened >= limit_price)
+                )
                 fill_index = candidate_index
                 break
             if fill_index is None:
@@ -371,26 +393,57 @@ class BacktestRunner:
                 self.invalid_candidates += 1
                 return None
 
-        future = candles[fill_index:]
         use_partial = bool(getattr(self, "partial_exits", True))
-        if use_partial:
-            outcome = simulate_trade_partial(
-                entry=entry_price,
-                stop_loss=stop,
-                targets=tps,
-                future_candles=future,
-                direction=signal_dir,
-                tp_weights=self.tp_weights,
+        if limit_intrabar_fill:
+            fill_candle = candles[fill_index]
+            fill_stop_hit = _candle_touched_stop(
+                signal_dir == "LONG", stop, fill_candle.low, fill_candle.high
             )
+            if fill_stop_hit:
+                outcome = {"result": "LOSS", "tp": 0, "net_rr": -1.0, "levels": []}
+            else:
+                # Exclude the fill candle from target simulation. Its high/low
+                # may have occurred before the intrabar limit order was filled.
+                future = candles[fill_index + 1:]
+                if use_partial:
+                    outcome = simulate_trade_partial(
+                        entry=entry_price,
+                        stop_loss=stop,
+                        targets=tps,
+                        future_candles=future,
+                        direction=signal_dir,
+                        tp_weights=self.tp_weights,
+                    )
+                else:
+                    outcome = simulate_trade(
+                        entry=entry_price,
+                        stop_loss=stop,
+                        targets=tps,
+                        future_candles=future,
+                        direction=signal_dir,
+                        round_trip_cost_rate=self.fee_rate,
+                    )
         else:
-            outcome = simulate_trade(
-                entry=entry_price,
-                stop_loss=stop,
-                targets=tps,
-                future_candles=future,
-                direction=signal_dir,
-                round_trip_cost_rate=self.fee_rate,
-            )
+            # MARKET and gap-through LIMIT orders fill at candle open.
+            future = candles[fill_index:]
+            if use_partial:
+                outcome = simulate_trade_partial(
+                    entry=entry_price,
+                    stop_loss=stop,
+                    targets=tps,
+                    future_candles=future,
+                    direction=signal_dir,
+                    tp_weights=self.tp_weights,
+                )
+            else:
+                outcome = simulate_trade(
+                    entry=entry_price,
+                    stop_loss=stop,
+                    targets=tps,
+                    future_candles=future,
+                    direction=signal_dir,
+                    round_trip_cost_rate=self.fee_rate,
+                )
 
         # Pencere içinde çözülemeyen (ne SL ne TP) işlemleri istatistiğe katma.
         if outcome.get("result") == "OPEN":

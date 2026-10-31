@@ -159,6 +159,10 @@ class DecisionEngine:
             "risk_valid": risk_valid,
             "mtf_valid": bool(mtf.get("valid", False)) if isinstance(mtf, dict) else False,
             "rr": rr_value,
+            "rr_basis": "max_target_for_execution_filter",
+            "weighted_rr": self._safe_number(risk.get("weighted_rr") if isinstance(risk, dict) else None, None),
+            "weighted_net_rr": self._safe_number(risk.get("weighted_net_rr") if isinstance(risk, dict) else None, None),
+            "target_max_rr": self._safe_number(risk.get("target_max_rr") if isinstance(risk, dict) else None, rr_value),
             "selected_rr": self._safe_number(risk.get("selected_rr") if isinstance(risk, dict) else None, rr_value),
             "selected_tp": risk.get("selected_tp") if isinstance(risk, dict) else None,
             "rr_by_tp": risk.get("rr_by_tp") if isinstance(risk, dict) else None,
@@ -288,6 +292,22 @@ class DecisionEngine:
             self._append_unique(
                 blockers,
                 f"RR below minimum RR: {self._fmt_number(rr_value)} < {self._fmt_number(minimum_rr)}",
+            )
+
+        weighted_rr = self._safe_number(
+            risk.get("weighted_rr") if isinstance(risk, dict) else None,
+            None,
+        )
+        weighted_net_rr = self._safe_number(
+            risk.get("weighted_net_rr") if isinstance(risk, dict) else None,
+            None,
+        )
+        if weighted_rr is not None and weighted_net_rr is None:
+            self._append_unique(blockers, "Net RR after costs cannot be calculated")
+        elif weighted_net_rr is not None and weighted_net_rr <= 0:
+            self._append_unique(
+                blockers,
+                f"Net RR after costs is non-positive: {self._fmt_number(weighted_net_rr)}",
             )
 
         return blockers, len(blockers) == 0

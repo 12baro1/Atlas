@@ -1002,8 +1002,8 @@ class TradeJournal:
     def resolve_signal_outcome(self, outcome, candles, max_steps=None):
         """Teorik sinyal sonucunu mumlar üzerinde ilerletir.
 
-        Partial TP mantığı desteklenir: birden fazla TP varsa her TP eşit
-        ağırlıkta kısmi kapanış oluşturur (ör. 3 TP → %33.3). TP1'den sonra
+        Partial TP mantığı desteklenir: TP ağırlıkları normalize edilerek
+        pozisyon paylarına çevrilir (varsayılan 3 TP → her biri %33.3). TP1'den sonra
         koruyucu stop breakeven'e, TP2'den sonra TP1 seviyesine taşınır.
         TP sonrası SL gelen senaryo 'WIN' olarak değil gerçekleşen kısmi R
         ile işaretlenir.
@@ -1020,8 +1020,15 @@ class TradeJournal:
             return None
 
         candles = self._candles_for_symbol(candles, symbol)
-        matching = [c for c in candles if getattr(c, "time", 0) > outcome.get("opened_at", 0)]
-        matching = matching[: max_steps] if max_steps else matching
+        opened_at = int(outcome.get("opened_at") or 0)
+        last_processed_at = int(outcome.get("last_processed_candle_time") or 0)
+        matching = [
+            candle for candle in candles
+            if int(getattr(candle, "time", 0) or 0) > opened_at
+            and int(getattr(candle, "time", 0) or 0) > last_processed_at
+        ]
+        matching.sort(key=lambda candle: int(getattr(candle, "time", 0) or 0))
+        matching = matching[:max_steps] if max_steps else matching
         if not matching:
             return None
 
@@ -1036,7 +1043,9 @@ class TradeJournal:
 
         reached = list(outcome.get("tps_hit") or [])
         trailing_stop = self._num(outcome.get("trailing_stop")) or stop_loss
-        realized = 0.0
+        # Carry forward all previously realized partial R; only newly closed
+        # candles are processed on this invocation.
+        realized = self._num(outcome.get("realized_r"), 0.0) or 0.0
         hit_sl = bool(outcome.get("hit_sl"))
         mfe = float(outcome.get("max_favorable_excursion") or 0.0)
         mae = float(outcome.get("max_adverse_excursion") or 0.0)
@@ -1111,9 +1120,43 @@ class TradeJournal:
                         trailing_stop = tp1
                 else:
                     trailing_stop = current_stop
+
                 if len(reached) >= len(tps):
                     closed_all = True
                     break
+
+                # OHLC cannot prove that a later TP was reached before the
+                # protective stop moved by an earlier TP. Be conservative:
+                # once the new stop is inside this candle's range, close the
+                # remaining fraction here and do not count further targets.
+                remaining = max(
+                    0.0,
+                    1.0 - sum(self._weight_for(weights, level) for level in reached),
+                )
+                moved_stop_hit = (
+                    remaining > 0.0
+                    and (
+                        (side == "LONG" and trailing_stop is not None and low <= trailing_stop)
+                        or (side != "LONG" and trailing_stop is not None and high >= trailing_stop)
+                    )
+                )
+                if moved_stop_hit:
+                    if side == "LONG":
+                        rr_stop = (trailing_stop - entry) / risk
+                    else:
+                        rr_stop = (entry - trailing_stop) / risk
+                    realized += remaining * rr_stop
+                    hit_sl = True
+                    closed_all = True
+                    break
+
+        # Advance the candle cursor so subsequent calls cannot replay old bars.
+        processed_times = [
+            int(getattr(candle, "time", 0) or 0)
+            for candle in matching
+        ]
+        if processed_times:
+            outcome["last_processed_candle_time"] = max(processed_times)
 
         # Güncelle
         for level_no, _tp in tps:
@@ -1142,9 +1185,26 @@ class TradeJournal:
         self._persist_signal_outcome(outcome)
         return None
 
+    def _signal_round_trip_cost_rate(self):
+        try:
+            from config import Config
+            rate = float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.0012))
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+        return max(0.0, rate) if math.isfinite(rate) else 0.0
+
     def _finalize_signal_outcome(self, outcome):
         """TP/sl ile kapanmış sinyali kalıcı duruma geçirir."""
-        realized = float(outcome.get("realized_r") or 0.0)
+        gross_realized = float(outcome.get("realized_r") or 0.0)
+        entry = self._num(outcome.get("entry"))
+        stop_loss = self._num(outcome.get("stop_loss"))
+        risk_distance = abs(entry - stop_loss) if entry is not None and stop_loss is not None else 0.0
+        fee_rate = self._signal_round_trip_cost_rate()
+        fee_rr = (abs(entry) * fee_rate / risk_distance) if entry is not None and risk_distance > 0 else 0.0
+        outcome["gross_realized_r"] = round(gross_realized, 4)
+        outcome["fee_rr"] = round(fee_rr, 4)
+        outcome["realized_r"] = round(gross_realized - fee_rr, 4)
+        realized = outcome["realized_r"]
         if outcome.get("hit_sl") and not outcome.get("tps_hit"):
             outcome["status"] = "SL"
             outcome["final_result"] = "LOSS"
@@ -1152,15 +1212,13 @@ class TradeJournal:
             # TP sonrası SL: '%WIN' değil, gerçekleşen kısmi R işaretlenir.
             outcome["status"] = "SL"
             outcome["final_result"] = "PARTIAL"
-        elif len(outcome.get("tps_hit") or []) >= 3:
-            outcome["status"] = "TP3"
-            outcome["final_result"] = "WIN"
-        elif len(outcome.get("tps_hit") or []) == 2:
-            outcome["status"] = "TP2"
-            outcome["final_result"] = "WIN"
-        elif len(outcome.get("tps_hit") or []) == 1:
-            outcome["status"] = "TP1"
-            outcome["final_result"] = "WIN"
+        elif outcome.get("tps_hit"):
+            # TP status is the highest numbered target actually reached, not
+            # the count of targets. TP1+TP3 with no TP2 must still report TP3.
+            highest_hit = max(int(level) for level in outcome.get("tps_hit") if int(level) in (1, 2, 3))
+            outcome["status"] = f"TP{highest_hit}"
+            # A target can be touched while fees still make the whole trade net-negative.
+            outcome["final_result"] = "WIN" if realized > 0 else "LOSS"
         else:
             outcome["status"] = "PENDING"
             outcome["final_result"] = None
@@ -1675,7 +1733,7 @@ class TradeJournal:
         # TP ardından SL ile kapanan kısmi işlemler, gerçekleşen R pozitifse
         # öğrenme istatistiğinde zarar sayılmamalı. Sonuç etiketi PARTIAL olarak
         # korunur; ikili win/loss metriği net pozitif getiriyi esas alır.
-        win = final_result == "WIN" or (final_result == "PARTIAL" and r_value > 0)
+        win = r_value > 0
         payload = outcome.get("payload") or {}
         if not isinstance(payload, dict):
             payload = {}
@@ -1712,10 +1770,42 @@ class TradeJournal:
         return candles
 
     def _norm_partial_weights(self, outcome):
-        weights = outcome.get("partial_weights")
-        if isinstance(weights, (list, tuple)) and weights:
-            return [float(w) for w in weights]
-        return [1.0, 1.0, 1.0]
+        """Normalize partial-close weights over TP levels present in this signal."""
+        raw = outcome.get("partial_weights")
+        if isinstance(raw, dict):
+            supplied = [raw.get(f"tp{i}", 1.0) for i in range(1, 4)]
+        elif isinstance(raw, (list, tuple)):
+            supplied = list(raw)
+        else:
+            supplied = self._signal_partial_weights()
+
+        values = []
+        for index in range(3):
+            value = supplied[index] if index < len(supplied) else 1.0
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                number = 0.0
+            values.append(number if math.isfinite(number) and number > 0 else 0.0)
+
+        active_levels = [
+            i for i in range(1, 4)
+            if self._num(outcome.get(f"tp{i}")) is not None
+        ]
+        if not active_levels:
+            active_levels = [1, 2, 3]
+
+        total = sum(values[i - 1] for i in active_levels)
+        if total <= 0:
+            for i in active_levels:
+                values[i - 1] = 1.0
+            total = float(len(active_levels))
+
+        active = set(active_levels)
+        return [
+            values[i - 1] / total if i in active else 0.0
+            for i in range(1, 4)
+        ]
 
     def _weight_for(self, weights, level_no):
         index = level_no - 1
@@ -1724,13 +1814,30 @@ class TradeJournal:
         return 1.0
 
     def _signal_partial_weights(self):
-        try:
-            from config import Config
-            raw = str(getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0"))
-            parts = [float(item.strip()) for item in raw.split(",") if item.strip()]
-            return parts or [1.0, 1.0, 1.0]
-        except Exception:
+        from config import Config
+
+        raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+        if isinstance(raw, dict):
+            supplied = [raw.get(f"tp{i}", 1.0) for i in range(1, 4)]
+        elif isinstance(raw, str):
+            supplied = raw.split(",")
+        elif isinstance(raw, (list, tuple)):
+            supplied = list(raw)
+        else:
+            supplied = []
+
+        weights = []
+        for index in range(3):
+            value = supplied[index] if index < len(supplied) else 1.0
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                number = 0.0
+            weights.append(number if math.isfinite(number) and number > 0 else 0.0)
+
+        if sum(weights) <= 0:
             return [1.0, 1.0, 1.0]
+        return weights
 
     def _signal_outcome_expiry_hours(self):
         try:

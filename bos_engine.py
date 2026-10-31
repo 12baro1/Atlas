@@ -23,7 +23,8 @@ class BOSEngine:
                 "kind": pivot["type"],
                 "label": pivot["label"],
                 "bos": False,
-                "direction": None
+                "direction": None,
+                "confirmation_index": pivot.get("confirmation_index", pivot.get("index"))
             }
 
             if pivot["type"] == "HIGH":

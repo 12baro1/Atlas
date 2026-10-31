@@ -55,7 +55,7 @@ class DynamicTPEngine:
                     "tp3": None,
                     "reason": "no_valid_structural_targets",
                     "sources": selected_sources + ["missing_structural_target"],
-                    "synthetic_targets": True,
+                    "synthetic_targets": False,
                     "atr": round(atr_snapshot, 8),
                 }
             if target is None:

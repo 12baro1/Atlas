@@ -112,6 +112,11 @@ def build_signal_card(result):
         "stop_loss": None,
         "tp_levels": [],
         "rr": None,
+        "net_rr": None,
+        "target_max_rr": None,
+        "weighted_rr": None,
+        "weighted_net_rr": None,
+        "partial_exit_weights": {},
         "selected_tp": None,
         "position_size": None,
         "capital_at_risk": None,
@@ -135,7 +140,36 @@ def build_signal_card(result):
         if tp is not None:
             card["tp_levels"].append(_price(tp))
 
-    card["rr"] = _num(risk.get("rr") or rr.get("rr"))
+    card["target_max_rr"] = _num(
+        risk.get("target_max_rr")
+        or rr.get("target_max_rr")
+        or risk.get("rr")
+    )
+    card["weighted_rr"] = _num(
+        risk.get("weighted_rr")
+        if risk.get("weighted_rr") is not None
+        else rr.get("weighted_rr")
+    )
+    card["weighted_net_rr"] = _num(
+        risk.get("weighted_net_rr")
+        if risk.get("weighted_net_rr") is not None
+        else rr.get("weighted_net_rr")
+    )
+    card["partial_exit_weights"] = (
+        risk.get("partial_exit_weights")
+        or rr.get("partial_exit_weights")
+        or {}
+    )
+    card["rr"] = (
+        card["weighted_rr"]
+        if card["weighted_rr"] is not None
+        else _num(risk.get("rr") or rr.get("rr"))
+    )
+    card["net_rr"] = (
+        card["weighted_net_rr"]
+        if card["weighted_net_rr"] is not None
+        else _num(risk.get("net_rr"))
+    )
     card["selected_tp"] = risk.get("selected_tp") or rr.get("selected_tp")
     card["position_size"] = _num(risk.get("position_size"))
     card["capital_at_risk"] = _num(risk.get("capital_at_risk"))
@@ -172,7 +206,8 @@ def _summarize(card):
     tps = "/".join(str(t) for t in card["tp_levels"]) or "yok"
     return (
         f"{card['verdict']} {card['symbol']} @ {entry} | SL {sl} | TP {tps} | "
-        f"RR ~{card['rr']} | Kalite {card['setup_quality']}/100 | "
+        f"Ağırlıklı RR ~{card['rr']} | Net RR ~{card.get('net_rr')} | "
+        f"Kalite {card['setup_quality']}/100 | "
         f"{len(card['critical_blocks'])} kritik blok, {len(card['soft_adjustments'])} yumuşak düzeltme"
     )
 
@@ -233,7 +268,11 @@ def format_card_text(card):
         for index, target in enumerate(card["tp_levels"][:3], start=1):
             lines.append(f"  {label}{index} : {target}")
     if card.get("rr") is not None:
-        lines.append(f"  Risk/Ödül : {card['rr']}")
+        lines.append(f"  Ağırlıklı RR : {card['rr']}")
+    if card.get("net_rr") is not None:
+        lines.append(f"  Net RR       : {card['net_rr']}")
+    if card.get("target_max_rr") is not None:
+        lines.append(f"  TP max RR    : {card['target_max_rr']}")
     if card.get("setup_quality") is not None:
         lines.append(f"  Kalite    : {card['setup_quality']}/100")
     lines.append(line)
