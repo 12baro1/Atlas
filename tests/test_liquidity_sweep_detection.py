@@ -119,7 +119,7 @@ def test_post_structure_confirmation_requires_break_after_sweep():
     assert result["post_structure"]["reason"] == "structure_not_after_sweep"
 
 
-def test_post_structure_confirmation_accepts_explicit_later_break_index():
+def test_post_structure_confirmation_rejects_unobserved_future_break_index():
     engine = LiquiditySweepEngine()
     candles = [
         _candle(0, 99.6, 100.0, 99.2, 99.8),
