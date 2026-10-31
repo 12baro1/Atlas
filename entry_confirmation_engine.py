@@ -27,19 +27,28 @@ class EntryConfirmationEngine:
             result["reason"] = "No direction"
             return result
 
-        # A swing label alone (e.g. HL) is a location, not an entry trigger.
-        # The latest confirmed 15m swing must have actually broken structure.
-        last = structure[-1]
-        label = str(last.get("label", "")).upper()
-        event_direction = str(last.get("direction", "")).upper()
-        if not (last.get("bos") or last.get("choch")) or event_direction != expected:
+        # Keep the latest confirmed directional break active through ordinary
+        # pullback pivots (HL/LH). It expires only when a newer opposing BOS/CHoCH
+        # appears; a swing label by itself is not a new break.
+        break_events = [
+            item for item in structure
+            if isinstance(item, dict) and (item.get("bos") or item.get("choch"))
+        ]
+        if not break_events:
             result["reason"] = "15m directional BOS/CHoCH missing"
             return result
 
-        if direction == "LONG" and label not in {"HH"}:
+        last_break = break_events[-1]
+        label = str(last_break.get("label", "")).upper()
+        event_direction = str(last_break.get("direction", "")).upper()
+        if event_direction != expected:
+            result["reason"] = "Latest 15m break opposes entry direction"
+            return result
+
+        if direction == "LONG" and label != "HH":
             result["reason"] = "Bullish structural break missing"
             return result
-        if direction == "SHORT" and label not in {"LL"}:
+        if direction == "SHORT" and label != "LL":
             result["reason"] = "Bearish structural break missing"
             return result
 
