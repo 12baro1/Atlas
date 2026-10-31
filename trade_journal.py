@@ -1741,7 +1741,7 @@ class TradeJournal:
         """Normalize partial-close weights over TP levels present in this signal."""
         raw = outcome.get("partial_weights")
         if isinstance(raw, dict):
-            supplied = [raw.get(f"tp{i}") for i in range(1, 4)]
+            supplied = [raw.get(f"tp{i}", 1.0) for i in range(1, 4)]
         elif isinstance(raw, (list, tuple)):
             supplied = list(raw)
         else:
