@@ -356,3 +356,46 @@ def test_partial_tp_uses_configured_normalized_exit_weights():
     assert out["result"] == "WIN"
     assert out["tp"] == 3
     assert out["net_rr"] == pytest.approx(1.7, abs=1e-4)
+
+
+
+def test_partial_tp2_moves_remaining_stop_to_tp1():
+    candles = [
+        _tl(100.0, o=100.0, h=101.2, l=100.1, cl=101.0, t=1),
+        _tl(102.0, o=101.2, h=102.2, l=101.2, cl=102.0, t=2),
+        _tl(101.0, o=101.0, h=101.5, l=100.9, cl=101.0, t=3),
+    ]
+
+    out = simulate_trade_partial(
+        entry=100.0,
+        stop_loss=99.0,
+        targets=[101.0, 102.0, 103.0],
+        future_candles=candles,
+        direction="LONG",
+    )
+
+    assert out["result"] == "WIN"
+    assert out["tp"] == 2
+    assert out["levels"] == [1, 2]
+    assert out["net_rr"] == pytest.approx(4.0 / 3.0, abs=1e-4)
+
+
+def test_partial_tp2_moves_short_stop_to_tp1():
+    candles = [
+        _tl(100.0, o=100.0, h=99.9, l=98.8, cl=99.0, t=1),
+        _tl(98.0, o=98.8, h=98.8, l=97.8, cl=98.0, t=2),
+        _tl(99.0, o=99.0, h=99.1, l=98.5, cl=99.0, t=3),
+    ]
+
+    out = simulate_trade_partial(
+        entry=100.0,
+        stop_loss=101.0,
+        targets=[99.0, 98.0, 97.0],
+        future_candles=candles,
+        direction="SHORT",
+    )
+
+    assert out["result"] == "WIN"
+    assert out["tp"] == 2
+    assert out["levels"] == [1, 2]
+    assert out["net_rr"] == pytest.approx(4.0 / 3.0, abs=1e-4)
