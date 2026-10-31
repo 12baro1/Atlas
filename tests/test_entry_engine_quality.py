@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from entry_engine import EntryEngine
 
 
-def test_entry_engine_recommends_market_when_price_is_near_bullish_fvg():
+def test_entry_engine_does_not_market_enter_only_because_price_is_near_bullish_fvg():
     result = EntryEngine().generate(
         mtf={"entry": "LONG"},
         structure=[{"label": "HL", "kind": "LOW", "price": 99.5}],
@@ -15,8 +15,8 @@ def test_entry_engine_recommends_market_when_price_is_near_bullish_fvg():
         current_price=100.05,
     )
 
-    assert result["entry_type"] == "MARKET"
-    assert result["entry"] == 100.05
+    assert result["entry_type"] == "LIMIT"
+    assert result["entry"] == 100.0
     assert result["stop_loss"] < result["entry"]
 
 
@@ -32,6 +32,22 @@ def test_entry_engine_recommends_limit_when_price_is_far_from_bullish_fvg():
     assert result["entry_type"] == "LIMIT"
     assert result["entry"] == 100.0
     assert result["stop_loss"] < result["entry"]
+
+
+def test_entry_engine_market_entry_requires_sweep_and_post_choch():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 99.5}],
+        fvg=[{"type": "BULLISH", "from": 99.8, "to": 100.0, "filled": False}],
+        orderblocks=[],
+        current_price=99.9,
+        liquidity_sweep={
+            "sell_side": True,
+            "post_structure": {"confirmed": True, "direction": "BULLISH", "type": "CHOCH"},
+        },
+    )
+    assert result["entry_type"] == "MARKET"
+    assert result["entry"] == 99.9
 
 
 def test_entry_engine_rejects_wrong_side_stop_loss():
@@ -148,8 +164,8 @@ def test_structure_fallback_with_finite_live_price_uses_market_order():
     )
 
     assert result["valid"] is True
-    assert result["entry_type"] == "MARKET"
-    assert result["entry"] == 100.5
+    assert result["entry_type"] == "NONE"
+    assert result["entry"] is None
 
 
 def test_entry_engine_rejects_non_finite_current_price():
