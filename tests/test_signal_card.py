@@ -99,7 +99,7 @@ def test_signal_card_labels_confidence_as_score_not_probability():
     rendered = format_card_text(card)
 
     assert "İŞLEME GİRME" in rendered
-    assert "Giriş şartları oluşmadı." in rendered
+    assert "correlation block" in rendered
     assert "92%" not in rendered
 
 
