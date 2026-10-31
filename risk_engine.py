@@ -19,40 +19,37 @@ class RiskEngine:
 
 
     def _resolve_partial_exit_weights(self, rr_by_tp):
-        """Normalize configured TP exit weights over targets that are actually valid."""
+        """Match the signal journal's normalized TP exit weights."""
         names = ("tp1", "tp2", "tp3")
         raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+        if isinstance(raw, dict):
+            supplied = [raw.get(name, 1.0) for name in names]
+        elif isinstance(raw, str):
+            supplied = raw.split(",")
+        elif isinstance(raw, (list, tuple)):
+            supplied = list(raw)
+        else:
+            supplied = []
 
         parsed = {}
-        if isinstance(raw, dict):
-            for name in names:
-                try:
-                    number = float(raw.get(name))
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                if math.isfinite(number) and number > 0:
-                    parsed[name] = number
-        else:
-            values = raw.split(",") if isinstance(raw, str) else raw if isinstance(raw, (list, tuple)) else []
-            for name, value in zip(names, values):
-                try:
-                    number = float(value)
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                if math.isfinite(number) and number > 0:
-                    parsed[name] = number
+        for index, name in enumerate(names):
+            value = supplied[index] if index < len(supplied) else 1.0
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                number = 0.0
+            parsed[name] = number if math.isfinite(number) and number > 0 else 0.0
 
         available = [name for name in names if name in (rr_by_tp or {})]
         if not available:
             return {}, None
 
-        weights = {name: parsed.get(name, 0.0) for name in available}
-        total = sum(weights.values())
+        total = sum(parsed[name] for name in available)
         if not math.isfinite(total) or total <= 0:
-            weights = {name: 1.0 for name in available}
+            parsed = {name: 1.0 for name in available}
             total = float(len(available))
 
-        normalized = {name: weights[name] / total for name in available}
+        normalized = {name: parsed[name] / total for name in available}
         weighted_rr = sum(float(rr_by_tp[name]) * normalized[name] for name in available)
         return normalized, weighted_rr
 
