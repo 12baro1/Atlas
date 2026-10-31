@@ -181,7 +181,7 @@ class LiquiditySweepEngine:
             buy_breakout = bool(buy_event and buy_event["is_breakout"])
             sell_breakout = bool(sell_event and sell_event["is_breakout"])
             if not buy_swept and not sell_swept:
-                if buy_breakout or sell_breakout:
+                if (buy_breakout or sell_breakout) and sweep_index == len(candles) - 1:
                     return {
                         "event_type": "BREAKOUT",
                         "event_index": sweep_index,
