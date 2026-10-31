@@ -631,3 +631,28 @@ def test_signal_outcome_normalizes_weights_over_only_present_tp_levels(tmp_path)
     weights = journal._norm_partial_weights(outcome)
 
     assert weights == pytest.approx([0.5, 0.0, 0.5])
+
+
+
+def test_signal_outcome_does_not_count_later_tp_after_same_candle_breakeven_stop(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp2=102.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+    )
+    candle = _precise_candle(
+        1, high=102.5, low=99.9, close=101.0, open_=100.0
+    )
+
+    resolved = journal.resolve_signal_outcome(outcome, [candle])
+
+    assert resolved is not None
+    assert resolved["tps_hit"] == [1]
+    assert resolved["hit_sl"] is True
+    assert resolved["realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
