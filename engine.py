@@ -992,7 +992,10 @@ class AtlasEngine:
             candles=candles,
             liquidity_sweep=liquidity_sweep,
         )
-        confirmation = self.entry_confirmation.confirm(mtf, entry_structure, fvg, entry)
+        confirmation = self.entry_confirmation.confirm(
+            mtf, entry_structure, fvg, entry,
+            current_price=candles[-1].close if candles else None,
+        )
 
         setup_quality = self.setup_quality.evaluate(
             candles=candles,
