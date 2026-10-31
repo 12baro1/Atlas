@@ -413,7 +413,13 @@ class AtlasRuntime:
 
                     if Config.SIGNAL_TRACKING_ENABLED:
                         candles_15m = data.get("15m") or data.get("15M") or []
-                        self.engine.trade_journal.resolve_signal_outcomes({symbol: candles_15m})
+                        resolved_outcomes = self.engine.trade_journal.resolve_signal_outcomes(
+                            {symbol: candles_15m}
+                        )
+                        # Kapanan sinyal sonuçları aynı tarama döngüsünde öğrenme
+                        # indeksine aktarılır; bir sonraki analiz eski istatistikle kalmaz.
+                        if resolved_outcomes:
+                            self.engine.refresh_learning()
 
             if from_scan:
                 self._log(f"[{scan_index}/{scan_total}] analyzed {symbol}")
