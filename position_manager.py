@@ -3,6 +3,9 @@ position_manager.py
 Atlas SMC Engine v2
 """
 
+from config import Config
+
+
 class PositionManager:
 
     def __init__(self):
@@ -42,6 +45,7 @@ class PositionManager:
             "remaining_percent": 100,
             "realized_percent": 0,
             "sl_moved_to_entry": False,
+            "tp1_breakeven_stop": None,
             "runner_active": False,
             "hit_tp1": False,
             "hit_tp2": False,
@@ -79,22 +83,25 @@ class PositionManager:
 
                 if price <= pos["stop_loss"]:
                     pos["status"] = "STOP"
-                    changed_positions.append(pos)
+                    changed_positions.append(dict(pos, event="STOP"))
+                    continue
 
-                if price >= pos["tp1"] and not pos["hit_tp1"]:
+                if pos.get("tp1") is not None and price >= pos["tp1"] and not pos["hit_tp1"]:
                     self._take_partial(pos, percent=30)
                     pos["hit_tp1"] = True
-                    pos["stop_loss"] = pos["entry"]
+                    cost_rate = max(0.0, float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.0)))
+                    pos["stop_loss"] = pos["entry"] * (1.0 + cost_rate)
+                    pos["tp1_breakeven_stop"] = pos["stop_loss"]
                     pos["sl_moved_to_entry"] = True
                     changed_positions.append(dict(pos, event="TP1", partial_percent=30))
 
-                if price >= pos["tp2"] and not pos["hit_tp2"]:
+                if pos.get("tp2") is not None and price >= pos["tp2"] and not pos["hit_tp2"]:
                     self._take_partial(pos, percent=30)
                     pos["hit_tp2"] = True
                     pos["runner_active"] = True
                     changed_positions.append(dict(pos, event="TP2", partial_percent=30))
 
-                if price >= pos["tp3"] and not pos["hit_tp3"]:
+                if pos.get("tp3") is not None and price >= pos["tp3"] and not pos["hit_tp3"]:
                     self._take_partial(pos, percent=40)
                     pos["hit_tp3"] = True
                     pos["status"] = "CLOSED"
@@ -104,22 +111,25 @@ class PositionManager:
 
                 if price >= pos["stop_loss"]:
                     pos["status"] = "STOP"
-                    changed_positions.append(pos)
+                    changed_positions.append(dict(pos, event="STOP"))
+                    continue
 
-                if price <= pos["tp1"] and not pos["hit_tp1"]:
+                if pos.get("tp1") is not None and price <= pos["tp1"] and not pos["hit_tp1"]:
                     self._take_partial(pos, percent=30)
                     pos["hit_tp1"] = True
-                    pos["stop_loss"] = pos["entry"]
+                    cost_rate = max(0.0, float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.0)))
+                    pos["stop_loss"] = pos["entry"] * (1.0 - cost_rate)
+                    pos["tp1_breakeven_stop"] = pos["stop_loss"]
                     pos["sl_moved_to_entry"] = True
                     changed_positions.append(dict(pos, event="TP1", partial_percent=30))
 
-                if price <= pos["tp2"] and not pos["hit_tp2"]:
+                if pos.get("tp2") is not None and price <= pos["tp2"] and not pos["hit_tp2"]:
                     self._take_partial(pos, percent=30)
                     pos["hit_tp2"] = True
                     pos["runner_active"] = True
                     changed_positions.append(dict(pos, event="TP2", partial_percent=30))
 
-                if price <= pos["tp3"] and not pos["hit_tp3"]:
+                if pos.get("tp3") is not None and price <= pos["tp3"] and not pos["hit_tp3"]:
                     self._take_partial(pos, percent=40)
                     pos["hit_tp3"] = True
                     pos["status"] = "CLOSED"

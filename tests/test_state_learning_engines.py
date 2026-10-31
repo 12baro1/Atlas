@@ -36,14 +36,25 @@ def test_news_filter_blocks_high_impact_window():
     assert state["active"] is True
 
 
-def test_position_manager_moves_sl_to_entry_and_scales_out():
+def test_position_manager_moves_sl_to_net_breakeven_and_scales_out():
     manager = PositionManager()
     manager.open("BTC", {"side": "LONG", "entry": 100, "stop_loss": 95, "tp1": 105, "tp2": 110, "tp3": 120})
     manager.update("BTC", 106)
     pos = manager.open_positions()[0]
-    assert pos["stop_loss"] == 100
+    assert pos["stop_loss"] > 100
+    assert pos["stop_loss"] == pos["tp1_breakeven_stop"]
     assert pos["remaining_percent"] == 70
     assert pos["hit_tp1"] is True
+
+
+def test_position_manager_short_tp1_moves_stop_below_entry_after_costs():
+    manager = PositionManager()
+    manager.open("BTC", {"side": "SHORT", "entry": 100, "stop_loss": 105, "tp1": 95, "tp2": 90, "tp3": 80})
+    manager.update("BTC", 94)
+    pos = manager.open_positions()[0]
+    assert pos["stop_loss"] < 100
+    assert pos["stop_loss"] == pos["tp1_breakeven_stop"]
+    assert pos["remaining_percent"] == 70
 
 
 def test_cooldown_blocks_duplicate_symbol_direction():

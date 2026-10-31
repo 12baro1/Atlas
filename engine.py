@@ -977,6 +977,7 @@ class AtlasEngine:
             current_price=candles[-1].close if candles else None,
             allow_structure_fallback=bool(getattr(Config, "ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK", False)),
             candles=candles,
+            liquidity_sweep=liquidity_sweep,
         )
         confirmation = self.entry_confirmation.confirm(mtf, entry_structure, fvg, entry)
 
