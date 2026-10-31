@@ -12,6 +12,7 @@ her sinyali SL/TP vuruşuyla simüle eder ve expectancy/winrate/profit factor ra
 
 import argparse
 import logging
+import math
 import time
 import os
 import sys
