@@ -658,3 +658,39 @@ def test_signal_outcome_does_not_count_later_tp_after_same_candle_breakeven_stop
     assert resolved["tps_hit"] == [1]
     assert resolved["hit_sl"] is True
     assert resolved["realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+
+
+
+def test_signal_outcome_accumulates_realized_r_across_incremental_candle_batches(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    opened = 1_700_000_000_000
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp2=102.0,
+        tp3=103.0,
+        opened_at=opened,
+    )
+
+    first = _precise_candle(1, high=101.2, low=100.1, close=101.1)
+    second = _precise_candle(2, high=102.2, low=100.5, close=102.1)
+    third = _precise_candle(3, high=103.2, low=101.5, close=103.1)
+
+    assert journal.resolve_signal_outcome(outcome, [first]) is None
+    assert outcome["tps_hit"] == [1]
+    assert outcome["realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+    assert outcome["last_processed_candle_time"] == first.time
+
+    assert journal.resolve_signal_outcome(outcome, [first, second]) is None
+    assert outcome["tps_hit"] == [1, 2]
+    assert outcome["realized_r"] == pytest.approx(1.0, abs=1e-4)
+    assert outcome["last_processed_candle_time"] == second.time
+
+    resolved = journal.resolve_signal_outcome(outcome, [first, second, third])
+    assert resolved is not None
+    assert resolved["status"] == "TP3"
+    assert resolved["tps_hit"] == [1, 2, 3]
+    assert resolved["realized_r"] == pytest.approx(2.0, abs=1e-4)
