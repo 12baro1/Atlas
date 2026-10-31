@@ -1020,8 +1020,15 @@ class TradeJournal:
             return None
 
         candles = self._candles_for_symbol(candles, symbol)
-        matching = [c for c in candles if getattr(c, "time", 0) > outcome.get("opened_at", 0)]
-        matching = matching[: max_steps] if max_steps else matching
+        opened_at = int(outcome.get("opened_at") or 0)
+        last_processed_at = int(outcome.get("last_processed_candle_time") or 0)
+        matching = [
+            candle for candle in candles
+            if int(getattr(candle, "time", 0) or 0) > opened_at
+            and int(getattr(candle, "time", 0) or 0) > last_processed_at
+        ]
+        matching.sort(key=lambda candle: int(getattr(candle, "time", 0) or 0))
+        matching = matching[:max_steps] if max_steps else matching
         if not matching:
             return None
 
@@ -1036,7 +1043,9 @@ class TradeJournal:
 
         reached = list(outcome.get("tps_hit") or [])
         trailing_stop = self._num(outcome.get("trailing_stop")) or stop_loss
-        realized = 0.0
+        # Carry forward all previously realized partial R; only newly closed
+        # candles are processed on this invocation.
+        realized = self._num(outcome.get("realized_r"), 0.0) or 0.0
         hit_sl = bool(outcome.get("hit_sl"))
         mfe = float(outcome.get("max_favorable_excursion") or 0.0)
         mae = float(outcome.get("max_adverse_excursion") or 0.0)
@@ -1140,6 +1149,14 @@ class TradeJournal:
                     hit_sl = True
                     closed_all = True
                     break
+
+        # Advance the candle cursor so subsequent calls cannot replay old bars.
+        processed_times = [
+            int(getattr(candle, "time", 0) or 0)
+            for candle in matching
+        ]
+        if processed_times:
+            outcome["last_processed_candle_time"] = max(processed_times)
 
         # Güncelle
         for level_no, _tp in tps:
