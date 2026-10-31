@@ -676,7 +676,7 @@ def test_signal_outcome_accumulates_realized_r_across_incremental_candle_batches
     )
 
     first = _precise_candle(1, high=101.2, low=100.1, close=101.1)
-    second = _precise_candle(2, high=102.2, low=100.5, close=102.1)
+    second = _precise_candle(2, high=102.2, low=101.2, close=102.1)
     third = _precise_candle(3, high=103.2, low=101.5, close=103.1)
 
     assert journal.resolve_signal_outcome(outcome, [first]) is None
