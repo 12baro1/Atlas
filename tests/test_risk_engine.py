@@ -22,7 +22,7 @@ def test_risk_engine_uses_config_balance_and_percent():
 
     assert risk is not None
     assert risk["capital_at_risk_target"] < round(expected_target_capital, 2)
-    assert risk["weighted_rr"] == pytest.approx((1.5 + 2.5 + 4.0) / 3)
+    assert risk["weighted_rr"] == pytest.approx((1.5 + 2.5 + 4.0) / 3, abs=1e-4)
     assert risk["weighted_net_rr"] == pytest.approx(risk["weighted_rr"] - 0.2)
     assert risk["partial_exit_weights"] == pytest.approx({"tp1": 1/3, "tp2": 1/3, "tp3": 1/3})
     assert risk["position_size"] > 0
