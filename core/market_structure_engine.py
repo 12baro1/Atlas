@@ -35,7 +35,7 @@ class MarketStructureEngine:
                         index=i,
                         price=high,
                         kind="HIGH",
-                        confirmation_index=i + right
+                        confirmation_index=i + max(right, 10)
                     )
                 )
 
@@ -46,7 +46,7 @@ class MarketStructureEngine:
                         index=i,
                         price=low,
                         kind="LOW",
-                        confirmation_index=i + right
+                        confirmation_index=i + max(right, 10)
                     )
                 )
 
