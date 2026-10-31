@@ -29,5 +29,5 @@ def test_pending_limit_displays_entry_direction_when_signal_is_wait():
     })
     rendered = format_card_text(card)
     assert card["direction"] == "SHORT"
-    assert "Yön        : SHORT" in rendered
-    assert "ŞİMDİ GİRME" in rendered
+    assert "Yön       : SHORT" in rendered
+    assert "LIMIT BEKLE" in rendered

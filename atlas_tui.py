@@ -9,7 +9,7 @@ import threading
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Footer, Header, Input, Static
+from textual.widgets import Footer, Header, Input, RichLog, Static
 
 from data_engine import exchange
 from universe_engine import select_symbols
@@ -169,14 +169,18 @@ class AtlasTUIApp(App):
                 "'yardım' — komutların tamamı",
                 id="help",
             )
-            yield Static(
-                "Hazır. Analiz başlatmak için aşağıya coin sembolünü veya 'işlem ver' yaz.",
+            yield RichLog(
                 id="output",
+                wrap=True,
+                markup=False,
+                auto_scroll=True,
+                max_lines=5000,
             )
             yield Input(placeholder="Coin veya komut yazıp Enter'a bas...", id="command")
         yield Footer()
 
     def on_mount(self) -> None:
+        self._show("Hazır. Analiz başlatmak için coin sembolünü veya 'işlem ver' yaz.")
         self.query_one("#command", Input).focus()
         if self.initial_symbol:
             self._start_command(self.initial_symbol)
@@ -191,15 +195,15 @@ class AtlasTUIApp(App):
         self.query_one("#command", Input).value = ""
 
     def action_scroll_output_up(self) -> None:
-        self.query_one("#output", Static).scroll_relative(y=-10, animate=False)
+        self.query_one("#output", RichLog).scroll_relative(y=-10, animate=False)
 
     def action_scroll_output_down(self) -> None:
-        self.query_one("#output", Static).scroll_relative(y=10, animate=False)
+        self.query_one("#output", RichLog).scroll_relative(y=10, animate=False)
 
     def _show(self, message: str) -> None:
-        output = self.query_one("#output", Static)
-        output.update(message)
-        output.scroll_end(animate=False)
+        output = self.query_one("#output", RichLog)
+        output.clear()
+        output.write(message, scroll_end=True)
 
     def _start_command(self, command: str) -> None:
         if self._busy:

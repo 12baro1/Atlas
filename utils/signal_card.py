@@ -178,87 +178,63 @@ def _summarize(card):
 
 
 def format_card_text(card):
-    """Kartı terminalde yazdırılabilir, tek bakışta okunan metne çevirir."""
-    line = "=" * 46
+    """Terminalde yalnızca işlem kararına yarayan bilgileri göster."""
+    line = "=" * 42
     action = str(card.get("decision_action") or "").upper()
     entry_type = str(card.get("entry_type") or "").upper()
-    pending_limit = entry_type == "LIMIT"
+    pending_limit = (
+        entry_type == "LIMIT"
+        and card.get("direction") in ("LONG", "SHORT")
+        and card.get("entry") is not None
+        and card.get("stop_loss") is not None
+    )
     executable = action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and card.get("direction") in ("LONG", "SHORT")
+    no_trade = not pending_limit and not executable
+
     if pending_limit:
-        headline = "KARAR: ŞİMDİ GİRME | EMİR: LIMIT (FİYAT GELİNCE)"
+        headline = "LIMIT BEKLE"
     elif executable:
-        headline = "KARAR: İŞLEME GİR | EMİR: " + (entry_type if entry_type in ("MARKET", "LIMIT") else "GİRİŞİ TEYİT ET")
+        headline = "İŞLEME GİR"
     else:
-        headline = "KARAR: İŞLEME GİRME"
-    lines = [line, "  " + str(card["symbol"]) + "  |  " + headline, line]
-    if card["direction"]:
-        lines.append(f"  Yön        : {card['direction']}")
-    lines.append(f"  Girdi      : {card['entry']}")
+        headline = "İŞLEME GİRME"
+
+    lines = [line, f"  {card['symbol']}  |  {headline}", line]
+    if card.get("direction") in ("LONG", "SHORT"):
+        lines.append(f"  Yön       : {card['direction']}")
+
+    if no_trade:
+        reason = card.get("reason") or "Giriş şartları oluşmadı."
+        lines.append(f"  Neden     : {reason}")
+        lines.append(line)
+        return "\n".join(lines)
+
     if pending_limit:
-        shown_entry_type = "LIMIT (fiyat bölgesine gelirse)"
-    elif executable:
-        shown_entry_type = entry_type if entry_type in ("MARKET", "LIMIT") else "GİRİŞİ TEYİT ET"
+        lines.append("  Emir      : LIMIT (fiyat giriş seviyesine gelirse)")
+        condition = str(card.get("entry_type_reason") or "Fiyat LIMIT giriş seviyesine gelmeden işlem açma")
+        if "wait for pullback" in condition.lower():
+            condition = "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor"
+        lines.append("  Koşul     : " + condition)
+    elif entry_type in ("MARKET", "LIMIT"):
+        lines.append(f"  Emir      : {entry_type}")
     else:
-        shown_entry_type = "YOK (işlem açma)"
-    lines.append(f"  Emir türü  : {shown_entry_type}")
-    if pending_limit and card.get("entry_distance_label"):
-        distance_parts = [card["entry_distance_label"]]
-        if card.get("entry_distance_pct") is not None:
-            distance_parts.append(f"%{card['entry_distance_pct']}")
-        if card.get("entry_distance_atr") is not None:
-            distance_parts.append(f"{card['entry_distance_atr']} ATR")
-        lines.append("  Giriş mesafesi: " + " | ".join(distance_parts))
-    if card.get("entry_type_reason"):
-        entry_reason = str(card["entry_type_reason"])
-        if "wait for pullback" in entry_reason.lower():
-            entry_reason = "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor"
-        lines.append(f"  Giriş nedeni: {entry_reason}")
-    lines.append(f"  Stop       : {card['stop_loss']}")
-    if card["tp_levels"]:
-        tp_label = "TP1/2/3 (sentetik RR)" if card.get("synthetic_tp_targets") else "TP1/2/3"
-        lines.append(f"  {tp_label:<12}: {' / '.join(str(t) for t in card['tp_levels'])}")
-    lines.append(f"  RR         : {card['rr']}")
-    lines.append(f"  Kalite     : {card['setup_quality']}/100  (Confluence {card['confluence']})")
-    confidence = card.get("confidence")
-    try:
-        confidence_text = f"{float(confidence):g}"
-    except (TypeError, ValueError):
-        confidence_text = "-"
-    if executable:
-        phase_summary = f"{card['market_phase']} | Yön {card['direction']}"
-    elif pending_limit:
-        phase_summary = f"{card['market_phase']} | LIMIT fiyat bölgesi bekleniyor"
-    else:
-        phase_summary = f"{card['market_phase']} | Uygun işlem yok"
-    phase_summary += f" | skor {confidence_text}/100"
-    lines.append(f"  Piyasa Fz  : {phase_summary}")
-    if card["selected_tp"]:
-        lines.append(f"  Hedef TP   : {card['selected_tp']}")
-    if card["position_size"]:
-        lines.append(f"  Pozisyon   : {card['position_size']} birim | Risk {card['capital_at_risk']} USD")
-    if card["critical_blocks"]:
-        reasons = []
-        for item in card["critical_blocks"]:
-            reason = str(item)
-            if "wait for pullback" in reason.lower():
-                reason = "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor"
-            reasons.append(reason)
-        lines.append("  ENGELLER   : " + "; ".join(reasons))
-    if card["soft_adjustments"]:
-        parts = []
-        for item in card["soft_adjustments"]:
-            if item["delta"] is not None:
-                parts.append(f"{item['label']} ({item['delta']:+d})")
-            else:
-                parts.append(item["label"])
-        lines.append("  Düzeltme   : " + ", ".join(parts))
-    if card["bonuses"]:
-        parts = []
-        for item in card["bonuses"]:
-            if item["delta"] is not None:
-                parts.append(f"{item['label']} ({item['delta']:+d})")
-            else:
-                parts.append(item["label"])
-        lines.append("  Bonus      : " + ", ".join(parts))
+        lines.append("  Emir      : BELİRSİZ (teyit gerekli)")
+
+    if card.get("entry") is not None:
+        lines.append(f"  Giriş     : {card['entry']}")
+    if pending_limit and card.get("entry_distance_pct") is not None:
+        distance = f"%{card['entry_distance_pct']}"
+        if card.get("entry_distance_label"):
+            distance = f"{card['entry_distance_label']} ({distance})"
+        lines.append(f"  Mesafe    : {distance}")
+    if card.get("stop_loss") is not None:
+        lines.append(f"  Stop Loss : {card['stop_loss']}")
+    if card.get("tp_levels"):
+        label = "TP (sentetik RR)" if card.get("synthetic_tp_targets") else "TP"
+        for index, target in enumerate(card["tp_levels"][:3], start=1):
+            lines.append(f"  {label}{index} : {target}")
+    if card.get("rr") is not None:
+        lines.append(f"  Risk/Ödül : {card['rr']}")
+    if card.get("setup_quality") is not None:
+        lines.append(f"  Kalite    : {card['setup_quality']}/100")
     lines.append(line)
     return "\n".join(lines)
