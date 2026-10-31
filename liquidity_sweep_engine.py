@@ -25,11 +25,15 @@ class LiquiditySweepEngine:
         structure = structure or []
         layers = liquidity_layers or {"swing": [], "internal": [], "all": []}
 
-        # Liquidity must still be on the un-swept side of the market before
-        # the current candle. A level already behind prior close is not a
-        # valid reference for a fresh sweep in this candle.
-        swing_buy, swing_sell = self._nearest_levels(layers.get("swing", []), prev)
-        internal_buy, internal_sell = self._nearest_levels(layers.get("internal", []), prev)
+        # Liquidity must remain untouched before the current candle. A prior
+        # wick through a level consumes that reference even when the candle
+        # closes back on the original side; otherwise the same pool can be
+        # counted as a fresh sweep more than once.
+        swing_levels = layers.get("swing", [])
+        internal_levels = layers.get("internal", [])
+        has_reference_levels = bool(swing_levels or internal_levels)
+        swing_buy, swing_sell = self._nearest_levels(swing_levels, prev)
+        internal_buy, internal_sell = self._nearest_levels(internal_levels, prev)
 
         buy_side_event = self._classify_side("BUY_SIDE", last, swing_buy or internal_buy)
         sell_side_event = self._classify_side("SELL_SIDE", last, swing_sell or internal_sell)
@@ -43,8 +47,10 @@ class LiquiditySweepEngine:
         breakout_high = buy_side_event["level"] if buy_side_event and buy_side_event["is_breakout"] else None
         breakout_low = sell_side_event["level"] if sell_side_event and sell_side_event["is_breakout"] else None
 
-        # Legacy fallback only when no usable reference levels exist.
-        if buy_side_event is None and sell_side_event is None:
+        # Legacy fallback is only safe when no liquidity references were
+        # supplied. Do not re-label a previously swept reference as a new
+        # previous-candle high/low sweep after it has been filtered out.
+        if not has_reference_levels and buy_side_event is None and sell_side_event is None:
             buy_side = last.high > prev.high and last.close < prev.high
             sell_side = last.low < prev.low and last.close > prev.low
             strength = 55 if buy_side or sell_side else 0
