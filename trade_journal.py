@@ -1185,9 +1185,26 @@ class TradeJournal:
         self._persist_signal_outcome(outcome)
         return None
 
+    def _signal_round_trip_cost_rate(self):
+        try:
+            from config import Config
+            rate = float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.0012))
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+        return max(0.0, rate) if math.isfinite(rate) else 0.0
+
     def _finalize_signal_outcome(self, outcome):
         """TP/sl ile kapanmış sinyali kalıcı duruma geçirir."""
-        realized = float(outcome.get("realized_r") or 0.0)
+        gross_realized = float(outcome.get("realized_r") or 0.0)
+        entry = self._num(outcome.get("entry"))
+        stop_loss = self._num(outcome.get("stop_loss"))
+        risk_distance = abs(entry - stop_loss) if entry is not None and stop_loss is not None else 0.0
+        fee_rate = self._signal_round_trip_cost_rate()
+        fee_rr = (abs(entry) * fee_rate / risk_distance) if entry is not None and risk_distance > 0 else 0.0
+        outcome["gross_realized_r"] = round(gross_realized, 4)
+        outcome["fee_rr"] = round(fee_rr, 4)
+        outcome["realized_r"] = round(gross_realized - fee_rr, 4)
+        realized = outcome["realized_r"]
         if outcome.get("hit_sl") and not outcome.get("tps_hit"):
             outcome["status"] = "SL"
             outcome["final_result"] = "LOSS"
