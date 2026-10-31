@@ -86,7 +86,7 @@ class EntryEngine:
             return None
         return price if math.isfinite(price) and price > 0 else None
 
-    def generate(self, mtf, structure, fvg, orderblocks, current_price=None, allow_structure_fallback=False, candles=None):
+    def generate(self, mtf, structure, fvg, orderblocks, current_price=None, allow_structure_fallback=False, candles=None, liquidity_sweep=None):
         mtf = mtf if isinstance(mtf, dict) else {}
         structure = structure if isinstance(structure, list) else []
         fvg = fvg if isinstance(fvg, list) else []
@@ -149,23 +149,32 @@ class EntryEngine:
                     result["checks"].append("✗ Bearish Structure")
 
         # -------------------------
-        # Best FVG
+        # Relevant FVG: prefer an unfilled zone on the correct side of price.
         # -------------------------
 
         selected_fvg = None
-
-        for gap in reversed(fvg):
-
-            if gap.get("filled", False):
+        fvg_candidates = []
+        for gap in fvg:
+            if gap.get("filled", False) or gap.get("type") != ("BULLISH" if direction == "LONG" else "BEARISH"):
                 continue
-
-            if direction == "LONG" and gap["type"] == "BULLISH":
-                selected_fvg = gap
-                break
-
-            if direction == "SHORT" and gap["type"] == "BEARISH":
-                selected_fvg = gap
-                break
+            lower = self._safe_price(min(gap.get("from", 0), gap.get("to", 0)))
+            upper = self._safe_price(max(gap.get("from", 0), gap.get("to", 0)))
+            if lower is None or upper is None or lower >= upper:
+                continue
+            if current_price is not None:
+                # A LONG pullback zone must be below market; a SHORT zone above it.
+                if direction == "LONG" and lower > current_price:
+                    continue
+                if direction == "SHORT" and upper < current_price:
+                    continue
+                distance = 0.0 if lower <= current_price <= upper else (
+                    current_price - upper if direction == "LONG" else lower - current_price
+                )
+            else:
+                distance = 0.0
+            fvg_candidates.append((distance, gap))
+        if fvg_candidates:
+            selected_fvg = min(fvg_candidates, key=lambda item: item[0])[1]
 
         if selected_fvg:
             result["score"] += 25
@@ -184,13 +193,19 @@ class EntryEngine:
             if ob.get("mitigated", False):
                 continue
 
-            if direction == "LONG" and ob["type"] == "BULLISH":
-                selected_ob = ob
-                break
-
-            if direction == "SHORT" and ob["type"] == "BEARISH":
-                selected_ob = ob
-                break
+            if ob.get("type") != ("BULLISH" if direction == "LONG" else "BEARISH"):
+                continue
+            low = self._safe_price(ob.get("low"))
+            high = self._safe_price(ob.get("high"))
+            if low is None or high is None or low >= high:
+                continue
+            if current_price is not None:
+                if direction == "LONG" and low > current_price:
+                    continue
+                if direction == "SHORT" and high < current_price:
+                    continue
+            selected_ob = ob
+            break
 
         if selected_ob:
             result["score"] += 25
@@ -208,15 +223,24 @@ class EntryEngine:
                 direction, structure, selected_fvg, selected_ob
             )
 
-            limit_entry = selected_fvg["to"] if selected_fvg else (selected_ob["high"] if selected_ob else None)
+            limit_entry = max(float(selected_fvg["from"]), float(selected_fvg["to"])) if selected_fvg else (self._safe_price(selected_ob.get("high")) if selected_ob else None)
             if current_price is not None and result["stop_loss"] is not None:
-                near_market = current_price > result["stop_loss"] and (limit_entry is None or abs(current_price - limit_entry) / current_price <= 0.004)
-                if near_market:
+                zone_low = self._safe_price(min(selected_fvg.get("from"), selected_fvg.get("to"))) if selected_fvg else (
+                    self._safe_price(selected_ob.get("low")) if selected_ob else None
+                )
+                zone_high = self._safe_price(max(selected_fvg.get("from"), selected_fvg.get("to"))) if selected_fvg else (
+                    self._safe_price(selected_ob.get("high")) if selected_ob else None
+                )
+                sweep = liquidity_sweep or {}
+                post = sweep.get("post_structure") or {}
+                sweep_confirmed = bool(sweep.get("sell_side") and post.get("confirmed") and post.get("direction") == "BULLISH")
+                inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high
+                if inside_poi and sweep_confirmed and current_price > result["stop_loss"]:
                     result["entry"] = current_price
                     result["entry_type"] = "MARKET"
-                    result["entry_type_reason"] = "Price is within 0.4% of the selected bullish POI"
+                    result["entry_type_reason"] = "Sell-side sweep + bullish structure confirmation inside POI"
                     result["score"] += 10
-                    result["checks"].append("✓ Market Entry Near POI")
+                    result["checks"].append("✓ Sweep-confirmed market entry")
                 elif limit_entry is not None and current_price > limit_entry:
                     result["entry"] = limit_entry
                     result["entry_type"] = "LIMIT"
@@ -238,15 +262,24 @@ class EntryEngine:
                 direction, structure, selected_fvg, selected_ob
             )
 
-            limit_entry = selected_fvg["from"] if selected_fvg else (selected_ob["low"] if selected_ob else None)
+            limit_entry = min(float(selected_fvg["from"]), float(selected_fvg["to"])) if selected_fvg else (self._safe_price(selected_ob.get("low")) if selected_ob else None)
             if current_price is not None and result["stop_loss"] is not None:
-                near_market = current_price < result["stop_loss"] and (limit_entry is None or abs(current_price - limit_entry) / current_price <= 0.004)
-                if near_market:
+                zone_low = self._safe_price(min(selected_fvg.get("from"), selected_fvg.get("to"))) if selected_fvg else (
+                    self._safe_price(selected_ob.get("low")) if selected_ob else None
+                )
+                zone_high = self._safe_price(max(selected_fvg.get("from"), selected_fvg.get("to"))) if selected_fvg else (
+                    self._safe_price(selected_ob.get("high")) if selected_ob else None
+                )
+                sweep = liquidity_sweep or {}
+                post = sweep.get("post_structure") or {}
+                sweep_confirmed = bool(sweep.get("buy_side") and post.get("confirmed") and post.get("direction") == "BEARISH")
+                inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high
+                if inside_poi and sweep_confirmed and current_price < result["stop_loss"]:
                     result["entry"] = current_price
                     result["entry_type"] = "MARKET"
-                    result["entry_type_reason"] = "Price is within 0.4% of the selected bearish POI"
+                    result["entry_type_reason"] = "Buy-side sweep + bearish structure confirmation inside POI"
                     result["score"] += 10
-                    result["checks"].append("✓ Market Entry Near POI")
+                    result["checks"].append("✓ Sweep-confirmed market entry")
                 elif limit_entry is not None and current_price < limit_entry:
                     result["entry"] = limit_entry
                     result["entry_type"] = "LIMIT"
@@ -292,7 +325,7 @@ class EntryEngine:
             and not result.get("entry_zone_crossed")
             and not result.get("entry_too_far")
         ):
-            fallback_entry, fallback_sl = self._structure_fallback_levels(direction, structure)
+            fallback_entry, fallback_sl = (None, None)  # Swing midpoint is not an executable POI; never invent a market entry.
             market_side_valid = (
                 current_price is not None
                 and fallback_sl is not None
@@ -301,9 +334,7 @@ class EntryEngine:
                     or (direction == "SHORT" and current_price < fallback_sl)
                 )
             )
-            # A swing midpoint is not itself an executable order. Only recommend
-            # the fallback as MARKET when a finite live price is available and
-            # remains on the valid side of structural invalidation.
+            # No FVG/OB POI means no executable entry. A swing midpoint is not a trade trigger.
             fallback_stop_invalid = (
                 fallback_entry is not None
                 and fallback_sl is not None
