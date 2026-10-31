@@ -186,11 +186,13 @@ def simulate_trade_partial(
             reached_tp = level_no
             next_level_idx += 1
             # Koruma stopunu taşınma: TP1 → breakeven, TP2 → TP1 seviyesi.
-            if next_level_idx == 1 and len(levels) > 1:
+            available_level_numbers = {number for number, _ in levels}
+            if level_no == 1 and len(levels) > 1:
                 trailing_stop = entry
-            elif next_level_idx >= 2 and len(levels) >= 2:
-                # After TP2, protect the remaining position at TP1.
-                trailing_stop = levels[0][1]
+            elif level_no == 2 and 1 in available_level_numbers and 3 in available_level_numbers:
+                # After the actual TP2 (not simply the second listed target),
+                # protect the remaining position at the actual TP1 price.
+                trailing_stop = next(price for number, price in levels if number == 1)
 
             if closed_frac >= 1.0 - 1e-9:
                 break
