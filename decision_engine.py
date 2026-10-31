@@ -294,6 +294,16 @@ class DecisionEngine:
                 f"RR below minimum RR: {self._fmt_number(rr_value)} < {self._fmt_number(minimum_rr)}",
             )
 
+        weighted_net_rr = self._safe_number(
+            risk.get("weighted_net_rr") if isinstance(risk, dict) else None,
+            None,
+        )
+        if weighted_net_rr is not None and weighted_net_rr <= 0:
+            self._append_unique(
+                blockers,
+                f"Net RR after costs is non-positive: {self._fmt_number(weighted_net_rr)}",
+            )
+
         return blockers, len(blockers) == 0
 
     def _resolve_rr_value(self, risk):
