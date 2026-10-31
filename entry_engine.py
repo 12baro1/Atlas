@@ -254,7 +254,7 @@ class EntryEngine:
                 sweep = liquidity_sweep or {}
                 post = sweep.get("post_structure") or {}
                 try:
-                    confirmation_age = int(post.get("confirmation_age_bars", 0))
+                    confirmation_age = int(post.get("confirmation_age_bars", -1))
                     max_confirmation_age = max(
                         0, int(getattr(Config, "SWEEP_MARKET_ENTRY_MAX_AGE_BARS", 2))
                     )
@@ -305,7 +305,7 @@ class EntryEngine:
                 sweep = liquidity_sweep or {}
                 post = sweep.get("post_structure") or {}
                 try:
-                    confirmation_age = int(post.get("confirmation_age_bars", 0))
+                    confirmation_age = int(post.get("confirmation_age_bars", -1))
                     max_confirmation_age = max(
                         0, int(getattr(Config, "SWEEP_MARKET_ENTRY_MAX_AGE_BARS", 2))
                     )
