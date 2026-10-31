@@ -1002,8 +1002,8 @@ class TradeJournal:
     def resolve_signal_outcome(self, outcome, candles, max_steps=None):
         """Teorik sinyal sonucunu mumlar üzerinde ilerletir.
 
-        Partial TP mantığı desteklenir: birden fazla TP varsa her TP eşit
-        ağırlıkta kısmi kapanış oluşturur (ör. 3 TP → %33.3). TP1'den sonra
+        Partial TP mantığı desteklenir: TP ağırlıkları normalize edilerek
+        pozisyon paylarına çevrilir (varsayılan 3 TP → her biri %33.3). TP1'den sonra
         koruyucu stop breakeven'e, TP2'den sonra TP1 seviyesine taşınır.
         TP sonrası SL gelen senaryo 'WIN' olarak değil gerçekleşen kısmi R
         ile işaretlenir.
@@ -1712,10 +1712,42 @@ class TradeJournal:
         return candles
 
     def _norm_partial_weights(self, outcome):
-        weights = outcome.get("partial_weights")
-        if isinstance(weights, (list, tuple)) and weights:
-            return [float(w) for w in weights]
-        return [1.0, 1.0, 1.0]
+        """Normalize partial-close weights over TP levels present in this signal."""
+        raw = outcome.get("partial_weights")
+        if isinstance(raw, dict):
+            supplied = [raw.get(f"tp{i}") for i in range(1, 4)]
+        elif isinstance(raw, (list, tuple)):
+            supplied = list(raw)
+        else:
+            supplied = self._signal_partial_weights()
+
+        values = []
+        for index in range(3):
+            value = supplied[index] if index < len(supplied) else 1.0
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                number = 0.0
+            values.append(number if math.isfinite(number) and number > 0 else 0.0)
+
+        active_levels = [
+            i for i in range(1, 4)
+            if self._num(outcome.get(f"tp{i}")) is not None
+        ]
+        if not active_levels:
+            active_levels = [1, 2, 3]
+
+        total = sum(values[i - 1] for i in active_levels)
+        if total <= 0:
+            for i in active_levels:
+                values[i - 1] = 1.0
+            total = float(len(active_levels))
+
+        active = set(active_levels)
+        return [
+            values[i - 1] / total if i in active else 0.0
+            for i in range(1, 4)
+        ]
 
     def _weight_for(self, weights, level_no):
         index = level_no - 1
