@@ -210,7 +210,7 @@ def format_card_text(card):
 
     if pending_limit:
         lines.append("  Emir      : LIMIT (fiyat giriş seviyesine gelirse)")
-        lines.append("  Koşul     : Fiyat LIMIT giriş seviyesine gelmeden işlem açma")
+        lines.append("  Koşul     : " + (card.get("entry_type_reason") or "Fiyat LIMIT giriş seviyesine gelmeden işlem açma"))
     elif entry_type in ("MARKET", "LIMIT"):
         lines.append(f"  Emir      : {entry_type}")
     else:
