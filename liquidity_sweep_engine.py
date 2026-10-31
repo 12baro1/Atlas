@@ -287,38 +287,35 @@ class LiquiditySweepEngine:
             }
 
         trigger = "BEARISH" if swept_side == "BUY_SIDE" else "BULLISH"
-        pivot_kind = "LOW" if trigger == "BEARISH" else "HIGH"
         current_index = len(candles) - 1
         candidates = []
 
-        for pivot in structure or []:
-            if not isinstance(pivot, dict):
-                continue
-            kind = str(pivot.get("kind", pivot.get("type", ""))).upper()
-            if kind != pivot_kind:
-                continue
-            try:
-                pivot_index = int(pivot.get("index"))
-                confirmation_index = int(pivot.get("confirmation_index"))
-                price = float(pivot.get("price"))
-            except (TypeError, ValueError):
-                continue
-            if pivot_index <= sweep_index or confirmation_index < pivot_index:
-                continue
-            if confirmation_index > current_index:
+        # 15m mini structure: a one-left/one-right pivot must form AFTER
+        # the sweep. The pivot is observable only after its right candle closes.
+        for pivot_index in range(max(1, sweep_index + 1), current_index):
+            left = candles[pivot_index - 1]
+            pivot = candles[pivot_index]
+            right = candles[pivot_index + 1]
+            if trigger == "BEARISH":
+                is_pivot = pivot.low < left.low and pivot.low < right.low
+                level = float(pivot.low)
+            else:
+                is_pivot = pivot.high > left.high and pivot.high > right.high
+                level = float(pivot.high)
+            if not is_pivot:
                 continue
 
-            # A confirmed post-sweep swing only becomes a reversal trigger when
-            # a later candle CLOSES through it. Wick-only breaks are insufficient.
-            for break_index in range(max(sweep_index + 1, confirmation_index), len(candles)):
+            pivot_confirmation_index = pivot_index + 1
+            # The close must break the already-confirmed post-sweep pivot.
+            for break_index in range(pivot_confirmation_index + 1, len(candles)):
                 previous_close = float(candles[break_index - 1].close)
                 current_close = float(candles[break_index].close)
                 if trigger == "BEARISH":
-                    crossed = previous_close >= price and current_close < price
+                    crossed = previous_close >= level and current_close < level
                 else:
-                    crossed = previous_close <= price and current_close > price
+                    crossed = previous_close <= level and current_close > level
                 if crossed:
-                    candidates.append((break_index, confirmation_index, price))
+                    candidates.append((break_index, pivot_confirmation_index, pivot_index, level))
                     break
 
         if not candidates:
@@ -330,17 +327,20 @@ class LiquiditySweepEngine:
                 "sweep_index": sweep_index,
             }
 
-        break_index, pivot_confirmation_index, level = min(candidates, key=lambda item: item[0])
+        break_index, pivot_confirmation_index, pivot_index, level = min(
+            candidates, key=lambda item: item[0]
+        )
         return {
             "confirmed": True,
             "type": "CHOCH",
             "direction": trigger,
             "confirmation_index": break_index,
             "confirmation_age_bars": current_index - break_index,
+            "pivot_index": pivot_index,
             "pivot_confirmation_index": pivot_confirmation_index,
             "broken_level": level,
             "sweep_index": sweep_index,
-            "reason": "confirmed_close_through_post_sweep_swing",
+            "reason": "confirmed_close_through_post_sweep_mini_swing",
         }
 
     def _strength_score(self, buy_side_event, sell_side_event, post_structure, timeframe):
