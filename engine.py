@@ -461,12 +461,12 @@ class AtlasEngine:
             return None
 
     def refresh_learning(self, symbol=None):
-        """Kapanmış sinyal sonuçlarını öncelikli kullanarak öğrenme indeksini yeniler.
+        """Kapanmış işlemlerden öğrenme indeksini güvenli kaynak önceliğiyle yeniler.
 
-        Atlas'ın gönderdiği sinyallerin teorik TP/SL sonuçları ana öğrenme
-        kaynağıdır. Manuel ve takip edilen gerçek işlemler yalnızca sinyal
-        sonucu verisi yoksa yedek kaynak olur; böylece aynı setup'ın manuel
-        kaydı teorik sinyal geçmişini gölgelemez.
+        Varsayılan olarak kullanıcının gerçekten açıp kapattığı manuel işlemler
+        birincildir. Manuel veri yoksa scanner tarafından takip edilen gerçek
+        işlemler, onlar da yoksa teorik sinyal sonuçları kullanılır. Böylece
+        aynı sinyalin teorik sonucu gerçek kullanıcı sonucunu gölgeleyemez.
         """
         if not bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
             return None
@@ -477,13 +477,23 @@ class AtlasEngine:
         tracked_records = self.trade_journal.learning_records(source="tracked", symbol=symbol)
         manual_records = self.trade_journal.learning_records(source="manual", symbol=symbol)
 
-        if signal_records:
-            records, source = signal_records, "signal"
-        elif tracked_records:
-            records, source = tracked_records, "tracked"
-        elif manual_records:
-            records, source = manual_records, "manual"
+        if bool(getattr(Config, "LEARNING_MANUAL_TRADE_PRIMARY", True)):
+            source_order = (
+                ("manual", manual_records),
+                ("tracked", tracked_records),
+                ("signal", signal_records),
+            )
         else:
+            source_order = (
+                ("tracked", tracked_records),
+                ("signal", signal_records),
+                ("manual", manual_records),
+            )
+        source, records = next(
+            ((name, rows) for name, rows in source_order if rows),
+            (None, []),
+        )
+        if not records:
             # Geçerli kayıt kalmadıysa eski öğrenme index'ini tutma; aksi
             # halde EXPIRED/PENDING sinyallerden kalma istatistikler etkili olur.
             self.learning.stats["source"] = None
