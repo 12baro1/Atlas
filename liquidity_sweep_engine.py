@@ -22,6 +22,38 @@ class LiquiditySweepEngine:
 
         candidate = self._find_recent_sweep(candles, swing_levels, internal_levels)
         if candidate:
+            if candidate.get("event_type") == "BREAKOUT":
+                buy_event = candidate.get("buy_event")
+                sell_event = candidate.get("sell_event")
+                return {
+                    "buy_side": False,
+                    "sell_side": False,
+                    "swept_high": None,
+                    "swept_low": None,
+                    "breakout_high": buy_event["level"] if buy_event else None,
+                    "breakout_low": sell_event["level"] if sell_event else None,
+                    "is_sweep": False,
+                    "is_breakout": True,
+                    "strength_score": 0,
+                    "swing": {
+                        "buy_side": candidate.get("swing_buy"),
+                        "sell_side": candidate.get("swing_sell"),
+                    },
+                    "internal": {
+                        "buy_side": candidate.get("internal_buy"),
+                        "sell_side": candidate.get("internal_sell"),
+                    },
+                    "post_structure": {
+                        "confirmed": False,
+                        "type": None,
+                        "direction": None,
+                        "reason": "breakout_is_not_a_reversal_sweep",
+                    },
+                    "timeframe": timeframe,
+                    "breakout_index": candidate["event_index"],
+                    "breakout_side": candidate.get("side"),
+                }
+
             buy_event = candidate.get("buy_event")
             sell_event = candidate.get("sell_event")
             sweep_index = candidate["sweep_index"]
@@ -146,7 +178,21 @@ class LiquiditySweepEngine:
 
             buy_swept = bool(buy_event and buy_event["is_sweep"])
             sell_swept = bool(sell_event and sell_event["is_sweep"])
+            buy_breakout = bool(buy_event and buy_event["is_breakout"])
+            sell_breakout = bool(sell_event and sell_event["is_breakout"])
             if not buy_swept and not sell_swept:
+                if buy_breakout or sell_breakout:
+                    return {
+                        "event_type": "BREAKOUT",
+                        "event_index": sweep_index,
+                        "side": "BUY_SIDE" if buy_breakout else "SELL_SIDE",
+                        "buy_event": buy_event if buy_breakout else None,
+                        "sell_event": sell_event if sell_breakout else None,
+                        "swing_buy": swing_buy,
+                        "swing_sell": swing_sell,
+                        "internal_buy": internal_buy,
+                        "internal_sell": internal_sell,
+                    }
                 continue
 
             if buy_swept and sell_swept:
