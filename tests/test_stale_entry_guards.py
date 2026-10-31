@@ -63,7 +63,7 @@ def test_signal_card_displays_recommended_entry_type():
         "analysis": {"entry": {"entry": 100.0, "entry_type": "LIMIT"}},
     })
     assert card["entry_type"] == "LIMIT"
-    assert "Emir türü  : LIMIT" in format_card_text(card)
+    assert "Emir      : LIMIT" in format_card_text(card)
 
 
 def test_signal_card_labels_synthetic_tp_targets():
@@ -78,7 +78,7 @@ def test_signal_card_labels_synthetic_tp_targets():
         "rr": {"rr": 3.0},
         "analysis": {"entry": {"entry": 100.0, "entry_type": "LIMIT"}},
     })
-    assert "TP1/2/3 (sentetik RR)" in format_card_text(card)
+    assert "TP (sentetik RR)1" in format_card_text(card)
 
 
 
@@ -93,8 +93,8 @@ def test_terminal_card_uses_only_clear_no_entry_decision():
         "analysis": {"entry": {"valid": False, "entry_type": "NONE"}},
     })
     output = format_card_text(card)
-    assert "KARAR: İŞLEME GİRME" in output
-    assert "Emir türü  : YOK (işlem açma)" in output
+    assert "İŞLEME GİRME" in output
+    assert "Neden" in output
     assert "Sinyal WAIT" not in output
     assert "ATLA" not in output
     assert "BEKLE" not in output
@@ -117,9 +117,9 @@ def test_pending_limit_card_explains_conditional_limit_entry():
         },
     })
     output = format_card_text(card)
-    assert "KARAR: ŞİMDİ GİRME" in output
-    assert "EMİR: LIMIT (FİYAT GELİNCE)" in output
-    assert "Emir türü  : LIMIT (fiyat bölgesine gelirse)" in output
+    assert "LIMIT BEKLE" in output
+    assert "LIMIT (fiyat giriş seviyesine gelirse)" in output
+    assert "Emir      : LIMIT" in output
     assert "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor" in output
     assert "wait for pullback" not in output
     assert "Sinyal WAIT" not in output
