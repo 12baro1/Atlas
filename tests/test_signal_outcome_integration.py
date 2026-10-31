@@ -694,3 +694,28 @@ def test_signal_outcome_accumulates_realized_r_across_incremental_candle_batches
     assert resolved["status"] == "TP3"
     assert resolved["tps_hit"] == [1, 2, 3]
     assert resolved["realized_r"] == pytest.approx(2.0, abs=1e-4)
+
+
+
+def test_signal_outcome_labels_sparse_tp_levels_by_highest_hit(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+    )
+    candle = _precise_candle(
+        1, high=103.2, low=101.2, close=103.1
+    )
+
+    resolved = journal.resolve_signal_outcome(outcome, [candle])
+
+    assert resolved is not None
+    assert resolved["tps_hit"] == [1, 3]
+    assert resolved["status"] == "TP3"
+    assert resolved["final_result"] == "WIN"
+    assert resolved["realized_r"] == pytest.approx(2.0, abs=1e-4)
