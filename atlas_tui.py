@@ -315,9 +315,9 @@ class AtlasTUIApp(App):
             f"Winrate: %{manual.get('winrate', 0)} | Expectancy: {manual.get('expectancy', 0)} R | PF: {manual.get('profit_factor', 0)}",
             "",
             "ÖĞRENME",
-            f"Kaynak: {learning.get('source') or 'henüz yok'} | Kapanan manuel işlem: {learning.get('closed_manual_trades', 0)}",
-            f"Eşleşen setup: {learning.get('matched_setups', 0)} | Güvenilirlik: {learning.get('reliability', 0)}",
-            f"Öğrenme düzeltmesi: {learning.get('learning_adjustment', 0)}",
+            f"Kaynak: {learning.get('source') or 'henüz yok'} | Öğrenmeye giren kayıt: {learning.get('records_fed', 0)}",
+            f"Manuel kapanan: {learning.get('closed_manual_trades', 0)} | Eşleşen setup: {learning.get('matched_setups', 0)}",
+            f"Güvenilirlik: {learning.get('reliability', 0)} | Öğrenme düzeltmesi: {learning.get('learning_adjustment', 0):+g} puan",
             "",
             "Not: Otomatik sinyal sonuçları ve manuel işlemler ayrı tutulur. Sıralama/kalite puanı kazanma olasılığı değildir.",
         ]
