@@ -254,3 +254,19 @@ def test_later_equal_level_retests_do_not_delay_pool_formation_time():
     assert cluster["touches"] == 3
     assert cluster["formed_at"] == 13
     assert cluster["confirmation_indices"] == [7, 13, 19]
+
+
+
+def test_expanded_outer_edge_price_is_not_available_before_its_own_confirmation():
+    engine = LiquidityEngine()
+    structure = [
+        {"kind": "HIGH", "price": 100.0, "index": 2, "confirmation_index": 7},
+        {"kind": "HIGH", "price": 100.05, "index": 8, "confirmation_index": 13},
+        {"kind": "HIGH", "price": 100.2, "index": 14, "confirmation_index": 19},
+    ]
+
+    [cluster] = engine.detect(structure)
+
+    assert cluster["price"] == 100.2
+    assert cluster["formed_at"] == 13
+    assert cluster["price_formed_at"] == 19
