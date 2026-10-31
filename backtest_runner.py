@@ -55,9 +55,13 @@ def simulate_trade(entry, stop_loss, targets, future_candles, direction="LONG", 
     entry = _num(entry)
     stop = _num(stop_loss)
     tp1, tp2, tp3 = _tps(targets)
-    tps = [tp for tp in (tp1, tp2, tp3) if tp is not None]
+    levels = [
+        (level_no, target)
+        for level_no, target in enumerate((tp1, tp2, tp3), start=1)
+        if target is not None
+    ]
 
-    if entry is None or stop is None or not future_candles or not tps:
+    if entry is None or stop is None or not future_candles or not levels:
         return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
 
     risk_distance = abs(entry - stop)
@@ -73,17 +77,17 @@ def simulate_trade(entry, stop_loss, targets, future_candles, direction="LONG", 
         if is_long:
             if low <= stop:
                 return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0)}
-            for idx, tp in enumerate(tps, start=1):
-                if tp is not None and high >= tp:
+            for level_no, tp in levels:
+                if high >= tp:
                     rr = abs(tp - entry) / risk_distance
-                    return {"result": "WIN", "tp": idx, "net_rr": _num(rr)}
+                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr)}
         else:
             if high >= stop:
                 return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0)}
-            for idx, tp in enumerate(tps, start=1):
-                if tp is not None and low <= tp:
+            for level_no, tp in levels:
+                if low <= tp:
                     rr = abs(entry - tp) / risk_distance
-                    return {"result": "WIN", "tp": idx, "net_rr": _num(rr)}
+                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr)}
 
     return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
 
