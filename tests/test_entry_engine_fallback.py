@@ -29,7 +29,9 @@ def test_uses_structure_direction_fallback_when_mtf_none():
         allow_structure_fallback=True,
     )
     assert result["direction"] == "LONG"
-    assert result["valid"] is True
+    assert result["valid"] is False
+    assert result["entry"] is None
+    assert result["entry_type"] == "NONE"
 
 
 def test_fallback_direction_respects_bearish_structure():
