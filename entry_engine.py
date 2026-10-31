@@ -154,6 +154,7 @@ class EntryEngine:
 
         selected_fvg = None
         fvg_candidates = []
+        crossed_matching_fvg = False
         for gap in fvg:
             if gap.get("filled", False) or gap.get("type") != ("BULLISH" if direction == "LONG" else "BEARISH"):
                 continue
@@ -164,8 +165,10 @@ class EntryEngine:
             if current_price is not None:
                 # A LONG pullback zone must be below market; a SHORT zone above it.
                 if direction == "LONG" and lower > current_price:
+                    crossed_matching_fvg = True
                     continue
                 if direction == "SHORT" and upper < current_price:
+                    crossed_matching_fvg = True
                     continue
                 distance = 0.0 if lower <= current_price <= upper else (
                     current_price - upper if direction == "LONG" else lower - current_price
@@ -175,6 +178,9 @@ class EntryEngine:
             fvg_candidates.append((distance, gap))
         if fvg_candidates:
             selected_fvg = min(fvg_candidates, key=lambda item: item[0])[1]
+
+        if crossed_matching_fvg and selected_fvg is None:
+            result["entry_zone_crossed"] = True
 
         if selected_fvg:
             result["score"] += 25
@@ -325,15 +331,7 @@ class EntryEngine:
             and not result.get("entry_zone_crossed")
             and not result.get("entry_too_far")
         ):
-            fallback_entry, fallback_sl = (None, None)  # Swing midpoint is not an executable POI; never invent a market entry.
-            market_side_valid = (
-                current_price is not None
-                and fallback_sl is not None
-                and (
-                    (direction == "LONG" and current_price > fallback_sl)
-                    or (direction == "SHORT" and current_price < fallback_sl)
-                )
-            )
+            fallback_entry, fallback_sl = self._structure_fallback_levels(direction, structure)
             # No FVG/OB POI means no executable entry. A swing midpoint is not a trade trigger.
             fallback_stop_invalid = (
                 fallback_entry is not None
@@ -350,15 +348,6 @@ class EntryEngine:
                 result["stop_loss"] = fallback_sl
                 result["stop_source"] = "swing_fallback"
                 result["checks"].append("✗ SL direction")
-            elif fallback_entry is not None and fallback_sl is not None and market_side_valid:
-                result["entry"] = current_price
-                result["stop_loss"] = fallback_sl
-                result["stop_source"] = "swing_fallback"
-                result["score"] += 20
-                result["entry_type"] = "MARKET"
-                result["entry_type_reason"] = "Market entry from valid structural fallback"
-                result["checks"].append("✓ Market Structure Entry")
-                result["checks"].append("✓ Structure Fallback Levels")
             else:
                 result["entry"] = None
                 result["stop_loss"] = None
