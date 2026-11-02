@@ -86,7 +86,7 @@ class EntryEngine:
             return None
         return price if math.isfinite(price) and price > 0 else None
 
-    def generate(self, mtf, structure, fvg, orderblocks, current_price=None, allow_structure_fallback=False, candles=None, liquidity_sweep=None):
+    def generate(self, mtf, structure, fvg, orderblocks, current_price=None, allow_structure_fallback=False, candles=None, liquidity_sweep=None, ote=None, market_regime=None):
         mtf = mtf if isinstance(mtf, dict) else {}
         structure = structure if isinstance(structure, list) else []
         fvg = fvg if isinstance(fvg, list) else []
@@ -105,7 +105,10 @@ class EntryEngine:
             "requires_pullback": False,
             "score": 0,
             "reason": "",
-            "checks": []
+            "checks": [],
+            "poi_source": None,
+            "poi_zone": None,
+            "ote_confluence": False,
         }
 
         direction = mtf.get("entry")
@@ -123,6 +126,26 @@ class EntryEngine:
             return result
 
         result["direction"] = direction
+
+        regime = market_regime if isinstance(market_regime, dict) else {}
+        regime_name = str(regime.get("regime", "UNKNOWN")).upper()
+        requires_ote = regime_name in {"TRENDING_UP", "TRENDING_DOWN"}
+        ote_low = ote_high = None
+        if isinstance(ote, dict):
+            try:
+                fib_values = [float(ote.get("fib62")), float(ote.get("fib79"))]
+                if all(math.isfinite(value) and value > 0 for value in fib_values):
+                    ote_low, ote_high = min(fib_values), max(fib_values)
+            except (TypeError, ValueError, OverflowError):
+                ote_low = ote_high = None
+        if requires_ote and (ote_low is None or ote_high is None or ote_low >= ote_high):
+            result["reason"] = "4H OTE levels unavailable for trend continuation"
+            result["entry_type_reason"] = result["reason"]
+            result["entry_zone_crossed"] = True
+            return result
+
+        def overlaps_ote(lower, upper):
+            return not requires_ote or (ote_low <= upper and ote_high >= lower)
 
         # Place the stop a small ATR buffer beyond the structural invalidation
         # level. RiskEngine still rejects stops that remain too tight; it does
@@ -176,6 +199,8 @@ class EntryEngine:
             upper = self._safe_price(max(gap.get("from", 0), gap.get("to", 0)))
             if lower is None or upper is None or lower >= upper:
                 continue
+            if not overlaps_ote(lower, upper):
+                continue
             if current_price is not None:
                 # A LONG pullback zone must be below market; a SHORT zone above it.
                 if direction == "LONG" and lower > current_price:
@@ -189,9 +214,13 @@ class EntryEngine:
                 )
             else:
                 distance = 0.0
-            fvg_candidates.append((distance, gap))
+            try:
+                strength = float(gap.get("strength", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                strength = 0.0
+            fvg_candidates.append((distance, -strength, gap))
         if fvg_candidates:
-            selected_fvg = min(fvg_candidates, key=lambda item: item[0])[1]
+            selected_fvg = min(fvg_candidates, key=lambda item: (item[0], item[1]))[2]
 
         if crossed_matching_fvg and selected_fvg is None:
             result["entry_zone_crossed"] = True
@@ -206,32 +235,59 @@ class EntryEngine:
         # Best Order Block
         # -------------------------
 
-        selected_ob = None
+        ob_candidates = []
 
-        for ob in reversed(orderblocks):
-
+        for ob in orderblocks:
             if ob.get("mitigated", False):
                 continue
-
             if ob.get("type") != ("BULLISH" if direction == "LONG" else "BEARISH"):
                 continue
             low = self._safe_price(ob.get("low"))
             high = self._safe_price(ob.get("high"))
             if low is None or high is None or low >= high:
                 continue
+            if not overlaps_ote(low, high):
+                continue
             if current_price is not None:
                 if direction == "LONG" and low > current_price:
                     continue
                 if direction == "SHORT" and high < current_price:
                     continue
-            selected_ob = ob
-            break
+                distance = 0.0 if low <= current_price <= high else (
+                    current_price - high if direction == "LONG" else low - current_price
+                )
+            else:
+                distance = 0.0
+            try:
+                strength = float(ob.get("strength", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                strength = 0.0
+            ob_candidates.append((distance, -strength, ob))
+
+        selected_ob = min(ob_candidates, key=lambda item: (item[0], item[1]))[2] if ob_candidates else None
 
         if selected_ob:
             result["score"] += 25
             result["checks"].append("✓ Fresh Order Block")
         else:
             result["checks"].append("✗ Order Block")
+
+        if requires_ote and selected_fvg is None:
+            result["reason"] = "Trend continuation requires a fresh directional FVG overlapping 4H OTE"
+            result["entry_type_reason"] = result["reason"]
+            result["entry_zone_crossed"] = True
+            return result
+
+        selected_poi = selected_fvg or selected_ob
+        if selected_poi:
+            result["poi_source"] = "FVG" if selected_fvg else "ORDER_BLOCK"
+            result["poi_zone"] = {
+                "low": min(float(selected_poi.get("from", selected_poi.get("low"))), float(selected_poi.get("to", selected_poi.get("high")))),
+                "high": max(float(selected_poi.get("from", selected_poi.get("low"))), float(selected_poi.get("to", selected_poi.get("high")))),
+            }
+            result["ote_confluence"] = bool(
+                requires_ote and overlaps_ote(result["poi_zone"]["low"], result["poi_zone"]["high"])
+            )
 
         # -------------------------
         # Entry
@@ -244,6 +300,8 @@ class EntryEngine:
             )
 
             limit_entry = max(float(selected_fvg["from"]), float(selected_fvg["to"])) if selected_fvg else (self._safe_price(selected_ob.get("high")) if selected_ob else None)
+            if requires_ote and limit_entry is not None:
+                limit_entry = min(limit_entry, ote_high)
             if current_price is not None and result["stop_loss"] is not None:
                 zone_low = self._safe_price(min(selected_fvg.get("from"), selected_fvg.get("to"))) if selected_fvg else (
                     self._safe_price(selected_ob.get("low")) if selected_ob else None
@@ -266,7 +324,7 @@ class EntryEngine:
                     and post.get("direction") == "BULLISH"
                     and 0 <= confirmation_age <= max_confirmation_age
                 )
-                inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high
+                inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high and (not requires_ote or ote_low <= current_price <= ote_high) and (not requires_ote or ote_low <= current_price <= ote_high)
                 if inside_poi and sweep_confirmed and current_price > result["stop_loss"]:
                     result["entry"] = current_price
                     result["entry_type"] = "MARKET"
@@ -295,6 +353,8 @@ class EntryEngine:
             )
 
             limit_entry = min(float(selected_fvg["from"]), float(selected_fvg["to"])) if selected_fvg else (self._safe_price(selected_ob.get("low")) if selected_ob else None)
+            if requires_ote and limit_entry is not None:
+                limit_entry = max(limit_entry, ote_low)
             if current_price is not None and result["stop_loss"] is not None:
                 zone_low = self._safe_price(min(selected_fvg.get("from"), selected_fvg.get("to"))) if selected_fvg else (
                     self._safe_price(selected_ob.get("low")) if selected_ob else None

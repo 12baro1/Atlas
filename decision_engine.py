@@ -38,6 +38,8 @@ class DecisionEngine:
         unicorn = context["unicorn"]
         smt = context["smt"]
         market_phase = context["market_phase"]
+        market_regime = context["market_regime"]
+        trade_quality = context["trade_quality"]
 
         signal_dir = self._normalize_direction(signal.get("signal", "WAIT"))
         signal_confidence = self._safe_number(signal.get("confidence"), 0.0)
@@ -77,20 +79,29 @@ class DecisionEngine:
         # WAIT means the setup is not ready yet, not that its trade geometry is broken.
         # Keep execution blocked, but avoid reporting missing direction/entry/RR as failures.
         waiting_for_setup = signal_dir == "WAIT"
+        quality_gate_active = isinstance(trade_quality, dict) and "allowed" in trade_quality
         critical_blockers = []
         if not waiting_for_setup:
             self._append_unique(critical_blockers, "Signal direction invalid" if signal_dir not in ["LONG", "SHORT"] else None)
             self._append_unique(critical_blockers, "Entry invalid" if not entry_valid else None)
-            self._append_unique(
-                critical_blockers,
-                f"Confidence below minimum: {self._fmt_number(signal_confidence)} < {self._fmt_number(minimum_confidence)}"
-                if signal_confidence < minimum_confidence
-                else None,
-            )
+            # Legacy score/confidence thresholds are diagnostic only when the
+            # cross-motor execution gate is present. Actual execution is then
+            # determined by structure, entry geometry, risk and target validity.
+            if not quality_gate_active:
+                self._append_unique(
+                    critical_blockers,
+                    f"Confidence below minimum: {self._fmt_number(signal_confidence)} < {self._fmt_number(minimum_confidence)}"
+                    if signal_confidence < minimum_confidence
+                    else None,
+                )
             for blocker in risk_blockers:
                 self._append_unique(critical_blockers, blocker)
-            for blocker in quality_blockers:
-                self._append_unique(critical_blockers, blocker)
+            if not quality_gate_active:
+                for blocker in quality_blockers:
+                    self._append_unique(critical_blockers, blocker)
+            if quality_gate_active and not trade_quality.get("allowed", False):
+                for blocker in trade_quality.get("blockers", []) or [trade_quality.get("reason", "Trade quality gate rejected setup")]:
+                    self._append_unique(critical_blockers, f"Trade quality: {blocker}")
 
         adjustments = self._collect_adjustments(
             signal_grade=signal_grade,
@@ -110,6 +121,7 @@ class DecisionEngine:
             htf_orderblock=htf_orderblock,
             confluence=confluence,
             market_phase=market_phase,
+            market_regime=market_regime,
         )
 
         total_score = self._clamp_score(confluence_score + sum(item["delta"] for item in adjustments))
@@ -127,6 +139,10 @@ class DecisionEngine:
             action = self.ACTION_WAIT
         elif critical_blockers:
             action = self.ACTION_SKIP
+        elif quality_gate_active:
+            # The score is retained for reporting, but cannot promote or reject
+            # a setup once all execution-quality checks have been evaluated.
+            action = self.ACTION_EXECUTE
         elif override_applies:
             action = self.ACTION_EXECUTE
         elif total_score >= execute_threshold:
@@ -168,6 +184,7 @@ class DecisionEngine:
             "rr_by_tp": risk.get("rr_by_tp") if isinstance(risk, dict) else None,
             "minimum_rr": minimum_rr,
             "quality_filters_enabled": bool(getattr(Config, "QUALITY_FILTERS_ENABLED", True)),
+            "execution_quality_mode": "cross_motor_hard_gate" if quality_gate_active else "legacy_score_thresholds",
             "quality_blockers": quality_blockers,
             "critical_blockers": critical_blockers,
             "soft_blockers": soft_blockers,
@@ -186,6 +203,8 @@ class DecisionEngine:
             "smt_active": bool(smt.get("active", False)),
             "smt_direction": smt.get("direction", "NONE"),
             "market_phase": market_phase.get("phase", "Ranging"),
+            "market_regime": market_regime,
+            "trade_quality": trade_quality,
             "liquidity_sweep_strength": liquidity_sweep.get("strength_score", 0),
             "module_scores": {"decision_adjustments": adjustments},
         }
@@ -213,6 +232,8 @@ class DecisionEngine:
         htf_orderblock = bundle.get("htf_orderblock") or {}
         liquidity_sweep = bundle.get("liquidity_sweep") or {}
         market_phase = bundle.get("market_phase") or {}
+        market_regime = bundle.get("market_regime") or {}
+        trade_quality = bundle.get("trade_quality") or {}
 
         modules = bundle.get("modules") or self._discover_modules(bundle)
 
@@ -226,6 +247,8 @@ class DecisionEngine:
             "htf_orderblock": htf_orderblock,
             "liquidity_sweep": liquidity_sweep,
             "market_phase": market_phase,
+            "market_regime": market_regime,
+            "trade_quality": trade_quality,
             "cisd": cisd,
             "volume_profile": volume_profile,
             "institutional": institutional,
@@ -246,6 +269,8 @@ class DecisionEngine:
             "htf_orderblock",
             "liquidity_sweep",
             "market_phase",
+            "market_regime",
+            "trade_quality",
             "cisd",
             "volume_profile",
             "institutional",
@@ -363,6 +388,7 @@ class DecisionEngine:
         htf_orderblock,
         confluence,
         market_phase,
+        market_regime=None,
     ):
         adjustments = []
 
@@ -404,6 +430,8 @@ class DecisionEngine:
         else:
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_MARKET_PHASE_UNFRIENDLY, f"Market Phase {phase or 'Unknown'}")
 
+        self._apply_market_regime_adjustment(adjustments, market_regime or {}, direction)
+
         if not ote or not ote.get("valid", False):
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_OTE_MISSING, "OTE missing")
 
@@ -420,6 +448,28 @@ class DecisionEngine:
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_STACK_CONFLUENCE_MISSING, "Stack Confluence missing")
 
         return adjustments
+
+    def _apply_market_regime_adjustment(self, adjustments, regime, direction):
+        """Use OHLCV regime as a modest score modifier, never as a standalone signal."""
+        if not isinstance(regime, dict) or not regime.get("active") or direction not in ("LONG", "SHORT"):
+            return
+
+        name = str(regime.get("regime", "UNKNOWN")).upper()
+        bias = str(regime.get("directional_bias", "NEUTRAL")).upper()
+        if name in ("TRENDING_UP", "TRENDING_DOWN"):
+            aligned = (direction == "LONG" and bias == "BULLISH") or (direction == "SHORT" and bias == "BEARISH")
+            if aligned:
+                self._add_adjustment(adjustments, 4, f"Market Regime aligned: {name}")
+            else:
+                self._add_adjustment(adjustments, -8, f"Market Regime opposing: {name}")
+        elif name == "HIGH_VOLATILITY":
+            self._add_adjustment(adjustments, -5, "Market Regime high volatility")
+        elif name == "RANGING":
+            self._add_adjustment(adjustments, -4, "Market Regime ranging")
+        elif name == "COMPRESSION":
+            self._add_adjustment(adjustments, -2, "Market Regime compression")
+        elif name == "TRANSITION":
+            self._add_adjustment(adjustments, -2, "Market Regime transition")
 
     def _apply_directional_adjustment(self, adjustments, module, direction, label, bonus, penalty):
         if not module or not isinstance(module, dict) or not module.get("active", False):

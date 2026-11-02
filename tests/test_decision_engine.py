@@ -355,3 +355,27 @@ def test_decision_fails_closed_when_weighted_net_rr_is_unavailable():
         "Net RR after costs cannot be calculated" in item
         for item in result["critical_blockers"]
     )
+
+
+def test_decision_skips_when_cross_motor_trade_quality_gate_rejects_setup():
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            trade_quality={
+                "allowed": False,
+                "blockers": ["Liquidity sweep direction conflicts with the trade"],
+            }
+        )
+    )
+    assert result["action"] == "SKIP"
+    assert any("Trade quality" in item for item in result["critical_blockers"])
+
+
+def test_execution_quality_gate_not_confluence_score_decides_execution():
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            signal={"signal": "LONG", "confidence": 31, "grade": "D", "strength": "WEAK"},
+            confluence={"score": 8, "checks": []},
+            trade_quality={"allowed": True, "blockers": [], "reason": "All execution-quality checks passed"},
+        )
+    )
+    assert result["action"] == "EXECUTE"

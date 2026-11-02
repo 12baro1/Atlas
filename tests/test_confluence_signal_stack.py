@@ -16,7 +16,7 @@ def test_stack_confluence_bonus_and_signal_transfer():
         entry={"direction": "LONG", "valid": True},
         confirmation={"confirmed": True},
         premium_discount={"valid": True},
-        liquidity_sweep={"is_sweep": True, "is_breakout": False, "strength_score": 88},
+        liquidity_sweep={"is_sweep": True, "is_breakout": False, "buy_side": False, "sell_side": True, "strength_score": 88},
         ote={"valid": True},
         htf_orderblock={"valid": True},
         htf_fvg={"valid": True},

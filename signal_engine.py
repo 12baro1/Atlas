@@ -25,6 +25,8 @@ class SignalEngine:
         volume_profile = analysis.get("volume_profile", {})
         institutional = analysis.get("institutional", {})
         setup_quality = analysis.get("setup_quality", {})
+        trade_quality = analysis.get("trade_quality", {})
+        quality_gate_active = isinstance(trade_quality, dict) and "allowed" in trade_quality
 
         market_phase = analysis.get("market_phase", {})
         phase_name = market_phase.get("phase", "Ranging")
@@ -54,7 +56,7 @@ class SignalEngine:
         if setup_quality.get("active"):
             quality_score = setup_quality.get("score", confidence_adjusted)
             confidence_adjusted = (confidence_adjusted * 0.45) + (quality_score * 0.55)
-            if not setup_quality.get("trade_allowed", True):
+            if not setup_quality.get("trade_allowed", True) and not quality_gate_active:
                 confirmed = False
                 wait_reason = "setup_quality_blocked"
 
@@ -71,9 +73,13 @@ class SignalEngine:
 
         confidence_adjusted = clamp(confidence_adjusted)
 
-        if setup_quality.get("active") and not setup_quality.get("trade_allowed", True):
+        if setup_quality.get("active") and not setup_quality.get("trade_allowed", True) and not quality_gate_active:
             direction = "WAIT"
             wait_reason = wait_reason or "setup_quality_blocked"
+
+        if quality_gate_active and not trade_quality.get("allowed", False):
+            direction = "WAIT"
+            wait_reason = trade_quality.get("reason") or "trade_quality_blocked"
 
         if confidence_adjusted >= 96:
             grade = "S+"

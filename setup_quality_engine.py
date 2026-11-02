@@ -85,14 +85,23 @@ class SetupQualityEngine:
         return self._score(score, "Trend/structure aligned" if trend_ok else "Trend mismatch", blocker=not trend_ok or fake_choch)
 
     def _liquidity_sweep(self, direction, sweep):
+        sweep = sweep if isinstance(sweep, dict) else {}
         if sweep.get("is_sweep"):
-            score = 55 + min(30, sweep.get("strength_score", 0) * 0.35)
-            if sweep.get("post_structure", {}).get("confirmed"):
+            expected_side = bool(sweep.get("sell_side")) if direction == "LONG" else bool(sweep.get("buy_side"))
+            opposing_side = bool(sweep.get("buy_side")) if direction == "LONG" else bool(sweep.get("sell_side"))
+            post = sweep.get("post_structure") or {}
+            expected_direction = "BULLISH" if direction == "LONG" else "BEARISH"
+            if sweep.get("ambiguous_sweep") or opposing_side or not expected_side:
+                return self._score(0, "Liquidity sweep direction conflicts with setup", True)
+            if post.get("confirmed") and post.get("direction") != expected_direction:
+                return self._score(0, "Post-sweep structure direction conflicts with setup", True)
+            score = 65 + min(25, float(sweep.get("strength_score", 0) or 0) * 0.25)
+            if post.get("confirmed"):
                 score += 10
-            return self._score(score, "Confirmed liquidity sweep")
+            return self._score(score, "Directional liquidity sweep confirmed")
         if sweep.get("is_breakout"):
-            return self._score(45, "Breakout without sweep")
-        return self._score(52, "No sweep; not mandatory")
+            return self._score(58, "Directional breakout; no reversal sweep")
+        return self._score(52, "No sweep; not mandatory for trend continuation")
 
     def _order_block(self, direction, orderblocks, current):
         match = [ob for ob in (orderblocks or []) if ob.get("type") == ("BULLISH" if direction == "LONG" else "BEARISH")]

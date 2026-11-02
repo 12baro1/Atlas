@@ -307,3 +307,95 @@ def test_entry_engine_rejects_market_sweep_confirmation_without_explicit_age():
 
     assert result["entry_type"] != "MARKET"
     assert result["valid"] is False
+
+
+
+def test_trend_regime_requires_fvg_or_orderblock_overlap_with_4h_ote():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 98.8}],
+        fvg=[{"type": "BULLISH", "from": 99.8, "to": 100.0, "filled": False}],
+        orderblocks=[],
+        current_price=100.5,
+        ote={"valid": False, "fib62": 100.2, "fib79": 99.7},
+        market_regime={"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
+    )
+    assert result["valid"] is True
+    assert result["entry"] == 100.0
+    assert result["ote_confluence"] is True
+    assert result["poi_source"] == "FVG"
+
+
+def test_trend_regime_rejects_poi_outside_4h_ote():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 98.8}],
+        fvg=[{"type": "BULLISH", "from": 99.8, "to": 100.0, "filled": False}],
+        orderblocks=[],
+        current_price=100.5,
+        ote={"valid": False, "fib62": 102.0, "fib79": 101.0},
+        market_regime={"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
+    )
+    assert result["valid"] is False
+    assert result["entry"] is None
+    assert result["entry_zone_crossed"] is True
+
+
+def test_trend_regime_requires_fvg_even_when_orderblock_overlaps_ote():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 98.8}],
+        fvg=[],
+        orderblocks=[{"type": "BULLISH", "low": 99.8, "high": 100.1, "mitigated": False}],
+        current_price=100.5,
+        ote={"valid": False, "fib62": 100.2, "fib79": 99.7},
+        market_regime={"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
+    )
+    assert result["valid"] is False
+    assert result["entry"] is None
+    assert "fresh directional FVG" in result["reason"]
+
+
+def test_entry_engine_prefers_nearest_fresh_fvg_before_weaker_farther_zone():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 98.0}],
+        fvg=[
+            {"type": "BULLISH", "from": 98.5, "to": 99.0, "filled": False, "strength": 95},
+            {"type": "BULLISH", "from": 99.8, "to": 100.0, "filled": False, "strength": 30},
+        ],
+        orderblocks=[],
+        current_price=100.5,
+    )
+    assert result["poi_zone"] == {"low": 99.8, "high": 100.0}
+    assert result["entry"] == 100.0
+
+
+def test_entry_engine_uses_strength_to_break_equal_distance_fvg_ties():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 98.0}],
+        fvg=[
+            {"type": "BULLISH", "from": 99.5, "to": 99.8, "filled": False, "strength": 30},
+            {"type": "BULLISH", "from": 99.6, "to": 99.8, "filled": False, "strength": 90},
+        ],
+        orderblocks=[],
+        current_price=100.5,
+    )
+    assert result["poi_zone"] == {"low": 99.6, "high": 99.8}
+
+
+def test_entry_engine_prefers_nearest_fresh_orderblock():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 98.0}],
+        fvg=[],
+        orderblocks=[
+            {"type": "BULLISH", "low": 99.0, "high": 99.2, "mitigated": False, "strength": 95},
+            {"type": "BULLISH", "low": 99.8, "high": 100.0, "mitigated": False, "strength": 30},
+        ],
+        current_price=100.5,
+    )
+    assert result["poi_source"] == "ORDER_BLOCK"
+    assert result["poi_zone"] == {"low": 99.8, "high": 100.0}
+    assert result["entry"] == 100.0
