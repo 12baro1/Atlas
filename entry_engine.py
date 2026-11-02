@@ -260,6 +260,12 @@ class EntryEngine:
         else:
             result["checks"].append("✗ Order Block")
 
+        if requires_ote and selected_fvg is None:
+            result["reason"] = "Trend continuation requires a fresh directional FVG overlapping 4H OTE"
+            result["entry_type_reason"] = result["reason"]
+            result["entry_zone_crossed"] = True
+            return result
+
         selected_poi = selected_fvg or selected_ob
         if selected_poi:
             result["poi_source"] = "FVG" if selected_fvg else "ORDER_BLOCK"
