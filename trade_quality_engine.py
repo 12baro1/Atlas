@@ -216,6 +216,18 @@ class TradeQualityEngine:
                 if tp1_reached and entry.get("entry_type") != "LIMIT":
                     blockers.append("TP1 has already been reached; market entry would be chasing")
 
+        # Keep the blocker list stable and free of duplicate messages.
+        blockers = list(dict.fromkeys(str(item) for item in blockers if item))
+        return {
+            "allowed": not blockers,
+            "quality_passed": not blockers,
+            "direction": direction,
+            "regime": regime_name,
+            "blockers": blockers,
+            "warnings": warnings,
+            "reason": "All execution-quality checks passed" if not blockers else "; ".join(blockers),
+        }
+
     @staticmethod
     def _module_direction(module):
         if not isinstance(module, dict):
@@ -231,14 +243,3 @@ class TradeQualityEngine:
             return "SHORT"
         return "NONE"
 
-        # Keep the blocker list stable and free of duplicate messages.
-        blockers = list(dict.fromkeys(str(item) for item in blockers if item))
-        return {
-            "allowed": not blockers,
-            "quality_passed": not blockers,
-            "direction": direction,
-            "regime": regime_name,
-            "blockers": blockers,
-            "warnings": warnings,
-            "reason": "All execution-quality checks passed" if not blockers else "; ".join(blockers),
-        }
