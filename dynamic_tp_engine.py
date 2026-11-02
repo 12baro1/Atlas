@@ -87,7 +87,12 @@ class DynamicTPEngine:
     def _collect_targets(self, direction, entry, liquidity, fvg, orderblocks, structure):
         targets = []
 
+        # Targets must be opposing-side liquidity pools. A long seeks BSL;
+        # a short seeks SSL. Unknown liquidity types are not treated as targets.
+        expected_liquidity = "BUY_SIDE" if direction == "LONG" else "SELL_SIDE"
         for item in liquidity or []:
+            if not isinstance(item, dict) or item.get("type") != expected_liquidity:
+                continue
             price = self._safe_float(item.get("price"))
             if price is None:
                 continue
@@ -96,23 +101,33 @@ class DynamicTPEngine:
             elif direction == "SHORT" and price < entry:
                 targets.append(price)
 
+        # An opposing, still-unfilled imbalance may be used as an objective;
+        # filled gaps are already mitigated and must not be recycled as targets.
+        expected_fvg = "BEARISH" if direction == "LONG" else "BULLISH"
         for item in fvg or []:
+            if not isinstance(item, dict) or item.get("type") != expected_fvg or item.get("filled", False):
+                continue
             if direction == "LONG":
-                price = self._safe_float(item.get("to"))
+                price = self._safe_float(item.get("from"))
                 if price is not None and price > entry:
                     targets.append(price)
             else:
-                price = self._safe_float(item.get("from"))
+                price = self._safe_float(item.get("to"))
                 if price is not None and price < entry:
                     targets.append(price)
 
+        # Opposing fresh order blocks are supply targets for longs and demand
+        # targets for shorts. Mitigated blocks are excluded.
+        expected_ob = "BEARISH" if direction == "LONG" else "BULLISH"
         for item in orderblocks or []:
+            if not isinstance(item, dict) or item.get("type") != expected_ob or item.get("mitigated", False):
+                continue
             if direction == "LONG":
-                price = self._safe_float(item.get("high"))
+                price = self._safe_float(item.get("low"))
                 if price is not None and price > entry:
                     targets.append(price)
             else:
-                price = self._safe_float(item.get("low"))
+                price = self._safe_float(item.get("high"))
                 if price is not None and price < entry:
                     targets.append(price)
 
