@@ -127,7 +127,7 @@ class TradeQualityEngine:
                 blockers.append(f"{name} high-confidence direction conflicts with the trade")
 
         phase = str((market_phase or {}).get("phase", "")).strip()
-        if phase and phase.lower() in {"manipulation", "distribution", "accumulation"}:
+        if phase and phase.lower() == "manipulation":
             if not (sweep_active and expected_sweep and post.get("confirmed")):
                 blockers.append("Market phase indicates manipulation without confirmed reversal")
 
@@ -200,6 +200,10 @@ class TradeQualityEngine:
                 atr = float(calculate_atr(candles, period=14))
         except (TypeError, ValueError, OverflowError):
             atr = None
+
+        if regime_name == "HIGH_VOLATILITY" and atr and atr > 0 and risk_distance is not None:
+            if risk_distance < atr * 0.5:
+                blockers.append("High-volatility stop is tighter than 0.5 ATR")
 
         if current is not None and entry_price is not None and atr and atr > 0:
             distance = abs(current - entry_price)
