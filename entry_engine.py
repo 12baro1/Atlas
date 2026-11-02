@@ -214,9 +214,13 @@ class EntryEngine:
                 )
             else:
                 distance = 0.0
-            fvg_candidates.append((distance, gap))
+            try:
+                strength = float(gap.get("strength", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                strength = 0.0
+            fvg_candidates.append((distance, -strength, gap))
         if fvg_candidates:
-            selected_fvg = min(fvg_candidates, key=lambda item: item[0])[1]
+            selected_fvg = min(fvg_candidates, key=lambda item: (item[0], item[1]))[2]
 
         if crossed_matching_fvg and selected_fvg is None:
             result["entry_zone_crossed"] = True
@@ -231,13 +235,11 @@ class EntryEngine:
         # Best Order Block
         # -------------------------
 
-        selected_ob = None
+        ob_candidates = []
 
-        for ob in reversed(orderblocks):
-
+        for ob in orderblocks:
             if ob.get("mitigated", False):
                 continue
-
             if ob.get("type") != ("BULLISH" if direction == "LONG" else "BEARISH"):
                 continue
             low = self._safe_price(ob.get("low"))
@@ -251,8 +253,18 @@ class EntryEngine:
                     continue
                 if direction == "SHORT" and high < current_price:
                     continue
-            selected_ob = ob
-            break
+                distance = 0.0 if low <= current_price <= high else (
+                    current_price - high if direction == "LONG" else low - current_price
+                )
+            else:
+                distance = 0.0
+            try:
+                strength = float(ob.get("strength", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                strength = 0.0
+            ob_candidates.append((distance, -strength, ob))
+
+        selected_ob = min(ob_candidates, key=lambda item: (item[0], item[1]))[2] if ob_candidates else None
 
         if selected_ob:
             result["score"] += 25
