@@ -38,6 +38,7 @@ class DecisionEngine:
         unicorn = context["unicorn"]
         smt = context["smt"]
         market_phase = context["market_phase"]
+        market_regime = context["market_regime"]
 
         signal_dir = self._normalize_direction(signal.get("signal", "WAIT"))
         signal_confidence = self._safe_number(signal.get("confidence"), 0.0)
@@ -110,6 +111,7 @@ class DecisionEngine:
             htf_orderblock=htf_orderblock,
             confluence=confluence,
             market_phase=market_phase,
+            market_regime=market_regime,
         )
 
         total_score = self._clamp_score(confluence_score + sum(item["delta"] for item in adjustments))
@@ -186,6 +188,7 @@ class DecisionEngine:
             "smt_active": bool(smt.get("active", False)),
             "smt_direction": smt.get("direction", "NONE"),
             "market_phase": market_phase.get("phase", "Ranging"),
+            "market_regime": market_regime,
             "liquidity_sweep_strength": liquidity_sweep.get("strength_score", 0),
             "module_scores": {"decision_adjustments": adjustments},
         }
@@ -213,6 +216,7 @@ class DecisionEngine:
         htf_orderblock = bundle.get("htf_orderblock") or {}
         liquidity_sweep = bundle.get("liquidity_sweep") or {}
         market_phase = bundle.get("market_phase") or {}
+        market_regime = bundle.get("market_regime") or {}
 
         modules = bundle.get("modules") or self._discover_modules(bundle)
 
@@ -226,6 +230,7 @@ class DecisionEngine:
             "htf_orderblock": htf_orderblock,
             "liquidity_sweep": liquidity_sweep,
             "market_phase": market_phase,
+            "market_regime": market_regime,
             "cisd": cisd,
             "volume_profile": volume_profile,
             "institutional": institutional,
@@ -246,6 +251,7 @@ class DecisionEngine:
             "htf_orderblock",
             "liquidity_sweep",
             "market_phase",
+            "market_regime",
             "cisd",
             "volume_profile",
             "institutional",
@@ -363,6 +369,7 @@ class DecisionEngine:
         htf_orderblock,
         confluence,
         market_phase,
+        market_regime=None,
     ):
         adjustments = []
 
@@ -404,6 +411,8 @@ class DecisionEngine:
         else:
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_MARKET_PHASE_UNFRIENDLY, f"Market Phase {phase or 'Unknown'}")
 
+        self._apply_market_regime_adjustment(adjustments, market_regime or {}, direction)
+
         if not ote or not ote.get("valid", False):
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_OTE_MISSING, "OTE missing")
 
@@ -420,6 +429,28 @@ class DecisionEngine:
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_STACK_CONFLUENCE_MISSING, "Stack Confluence missing")
 
         return adjustments
+
+    def _apply_market_regime_adjustment(self, adjustments, regime, direction):
+        """Use OHLCV regime as a modest score modifier, never as a standalone signal."""
+        if not isinstance(regime, dict) or not regime.get("active") or direction not in ("LONG", "SHORT"):
+            return
+
+        name = str(regime.get("regime", "UNKNOWN")).upper()
+        bias = str(regime.get("directional_bias", "NEUTRAL")).upper()
+        if name in ("TRENDING_UP", "TRENDING_DOWN"):
+            aligned = (direction == "LONG" and bias == "BULLISH") or (direction == "SHORT" and bias == "BEARISH")
+            if aligned:
+                self._add_adjustment(adjustments, 4, f"Market Regime aligned: {name}")
+            else:
+                self._add_adjustment(adjustments, -8, f"Market Regime opposing: {name}")
+        elif name == "HIGH_VOLATILITY":
+            self._add_adjustment(adjustments, -5, "Market Regime high volatility")
+        elif name == "RANGING":
+            self._add_adjustment(adjustments, -4, "Market Regime ranging")
+        elif name == "COMPRESSION":
+            self._add_adjustment(adjustments, -2, "Market Regime compression")
+        elif name == "TRANSITION":
+            self._add_adjustment(adjustments, -2, "Market Regime transition")
 
     def _apply_directional_adjustment(self, adjustments, module, direction, label, bonus, penalty):
         if not module or not isinstance(module, dict) or not module.get("active", False):
