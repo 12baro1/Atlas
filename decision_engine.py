@@ -39,6 +39,7 @@ class DecisionEngine:
         smt = context["smt"]
         market_phase = context["market_phase"]
         market_regime = context["market_regime"]
+        trade_quality = context["trade_quality"]
 
         signal_dir = self._normalize_direction(signal.get("signal", "WAIT"))
         signal_confidence = self._safe_number(signal.get("confidence"), 0.0)
@@ -92,6 +93,9 @@ class DecisionEngine:
                 self._append_unique(critical_blockers, blocker)
             for blocker in quality_blockers:
                 self._append_unique(critical_blockers, blocker)
+            if trade_quality and not trade_quality.get("allowed", False):
+                for blocker in trade_quality.get("blockers", []) or [trade_quality.get("reason", "Trade quality gate rejected setup")]:
+                    self._append_unique(critical_blockers, f"Trade quality: {blocker}")
 
         adjustments = self._collect_adjustments(
             signal_grade=signal_grade,
@@ -189,6 +193,7 @@ class DecisionEngine:
             "smt_direction": smt.get("direction", "NONE"),
             "market_phase": market_phase.get("phase", "Ranging"),
             "market_regime": market_regime,
+            "trade_quality": trade_quality,
             "liquidity_sweep_strength": liquidity_sweep.get("strength_score", 0),
             "module_scores": {"decision_adjustments": adjustments},
         }
@@ -217,6 +222,7 @@ class DecisionEngine:
         liquidity_sweep = bundle.get("liquidity_sweep") or {}
         market_phase = bundle.get("market_phase") or {}
         market_regime = bundle.get("market_regime") or {}
+        trade_quality = bundle.get("trade_quality") or {}
 
         modules = bundle.get("modules") or self._discover_modules(bundle)
 
@@ -231,6 +237,7 @@ class DecisionEngine:
             "liquidity_sweep": liquidity_sweep,
             "market_phase": market_phase,
             "market_regime": market_regime,
+            "trade_quality": trade_quality,
             "cisd": cisd,
             "volume_profile": volume_profile,
             "institutional": institutional,
@@ -252,6 +259,7 @@ class DecisionEngine:
             "liquidity_sweep",
             "market_phase",
             "market_regime",
+            "trade_quality",
             "cisd",
             "volume_profile",
             "institutional",
