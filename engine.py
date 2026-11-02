@@ -1186,6 +1186,7 @@ class AtlasEngine:
         news_state=None,
         correlation_state=None,
         cooldown_state=None,
+        market_regime_state=None,
     ):
         """Dış API'de beklenen analysis sözlüğünü oluşturur."""
         analysis_payload = {
@@ -1229,6 +1230,7 @@ class AtlasEngine:
             "dynamic_tp": execution_state["dynamic_tp"],
             "confluence": execution_state["confluence"],
             "market_phase": context_state["market_phase"],
+            "market_regime": market_regime_state or context_state.get("market_regime", {}),
             "smt": smt_state,
             "volume_profile": volume_profile_state or {
                 "active": False,
