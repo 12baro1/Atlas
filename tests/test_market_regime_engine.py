@@ -54,3 +54,38 @@ def test_market_regime_rejects_malformed_ohlc():
     result = MarketRegimeEngine().analyze(candles)
     assert result["active"] is False
     assert result["regime"] == "UNKNOWN"
+
+from decision_engine import DecisionEngine
+
+
+def test_market_regime_alignment_changes_decision_score():
+    engine = DecisionEngine()
+    adjustments = []
+    engine._apply_market_regime_adjustment(
+        adjustments,
+        {"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
+        "LONG",
+    )
+    assert adjustments == [{"delta": 4, "reason": "Market Regime aligned: TRENDING_UP"}]
+
+
+def test_opposing_market_regime_penalizes_decision_score():
+    engine = DecisionEngine()
+    adjustments = []
+    engine._apply_market_regime_adjustment(
+        adjustments,
+        {"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
+        "SHORT",
+    )
+    assert adjustments == [{"delta": -8, "reason": "Market Regime opposing: TRENDING_UP"}]
+
+
+def test_unavailable_market_regime_does_not_change_score():
+    engine = DecisionEngine()
+    adjustments = []
+    engine._apply_market_regime_adjustment(
+        adjustments,
+        {"active": False, "regime": "UNKNOWN"},
+        "LONG",
+    )
+    assert adjustments == []
