@@ -22,6 +22,13 @@ class TradeQualityEngine:
         current_price=None,
         candles=None,
         minimum_rr=3.0,
+        smt=None,
+        unicorn=None,
+        cisd=None,
+        volume_profile=None,
+        institutional=None,
+        market_phase=None,
+        setup_quality=None,
     ):
         entry = entry if isinstance(entry, dict) else {}
         confirmation = confirmation if isinstance(confirmation, dict) else {}
@@ -99,6 +106,41 @@ class TradeQualityEngine:
         else:
             warnings.append("4H regime unavailable; other structural checks remain mandatory")
 
+        # Optional specialist motors are not mandatory when inactive. When
+        # active and sufficiently confident, however, they may not contradict
+        # the proposed direction.
+        for name, module in (
+            ("SMT", smt),
+            ("Unicorn", unicorn),
+            ("CISD", cisd),
+            ("Volume Profile", volume_profile),
+            ("Institutional Flow", institutional),
+        ):
+            if not isinstance(module, dict) or not module.get("active"):
+                continue
+            try:
+                confidence = float(module.get("confidence", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                confidence = 0.0
+            module_direction = self._module_direction(module)
+            if confidence >= 75 and module_direction in {"LONG", "SHORT"} and module_direction != direction:
+                blockers.append(f"{name} high-confidence direction conflicts with the trade")
+
+        phase = str((market_phase or {}).get("phase", "")).strip()
+        if phase and phase.lower() in {"manipulation", "distribution", "accumulation"}:
+            if not (sweep_active and expected_sweep and post.get("confirmed")):
+                blockers.append("Market phase indicates manipulation without confirmed reversal")
+
+        learning = (setup_quality or {}).get("learning") if isinstance(setup_quality, dict) else None
+        if isinstance(learning, dict) and learning.get("matched"):
+            try:
+                sample_count = int(learning.get("sample_count", 0) or 0)
+                expected_r = float(learning.get("expected_r"))
+            except (TypeError, ValueError, OverflowError):
+                sample_count, expected_r = 0, None
+            if sample_count >= 20 and expected_r is not None and expected_r <= 0:
+                blockers.append("Learning history shows non-positive expectancy for this setup")
+
         if not risk.get("risk_setup_valid"):
             blockers.append(risk.get("risk_setup_reason") or "Risk engine rejected the stop")
         if risk.get("stop_adjusted"):
@@ -169,6 +211,21 @@ class TradeQualityEngine:
                 tp1_reached = current >= tp_prices[0] if direction == "LONG" else current <= tp_prices[0]
                 if tp1_reached and entry.get("entry_type") != "LIMIT":
                     blockers.append("TP1 has already been reached; market entry would be chasing")
+
+    @staticmethod
+    def _module_direction(module):
+        if not isinstance(module, dict):
+            return "NONE"
+        value = module.get("direction") or module.get("signal") or module.get("trend")
+        if not value and isinstance(module.get("best"), dict):
+            best = module["best"]
+            value = best.get("direction") or best.get("signal") or best.get("trend")
+        value = str(value or "NONE").upper()
+        if value in {"LONG", "BULLISH"}:
+            return "LONG"
+        if value in {"SHORT", "BEARISH"}:
+            return "SHORT"
+        return "NONE"
 
         # Keep the blocker list stable and free of duplicate messages.
         blockers = list(dict.fromkeys(str(item) for item in blockers if item))
