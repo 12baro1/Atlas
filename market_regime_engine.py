@@ -26,7 +26,7 @@ class MarketRegimeEngine:
             return self._unknown("Malformed candle data")
 
         if any(
-            not all(math.isfinite(value) for value in row)
+            not all(math.isfinite(value) for value in (open_, high, low, close, volume))
             or high < max(open_, close, low)
             or low > min(open_, close, high)
             or min(open_, high, low, close) <= 0
