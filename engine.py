@@ -1154,6 +1154,13 @@ class AtlasEngine:
             current_price=candles[-1].close if candles else None,
             candles=candles,
             minimum_rr=float(getattr(Config, "MINIMUM_RR", 3.0)),
+            smt=smt,
+            unicorn=unicorn,
+            cisd=cisd,
+            volume_profile=volume_profile,
+            institutional=institutional,
+            market_phase=market_phase,
+            setup_quality=setup_quality,
         )
 
         analysis_for_signal = {
