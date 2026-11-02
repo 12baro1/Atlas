@@ -301,7 +301,7 @@ class AtlasTUIApp(App):
                         result_text = format_card_text(card)
                         result_text += f"\n\nAnaliz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn"
                     else:
-                        result_text = ""
+                        result_text = "Şu an girilebilir MARKET/LIMIT sinyali yok."
             self.call_from_thread(self._finish, result_text)
         except Exception:
             self.call_from_thread(self._finish, traceback.format_exc())
