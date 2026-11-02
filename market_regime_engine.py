@@ -4,6 +4,7 @@ This engine deliberately uses only closed candle data. It does not infer
 order flow, liquidation levels, or other unavailable exchange microstructure.
 """
 
+import math
 from statistics import median
 
 
@@ -21,16 +22,18 @@ class MarketRegimeEngine:
                 (float(c.open), float(c.high), float(c.low), float(c.close), float(c.volume))
                 for c in candles[-80:]
             ]
-        except (AttributeError, TypeError, ValueError):
+        except (AttributeError, TypeError, ValueError, OverflowError):
             return self._unknown("Malformed candle data")
 
         if any(
-            high < max(open_, close, low)
+            not all(math.isfinite(value) for value in row)
+            or high < max(open_, close, low)
             or low > min(open_, close, high)
             or min(open_, high, low, close) <= 0
-            for open_, high, low, close, _ in rows
+            or volume < 0
+            for open_, high, low, close, volume in rows
         ):
-            return self._unknown("Invalid OHLC values")
+            return self._unknown("Invalid or non-finite OHLCV values")
 
         closes = [row[3] for row in rows]
         true_ranges = []
@@ -41,7 +44,7 @@ class MarketRegimeEngine:
 
         atr_fast = sum(true_ranges[-14:]) / 14
         atr_slow = sum(true_ranges[-50:]) / 50
-        if atr_fast <= 0 or atr_slow <= 0:
+        if not math.isfinite(atr_fast) or not math.isfinite(atr_slow) or atr_fast <= 0 or atr_slow <= 0:
             return self._unknown("ATR unavailable")
 
         # Efficiency ratio: directional travel divided by total path length.
