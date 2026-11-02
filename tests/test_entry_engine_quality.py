@@ -339,3 +339,18 @@ def test_trend_regime_rejects_poi_outside_4h_ote():
     assert result["valid"] is False
     assert result["entry"] is None
     assert result["entry_zone_crossed"] is True
+
+
+def test_trend_regime_requires_fvg_even_when_orderblock_overlaps_ote():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 98.8}],
+        fvg=[],
+        orderblocks=[{"type": "BULLISH", "low": 99.8, "high": 100.1, "mitigated": False}],
+        current_price=100.5,
+        ote={"valid": False, "fib62": 100.2, "fib79": 99.7},
+        market_regime={"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
+    )
+    assert result["valid"] is False
+    assert result["entry"] is None
+    assert "fresh directional FVG" in result["reason"]
