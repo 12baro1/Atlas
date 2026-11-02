@@ -184,6 +184,7 @@ class DecisionEngine:
             "rr_by_tp": risk.get("rr_by_tp") if isinstance(risk, dict) else None,
             "minimum_rr": minimum_rr,
             "quality_filters_enabled": bool(getattr(Config, "QUALITY_FILTERS_ENABLED", True)),
+            "execution_quality_mode": "cross_motor_hard_gate" if quality_gate_active else "legacy_score_thresholds",
             "quality_blockers": quality_blockers,
             "critical_blockers": critical_blockers,
             "soft_blockers": soft_blockers,
