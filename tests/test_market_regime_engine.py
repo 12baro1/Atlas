@@ -1,0 +1,56 @@
+import math
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.candle import Candle
+from market_regime_engine import MarketRegimeEngine
+
+
+def _candles(closes, spread=1.0):
+    rows = []
+    for index, close in enumerate(closes):
+        open_price = close - 0.1
+        rows.append(
+            Candle(
+                time=index * 4 * 60 * 60 * 1000,
+                open=open_price,
+                high=max(open_price, close) + spread,
+                low=min(open_price, close) - spread,
+                close=close,
+                volume=100.0,
+            )
+        )
+    return rows
+
+
+def test_market_regime_detects_uptrend():
+    closes = [100 + index * 1.5 + math.sin(index) * 0.15 for index in range(80)]
+    result = MarketRegimeEngine().analyze(_candles(closes))
+    assert result["active"] is True
+    assert result["regime"] == "TRENDING_UP"
+    assert result["directional_bias"] == "BULLISH"
+    assert result["source"] == "bybit_ohlcv"
+
+
+def test_market_regime_detects_range():
+    closes = [100 + math.sin(index * 1.7) * 0.5 for index in range(80)]
+    result = MarketRegimeEngine().analyze(_candles(closes, spread=0.7))
+    assert result["active"] is True
+    assert result["regime"] == "RANGING"
+    assert result["directional_bias"] == "NEUTRAL"
+
+
+def test_market_regime_requires_sufficient_history():
+    result = MarketRegimeEngine().analyze(_candles([100 + index for index in range(20)]))
+    assert result["active"] is False
+    assert result["regime"] == "UNKNOWN"
+
+
+def test_market_regime_rejects_malformed_ohlc():
+    candles = _candles([100 + index for index in range(60)])
+    candles[-1].high = candles[-1].low - 1
+    result = MarketRegimeEngine().analyze(candles)
+    assert result["active"] is False
+    assert result["regime"] == "UNKNOWN"
