@@ -6,6 +6,7 @@ import math
 import os
 import re
 import threading
+import traceback
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
@@ -293,8 +294,8 @@ class AtlasTUIApp(App):
                     result_text = format_card_text(card)
                     result_text += f"\n\nAnaliz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn"
             self.call_from_thread(self._finish, result_text)
-        except Exception as exc:
-            self.call_from_thread(self._finish, f"ANALİZ HATASI\n\n{type(exc).__name__}: {exc}")
+        except Exception:
+            self.call_from_thread(self._finish, traceback.format_exc())
 
 
     def _format_performance(self, command: str) -> str:
