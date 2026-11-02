@@ -79,21 +79,27 @@ class DecisionEngine:
         # WAIT means the setup is not ready yet, not that its trade geometry is broken.
         # Keep execution blocked, but avoid reporting missing direction/entry/RR as failures.
         waiting_for_setup = signal_dir == "WAIT"
+        quality_gate_active = isinstance(trade_quality, dict) and "allowed" in trade_quality
         critical_blockers = []
         if not waiting_for_setup:
             self._append_unique(critical_blockers, "Signal direction invalid" if signal_dir not in ["LONG", "SHORT"] else None)
             self._append_unique(critical_blockers, "Entry invalid" if not entry_valid else None)
-            self._append_unique(
-                critical_blockers,
-                f"Confidence below minimum: {self._fmt_number(signal_confidence)} < {self._fmt_number(minimum_confidence)}"
-                if signal_confidence < minimum_confidence
-                else None,
-            )
+            # Legacy score/confidence thresholds are diagnostic only when the
+            # cross-motor execution gate is present. Actual execution is then
+            # determined by structure, entry geometry, risk and target validity.
+            if not quality_gate_active:
+                self._append_unique(
+                    critical_blockers,
+                    f"Confidence below minimum: {self._fmt_number(signal_confidence)} < {self._fmt_number(minimum_confidence)}"
+                    if signal_confidence < minimum_confidence
+                    else None,
+                )
             for blocker in risk_blockers:
                 self._append_unique(critical_blockers, blocker)
-            for blocker in quality_blockers:
-                self._append_unique(critical_blockers, blocker)
-            if trade_quality and not trade_quality.get("allowed", False):
+            if not quality_gate_active:
+                for blocker in quality_blockers:
+                    self._append_unique(critical_blockers, blocker)
+            if quality_gate_active and not trade_quality.get("allowed", False):
                 for blocker in trade_quality.get("blockers", []) or [trade_quality.get("reason", "Trade quality gate rejected setup")]:
                     self._append_unique(critical_blockers, f"Trade quality: {blocker}")
 
@@ -133,6 +139,10 @@ class DecisionEngine:
             action = self.ACTION_WAIT
         elif critical_blockers:
             action = self.ACTION_SKIP
+        elif quality_gate_active:
+            # The score is retained for reporting, but cannot promote or reject
+            # a setup once all execution-quality checks have been evaluated.
+            action = self.ACTION_EXECUTE
         elif override_applies:
             action = self.ACTION_EXECUTE
         elif total_score >= execute_threshold:
