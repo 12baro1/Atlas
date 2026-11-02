@@ -291,8 +291,17 @@ class AtlasTUIApp(App):
                     )
                 else:
                     card = build_signal_card(outcome["result"])
-                    result_text = format_card_text(card)
-                    result_text += f"\n\nAnaliz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn"
+                    action = str(card.get("decision_action") or "").upper()
+                    direction = card.get("direction") in {"LONG", "SHORT"}
+                    entry_type = str(card.get("entry_type") or "").upper()
+                    has_levels = bool(card.get("entry")) and bool(card.get("stop_loss")) and len(card.get("tp_levels") or []) >= 1
+                    market_signal = action in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and direction and entry_type == "MARKET" and has_levels
+                    limit_signal = entry_type == "LIMIT" and direction and has_levels
+                    if market_signal or limit_signal:
+                        result_text = format_card_text(card)
+                        result_text += f"\n\nAnaliz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn"
+                    else:
+                        result_text = ""
             self.call_from_thread(self._finish, result_text)
         except Exception:
             self.call_from_thread(self._finish, traceback.format_exc())
@@ -397,8 +406,8 @@ class AtlasTUIApp(App):
             if not entry_data.get("entry"):
                 diagnostics["no_entry"] += 1
             card = build_signal_card(raw)
-            pending_limit = card.get("entry_type") == "LIMIT" and card.get("direction") in {"LONG", "SHORT"} and bool(card.get("entry")) and bool(card.get("stop_loss"))
-            executable_market = card.get("decision_action") == "EXECUTE" and card.get("direction") in {"LONG", "SHORT"}
+            pending_limit = card.get("entry_type") == "LIMIT" and card.get("direction") in {"LONG", "SHORT"} and bool(card.get("entry")) and bool(card.get("stop_loss")) and bool(card.get("tp_levels"))
+            executable_market = card.get("decision_action") in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and card.get("entry_type") == "MARKET" and card.get("direction") in {"LONG", "SHORT"}
             if not (executable_market or pending_limit):
                 diagnostics["wait_or_skip"] += 1
                 continue
