@@ -79,23 +79,34 @@ class ConfluenceEngine:
         else:
             checks.append("✘ Premium Zone")
 
-        # Liquidity Sweep
-        if liquidity_sweep.get("is_sweep"):
-            sweep_score = min(15, int(liquidity_sweep.get("strength_score", 0) / 8))
-            score += sweep_score
-            checks.append(f"✔ Liquidity Sweep ({liquidity_sweep.get('strength_score', 0)}%)")
+        # Liquidity sweep must be on the correct side for the proposed reversal.
+        expected_sweep = bool(liquidity_sweep.get("sell_side")) if entry_direction == "LONG" else bool(liquidity_sweep.get("buy_side"))
+        opposing_sweep = bool(liquidity_sweep.get("buy_side")) if entry_direction == "LONG" else bool(liquidity_sweep.get("sell_side"))
+        if liquidity_sweep.get("is_sweep") and expected_sweep and not opposing_sweep and not liquidity_sweep.get("ambiguous_sweep"):
+            post = liquidity_sweep.get("post_structure") or {}
+            if post.get("confirmed") and post.get("direction") != ("BULLISH" if entry_direction == "LONG" else "BEARISH"):
+                score -= 8
+                checks.append("✘ Liquidity Sweep Structure Direction")
+            else:
+                sweep_score = min(15, int(liquidity_sweep.get("strength_score", 0) / 8))
+                score += sweep_score
+                checks.append(f"✔ Directional Liquidity Sweep ({liquidity_sweep.get('strength_score', 0)}%)")
         elif liquidity_sweep.get("is_breakout"):
             score += 2
             checks.append("◐ Liquidity Breakout")
+        elif liquidity_sweep.get("is_sweep"):
+            score -= 10
+            checks.append("✘ Liquidity Sweep Direction Mismatch")
         else:
             checks.append("✘ Liquidity Sweep")
 
-        # OTE
-        if ote["valid"]:
+        # OTE can qualify through the actual executable POI overlap, even when
+        # current market price has not yet retraced into the pending LIMIT zone.
+        if ote.get("valid") or entry.get("ote_confluence"):
             score += 8
-            checks.append("✔ OTE")
+            checks.append("✔ OTE + POI")
         else:
-            checks.append("✘ OTE")
+            checks.append("✘ OTE + POI")
 
         # Breaker
         if breaker is not None and len(breaker) > 0:
@@ -147,12 +158,27 @@ class ConfluenceEngine:
         else:
             checks.append("✘ SMT")
 
-        # Stack Confluence: Sweep + OB + FVG + SMT + Market Phase
-        stack_ok = (
+        # Stack Confluence uses only fresh POIs matching the intended direction.
+        expected_poi = "BULLISH" if entry_direction == "LONG" else "BEARISH"
+        directional_ob = any(
+            isinstance(item, dict) and item.get("type") == expected_poi and not item.get("mitigated")
+            for item in (orderblocks or [])
+        )
+        directional_fvg = any(
+            isinstance(item, dict) and item.get("type") == expected_poi and not item.get("filled")
+            for item in (fvg or [])
+        )
+        directional_sweep = (
             liquidity_sweep.get("is_sweep")
-            and bool(orderblocks)
-            and bool(fvg)
-            and bool(smt and smt.get("active"))
+            and expected_sweep
+            and not opposing_sweep
+            and not liquidity_sweep.get("ambiguous_sweep")
+        )
+        stack_ok = (
+            directional_sweep
+            and directional_ob
+            and directional_fvg
+            and bool(smt and smt.get("active") and smt.get("direction") == ("BULLISH" if entry_direction == "LONG" else "BEARISH"))
             and bool(market_phase and market_phase.get("phase") in ["Expansion", "Trending", "Reversal"])
         )
 
