@@ -38,6 +38,7 @@ from liquidity_engine import LiquidityEngine
 from liquidity_sweep_engine import LiquiditySweepEngine
 from institutional_engine import InstitutionalAnalysisEngine
 from market_phase_engine import MarketPhaseEngine
+from market_regime_engine import MarketRegimeEngine
 from manual_trade_quality import ManualTradeQualityGate
 from mitigation_engine import MitigationEngine
 from mtf_engine import MTFEngine
@@ -106,6 +107,7 @@ class AtlasEngine:
         # Faz, bağlam ve MTF motorları
         self.trend = TrendEngine()
         self.market_phase = MarketPhaseEngine()
+        self.market_regime = MarketRegimeEngine()
         self.mtf = MTFEngine()
         self.premium_discount = PremiumDiscountEngine()
         self.killzone = KillZoneEngine()
@@ -261,6 +263,9 @@ class AtlasEngine:
             breakers=structure_state["breaker"],
         )
 
+        market_regime_state = self.market_regime.analyze(h4)
+        context_state["market_regime"] = market_regime_state
+
         unicorn_state = self._build_unicorn_state(
             data=data,
             tf_analysis=tf_analysis,
@@ -342,6 +347,7 @@ class AtlasEngine:
             htf_orderblock=context_state.get("htf_orderblock"),
             liquidity_sweep=structure_state.get("liquidity_sweep"),
             market_phase=context_state.get("market_phase"),
+            market_regime=market_regime_state,
             cisd=cisd_state,
             volume_profile=volume_profile_state,
             institutional=institutional_state,
@@ -383,6 +389,7 @@ class AtlasEngine:
             news_state=news_state,
             correlation_state=correlation_state,
             cooldown_state=cooldown_state,
+            market_regime_state=market_regime_state,
         )
 
         journal_snapshot = self.trade_journal.record_analysis(
