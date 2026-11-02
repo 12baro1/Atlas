@@ -307,3 +307,35 @@ def test_entry_engine_rejects_market_sweep_confirmation_without_explicit_age():
 
     assert result["entry_type"] != "MARKET"
     assert result["valid"] is False
+
+
+
+def test_trend_regime_requires_fvg_or_orderblock_overlap_with_4h_ote():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 98.8}],
+        fvg=[{"type": "BULLISH", "from": 99.8, "to": 100.0, "filled": False}],
+        orderblocks=[],
+        current_price=100.5,
+        ote={"valid": False, "fib62": 100.2, "fib79": 99.7},
+        market_regime={"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
+    )
+    assert result["valid"] is True
+    assert result["entry"] == 100.0
+    assert result["ote_confluence"] is True
+    assert result["poi_source"] == "FVG"
+
+
+def test_trend_regime_rejects_poi_outside_4h_ote():
+    result = EntryEngine().generate(
+        mtf={"entry": "LONG"},
+        structure=[{"label": "HL", "kind": "LOW", "price": 98.8}],
+        fvg=[{"type": "BULLISH", "from": 99.8, "to": 100.0, "filled": False}],
+        orderblocks=[],
+        current_price=100.5,
+        ote={"valid": False, "fib62": 102.0, "fib79": 101.0},
+        market_regime={"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
+    )
+    assert result["valid"] is False
+    assert result["entry"] is None
+    assert result["entry_zone_crossed"] is True
