@@ -56,7 +56,7 @@ class TradeQualityEngine:
 
         trend_direction = str(trend.get("trend", "NEUTRAL")).upper()
         expected_trend = "BULLISH" if direction == "LONG" else "BEARISH"
-        if direction in {"LONG", "SHORT"} and trend_direction not in {expected_trend, "NEUTRAL"}:
+        if direction in {"LONG", "SHORT"} and trend_direction not in {expected_trend, "NEUTRAL", "RANGE", "NONE"}:
             blockers.append("Trend engine conflicts with the proposed direction")
 
         sweep_active = bool(sweep.get("is_sweep"))
