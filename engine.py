@@ -39,6 +39,7 @@ from liquidity_sweep_engine import LiquiditySweepEngine
 from institutional_engine import InstitutionalAnalysisEngine
 from market_phase_engine import MarketPhaseEngine
 from market_regime_engine import MarketRegimeEngine
+from trade_quality_engine import TradeQualityEngine
 from manual_trade_quality import ManualTradeQualityGate
 from mitigation_engine import MitigationEngine
 from mtf_engine import MTFEngine
@@ -108,6 +109,7 @@ class AtlasEngine:
         self.trend = TrendEngine()
         self.market_phase = MarketPhaseEngine()
         self.market_regime = MarketRegimeEngine()
+        self.trade_quality = TradeQualityEngine()
         self.mtf = MTFEngine()
         self.premium_discount = PremiumDiscountEngine()
         self.killzone = KillZoneEngine()
@@ -335,6 +337,7 @@ class AtlasEngine:
             ifvg=structure_state.get("ifvg"),
             eqh_eql=structure_state.get("eqh_eql"),
             internal_structure=structure_state.get("internal_structure"),
+            market_regime=market_regime_state,
         )
 
         decision_state = self.decision.decide(
@@ -348,6 +351,7 @@ class AtlasEngine:
             liquidity_sweep=structure_state.get("liquidity_sweep"),
             market_phase=context_state.get("market_phase"),
             market_regime=market_regime_state,
+            trade_quality=execution_state.get("trade_quality"),
             cisd=cisd_state,
             volume_profile=volume_profile_state,
             institutional=institutional_state,
@@ -987,6 +991,7 @@ class AtlasEngine:
         ifvg=None,
         eqh_eql=None,
         internal_structure=None,
+        market_regime=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(
@@ -998,6 +1003,8 @@ class AtlasEngine:
             allow_structure_fallback=bool(getattr(Config, "ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK", False)),
             candles=candles,
             liquidity_sweep=liquidity_sweep,
+            ote=ote,
+            market_regime=market_regime,
         )
         confirmation = self.entry_confirmation.confirm(
             mtf, entry_structure, fvg, entry,
@@ -1134,6 +1141,21 @@ class AtlasEngine:
                 )
         rr = self.rr.evaluate(risk) if risk is not None else None
 
+        trade_quality = self.trade_quality.evaluate(
+            entry=entry,
+            confirmation=confirmation,
+            mtf=mtf,
+            trend=trend,
+            liquidity_sweep=liquidity_sweep,
+            ote=ote,
+            market_regime=market_regime,
+            dynamic_tp=dynamic_tp,
+            risk=risk,
+            current_price=candles[-1].close if candles else None,
+            candles=candles,
+            minimum_rr=float(getattr(Config, "MINIMUM_RR", 3.0)),
+        )
+
         analysis_for_signal = {
             "entry": entry,
             "confirmation": confirmation,
@@ -1146,6 +1168,7 @@ class AtlasEngine:
             "volume_profile": volume_profile,
             "institutional": institutional,
             "setup_quality": setup_quality,
+            "trade_quality": trade_quality,
             "news_filter": news_filter or {},
             "correlation": correlation or {},
             "cooldown": cooldown or {},
@@ -1170,6 +1193,7 @@ class AtlasEngine:
             "rr": rr,
             "signal": signal,
             "setup_quality": setup_quality,
+            "trade_quality": trade_quality,
         }
 
     def _compose_analysis(
@@ -1231,6 +1255,7 @@ class AtlasEngine:
             "confluence": execution_state["confluence"],
             "market_phase": context_state["market_phase"],
             "market_regime": market_regime_state or context_state.get("market_regime", {}),
+            "trade_quality": execution_state.get("trade_quality", {}),
             "smt": smt_state,
             "volume_profile": volume_profile_state or {
                 "active": False,
