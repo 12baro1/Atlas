@@ -55,6 +55,15 @@ def test_market_regime_rejects_malformed_ohlc():
     assert result["active"] is False
     assert result["regime"] == "UNKNOWN"
 
+
+def test_market_regime_rejects_nan_ohlcv():
+    candles = _candles([100 + index for index in range(60)])
+    candles[-1].close = float("nan")
+    result = MarketRegimeEngine().analyze(candles)
+    assert result["active"] is False
+    assert result["regime"] == "UNKNOWN"
+
+
 from decision_engine import DecisionEngine
 
 
