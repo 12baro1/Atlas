@@ -66,7 +66,7 @@ def test_market_regime_alignment_changes_decision_score():
         {"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
         "LONG",
     )
-    assert adjustments == [{"delta": 4, "reason": "Market Regime aligned: TRENDING_UP"}]
+    assert adjustments == [{"delta": 4, "label": "Market Regime aligned: TRENDING_UP"}]
 
 
 def test_opposing_market_regime_penalizes_decision_score():
@@ -77,7 +77,7 @@ def test_opposing_market_regime_penalizes_decision_score():
         {"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
         "SHORT",
     )
-    assert adjustments == [{"delta": -8, "reason": "Market Regime opposing: TRENDING_UP"}]
+    assert adjustments == [{"delta": -8, "label": "Market Regime opposing: TRENDING_UP"}]
 
 
 def test_unavailable_market_regime_does_not_change_score():
