@@ -6,6 +6,7 @@ import copy
 import logging
 import os
 import threading
+import traceback
 import time
 from collections import deque
 from config import Config
@@ -434,12 +435,13 @@ class AtlasRuntime:
             }
         except Exception as exc:
             self._inc("failed")
-            self._error = str(exc)
-            self._log(f"ERROR {symbol}: {exc}")
+            error_trace = traceback.format_exc()
+            self._error = error_trace
+            self._log(f"ERROR {symbol}: {error_trace}")
             return {
                 "ok": False,
                 "symbol": symbol,
-                "error": str(exc),
+                "error": error_trace,
                 "elapsed_ms": int(time.time() * 1000) - started,
             }
         finally:
