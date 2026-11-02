@@ -240,6 +240,23 @@ def format_card_text(card):
     if no_trade:
         reason = card.get("reason") or "Giriş şartları oluşmadı."
         lines.append(f"  Neden     : {reason}")
+        # Keep calculated candidate levels visible for diagnosis, but never
+        # present them as an executable order when the decision gate rejects it.
+        if card.get("entry") is not None:
+            lines.append(f"  Aday Giriş: {card['entry']}")
+        if card.get("stop_loss") is not None:
+            lines.append(f"  Aday SL   : {card['stop_loss']}")
+        if card.get("tp_levels"):
+            label = "Aday TP (sentetik RR)" if card.get("synthetic_tp_targets") else "Aday TP"
+            for index, target in enumerate(card["tp_levels"][:3], start=1):
+                lines.append(f"  {label}{index}: {target}")
+        else:
+            lines.append("  TP        : Hesaplanamadı / geçerli hedef bulunamadı")
+        if card.get("rr") is not None:
+            lines.append(f"  Ağırlıklı RR: {card['rr']}")
+        if card.get("target_max_rr") is not None:
+            lines.append(f"  TP max RR : {card['target_max_rr']}")
+        lines.append("  Not       : Bu seviyeler emir değildir; karar kapısı işlemi reddetti.")
         lines.append(line)
         return "\n".join(lines)
 
