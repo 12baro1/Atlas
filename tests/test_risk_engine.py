@@ -329,7 +329,7 @@ def test_dynamic_tp_long_sl_behind_entry_rejected():
 
 def test_dynamic_tp_and_rr_recalculate_for_wider_structural_stop():
     engine = DynamicTPEngine()
-    targets = [{"price": 102.0}, {"price": 104.0}, {"price": 106.0}]
+    targets = [{"type": "BUY_SIDE", "price": 102.0}, {"type": "BUY_SIDE", "price": 104.0}, {"type": "BUY_SIDE", "price": 106.0}]
     original = engine.calculate(
         direction="LONG", entry=100.0, stop_loss=99.0,
         liquidity=targets, fvg=[], orderblocks=[], structure=[],
