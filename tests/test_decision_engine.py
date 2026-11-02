@@ -368,3 +368,14 @@ def test_decision_skips_when_cross_motor_trade_quality_gate_rejects_setup():
     )
     assert result["action"] == "SKIP"
     assert any("Trade quality" in item for item in result["critical_blockers"])
+
+
+def test_execution_quality_gate_not_confluence_score_decides_execution():
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            signal={"signal": "LONG", "confidence": 31, "grade": "D", "strength": "WEAK"},
+            confluence={"score": 8, "checks": []},
+            trade_quality={"allowed": True, "blockers": [], "reason": "All execution-quality checks passed"},
+        )
+    )
+    assert result["action"] == "EXECUTE"
