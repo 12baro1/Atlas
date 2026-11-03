@@ -44,6 +44,7 @@ from manual_trade_quality import ManualTradeQualityGate
 from mitigation_engine import MitigationEngine
 from mtf_engine import MTFEngine
 from orderblock_engine import OrderBlockEngine
+from orderbook_engine import OrderBookEngine
 from ote_engine import OTEEngine
 from position_manager import PositionManager
 from premium_discount_engine import PremiumDiscountEngine
@@ -99,6 +100,7 @@ class AtlasEngine:
         self.choch = CHOCHEngine()
         self.liquidity = LiquidityEngine()
         self.orderblocks = OrderBlockEngine()
+        self.orderbook = OrderBookEngine()
         self.mitigation = MitigationEngine()
         self.fvg = FVGEngine()
         self.liquidity_sweep = LiquiditySweepEngine()
@@ -307,6 +309,11 @@ class AtlasEngine:
             direction=context_state["mtf"].get("entry", "WAIT"),
             open_positions=self.position.open_positions(),
         )
+        orderbook_state = self.orderbook.analyze(
+            data.get("orderbook"),
+            direction=context_state["mtf"].get("entry", "NONE"),
+            now_ms=int(time.time() * 1000),
+        )
 
         execution_state = self._build_execution_state(
             candles=candles,
@@ -338,6 +345,7 @@ class AtlasEngine:
             eqh_eql=structure_state.get("eqh_eql"),
             internal_structure=structure_state.get("internal_structure"),
             market_regime=market_regime_state,
+            orderbook=orderbook_state,
         )
 
         decision_state = self.decision.decide(
@@ -992,6 +1000,7 @@ class AtlasEngine:
         eqh_eql=None,
         internal_structure=None,
         market_regime=None,
+        orderbook=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(
@@ -1010,6 +1019,26 @@ class AtlasEngine:
             mtf, entry_structure, fvg, entry,
             current_price=candles[-1].close if candles else None,
         )
+        orderbook = orderbook or {"active": False, "market_entry_allowed": True}
+        entry["orderbook"] = orderbook
+        if entry.get("valid") and orderbook.get("active"):
+            entry_type = str(entry.get("entry_type") or "").upper()
+            if orderbook.get("opposing"):
+                entry["valid"] = False
+                entry["reason"] = "Order book yönün karşısında güçlü hacim gösteriyor"
+                entry.setdefault("checks", []).append("✗ Order book karşı yön baskısı")
+                confirmation["confirmed"] = False
+                confirmation["reason"] = entry["reason"]
+            elif entry_type == "MARKET" and not orderbook.get("market_entry_allowed", True):
+                entry["valid"] = False
+                entry["reason"] = "Order book spread/derinlik koşulları market girişine uygun değil"
+                entry.setdefault("checks", []).append("✗ Order book market girişini onaylamadı")
+                confirmation["confirmed"] = False
+                confirmation["reason"] = entry["reason"]
+            else:
+                entry.setdefault("checks", []).append(
+                    "✓ Order book yönü destekli" if orderbook.get("supportive") else "✓ Order book engel oluşturmuyor"
+                )
 
         setup_quality = self.setup_quality.evaluate(
             candles=candles,
@@ -1043,6 +1072,7 @@ class AtlasEngine:
             "news_filter": news_filter or {},
             "correlation": correlation or {},
             "cooldown": cooldown or {},
+            "orderbook": orderbook,
         }
         if any(not (flt or {}).get("trade_allowed", True) for flt in setup_quality["external_risk_filters"].values()):
             setup_quality["trade_allowed"] = False
@@ -1201,6 +1231,7 @@ class AtlasEngine:
             "signal": signal,
             "setup_quality": setup_quality,
             "trade_quality": trade_quality,
+            "orderbook": orderbook,
         }
 
     def _compose_analysis(
