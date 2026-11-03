@@ -3,6 +3,9 @@ backtest_engine.py
 Atlas Backtest Engine v4
 """
 
+import math
+
+
 class BacktestEngine:
 
     def __init__(self):
