@@ -95,17 +95,27 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
     candles = []
     cursor = since_ms
     attempts = 0
+    last_error = None
     while True:
         try:
             batch = exchange.fetch_ohlcv(symbol, timeframe, since=cursor, limit=limit)
-        except Exception:
+        except Exception as exc:
+            last_error = exc
             attempts += 1
             if attempts > 3:
-                break
+                raise RuntimeError(
+                    f"Bybit OHLCV alınamadı: {symbol} {timeframe}; "
+                    f"4 deneme başarısız. Son hata: {type(last_error).__name__}: {last_error}"
+                ) from last_error
             time.sleep(0.5 * attempts)
             continue
         attempts = 0
         if not batch:
+            if not candles and last_error is not None:
+                raise RuntimeError(
+                    f"Bybit boş OHLCV döndürdü: {symbol} {timeframe}; "
+                    f"son hata: {type(last_error).__name__}: {last_error}"
+                )
             break
         candles.extend(
             Candle(time=c[0], open=c[1], high=c[2], low=c[3], close=c[4], volume=c[5]) for c in batch
@@ -150,6 +160,26 @@ def load_historical(symbol, days=60, now_ms=None):
             history_days,
         )
     return data
+
+
+def _validate_backtest_history(data, symbol):
+    """Fail loudly instead of reporting a successful zero-call backtest."""
+    counts = {
+        tf: len(data.get(tf) or [])
+        for tf in ("15m", "1h", "4h", "1d", "1w")
+    }
+    print(
+        "VERİ DURUMU | "
+        + " | ".join(f"{tf}: {count} mum" for tf, count in counts.items())
+    )
+    minimum = BACKTEST_WARMUP_CANDLES["15m"] + 1
+    if counts["15m"] < minimum:
+        raise RuntimeError(
+            f"{symbol}: 15m geçmişi yetersiz ({counts['15m']} mum; "
+            f"en az {minimum} gerekli). Backtest başlatılmadı. "
+            "Bybit OHLCV erişimini ve tarihsel veri sınırını kontrol edin."
+        )
+    return counts
 
 
 def build_analyze_fn(engine):
@@ -327,6 +357,7 @@ def main():
     all_stats = []
     for symbol in symbols:
         data = load_historical(symbol, days=args.days)
+        _validate_backtest_history(data, symbol)
         runner = BacktestRunner(
             analyze_fn=build_analyze_fn(engine),
             fee_rate=float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.002)),
