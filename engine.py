@@ -168,7 +168,8 @@ class AtlasEngine:
 
         symbol = data.get("symbol", "UNKNOWN")
         candles = data["15m"]
-        if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)) and bool(getattr(Config, "INCREMENTAL_ANALYSIS_ENABLED", True)):
+        # A live order-book snapshot changes independently of candle closes; do not reuse a candle-only cached decision.
+        if (not data.get("orderbook")) and bool(getattr(Config, "STATE_ENGINE_ENABLED", True)) and bool(getattr(Config, "INCREMENTAL_ANALYSIS_ENABLED", True)):
             cached = self._restore_incremental_if_unchanged(symbol, candles)
             if cached is not None:
                 cached_analysis = cached.get("analysis") if isinstance(cached, dict) else None
