@@ -15,6 +15,7 @@ import logging
 import math
 import time
 import os
+import ccxt
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -91,6 +92,54 @@ def _disable_backtest_live_features():
     Config.TRADE_COOLDOWN_MINUTES = 0.0
 
 
+_history_fallback_exchange = None
+_history_provider_name = "Bybit"
+
+
+def _create_history_fallback_exchange():
+    """Binance USD-M public futures OHLCV fallback for regions blocking Bybit."""
+    return ccxt.binanceusdm({
+        "enableRateLimit": True,
+        "options": {"defaultType": "future"},
+    })
+
+
+def _is_geoblock_error(exc):
+    message = str(exc).lower()
+    return "403" in message or "cloudfront" in message or "configured to block" in message
+
+
+def _fetch_history_batch(symbol, timeframe, cursor, limit):
+    global _history_fallback_exchange, _history_provider_name
+    if _history_fallback_exchange is not None:
+        batch = _history_fallback_exchange.fetch_ohlcv(
+            symbol, timeframe, since=cursor, limit=limit
+        )
+        _history_provider_name = "Binance USD-M Futures (Bybit 403 fallback)"
+        return batch
+    try:
+        return exchange.fetch_ohlcv(symbol, timeframe, since=cursor, limit=limit)
+    except Exception as exc:
+        if not _is_geoblock_error(exc):
+            raise
+        logging.warning(
+            "Bybit 403 engeli; tarihsel OHLCV için Binance USD-M Futures deneniyor."
+        )
+        _history_fallback_exchange = _create_history_fallback_exchange()
+        try:
+            batch = _history_fallback_exchange.fetch_ohlcv(
+                symbol, timeframe, since=cursor, limit=limit
+            )
+        except Exception as fallback_exc:
+            _history_fallback_exchange = None
+            raise RuntimeError(
+                f"Bybit 403 verdi; Binance USD-M yedeği de başarısız: "
+                f"{type(fallback_exc).__name__}: {fallback_exc}"
+            ) from fallback_exc
+        _history_provider_name = "Binance USD-M Futures (Bybit 403 fallback)"
+        return batch
+
+
 def _fetch_history(symbol, timeframe, since_ms, limit=1000):
     candles = []
     cursor = since_ms
@@ -98,14 +147,15 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
     last_error = None
     while True:
         try:
-            batch = exchange.fetch_ohlcv(symbol, timeframe, since=cursor, limit=limit)
+            batch = _fetch_history_batch(symbol, timeframe, cursor, limit)
         except Exception as exc:
             last_error = exc
             attempts += 1
             if attempts > 3:
                 raise RuntimeError(
-                    f"Bybit OHLCV alınamadı: {symbol} {timeframe}; "
-                    f"4 deneme başarısız. Son hata: {type(last_error).__name__}: {last_error}"
+                    f"Tarihsel OHLCV alınamadı: {symbol} {timeframe}; "
+                    f"4 deneme başarısız. Sağlayıcı={_history_provider_name}. "
+                    f"Son hata: {type(last_error).__name__}: {last_error}"
                 ) from last_error
             time.sleep(0.5 * attempts)
             continue
@@ -121,7 +171,6 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
             break
         cursor = last_time + 1
         time.sleep(0.05)
-    # Tarihe göre sırala ve tekilleştir
     seen = set()
     ordered = []
     for candle in sorted(candles, key=lambda c: c.time):
@@ -130,7 +179,6 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
         seen.add(candle.time)
         ordered.append(candle)
     return ordered
-
 
 def load_historical(symbol, days=60, now_ms=None):
     """Load the evaluation window plus sufficient timeframe-specific warmup."""
@@ -406,6 +454,7 @@ def main():
 
     # Semboller arası signal durumunu izole et: runner tek örnekte yok, engine'deki
     # cooldown 0 olduğu için ardışık tarama bir sonraki sembolü etkilemez.
+    print(f"VERİ SAĞLAYICISI | {_history_provider_name}")
     all_stats = []
     for symbol in symbols:
         data = load_historical(symbol, days=args.days)
