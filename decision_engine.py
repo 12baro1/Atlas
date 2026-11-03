@@ -60,11 +60,12 @@ class DecisionEngine:
         wait_threshold = float(getattr(Config, "DECISION_SCORE_WAIT", 60))
 
         rr_value = self._resolve_rr_value(risk)
+        execution_rr = self._resolve_execution_rr_value(risk, fallback=rr_value)
         position_size = self._safe_number(risk.get("position_size") if isinstance(risk, dict) else None, None)
 
         risk_blockers, risk_valid = self._collect_risk_blockers(
             risk=risk,
-            rr_value=rr_value,
+            rr_value=execution_rr,
             minimum_rr=minimum_rr,
             position_size=position_size,
         )
@@ -72,7 +73,7 @@ class DecisionEngine:
         quality_blockers = self._collect_quality_blockers(
             signal_grade=signal_grade,
             signal_confidence=signal_confidence,
-            rr_value=rr_value,
+            rr_value=execution_rr,
             minimum_rr=minimum_rr,
             direction=signal_dir,
             mtf=mtf,
@@ -112,7 +113,7 @@ class DecisionEngine:
             signal_grade=signal_grade,
             signal_strength=signal_strength,
             signal_confidence=signal_confidence,
-            rr_value=rr_value,
+            rr_value=execution_rr,
             minimum_rr=minimum_rr,
             direction=signal_dir,
             mtf=mtf,
@@ -136,7 +137,7 @@ class DecisionEngine:
             signal_grade=signal_grade,
             signal_strength=signal_strength,
             signal_confidence=signal_confidence,
-            rr_value=rr_value,
+            rr_value=execution_rr,
             soft_blockers=soft_blockers,
         )
 
@@ -180,6 +181,7 @@ class DecisionEngine:
             "risk_valid": risk_valid,
             "mtf_valid": bool(mtf.get("valid", False)) if isinstance(mtf, dict) else False,
             "rr": rr_value,
+            "execution_rr": execution_rr,
             "rr_basis": "weighted_net_rr_after_costs" if weighted_net_rr is not None else "legacy_max_target",
             "weighted_rr": self._safe_number(risk.get("weighted_rr") if isinstance(risk, dict) else None, None),
             "weighted_net_rr": self._safe_number(risk.get("weighted_net_rr") if isinstance(risk, dict) else None, None),
@@ -343,44 +345,36 @@ class DecisionEngine:
         return blockers, len(blockers) == 0
 
     def _resolve_rr_value(self, risk):
+        """Display RR: preserve the best structurally valid target RR."""
         if not isinstance(risk, dict):
             return None
-
-        weighted_net_rr = self._safe_number(risk.get("weighted_net_rr"), None)
-        if weighted_net_rr is not None:
-            return weighted_net_rr
-
-        execution_rr = self._safe_number(risk.get("execution_rr"), None)
-        if execution_rr is not None:
-            return execution_rr
-
         selected_rr = self._safe_number(risk.get("selected_rr"), None)
         if selected_rr is not None and selected_rr > 0:
             return selected_rr
-
         rr = self._safe_number(risk.get("rr"), None)
         if rr is not None and rr > 0:
             return rr
-
         rr_by_tp = risk.get("rr_by_tp")
         if isinstance(rr_by_tp, dict):
             positive_rrs = [self._safe_number(value, None) for value in rr_by_tp.values()]
             positive_rrs = [value for value in positive_rrs if value is not None and value > 0]
             if positive_rrs:
                 return max(positive_rrs)
-
         breakdown = self.rr_engine.calculate_breakdown(
-            risk.get("entry"),
-            risk.get("stop_loss"),
-            tp1=risk.get("tp1"),
-            tp2=risk.get("tp2"),
-            tp3=risk.get("tp3"),
+            risk.get("entry"), risk.get("stop_loss"),
+            tp1=risk.get("tp1"), tp2=risk.get("tp2"), tp3=risk.get("tp3"),
             selection_rule=risk.get("rr_selection_rule") or "max_rr",
         )
-        if breakdown is None:
-            return None
+        return self._safe_number(breakdown.get("selected_rr"), None) if breakdown else None
 
-        return self._safe_number(breakdown.get("selected_rr"), None)
+    def _resolve_execution_rr_value(self, risk, fallback=None):
+        """Use cost-adjusted partial-exit R for execution gates."""
+        if not isinstance(risk, dict):
+            return fallback
+        value = self._safe_number(risk.get("weighted_net_rr"), None)
+        if value is None:
+            value = self._safe_number(risk.get("execution_rr"), None)
+        return fallback if value is None else value
 
     def _collect_adjustments(
         self,
