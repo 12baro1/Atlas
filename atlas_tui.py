@@ -388,7 +388,8 @@ class AtlasTUIApp(App):
             )
             outcome = self.runtime.analyze_symbol(symbol, force_refresh=True)
             if not outcome.get("ok"):
-                errors.append(f"{symbol}: {outcome.get('error', 'analiz başarısız')}")
+                error_text = str(outcome.get("error") or "analiz başarısız").splitlines()[0][:180]
+                errors.append(f"{symbol}: {error_text}")
                 continue
             raw = outcome["result"]
             signal_data = raw.get("signal") or {}
