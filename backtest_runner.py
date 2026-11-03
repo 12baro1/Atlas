@@ -251,6 +251,13 @@ class BacktestRunner:
         self.tp2 = 0
         self.tp3 = 0
         self.net_rr = 0.0
+        # Diagnostic counters explain why historical analysis produces no trades.
+        self.analysis_calls = 0
+        self.empty_results = 0
+        self.raw_long_signals = 0
+        self.raw_short_signals = 0
+        self.non_directional_results = 0
+        self.action_counts = {}
 
     def reset(self):
         self.__init__(
@@ -281,10 +288,23 @@ class BacktestRunner:
             }
             window["symbol"] = data.get("symbol", "SYMBOL")
 
+            self.analysis_calls += 1
             result = self.analyze_fn(window) if self.analyze_fn else on_signal(window)
 
             if not result:
+                self.empty_results += 1
                 continue
+            signal = (result.get("signal") or {}) if isinstance(result, dict) else {}
+            decision = (result.get("decision") or {}) if isinstance(result, dict) else {}
+            signal_dir = str(signal.get("signal", "")).upper()
+            action = str(decision.get("action", "MISSING")).upper() or "MISSING"
+            self.action_counts[action] = self.action_counts.get(action, 0) + 1
+            if signal_dir == "LONG":
+                self.raw_long_signals += 1
+            elif signal_dir == "SHORT":
+                self.raw_short_signals += 1
+            else:
+                self.non_directional_results += 1
             trade = self._to_trade(result, candles, idx + 1, lenient=lenient)
             if trade is None:
                 continue
@@ -553,6 +573,12 @@ class BacktestRunner:
             return {
                 "total": 0, "wins": 0, "losses": 0, "winrate": 0,
                 "candidate_signals": self.candidate_signals,
+                "analysis_calls": self.analysis_calls,
+                "empty_results": self.empty_results,
+                "raw_long_signals": self.raw_long_signals,
+                "raw_short_signals": self.raw_short_signals,
+                "non_directional_results": self.non_directional_results,
+                "action_counts": dict(self.action_counts),
                 "unfilled_limits": self.unfilled_limits,
                 "open_trades": self.open_trades,
                 "invalid_candidates": self.invalid_candidates,
@@ -589,6 +615,12 @@ class BacktestRunner:
             "total": self.total,
             "wins": wins,
             "candidate_signals": self.candidate_signals,
+            "analysis_calls": self.analysis_calls,
+            "empty_results": self.empty_results,
+            "raw_long_signals": self.raw_long_signals,
+            "raw_short_signals": self.raw_short_signals,
+            "non_directional_results": self.non_directional_results,
+            "action_counts": dict(self.action_counts),
             "unfilled_limits": self.unfilled_limits,
             "open_trades": self.open_trades,
             "invalid_candidates": self.invalid_candidates,
