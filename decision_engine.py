@@ -49,6 +49,11 @@ class DecisionEngine:
         entry_valid = bool(entry.get("valid", False))
 
         minimum_rr = float(getattr(Config, "MINIMUM_RR", 3.0))
+        weighted_net_rr = self._safe_number(risk.get("weighted_net_rr") if isinstance(risk, dict) else None, None)
+        # New risk payloads are gated on conservative net R; legacy payloads
+        # retain the old target-RR threshold for backward compatibility.
+        if weighted_net_rr is not None:
+            minimum_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
         minimum_confidence = float(getattr(Config, "MINIMUM_CONFIDENCE", 80))
         execute_threshold = float(getattr(Config, "DECISION_SCORE_EXECUTE", 90))
         caution_threshold = float(getattr(Config, "DECISION_SCORE_EXECUTE_WITH_CAUTION", 75))
@@ -175,7 +180,7 @@ class DecisionEngine:
             "risk_valid": risk_valid,
             "mtf_valid": bool(mtf.get("valid", False)) if isinstance(mtf, dict) else False,
             "rr": rr_value,
-            "rr_basis": "max_target_for_execution_filter",
+            "rr_basis": "weighted_net_rr_after_costs" if weighted_net_rr is not None else "legacy_max_target",
             "weighted_rr": self._safe_number(risk.get("weighted_rr") if isinstance(risk, dict) else None, None),
             "weighted_net_rr": self._safe_number(risk.get("weighted_net_rr") if isinstance(risk, dict) else None, None),
             "target_max_rr": self._safe_number(risk.get("target_max_rr") if isinstance(risk, dict) else None, rr_value),
@@ -340,6 +345,14 @@ class DecisionEngine:
     def _resolve_rr_value(self, risk):
         if not isinstance(risk, dict):
             return None
+
+        weighted_net_rr = self._safe_number(risk.get("weighted_net_rr"), None)
+        if weighted_net_rr is not None:
+            return weighted_net_rr
+
+        execution_rr = self._safe_number(risk.get("execution_rr"), None)
+        if execution_rr is not None:
+            return execution_rr
 
         selected_rr = self._safe_number(risk.get("selected_rr"), None)
         if selected_rr is not None and selected_rr > 0:
