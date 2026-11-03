@@ -210,6 +210,15 @@ def _validate_backtest_coverage(data, symbol, days, now_ms):
                 f"{symbol} {tf}: son mum eski ({stale_days:.1f} gün geride); "
                 "backtest durduruldu."
             )
+        ordered_times = sorted(c.time for c in candles)
+        if any(
+            current - previous > 2 * duration
+            for previous, current in zip(ordered_times, ordered_times[1:])
+        ):
+            raise RuntimeError(
+                f"{symbol} {tf}: mumlar arasında 2 zaman diliminden büyük veri boşluğu var; "
+                "backtest durduruldu."
+            )
         minimum = BACKTEST_WARMUP_CANDLES[tf]
         if len(candles) < minimum:
             raise RuntimeError(
