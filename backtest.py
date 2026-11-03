@@ -110,6 +110,7 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
             time.sleep(0.5 * attempts)
             continue
         attempts = 0
+        last_error = None
         if not batch:
             if not candles and last_error is not None:
                 raise RuntimeError(
