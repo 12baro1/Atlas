@@ -136,6 +136,11 @@ def load_historical(symbol, days=60, now_ms=None):
         history_days = _history_days_for_timeframe(days, tf)
         since = now - int(history_days * 86_400_000)
         candles = _fetch_history(symbol, tf, since_ms=since, limit=limit)
+        # Bybit includes the currently-forming candle in OHLCV responses.
+        # A historical decision may only use candles that were fully closed
+        # at the backtest's fixed as-of timestamp.
+        duration_ms = TIMEFRAME_DURATION_MS[tf]
+        candles = [candle for candle in candles if candle.time + duration_ms <= now]
         data[tf] = candles
         logging.info(
             "%s %s -> %s candles (history %.1f days)",
@@ -223,6 +228,18 @@ def _report(stats, name):
     print(f"  Beklenti       : {stats['expectancy']} RR/işlem")
     print(f"  Profit Factor  : {stats['profit_factor']}")
     print(f"  Net RR         : {stats['net_rr']}")
+    if "max_drawdown" in stats:
+        print(f"  Max Drawdown   : {stats['max_drawdown']} R")
+    breakdown = stats.get("direction_breakdown") or {}
+    for direction in ("LONG", "SHORT"):
+        side = breakdown.get(direction)
+        if side and side.get("total", 0):
+            print(
+                f"  {direction:<5}          : {side.get('total', 0)} işlem | "
+                f"Win %{side.get('winrate', 0)} | "
+                f"Beklenti {side.get('expectancy', 0)} R | "
+                f"PF {side.get('profit_factor', 0)}"
+            )
 
     if stats["total"] >= 20 and stats["expectancy"] > 0 and stats["profit_factor"] >= 1.3:
         print("  YORUM: Edge pozitif görünüyor; daha uzun örnekle doğrulanmalı.")
