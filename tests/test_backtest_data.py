@@ -45,3 +45,36 @@ def test_load_historical_does_not_mutate_source_candle_list(monkeypatch):
 
     assert len(source) == 2
     assert len(data["15m"]) == 1
+
+
+
+def test_fetch_history_raises_after_repeated_exchange_errors(monkeypatch):
+    calls = {"count": 0}
+
+    def fail(*args, **kwargs):
+        calls["count"] += 1
+        raise OSError("temporary network failure")
+
+    monkeypatch.setattr(backtest.exchange, "fetch_ohlcv", fail)
+    monkeypatch.setattr(backtest.time, "sleep", lambda *_: None)
+
+    with pytest.raises(RuntimeError, match="4 deneme başarısız"):
+        backtest._fetch_history("BTC/USDT:USDT", "15m", since_ms=0)
+
+    assert calls["count"] == 4
+
+
+def test_backtest_history_validation_rejects_insufficient_15m_data():
+    data = {"15m": [_candle(i) for i in range(300)]}
+
+    with pytest.raises(RuntimeError, match="15m geçmişi yetersiz"):
+        backtest._validate_backtest_history(data, "BTC/USDT:USDT")
+
+
+def test_backtest_history_validation_accepts_minimum_15m_data(capsys):
+    data = {"15m": [_candle(i) for i in range(301)]}
+
+    counts = backtest._validate_backtest_history(data, "BTC/USDT:USDT")
+
+    assert counts["15m"] == 301
+    assert "15m: 301 mum" in capsys.readouterr().out
