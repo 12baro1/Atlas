@@ -86,6 +86,9 @@ class Config:
     # Risk
     RISK_PERCENT = 1.0
     MINIMUM_RR = 3.0
+    # When the risk engine provides a cost-adjusted partial-exit result, require
+    # at least this many net R; max-target RR is not sufficient on its own.
+    MINIMUM_NET_RR = float(os.getenv("ATLAS_MINIMUM_NET_RR", "1.5"))
     # In live analysis, do not fabricate TP levels when structure has no valid targets.
     DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK = _env_or_rc("ATLAS_ALLOW_SYNTHETIC_TP_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
     # Require higher-timeframe direction by default; 15m-only direction is legacy opt-in.
