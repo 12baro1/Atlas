@@ -132,27 +132,31 @@ class RREngine:
         if rr is None:
             return None
 
-        if rr >= 5:
+        # Quality grades must reflect the realizable partial-exit result after
+        # costs, not only the most optimistic gross target distance.
+        quality_rr = weighted_net_rr if weighted_net_rr is not None else rr
+
+        if quality_rr >= 5:
             stars = "★★★★★"
             quality = "EXCELLENT"
             score = 100
 
-        elif rr >= 4:
+        elif quality_rr >= 4:
             stars = "★★★★☆"
             quality = "VERY GOOD"
             score = 90
 
-        elif rr >= 3:
+        elif quality_rr >= 3:
             stars = "★★★☆☆"
             quality = "GOOD"
             score = 80
 
-        elif rr >= 2:
+        elif quality_rr >= 2:
             stars = "★★☆☆☆"
             quality = "NORMAL"
             score = 65
 
-        elif rr >= 1.5:
+        elif quality_rr >= 1.5:
             stars = "★☆☆☆☆"
             quality = "WEAK"
             score = 45
@@ -174,6 +178,8 @@ class RREngine:
             "target_max_tp": target_max_tp,
             "weighted_rr": weighted_rr,
             "weighted_net_rr": weighted_net_rr,
+
+            "quality_rr": quality_rr,
 
             "rr_by_tp": rr_by_tp,
 
