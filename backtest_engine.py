@@ -383,6 +383,7 @@ class BacktestEngine:
             "median_rr": round(median_rr, 2),
             "expectancy": stats["expectancy"],
             "profit_factor": stats["profit_factor"],
+            "performance_gate": self.performance_gate(),
             "direction_breakdown": {
                 side: self._chunk_stats([trade for trade in closed if str(trade.get("side", "")).upper() == side])
                 for side in ("LONG", "SHORT")
