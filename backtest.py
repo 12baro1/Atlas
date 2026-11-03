@@ -112,11 +112,6 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
         attempts = 0
         last_error = None
         if not batch:
-            if not candles and last_error is not None:
-                raise RuntimeError(
-                    f"Bybit boş OHLCV döndürdü: {symbol} {timeframe}; "
-                    f"son hata: {type(last_error).__name__}: {last_error}"
-                )
             break
         candles.extend(
             Candle(time=c[0], open=c[1], high=c[2], low=c[3], close=c[4], volume=c[5]) for c in batch
