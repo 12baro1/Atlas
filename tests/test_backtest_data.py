@@ -139,3 +139,25 @@ def test_backtest_coverage_rejects_stale_latest_candle():
         backtest._validate_backtest_coverage(
             data, "BTC/USDT:USDT", days=2, now_ms=now_ms
         )
+
+
+def test_fetch_history_clears_transient_error_after_success(monkeypatch):
+    calls = {"count": 0}
+
+    def fetch(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise OSError("temporary network failure")
+        if calls["count"] == 2:
+            return [[60_000, 1.0, 2.0, 0.5, 1.5, 10.0]]
+        return []
+
+    monkeypatch.setattr(backtest.exchange, "fetch_ohlcv", fetch)
+    monkeypatch.setattr(backtest.time, "sleep", lambda *_: None)
+
+    candles = backtest._fetch_history("BTC/USDT:USDT", "1m", since_ms=0)
+
+    assert len(candles) == 1
+    assert candles[0].time == 60_000
+    assert calls["count"] == 3
+
