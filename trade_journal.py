@@ -979,6 +979,8 @@ class TradeJournal:
     def _empty_summary(self):
         return {
             "total_trades": 0,
+            "performance_gate": self.performance_gate(),
+            "direction_statistics": self.direction_statistics(),
             "open_trades": 0,
             "wins": 0,
             "losses": 0,
