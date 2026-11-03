@@ -95,16 +95,22 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
     candles = []
     cursor = since_ms
     attempts = 0
+    last_error = None
     while True:
         try:
             batch = exchange.fetch_ohlcv(symbol, timeframe, since=cursor, limit=limit)
-        except Exception:
+        except Exception as exc:
+            last_error = exc
             attempts += 1
             if attempts > 3:
-                break
+                raise RuntimeError(
+                    f"Bybit OHLCV alınamadı: {symbol} {timeframe}; "
+                    f"4 deneme başarısız. Son hata: {type(last_error).__name__}: {last_error}"
+                ) from last_error
             time.sleep(0.5 * attempts)
             continue
         attempts = 0
+        last_error = None
         if not batch:
             break
         candles.extend(
@@ -150,6 +156,82 @@ def load_historical(symbol, days=60, now_ms=None):
             history_days,
         )
     return data
+
+
+def _validate_backtest_history(data, symbol):
+    """Fail loudly instead of reporting a successful zero-call backtest."""
+    counts = {
+        tf: len(data.get(tf) or [])
+        for tf in ("15m", "1h", "4h", "1d", "1w")
+    }
+    print(
+        "VERİ DURUMU | "
+        + " | ".join(f"{tf}: {count} mum" for tf, count in counts.items())
+    )
+    minimum = BACKTEST_WARMUP_CANDLES["15m"] + 1
+    if counts["15m"] < minimum:
+        raise RuntimeError(
+            f"{symbol}: 15m geçmişi yetersiz ({counts['15m']} mum; "
+            f"en az {minimum} gerekli). Backtest başlatılmadı. "
+            "Bybit OHLCV erişimini ve tarihsel veri sınırını kontrol edin."
+        )
+    return counts
+
+
+def _validate_backtest_coverage(data, symbol, days, now_ms):
+    """Ensure every timeframe covers the requested evaluation and warmup window."""
+    now = float(now_ms)
+    coverage = {}
+    for tf in ("15m", "1h", "4h", "1d", "1w"):
+        candles = data.get(tf) or []
+        duration = TIMEFRAME_DURATION_MS[tf]
+        history_days = _history_days_for_timeframe(days, tf)
+        requested_start = now - history_days * 86_400_000
+        if not candles:
+            raise RuntimeError(f"{symbol} {tf}: tarihsel veri yok; backtest durduruldu.")
+
+        first_open = min(c.time for c in candles)
+        last_close = max(c.time + duration for c in candles)
+        # Candle boundaries are timeframe-aligned; allow two full intervals
+        # for exchange boundary/availability differences, but not partial history.
+        if first_open > requested_start + 2 * duration:
+            missing_days = (first_open - requested_start) / 86_400_000
+            raise RuntimeError(
+                f"{symbol} {tf}: başlangıç verisi eksik. İstenen geçmiş "
+                f"{history_days:.1f} gün; ilk mum {missing_days:.1f} gün geç geliyor."
+            )
+        if last_close < now - 2 * duration:
+            stale_days = (now - last_close) / 86_400_000
+            raise RuntimeError(
+                f"{symbol} {tf}: son mum eski ({stale_days:.1f} gün geride); "
+                "backtest durduruldu."
+            )
+        ordered_times = sorted(c.time for c in candles)
+        if any(
+            current - previous > 2 * duration
+            for previous, current in zip(ordered_times, ordered_times[1:])
+        ):
+            raise RuntimeError(
+                f"{symbol} {tf}: mumlar arasında 2 zaman diliminden büyük veri boşluğu var; "
+                "backtest durduruldu."
+            )
+        minimum = BACKTEST_WARMUP_CANDLES[tf]
+        if len(candles) < minimum:
+            raise RuntimeError(
+                f"{symbol} {tf}: warmup verisi yetersiz ({len(candles)} mum; "
+                f"en az {minimum} gerekli)."
+            )
+        coverage[tf] = {
+            "first": first_open,
+            "last_close": last_close,
+            "count": len(candles),
+            "requested_days": round(history_days, 1),
+        }
+    print("TARİH KAPSAMI | " + " | ".join(
+        f"{tf}: {item['requested_days']}g / {item['count']} mum"
+        for tf, item in coverage.items()
+    ))
+    return coverage
 
 
 def build_analyze_fn(engine):
@@ -327,6 +409,8 @@ def main():
     all_stats = []
     for symbol in symbols:
         data = load_historical(symbol, days=args.days)
+        _validate_backtest_history(data, symbol)
+        _validate_backtest_coverage(data, symbol, args.days, time.time() * 1000)
         runner = BacktestRunner(
             analyze_fn=build_analyze_fn(engine),
             fee_rate=float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.002)),
