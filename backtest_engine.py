@@ -83,6 +83,143 @@ class BacktestEngine:
 
         self.history.append(entry)
 
+    @staticmethod
+    def simulate_trade(entry, stop_loss, targets, candles, side="LONG",
+                       partial_weights=None, round_trip_cost_rate=0.002):
+        """Conservative OHLC simulation with partial TP exits and net-R costs.
+
+        If SL and the next TP are both inside one candle, SL is assumed first.
+        At most one new TP can fill per candle because intrabar ordering is unknown.
+        """
+        try:
+            entry = float(entry)
+            stop_loss = float(stop_loss)
+            side = str(side or "").upper()
+            if not math.isfinite(entry) or not math.isfinite(stop_loss) or entry <= 0:
+                raise ValueError
+            if side not in ("LONG", "SHORT"):
+                raise ValueError
+            risk = abs(entry - stop_loss)
+            if risk <= 0 or (side == "LONG" and stop_loss >= entry) or (side == "SHORT" and stop_loss <= entry):
+                raise ValueError
+            levels = [float(value) for value in (targets or []) if value is not None]
+            levels = [value for value in levels if math.isfinite(value)]
+            if not levels:
+                raise ValueError
+            if any((value <= entry if side == "LONG" else value >= entry) for value in levels):
+                raise ValueError
+            if any((levels[i] >= levels[i + 1] if side == "LONG" else levels[i] <= levels[i + 1])
+                   for i in range(len(levels) - 1)):
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            return {"result": "INVALID", "reason": "invalid_trade_geometry"}
+
+        if partial_weights is None:
+            weights = [1.0 / len(levels)] * len(levels)
+        else:
+            try:
+                weights = [max(0.0, float(value)) for value in partial_weights[:len(levels)]]
+            except (TypeError, ValueError, OverflowError):
+                return {"result": "INVALID", "reason": "invalid_partial_weights"}
+            weights += [0.0] * (len(levels) - len(weights))
+            total_weight = sum(weights)
+            if total_weight <= 0 or not math.isfinite(total_weight):
+                return {"result": "INVALID", "reason": "invalid_partial_weights"}
+            weights = [value / total_weight for value in weights]
+
+        remaining = 1.0
+        realized_rr = 0.0
+        targets_hit = 0
+        for candle in candles or []:
+            try:
+                high = float(candle.get("high") if isinstance(candle, dict) else candle.high)
+                low = float(candle.get("low") if isinstance(candle, dict) else candle.low)
+            except (TypeError, ValueError, AttributeError, OverflowError):
+                continue
+            if not (math.isfinite(high) and math.isfinite(low)):
+                continue
+            stop_hit = low <= stop_loss if side == "LONG" else high >= stop_loss
+            next_target_hit = (
+                high >= levels[targets_hit] if side == "LONG"
+                else low <= levels[targets_hit]
+            ) if targets_hit < len(levels) else False
+
+            # Unknown intrabar order: stop takes precedence over a target.
+            if stop_hit:
+                realized_rr -= remaining
+                remaining = 0.0
+                cost_rr = (abs(entry) * max(0.0, float(round_trip_cost_rate))) / risk
+                net_rr = realized_rr - cost_rr
+                return {
+                    "result": "WIN" if net_rr > 0 else "LOSS",
+                    "gross_rr": round(realized_rr, 4),
+                    "net_rr": round(net_rr, 4),
+                    "targets_hit": targets_hit,
+                    "remaining_fraction": 0.0,
+                    "close_reason": "stop_after_partial_tp" if targets_hit else "stop_loss",
+                    "intrabar_policy": "stop_first",
+                }
+            if next_target_hit:
+                weight = weights[targets_hit]
+                target_rr = abs(levels[targets_hit] - entry) / risk
+                realized_rr += weight * target_rr
+                remaining -= weight
+                targets_hit += 1
+                if remaining <= 1e-9:
+                    cost_rr = (abs(entry) * max(0.0, float(round_trip_cost_rate))) / risk
+                    net_rr = realized_rr - cost_rr
+                    return {
+                        "result": "WIN" if net_rr > 0 else "LOSS",
+                        "gross_rr": round(realized_rr, 4),
+                        "net_rr": round(net_rr, 4),
+                        "targets_hit": targets_hit,
+                        "remaining_fraction": 0.0,
+                        "close_reason": "all_targets_hit",
+                        "intrabar_policy": "one_target_per_candle",
+                    }
+
+        cost_rr = (abs(entry) * max(0.0, float(round_trip_cost_rate))) / risk
+        return {
+            "result": "PENDING",
+            "gross_rr": round(realized_rr, 4),
+            "net_rr": round(realized_rr - cost_rr, 4),
+            "targets_hit": targets_hit,
+            "remaining_fraction": round(remaining, 6),
+            "close_reason": "history_exhausted",
+            "intrabar_policy": "stop_first_one_target_per_candle",
+        }
+
+    def performance_gate(self, minimum_trades=200, minimum_profit_factor=1.5,
+                         maximum_drawdown_pct=10.0, risk_percent=1.0):
+        """Return a validation gate; never treat a small sample as proven edge."""
+        closed = self._closed_history()
+        stats = self.statistics()
+        equity = peak = 100.0
+        max_drawdown = 0.0
+        risk_fraction = max(0.0, float(risk_percent)) / 100.0
+        for trade in closed:
+            rr = abs(float(trade.get("rr", 0) or 0))
+            signed_rr = rr if str(trade.get("result", "")).upper() == "WIN" else -rr
+            equity *= max(0.0, 1.0 + signed_rr * risk_fraction)
+            peak = max(peak, equity)
+            if peak > 0:
+                max_drawdown = max(max_drawdown, (peak - equity) / peak * 100.0)
+        enough_data = len(closed) >= int(minimum_trades)
+        pf_ok = stats["profit_factor"] >= float(minimum_profit_factor)
+        dd_ok = max_drawdown <= float(maximum_drawdown_pct)
+        return {
+            "ready": bool(enough_data and pf_ok and dd_ok),
+            "sample_sufficient": enough_data,
+            "closed_trades": len(closed),
+            "minimum_trades": int(minimum_trades),
+            "profit_factor": stats["profit_factor"],
+            "minimum_profit_factor": float(minimum_profit_factor),
+            "max_drawdown_pct": round(max_drawdown, 2),
+            "maximum_drawdown_pct": float(maximum_drawdown_pct),
+            "risk_percent_per_trade": float(risk_percent),
+            "checks": {"sample": enough_data, "profit_factor": pf_ok, "drawdown": dd_ok},
+        }
+
     def statistics(self):
 
         if self.total == 0:
@@ -246,6 +383,10 @@ class BacktestEngine:
             "median_rr": round(median_rr, 2),
             "expectancy": stats["expectancy"],
             "profit_factor": stats["profit_factor"],
+            "direction_breakdown": {
+                side: self._chunk_stats([trade for trade in closed if str(trade.get("side", "")).upper() == side])
+                for side in ("LONG", "SHORT")
+            },
         }
 
     def _closed_history(self):
