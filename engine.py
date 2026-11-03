@@ -314,6 +314,7 @@ class AtlasEngine:
             data.get("orderbook"),
             direction=context_state["mtf"].get("entry", "NONE"),
             now_ms=int(time.time() * 1000),
+            trades=data.get("recent_trades"),
         )
 
         execution_state = self._build_execution_state(
@@ -1022,9 +1023,9 @@ class AtlasEngine:
         )
         orderbook = orderbook or {"active": False, "market_entry_allowed": True}
         entry["orderbook"] = orderbook
-        if entry.get("valid") and orderbook.get("active"):
+        if entry.get("valid") and (orderbook.get("active") or orderbook.get("trade_flow_active")):
             entry_type = str(entry.get("entry_type") or "").upper()
-            if entry_type == "LIMIT" and entry.get("poi_zone"):
+            if orderbook.get("active") and entry_type == "LIMIT" and entry.get("poi_zone"):
                 try:
                     candidate = float(orderbook.get("limit_entry_candidate"))
                     original = float(entry.get("entry"))

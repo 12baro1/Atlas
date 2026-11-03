@@ -318,8 +318,8 @@ def test_decision_accepts_positive_weighted_net_rr_when_target_rr_passes():
                 "stop_loss": 99.0,
                 "rr": 3.5,
                 "selected_rr": 3.5,
-                "weighted_rr": 1.0,
-                "weighted_net_rr": 0.8,
+                "weighted_rr": 2.0,
+                "weighted_net_rr": 1.8,
                 "risk": 1.0,
                 "position_size": 1.0,
             }

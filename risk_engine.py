@@ -205,7 +205,14 @@ class RiskEngine:
                 )
                 if weighted_rr is not None:
                     # Match the normalized partial-close weights used by the signal outcome tracker.
-                    fee_in_r = (abs(entry) * max(0.0, round_trip_cost_rate)) / risk
+                    # Net R includes round-trip fees plus the spread/slippage
+                    # execution buffers already estimated for this symbol.
+                    execution_cost = (
+                        abs(entry) * max(0.0, round_trip_cost_rate)
+                        + max(0.0, spread_buffer)
+                        + max(0.0, slippage_buffer)
+                    )
+                    fee_in_r = execution_cost / risk
                     weighted_net_rr = round(weighted_rr - fee_in_r, 4)
                     net_rr = weighted_net_rr
 
@@ -325,6 +332,9 @@ class RiskEngine:
             "target_max_rr": rr_breakdown.get("selected_rr") if rr_breakdown else rr,
             "weighted_rr": round(weighted_rr, 4) if weighted_rr is not None else None,
             "weighted_net_rr": weighted_net_rr,
+            "execution_rr": weighted_net_rr if weighted_net_rr is not None else rr,
+            "cost_drag_rr": round(fee_in_r, 4) if weighted_net_rr is not None else None,
+            "cost_model": "round_trip_fee_plus_spread_slippage",
             "partial_exit_weights": partial_exit_weights,
             "rr_basis": "max_target" if rr is not None else None,
 

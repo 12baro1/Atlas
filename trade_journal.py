@@ -221,6 +221,8 @@ class TradeJournal:
         weaknesses = self.weakness_report()
         return {
             "total_trades": len(closed_trades),
+            "performance_gate": self.performance_gate(),
+            "direction_statistics": self.direction_statistics(),
             "open_trades": len([trade for trade in self._trades if trade.get("status") == "OPEN"]),
             "wins": len([trade for trade in closed_trades if trade.get("result") == "WIN"]),
             "losses": len([trade for trade in closed_trades if trade.get("result") == "LOSS"]),
@@ -248,6 +250,55 @@ class TradeJournal:
             "weaknesses": weaknesses,
             "strengths": strengths,
         }
+
+    def performance_gate(self, minimum_trades=200, minimum_profit_factor=1.5,
+                         maximum_drawdown_pct=10.0, risk_percent=1.0):
+        """Persistent-journal validation; small samples can never be marked ready."""
+        closed = sorted(self._closed_trades(), key=lambda item: item.get("closed_at") or 0)
+        metrics = self._metrics(closed) if closed else {"profit_factor": 0.0}
+        equity = peak = 100.0
+        max_drawdown = 0.0
+        risk_fraction = max(0.0, float(risk_percent)) / 100.0
+        for trade in closed:
+            pnl_r = self._num(trade.get("pnl_rr"))
+            if pnl_r is None:
+                rr = abs(self._num(trade.get("rr")) or 0.0)
+                pnl_r = rr if trade.get("result") == "WIN" else -rr
+            equity *= max(0.0, 1.0 + pnl_r * risk_fraction)
+            peak = max(peak, equity)
+            if peak > 0:
+                max_drawdown = max(max_drawdown, (peak - equity) / peak * 100.0)
+        sample_ok = len(closed) >= int(minimum_trades)
+        pf = float(metrics.get("profit_factor") or 0.0)
+        pf_ok = pf >= float(minimum_profit_factor)
+        dd_ok = max_drawdown <= float(maximum_drawdown_pct)
+        return {
+            "ready": bool(sample_ok and pf_ok and dd_ok),
+            "sample_sufficient": sample_ok,
+            "closed_trades": len(closed),
+            "minimum_trades": int(minimum_trades),
+            "profit_factor": round(pf, 4),
+            "minimum_profit_factor": float(minimum_profit_factor),
+            "max_drawdown_pct": round(max_drawdown, 2),
+            "maximum_drawdown_pct": float(maximum_drawdown_pct),
+            "risk_percent_per_trade": float(risk_percent),
+            "checks": {"sample": sample_ok, "profit_factor": pf_ok, "drawdown": dd_ok},
+        }
+
+    def direction_statistics(self):
+        """LONG and SHORT performance are measured independently."""
+        closed = self._closed_trades()
+        output = {}
+        for side in ("LONG", "SHORT"):
+            trades = [trade for trade in closed if str(trade.get("side") or "").upper() == side]
+            output[side] = {
+                "total": len(trades),
+                **(self._metrics(trades) if trades else {
+                    "winrate": 0.0, "expectancy": 0.0, "profit_factor": 0.0,
+                    "average_r": 0.0, "max_drawdown": 0.0,
+                }),
+            }
+        return output
 
     def daily_report(self):
         return self._periodic_report("day")
@@ -928,6 +979,8 @@ class TradeJournal:
     def _empty_summary(self):
         return {
             "total_trades": 0,
+            "performance_gate": self.performance_gate(),
+            "direction_statistics": self.direction_statistics(),
             "open_trades": 0,
             "wins": 0,
             "losses": 0,

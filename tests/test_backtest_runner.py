@@ -432,3 +432,23 @@ def test_full_exit_backtest_preserves_sparse_tp3_number():
 
     assert out["result"] == "WIN"
     assert out["tp"] == 3
+
+
+
+def test_runner_reports_performance_gate_and_long_short_breakdown():
+    runner = BacktestRunner()
+    for index in range(200):
+        is_win = index % 4 != 0
+        net_rr = 2.0 if is_win else -1.0
+        runner._record({
+            "_w": is_win,
+            "net_rr": net_rr,
+            "_levels": [],
+            "direction": "LONG" if index % 2 == 0 else "SHORT",
+        })
+
+    stats = runner.statistics()
+    assert stats["performance_gate"]["sample_sufficient"] is True
+    assert stats["performance_gate"]["ready"] is True
+    assert stats["direction_breakdown"]["LONG"]["total"] == 100
+    assert stats["direction_breakdown"]["SHORT"]["total"] == 100

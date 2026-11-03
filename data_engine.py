@@ -69,6 +69,13 @@ def get_market_data(symbol, force_refresh=False):
     except Exception:
         data["orderbook"] = None
 
+    # Recent executed trades provide taker buy/sell delta. This is a short
+    # rolling sample, not a historical cumulative-volume-delta series.
+    try:
+        data["recent_trades"] = exchange.fetch_trades(symbol, limit=200)
+    except Exception:
+        data["recent_trades"] = None
+
     for timeframe, c_limit in TIMEFRAMES.items():
         data[timeframe] = fetch_candles(symbol, timeframe, c_limit, force_refresh=force_refresh)
 

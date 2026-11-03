@@ -497,6 +497,57 @@ class BacktestRunner:
                 self.tp3 += 1
         self.net_rr += trade.get("net_rr", 0.0)
 
+    def performance_gate(self, minimum_trades=200, minimum_profit_factor=1.5,
+                         maximum_drawdown_pct=10.0, risk_percent=1.0):
+        """Historical-runner gate based only on closed, realized net-R trades."""
+        trades = self.history
+        gross_profit = sum(max(0.0, float(item.get("net_rr", 0.0) or 0.0)) for item in trades)
+        gross_loss = abs(sum(min(0.0, float(item.get("net_rr", 0.0) or 0.0)) for item in trades))
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
+        equity = peak = 100.0
+        max_drawdown_pct = 0.0
+        risk_fraction = max(0.0, float(risk_percent)) / 100.0
+        for item in trades:
+            net_r = float(item.get("net_rr", 0.0) or 0.0)
+            equity *= max(0.0, 1.0 + net_r * risk_fraction)
+            peak = max(peak, equity)
+            if peak > 0:
+                max_drawdown_pct = max(max_drawdown_pct, (peak - equity) / peak * 100.0)
+        sample_ok = len(trades) >= int(minimum_trades)
+        pf_ok = profit_factor >= float(minimum_profit_factor)
+        dd_ok = max_drawdown_pct <= float(maximum_drawdown_pct)
+        return {
+            "ready": bool(sample_ok and pf_ok and dd_ok),
+            "sample_sufficient": sample_ok,
+            "closed_trades": len(trades),
+            "minimum_trades": int(minimum_trades),
+            "profit_factor": round(profit_factor, 4),
+            "minimum_profit_factor": float(minimum_profit_factor),
+            "max_drawdown_pct": round(max_drawdown_pct, 2),
+            "maximum_drawdown_pct": float(maximum_drawdown_pct),
+            "risk_percent_per_trade": float(risk_percent),
+            "checks": {"sample": sample_ok, "profit_factor": pf_ok, "drawdown": dd_ok},
+        }
+
+    def direction_breakdown(self):
+        """Separate realized metrics for LONG and SHORT samples."""
+        output = {}
+        for side in ("LONG", "SHORT"):
+            trades = [item for item in self.history if str(item.get("direction", "")).upper() == side]
+            wins = [item for item in trades if float(item.get("net_rr", 0.0) or 0.0) > 0]
+            losses = [item for item in trades if float(item.get("net_rr", 0.0) or 0.0) < 0]
+            gross_profit = sum(float(item.get("net_rr", 0.0) or 0.0) for item in wins)
+            gross_loss = abs(sum(float(item.get("net_rr", 0.0) or 0.0) for item in losses))
+            output[side] = {
+                "total": len(trades),
+                "wins": len(wins),
+                "losses": len(losses),
+                "winrate": round(len(wins) / len(trades) * 100.0, 2) if trades else 0.0,
+                "expectancy": round(sum(float(item.get("net_rr", 0.0) or 0.0) for item in trades) / len(trades), 4) if trades else 0.0,
+                "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else (round(gross_profit, 2) if gross_profit else 0.0),
+            }
+        return output
+
     def statistics(self):
         if not self.total:
             return {
@@ -511,6 +562,8 @@ class BacktestRunner:
                 "gross_profit_rr": 0, "gross_loss_rr": 0,
                 "tp1": 0, "tp2": 0, "tp3": 0,
                 "sample_base": "realized_closed_trades",
+                "performance_gate": self.performance_gate(),
+                "direction_breakdown": self.direction_breakdown(),
             }
         wins = self.wins
         losses = self.total - wins
@@ -553,6 +606,8 @@ class BacktestRunner:
             "tp2": self.tp2,
             "tp3": self.tp3,
             "sample_base": "realized_closed_trades",
+            "performance_gate": self.performance_gate(),
+            "direction_breakdown": self.direction_breakdown(),
         }
 
 
