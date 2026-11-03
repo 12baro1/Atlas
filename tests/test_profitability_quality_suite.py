@@ -30,6 +30,23 @@ def test_decision_uses_cost_adjusted_rr_instead_of_max_tp_rr():
     assert any("RR below minimum" in item for item in blockers)
 
 
+def test_rr_quality_grade_uses_net_partial_exit_rr():
+    from rr_engine import RREngine
+
+    result = RREngine().evaluate({
+        "entry": 100.0,
+        "stop_loss": 99.0,
+        "rr": 4.0,
+        "selected_rr": 4.0,
+        "weighted_rr": 3.0,
+        "weighted_net_rr": 1.2,
+        "rr_by_tp": {"tp1": 2.0, "tp2": 3.0, "tp3": 4.0},
+    })
+    assert result["rr"] == 3.0
+    assert result["quality_rr"] == 1.2
+    assert result["quality"] == "AVOID"
+
+
 def test_orderflow_opposition_blocks_market_entry_even_if_book_is_neutral():
     engine = OrderBookEngine()
     now = 100_000
