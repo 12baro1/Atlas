@@ -1024,6 +1024,23 @@ class AtlasEngine:
         entry["orderbook"] = orderbook
         if entry.get("valid") and orderbook.get("active"):
             entry_type = str(entry.get("entry_type") or "").upper()
+            if entry_type == "LIMIT" and entry.get("poi_zone"):
+                try:
+                    candidate = float(orderbook.get("limit_entry_candidate"))
+                    original = float(entry.get("entry"))
+                    current = float(candles[-1].close)
+                    zone = entry["poi_zone"]
+                    low, high = float(zone["low"]), float(zone["high"])
+                    direction = str(entry.get("direction") or "").upper()
+                    favorable = candidate <= original if direction == "LONG" else candidate >= original
+                    on_entry_side = candidate < current if direction == "LONG" else candidate > current
+                    shift_pct = abs(candidate - original) / original * 100.0
+                    if low <= candidate <= high and favorable and on_entry_side and shift_pct <= 0.20:
+                        entry["entry"] = candidate
+                        orderbook["limit_entry_adjustment"] = {"from": original, "to": candidate}
+                        entry.setdefault("checks", []).append("✓ Order book LIMIT fiyatı POI içinde iyileştirildi")
+                except (TypeError, ValueError, KeyError, ZeroDivisionError, IndexError):
+                    pass
             if orderbook.get("opposing"):
                 entry["valid"] = False
                 entry["reason"] = "Order book yönün karşısında güçlü hacim gösteriyor"
