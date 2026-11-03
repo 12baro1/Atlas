@@ -175,6 +175,12 @@ def _combine_stats(all_stats):
         "gross_profit_rr": 0,
         "gross_loss_rr": 0,
         "candidate_signals": 0,
+        "analysis_calls": 0,
+        "empty_results": 0,
+        "raw_long_signals": 0,
+        "raw_short_signals": 0,
+        "non_directional_results": 0,
+        "action_counts": {},
         "unfilled_limits": 0,
         "open_trades": 0,
         "invalid_candidates": 0,
@@ -186,10 +192,14 @@ def _combine_stats(all_stats):
     for _, stats in all_stats:
         for key in (
             "total", "wins", "tp1", "tp2", "tp3",
-            "candidate_signals", "unfilled_limits", "open_trades",
+            "candidate_signals", "analysis_calls", "empty_results",
+            "raw_long_signals", "raw_short_signals", "non_directional_results",
+            "unfilled_limits", "open_trades",
             "invalid_candidates", "no_followup_data",
         ):
             combined[key] += int(stats.get(key, 0) or 0)
+        for action, count in (stats.get("action_counts") or {}).items():
+            combined["action_counts"][action] = combined["action_counts"].get(action, 0) + int(count or 0)
         combined["net_rr"] += float(stats.get("net_rr", 0) or 0)
         combined["gross_profit_rr"] += float(stats.get("gross_profit_rr", 0) or 0)
         combined["gross_loss_rr"] += float(stats.get("gross_loss_rr", 0) or 0)
@@ -211,6 +221,11 @@ def _report(stats, name):
     print("=" * 52)
     print(f"SONUÇ | {name}")
     print("=" * 52)
+    print(f"  Analiz çağrısı : {stats.get('analysis_calls', 0)}")
+    print(f"  Boş sonuç      : {stats.get('empty_results', 0)}")
+    print(f"  Ham LONG/SHORT : {stats.get('raw_long_signals', 0)}/{stats.get('raw_short_signals', 0)}")
+    print(f"  Yönsüz sonuç   : {stats.get('non_directional_results', 0)}")
+    print(f"  Karar aksiyonları: {stats.get('action_counts', {})}")
     print(f"  Aday sinyal    : {stats.get('candidate_signals', 0)}")
     print(f"  Kapanan işlem  : {stats['total']}")
     print(f"  Açık işlem     : {stats.get('open_trades', 0)}")
