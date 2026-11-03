@@ -159,5 +159,5 @@ def test_fetch_history_clears_transient_error_after_success(monkeypatch):
 
     assert len(candles) == 1
     assert candles[0].time == 60_000
-    assert calls["count"] == 3
+    assert calls["count"] == 2
 
