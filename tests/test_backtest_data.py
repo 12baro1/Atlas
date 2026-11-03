@@ -78,3 +78,64 @@ def test_backtest_history_validation_accepts_minimum_15m_data(capsys):
 
     assert counts["15m"] == 301
     assert "15m: 301 mum" in capsys.readouterr().out
+
+
+
+def _complete_coverage_data(days, now_ms):
+    data = {}
+    for timeframe, duration in backtest.TIMEFRAME_DURATION_MS.items():
+        history_days = backtest._history_days_for_timeframe(days, timeframe)
+        requested_start = now_ms - history_days * 86_400_000
+        first_open = int(requested_start // duration) * duration
+        last_open = (int(now_ms // duration) - 1) * duration
+        data[timeframe] = [
+            _candle(timestamp)
+            for timestamp in range(first_open, last_open + 1, duration)
+        ]
+    return data
+
+
+def test_backtest_coverage_accepts_full_requested_history(capsys):
+    now_ms = 2_000_000_000_000
+    data = _complete_coverage_data(days=2, now_ms=now_ms)
+
+    coverage = backtest._validate_backtest_coverage(
+        data, "BTC/USDT:USDT", days=2, now_ms=now_ms
+    )
+
+    assert set(coverage) == {"15m", "1h", "4h", "1d", "1w"}
+    assert "TARİH KAPSAMI" in capsys.readouterr().out
+
+
+def test_backtest_coverage_rejects_late_start():
+    now_ms = 2_000_000_000_000
+    data = _complete_coverage_data(days=2, now_ms=now_ms)
+    data["4h"] = data["4h"][10:]
+
+    with pytest.raises(RuntimeError, match="başlangıç verisi eksik"):
+        backtest._validate_backtest_coverage(
+            data, "BTC/USDT:USDT", days=2, now_ms=now_ms
+        )
+
+
+def test_backtest_coverage_rejects_large_internal_gap():
+    now_ms = 2_000_000_000_000
+    data = _complete_coverage_data(days=2, now_ms=now_ms)
+    candles = data["1h"]
+    data["1h"] = candles[:100] + candles[103:]
+
+    with pytest.raises(RuntimeError, match="veri boşluğu"):
+        backtest._validate_backtest_coverage(
+            data, "BTC/USDT:USDT", days=2, now_ms=now_ms
+        )
+
+
+def test_backtest_coverage_rejects_stale_latest_candle():
+    now_ms = 2_000_000_000_000
+    data = _complete_coverage_data(days=2, now_ms=now_ms)
+    data["15m"] = data["15m"][:-20]
+
+    with pytest.raises(RuntimeError, match="son mum eski"):
+        backtest._validate_backtest_coverage(
+            data, "BTC/USDT:USDT", days=2, now_ms=now_ms
+        )
