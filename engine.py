@@ -314,6 +314,7 @@ class AtlasEngine:
             data.get("orderbook"),
             direction=context_state["mtf"].get("entry", "NONE"),
             now_ms=int(time.time() * 1000),
+            trades=data.get("recent_trades"),
         )
 
         execution_state = self._build_execution_state(
