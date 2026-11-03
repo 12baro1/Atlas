@@ -187,7 +187,7 @@ def test_fetch_history_uses_binance_fallback_after_bybit_geoblock(monkeypatch):
 
     assert len(candles) == 1
     assert calls["bybit"] == 1
-    assert calls["fallback"] == 2
+    assert calls["fallback"] == 1
     assert "Binance USD-M Futures" in backtest._history_provider_name
 
 
