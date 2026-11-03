@@ -17,7 +17,8 @@ def test_decision_uses_cost_adjusted_rr_instead_of_max_tp_rr():
         "weighted_net_rr": 1.2,
         "execution_rr": 1.2,
     }
-    assert engine._resolve_rr_value(risk) == 1.2
+    assert engine._resolve_rr_value(risk) == 4.5
+    assert engine._resolve_execution_rr_value(risk) == 1.2
     blockers, valid = engine._collect_risk_blockers(
         risk={"risk": 1.0, "stop_loss": 99.0, "weighted_rr": 2.0,
               "weighted_net_rr": 1.2},
