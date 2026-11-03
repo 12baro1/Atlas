@@ -136,6 +136,11 @@ def load_historical(symbol, days=60, now_ms=None):
         history_days = _history_days_for_timeframe(days, tf)
         since = now - int(history_days * 86_400_000)
         candles = _fetch_history(symbol, tf, since_ms=since, limit=limit)
+        # Bybit includes the currently-forming candle in OHLCV responses.
+        # A historical decision may only use candles that were fully closed
+        # at the backtest's fixed as-of timestamp.
+        duration_ms = TIMEFRAME_DURATION_MS[tf]
+        candles = [candle for candle in candles if candle.time + duration_ms <= now]
         data[tf] = candles
         logging.info(
             "%s %s -> %s candles (history %.1f days)",
