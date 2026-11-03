@@ -81,6 +81,24 @@ def test_partial_exit_backtest_accounts_for_tp1_then_stop():
     assert result["gross_rr"] == 0.2
 
 
+def test_backtest_records_realized_net_r_from_partial_simulation():
+    outcome = BacktestEngine.simulate_trade(
+        entry=100.0,
+        stop_loss=99.0,
+        targets=[102.0, 104.0, 106.0],
+        side="LONG",
+        partial_weights=[0.4, 0.3, 0.3],
+        round_trip_cost_rate=0.0,
+        candles=[
+            {"high": 102.1, "low": 100.5},
+            {"high": 101.0, "low": 98.9},
+        ],
+    )
+    engine = BacktestEngine()
+    engine.record(outcome)
+    assert engine.statistics()["expectancy"] == 0.2
+
+
 def test_ambiguous_same_candle_stop_and_target_is_resolved_stop_first():
     result = BacktestEngine.simulate_trade(
         entry=100.0,
