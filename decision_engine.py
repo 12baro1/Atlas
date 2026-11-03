@@ -557,7 +557,14 @@ class DecisionEngine:
                 f"Confidence below quality minimum: {self._fmt_number(signal_confidence)} < {self._fmt_number(min_confidence)}",
             )
 
-        quality_min_rr = max(float(getattr(Config, "QUALITY_MIN_RR", 3.0)), float(minimum_rr))
+        legacy_minimum_rr = float(getattr(Config, "MINIMUM_RR", 3.0))
+        # Net-R mode uses its own lower floor; applying the legacy gross-target
+        # floor here would silently undo the cost-adjusted execution policy.
+        quality_min_rr = (
+            float(minimum_rr)
+            if float(minimum_rr) < legacy_minimum_rr
+            else max(float(getattr(Config, "QUALITY_MIN_RR", 3.0)), float(minimum_rr))
+        )
         if rr_value is None or rr_value < quality_min_rr:
             self._append_unique(
                 blockers,
