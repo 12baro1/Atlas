@@ -161,3 +161,40 @@ def test_fetch_history_clears_transient_error_after_success(monkeypatch):
     assert candles[0].time == 60_000
     assert calls["count"] == 2
 
+
+
+def test_fetch_history_uses_binance_fallback_after_bybit_geoblock(monkeypatch):
+    calls = {"bybit": 0, "fallback": 0}
+
+    def blocked(*args, **kwargs):
+        calls["bybit"] += 1
+        raise RuntimeError("403 Forbidden CloudFront distribution is configured to block")
+
+    class FakeFallback:
+        def fetch_ohlcv(self, *args, **kwargs):
+            calls["fallback"] += 1
+            if calls["fallback"] == 1:
+                return [[60_000, 1.0, 2.0, 0.5, 1.5, 10.0]]
+            return []
+
+    monkeypatch.setattr(backtest.exchange, "fetch_ohlcv", blocked)
+    monkeypatch.setattr(backtest, "_create_history_fallback_exchange", FakeFallback)
+    monkeypatch.setattr(backtest.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(backtest, "_history_fallback_exchange", None)
+    monkeypatch.setattr(backtest, "_history_provider_name", "Bybit")
+
+    candles = backtest._fetch_history("BTC/USDT:USDT", "1m", since_ms=0)
+
+    assert len(candles) == 1
+    assert calls["bybit"] == 1
+    assert calls["fallback"] == 1
+    assert "Binance USD-M Futures" in backtest._history_provider_name
+
+
+def test_fetch_history_does_not_switch_provider_for_transient_errors(monkeypatch):
+    monkeypatch.setattr(backtest, "_history_fallback_exchange", None)
+    monkeypatch.setattr(backtest.exchange, "fetch_ohlcv", lambda *a, **k: (_ for _ in ()).throw(OSError("temporary")))
+    monkeypatch.setattr(backtest.time, "sleep", lambda *_: None)
+
+    with pytest.raises(RuntimeError, match="4 deneme başarısız"):
+        backtest._fetch_history("BTC/USDT:USDT", "15m", since_ms=0)
