@@ -228,6 +228,18 @@ def _report(stats, name):
     print(f"  Beklenti       : {stats['expectancy']} RR/işlem")
     print(f"  Profit Factor  : {stats['profit_factor']}")
     print(f"  Net RR         : {stats['net_rr']}")
+    if "max_drawdown" in stats:
+        print(f"  Max Drawdown   : {stats['max_drawdown']} R")
+    breakdown = stats.get("direction_breakdown") or {}
+    for direction in ("LONG", "SHORT"):
+        side = breakdown.get(direction)
+        if side and side.get("total", 0):
+            print(
+                f"  {direction:<5}          : {side.get('total', 0)} işlem | "
+                f"Win %{side.get('winrate', 0)} | "
+                f"Beklenti {side.get('expectancy', 0)} R | "
+                f"PF {side.get('profit_factor', 0)}"
+            )
 
     if stats["total"] >= 20 and stats["expectancy"] > 0 and stats["profit_factor"] >= 1.3:
         print("  YORUM: Edge pozitif görünüyor; daha uzun örnekle doğrulanmalı.")
