@@ -63,6 +63,11 @@ def invalidate_all():
 
 def get_market_data(symbol, force_refresh=False):
     data = {"symbol": symbol}
+    # Public Bybit order-book snapshot; optional so OHLCV analysis survives API hiccups.
+    try:
+        data["orderbook"] = exchange.fetch_order_book(symbol, limit=50)
+    except Exception:
+        data["orderbook"] = None
 
     for timeframe, c_limit in TIMEFRAMES.items():
         data[timeframe] = fetch_candles(symbol, timeframe, c_limit, force_refresh=force_refresh)
