@@ -41,8 +41,8 @@ class BacktestEngine:
             return
 
         self.total += 1
-        rr = abs(trade.get("rr", 0) if isinstance(trade.get("rr"), (int, float)) else 0)
-        signed_rr = rr if result == "WIN" else -rr
+        signed_rr = self._signed_trade_rr(trade)
+        rr = abs(signed_rr)
         self.net_rr += signed_rr
 
         if result == "WIN":
@@ -65,6 +65,20 @@ class BacktestEngine:
             self.tp3 += 1
 
         self.history.append(trade)
+
+    @staticmethod
+    def _signed_trade_rr(trade):
+        """Prefer realized net R from simulations/journals; fall back to result + RR."""
+        for key in ("net_rr", "pnl_rr"):
+            value = trade.get(key)
+            if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                return float(value)
+        value = trade.get("rr", 0)
+        try:
+            value = abs(float(value or 0))
+        except (TypeError, ValueError, OverflowError):
+            value = 0.0
+        return value if str(trade.get("result", "")).upper() == "WIN" else -value
 
     def _record_payload(self, result_payload):
         """Canlı engine.analyze() çıktısını geri test kaydına işler."""
@@ -198,8 +212,7 @@ class BacktestEngine:
         max_drawdown = 0.0
         risk_fraction = max(0.0, float(risk_percent)) / 100.0
         for trade in closed:
-            rr = abs(float(trade.get("rr", 0) or 0))
-            signed_rr = rr if str(trade.get("result", "")).upper() == "WIN" else -rr
+            signed_rr = self._signed_trade_rr(trade)
             equity *= max(0.0, 1.0 + signed_rr * risk_fraction)
             peak = max(peak, equity)
             if peak > 0:
@@ -298,7 +311,7 @@ class BacktestEngine:
                 "worst_case_rr": 0,
                 "best_case_rr": 0,
             }
-        outcomes = [abs(trade.get("rr", 0)) if trade.get("result") == "WIN" else -abs(trade.get("rr", 0)) for trade in closed]
+        outcomes = [self._signed_trade_rr(trade) for trade in closed]
         sample_size = sample_size or min(20, len(outcomes))
         sample_size = max(1, min(sample_size, len(outcomes)))
 
@@ -362,7 +375,7 @@ class BacktestEngine:
                 "expectancy": 0,
             }
 
-        rr_values = [abs(trade.get("rr", 0)) if trade.get("result") == "WIN" else -abs(trade.get("rr", 0)) for trade in closed]
+        rr_values = [self._signed_trade_rr(trade) for trade in closed]
         long_trades = len([trade for trade in closed if trade.get("side") == "LONG"])
         short_trades = len([trade for trade in closed if trade.get("side") == "SHORT"])
         ordered_rr = sorted(rr_values)
@@ -401,7 +414,7 @@ class BacktestEngine:
         total = len(chunk)
         wins = len([trade for trade in chunk if trade.get("result") == "WIN"])
         losses = total - wins
-        rr_values = [abs(trade.get("rr", 0)) if trade.get("result") == "WIN" else -abs(trade.get("rr", 0)) for trade in chunk]
+        rr_values = [self._signed_trade_rr(trade) for trade in chunk]
         avg_rr = sum(rr_values) / total if total else 0
         winrate = (wins / total) * 100 if total else 0
         return {
