@@ -452,3 +452,26 @@ def test_runner_reports_performance_gate_and_long_short_breakdown():
     assert stats["performance_gate"]["ready"] is True
     assert stats["direction_breakdown"]["LONG"]["total"] == 100
     assert stats["direction_breakdown"]["SHORT"]["total"] == 100
+
+
+def test_runner_reports_raw_signal_and_decision_gate_counts():
+    candles = _rising_series(500)
+
+    def fake_analyze(window):
+        if len(window["15m"]) == 401:
+            return {
+                "decision": {"action": "WAIT"},
+                "signal": {"signal": "LONG"},
+                "risk": {},
+            }
+        return None
+
+    stats = BacktestRunner(analyze_fn=fake_analyze).run({"15m": candles})
+
+    assert stats["analysis_calls"] == 200
+    assert stats["empty_results"] == 199
+    assert stats["raw_long_signals"] == 1
+    assert stats["raw_short_signals"] == 0
+    assert stats["non_directional_results"] == 0
+    assert stats["action_counts"] == {"WAIT": 1}
+    assert stats["candidate_signals"] == 0
