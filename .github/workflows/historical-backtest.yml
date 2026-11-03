@@ -25,6 +25,7 @@ on:
         options:
           - strict
           - lenient
+          - both
 
 permissions:
   contents: read
@@ -60,10 +61,17 @@ jobs:
         run: |
           set -o pipefail
           args=(--symbols "${{ inputs.symbols }}" --days "${{ inputs.days }}")
-          if [ "${{ inputs.mode }}" = "lenient" ]; then
-            args+=(--lenient)
+          if [ "${{ inputs.mode }}" = "both" ]; then
+            echo "===== STRICT MODE =====" | tee historical-backtest.txt
+            python backtest.py "${args[@]}" 2>&1 | tee -a historical-backtest.txt
+            echo "===== LENIENT RAW-SIGNAL MODE =====" | tee -a historical-backtest.txt
+            python backtest.py "${args[@]}" --lenient 2>&1 | tee -a historical-backtest.txt
+          else
+            if [ "${{ inputs.mode }}" = "lenient" ]; then
+              args+=(--lenient)
+            fi
+            python backtest.py "${args[@]}" 2>&1 | tee historical-backtest.txt
           fi
-          python backtest.py "${args[@]}" 2>&1 | tee historical-backtest.txt
       - name: Upload backtest report
         if: always()
         uses: actions/upload-artifact@v4
