@@ -318,6 +318,8 @@ def _combine_stats(all_stats):
         "entry_type_counts": {},
         "risk_reason_counts": {},
         "target_reason_counts": {},
+        "target_missing_rr_counts": {},
+        "stop_atr_buckets": {},
         "unfilled_limits": 0,
         "open_trades": 0,
         "invalid_candidates": 0,
@@ -335,7 +337,7 @@ def _combine_stats(all_stats):
             "invalid_candidates", "no_followup_data",
         ):
             combined[key] += int(stats.get(key, 0) or 0)
-        for key in ("action_counts", "wait_reason_counts", "signal_reason_counts", "mtf_alignment_counts", "entry_reason_counts", "entry_type_counts", "risk_reason_counts", "target_reason_counts"):
+        for key in ("action_counts", "wait_reason_counts", "signal_reason_counts", "mtf_alignment_counts", "entry_reason_counts", "entry_type_counts", "risk_reason_counts", "target_reason_counts", "target_missing_rr_counts", "stop_atr_buckets"):
             for label, count in (stats.get(key) or {}).items():
                 combined[key][label] = combined[key].get(label, 0) + int(count or 0)
         combined["net_rr"] += float(stats.get("net_rr", 0) or 0)
@@ -378,6 +380,10 @@ def _report(stats, name):
         print(f"  Stop nedenleri : {stats['risk_reason_counts']}")
     if stats.get("target_reason_counts"):
         print(f"  TP nedenleri   : {stats['target_reason_counts']}")
+    if stats.get("target_missing_rr_counts"):
+        print(f"  Eksik TP RR    : {stats['target_missing_rr_counts']}")
+    if stats.get("stop_atr_buckets"):
+        print(f"  Stop / ATR     : {stats['stop_atr_buckets']}")
     print(f"  Aday sinyal    : {stats.get('candidate_signals', 0)}")
     print(f"  Kapanan işlem  : {stats['total']}")
     print(f"  Açık işlem     : {stats.get('open_trades', 0)}")
@@ -497,7 +503,7 @@ def main():
         print(f"{symbol:<22} {stats['total']:>7} {stats['winrate']:>8}% {stats['profit_factor']:>6} {stats['net_rr']:>8.2f}")
 
     combined = _combine_stats(all_stats)
-    if combined["candidate_signals"] > 0 or combined["total"] > 0 or any(combined.get(key) for key in ("wait_reason_counts", "entry_reason_counts", "risk_reason_counts", "target_reason_counts")):
+    if combined["candidate_signals"] > 0 or combined["total"] > 0 or any(combined.get(key) for key in ("wait_reason_counts", "entry_reason_counts", "risk_reason_counts", "target_reason_counts", "target_missing_rr_counts", "stop_atr_buckets")):
         _report(combined, "BİRLEŞİK")
 
 
