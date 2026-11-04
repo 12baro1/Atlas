@@ -96,6 +96,7 @@ class EntryEngine:
         result = {
             "valid": False,
             "direction": "NONE",
+            "entry_reason_code": "NO_DIRECTION",
             "entry": None,
             "stop_loss": None,
             "entry_type": "NONE",
