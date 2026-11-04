@@ -4,6 +4,8 @@ Scores remain diagnostic only. This gate checks whether the actual trade geometr
 and the underlying SMC evidence agree before a signal can be executed.
 """
 
+from config import Config
+
 
 class TradeQualityEngine:
     """Validate the complete setup rather than trusting a weighted score."""
@@ -207,10 +209,19 @@ class TradeQualityEngine:
 
         if current is not None and entry_price is not None and atr and atr > 0:
             distance = abs(current - entry_price)
-            if entry.get("entry_type") == "LIMIT" and distance > atr * 2.0:
-                blockers.append("LIMIT entry is more than 2 ATR away from market")
-            if entry.get("entry_type") == "MARKET" and distance > atr * 0.35:
-                blockers.append("MARKET entry is already too far from the calculated trigger")
+            entry_type = str(entry.get("entry_type") or "").upper()
+            if entry_type == "LIMIT":
+                max_limit_atr = max(0.0, float(getattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_ATR", 3.0)))
+                max_limit_pct = max(0.0, float(getattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_PERCENT", 0.05)))
+                distance_pct = distance / max(abs(current), 1e-12)
+                if distance > atr * max_limit_atr or distance_pct > max_limit_pct:
+                    blockers.append(
+                        f"LIMIT entry exceeds configured distance ({max_limit_atr:g} ATR / {max_limit_pct * 100:g}%)"
+                    )
+            if entry_type == "MARKET":
+                max_market_atr = max(0.0, float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_ATR", 0.35)))
+                if distance > atr * max_market_atr:
+                    blockers.append("MARKET entry is already too far from the calculated trigger")
             if len(tp_prices) == 3:
                 tp1_reached = current >= tp_prices[0] if direction == "LONG" else current <= tp_prices[0]
                 if tp1_reached and entry.get("entry_type") != "LIMIT":

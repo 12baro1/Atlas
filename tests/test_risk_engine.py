@@ -181,6 +181,7 @@ def test_risk_engine_expands_too_tight_stop_using_atr_floor(monkeypatch):
     # Sıkı stopları reddetme modu kapalıyken auto-expand davranışı korunur.
     monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", False)
     monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", True)
+    monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75)
     risk = RiskEngine().calculate(
         entry=79.00,
         stop_loss=79.01,
@@ -204,6 +205,7 @@ def test_risk_engine_auto_expands_tight_stop_even_when_reject_on(monkeypatch):
     # olsa bile sıkı stoplar otomatik genişletilir ve sinyal SKIP edilmez.
     monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
     monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", True)
+    monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75)
     risk = RiskEngine().calculate(
         entry=79.00,
         stop_loss=79.01,

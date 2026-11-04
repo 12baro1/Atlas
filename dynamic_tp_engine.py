@@ -49,6 +49,11 @@ class DynamicTPEngine:
             )
 
             if target is None and not allow_rr_fallback:
+                candidate_rr = [
+                    round((entry - price if direction == "SHORT" else price - entry) / risk, 4)
+                    for price in targets
+                    if (entry - price if direction == "SHORT" else price - entry) > 0
+                ]
                 return {
                     "tp1": None,
                     "tp2": None,
@@ -57,6 +62,10 @@ class DynamicTPEngine:
                     "sources": selected_sources + ["missing_structural_target"],
                     "synthetic_targets": False,
                     "atr": round(atr_snapshot, 8),
+                    "candidate_count": len(targets),
+                    "candidate_targets": [round(float(price), 8) for price in targets],
+                    "missing_rr_level": rr_multiple,
+                    "best_candidate_rr": max(candidate_rr) if candidate_rr else None,
                 }
             if target is None:
                 target = self._fallback_rr_level(entry, risk, direction, rr_multiple)
@@ -82,6 +91,12 @@ class DynamicTPEngine:
             "sources": selected_sources,
             "synthetic_targets": any(source == "rr_fallback" for source in selected_sources),
             "atr": round(atr_snapshot, 8),
+            "candidate_count": len(targets),
+            "candidate_targets": [round(float(price), 8) for price in targets],
+            "target_rrs": [
+                round((entry - price if direction == "SHORT" else price - entry) / risk, 4)
+                for price in selected_targets
+            ],
         }
 
     def _collect_targets(self, direction, entry, liquidity, fvg, orderblocks, structure):

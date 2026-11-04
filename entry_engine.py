@@ -96,6 +96,7 @@ class EntryEngine:
         result = {
             "valid": False,
             "direction": "NONE",
+            "entry_reason_code": "NO_DIRECTION",
             "entry": None,
             "stop_loss": None,
             "entry_type": "NONE",
@@ -140,6 +141,7 @@ class EntryEngine:
                 ote_low = ote_high = None
         if requires_ote and (ote_low is None or ote_high is None or ote_low >= ote_high):
             result["reason"] = "4H OTE levels unavailable for trend continuation"
+            result["entry_reason_code"] = "OTE_UNAVAILABLE"
             result["entry_type_reason"] = result["reason"]
             result["entry_zone_crossed"] = True
             return result
@@ -274,6 +276,7 @@ class EntryEngine:
 
         if requires_ote and selected_fvg is None:
             result["reason"] = "Trend continuation requires a fresh directional FVG overlapping 4H OTE"
+            result["entry_reason_code"] = "NO_FRESH_FVG_IN_OTE"
             result["entry_type_reason"] = result["reason"]
             result["entry_zone_crossed"] = True
             return result
@@ -324,7 +327,7 @@ class EntryEngine:
                     and post.get("direction") == "BULLISH"
                     and 0 <= confirmation_age <= max_confirmation_age
                 )
-                inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high and (not requires_ote or ote_low <= current_price <= ote_high) and (not requires_ote or ote_low <= current_price <= ote_high)
+                inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high and (not requires_ote or ote_low <= current_price <= ote_high)
                 if inside_poi and sweep_confirmed and current_price > result["stop_loss"]:
                     result["entry"] = current_price
                     result["entry_type"] = "MARKET"
@@ -478,10 +481,12 @@ class EntryEngine:
         if result["entry"] is not None and result["stop_loss"] is not None:
             if direction == "LONG" and result["stop_loss"] >= result["entry"]:
                 result["reason"] = "Invalid LONG: stop-loss must be below entry"
+                result["entry_reason_code"] = "INVALID_STOP_DIRECTION"
                 result["checks"].append("✗ SL direction")
                 return result
             if direction == "SHORT" and result["stop_loss"] <= result["entry"]:
                 result["reason"] = "Invalid SHORT: stop-loss must be above entry"
+                result["entry_reason_code"] = "INVALID_STOP_DIRECTION"
                 result["checks"].append("✗ SL direction")
                 return result
 
@@ -495,7 +500,15 @@ class EntryEngine:
 
         if result["valid"]:
             result["reason"] = "High probability setup"
+            result["entry_reason_code"] = "ENTRY_READY"
+        elif result.get("entry_zone_crossed"):
+            result["entry_reason_code"] = "POI_CROSSED"
+        elif result.get("entry") is None:
+            result["entry_reason_code"] = "NO_EXECUTABLE_PRICE"
+        elif result.get("score", 0) < 60:
+            result["entry_reason_code"] = "ENTRY_SCORE_BELOW_MINIMUM"
         else:
+            result["entry_reason_code"] = "ENTRY_VALIDATION_FAILED"
             result["reason"] = "Weak setup"
 
         return result

@@ -1047,12 +1047,14 @@ class AtlasEngine:
             if orderbook.get("opposing"):
                 entry["valid"] = False
                 entry["reason"] = "Order book yönün karşısında güçlü hacim gösteriyor"
+                entry["entry_reason_code"] = "ORDERBOOK_CONFLICT"
                 entry.setdefault("checks", []).append("✗ Order book karşı yön baskısı")
                 confirmation["confirmed"] = False
                 confirmation["reason"] = entry["reason"]
             elif entry_type == "MARKET" and not orderbook.get("market_entry_allowed", True):
                 entry["valid"] = False
                 entry["reason"] = "Order book spread/derinlik koşulları market girişine uygun değil"
+                entry["entry_reason_code"] = "MARKET_MICROSTRUCTURE_REJECTED"
                 entry.setdefault("checks", []).append("✗ Order book market girişini onaylamadı")
                 confirmation["confirmed"] = False
                 confirmation["reason"] = entry["reason"]
@@ -1141,6 +1143,7 @@ class AtlasEngine:
         if entry.get("valid") and not all(dynamic_tp.get(key) is not None for key in ("tp1", "tp2", "tp3")):
             entry["valid"] = False
             entry["reason"] = dynamic_tp.get("reason") or "No valid structural TP targets"
+            entry["entry_reason_code"] = "NO_STRUCTURAL_TARGETS"
             entry.setdefault("checks", []).append("✗ No valid structural TP targets; setup blocked")
             confirmation["confirmed"] = False
             confirmation["reason"] = "No valid structural TP targets; wait for a clearer liquidity objective"
@@ -1157,6 +1160,7 @@ class AtlasEngine:
         if tp1_reached and entry_type != "LIMIT":
             entry["valid"] = False
             entry["reason"] = "TP1 already reached; do not chase with a market entry"
+            entry["entry_reason_code"] = "TP1_ALREADY_REACHED"
             entry.setdefault("checks", []).append("✗ TP1 already reached; market entry blocked")
             confirmation["confirmed"] = False
             confirmation["reason"] = "TP1 already reached; wait for a fresh setup"
