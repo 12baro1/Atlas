@@ -107,7 +107,11 @@ class RiskEngine:
         atr_floor_distance = max(atr_snapshot * min_stop_atr_multiplier, percent_floor_distance)
         spread_buffer = self._resolve_buffer(spread, entry, spread_rate, minimum_tick_distance)
         slippage_buffer = self._resolve_buffer(slippage, entry, slippage_rate, minimum_tick_distance)
-        minimum_stop_distance = atr_floor_distance + spread_buffer + slippage_buffer
+        # Stop geometry is structural and volatility-based. Spread/slippage are
+        # execution costs; adding them to the stop-distance floor can reject a
+        # valid structural stop for the wrong reason. They remain included in
+        # cost-adjusted RR and position sizing below.
+        minimum_stop_distance = max(atr_floor_distance, minimum_tick_distance)
 
         requested_risk = abs(entry - stop_loss)
         stop_too_tight = requested_risk < minimum_stop_distance
