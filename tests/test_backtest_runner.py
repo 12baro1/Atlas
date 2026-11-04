@@ -547,7 +547,7 @@ def test_limit_order_is_cancelled_if_target_hits_before_fill():
 def test_trade_history_contains_actual_fill_and_plan_diagnostics():
     runner = BacktestRunner(partial_exits=False, limit_expiry_bars=4)
     candles = [
-        _candle(1, 100.0, 101.0, 96.0, 99.0),  # not filled
+        _candle(1, 100.0, 100.0, 96.0, 99.0),  # not filled
         _candle(2, 99.0, 100.0, 94.0, 95.0),   # fills at 95 intrabar
         _candle(3, 95.0, 102.0, 94.0, 101.0),  # TP1
     ]
