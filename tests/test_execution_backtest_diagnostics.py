@@ -34,9 +34,9 @@ def test_runner_reports_entry_stop_target_and_order_diagnostics():
                     "entry_reason_code": "ENTRY_SCORE_BELOW_MINIMUM",
                     "entry_type": "LIMIT",
                 },
-                "dynamic_tp": {"reason": "no_valid_structural_targets"},
+                "dynamic_tp": {"reason": "no_valid_structural_targets", "missing_rr_level": 2.0},
             },
-            "risk": {"risk_setup_valid": False, "reason_code": "UNSAFE_WIDE_OR_EXPAND_DISABLED"},
+            "risk": {"risk_setup_valid": False, "reason_code": "UNSAFE_WIDE_OR_EXPAND_DISABLED", "atr": 100.0, "requested_risk": 15.0},
         }
 
     stats = BacktestRunner(analyze_fn=fake_analyze).run({"15m": candles})
@@ -45,3 +45,5 @@ def test_runner_reports_entry_stop_target_and_order_diagnostics():
     assert stats["entry_type_counts"] == {"LIMIT": 2}
     assert stats["risk_reason_counts"] == {"UNSAFE_WIDE_OR_EXPAND_DISABLED": 2}
     assert stats["target_reason_counts"] == {"no_valid_structural_targets": 2}
+    assert stats["target_missing_rr_counts"] == {"2R": 2}
+    assert stats["stop_atr_buckets"] == {"<0.25 ATR": 2}
