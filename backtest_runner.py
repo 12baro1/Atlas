@@ -502,11 +502,14 @@ class BacktestRunner:
                 signal_dir == "LONG", stop, fill_candle.low, fill_candle.high
             )
             if fill_stop_hit:
-                outcome = {"result": "LOSS", "tp": 0, "net_rr": -1.0, "levels": []}
+                outcome = {"result": "LOSS", "tp": 0, "net_rr": -1.0, "levels": [],
+                           "exit_reason": "STOP", "exit_offset": 0}
+                outcome_start_index = fill_index
             else:
                 # Exclude the fill candle from target simulation. Its high/low
                 # may have occurred before the intrabar limit order was filled.
                 future = candles[fill_index + 1:]
+                outcome_start_index = fill_index + 1
                 if use_partial:
                     outcome = simulate_trade_partial(
                         entry=entry_price,
@@ -528,6 +531,7 @@ class BacktestRunner:
         else:
             # MARKET and gap-through LIMIT orders fill at candle open.
             future = candles[fill_index:]
+            outcome_start_index = fill_index
             if use_partial:
                 outcome = simulate_trade_partial(
                     entry=entry_price,
@@ -569,9 +573,10 @@ class BacktestRunner:
         net_rr = base_rr
 
         signal_index = max(0, int(signal_index if signal_index is not None else entry_index - 1))
-        exit_reason = ("STOP" if outcome.get("result") == "LOSS"
-                       else f"TP{outcome.get('tp', 0)}" if outcome.get("tp", 0)
-                       else "UNKNOWN")
+        exit_offset = outcome.get("exit_offset")
+        exit_index = (outcome_start_index + int(exit_offset)
+                      if exit_offset is not None else None)
+        exit_time = int(candles[exit_index].time) if exit_index is not None and exit_index < len(candles) else None
         return {
             "signal_index": signal_index,
             "signal_time": int(candles[signal_index].time),
@@ -584,7 +589,9 @@ class BacktestRunner:
             "entry": entry_price,
             "stop_loss": stop,
             "tps": tps,
-            "exit_reason": exit_reason,
+            "exit_reason": outcome.get("exit_reason", "UNKNOWN"),
+            "exit_index": exit_index,
+            "exit_time": exit_time,
             "result": outcome.get("result"),
             "tp": outcome.get("tp", 0),
             "net_rr": round(max(net_rr, -99.0), 4),
