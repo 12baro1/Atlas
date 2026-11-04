@@ -475,3 +475,35 @@ def test_runner_reports_raw_signal_and_decision_gate_counts():
     assert stats["non_directional_results"] == 0
     assert stats["action_counts"] == {"WAIT": 1}
     assert stats["candidate_signals"] == 0
+
+
+def test_runner_reports_wait_reasons_and_mtf_alignment():
+    candles = _rising_series(302)
+
+    def fake_analyze(window):
+        return {
+            "decision": {"action": "WAIT"},
+            "signal": {
+                "signal": "WAIT",
+                "wait_reason": "entry_not_confirmed",
+                "signal_reason": "Entry not confirmed",
+            },
+            "analysis": {
+                "mtf": {
+                    "entry": "NONE",
+                    "weekly": "BULLISH",
+                    "daily": "NEUTRAL",
+                    "h4": "BEARISH",
+                }
+            },
+            "risk": {},
+        }
+
+    stats = BacktestRunner(analyze_fn=fake_analyze).run({"15m": candles})
+
+    assert stats["analysis_calls"] == 2
+    assert stats["wait_reason_counts"] == {"entry_not_confirmed": 2}
+    assert stats["signal_reason_counts"] == {"Entry not confirmed": 2}
+    assert stats["mtf_alignment_counts"] == {
+        "entry=NONE|weekly=BULLISH|daily=NEUTRAL|h4=BEARISH": 2
+    }
