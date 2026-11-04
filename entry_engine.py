@@ -324,7 +324,7 @@ class EntryEngine:
                     and post.get("direction") == "BULLISH"
                     and 0 <= confirmation_age <= max_confirmation_age
                 )
-                inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high and (not requires_ote or ote_low <= current_price <= ote_high) and (not requires_ote or ote_low <= current_price <= ote_high)
+                inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high and (not requires_ote or ote_low <= current_price <= ote_high)
                 if inside_poi and sweep_confirmed and current_price > result["stop_loss"]:
                     result["entry"] = current_price
                     result["entry_type"] = "MARKET"
@@ -495,7 +495,15 @@ class EntryEngine:
 
         if result["valid"]:
             result["reason"] = "High probability setup"
+            result["entry_reason_code"] = "ENTRY_READY"
+        elif result.get("entry_zone_crossed"):
+            result["entry_reason_code"] = "POI_CROSSED"
+        elif result.get("entry") is None:
+            result["entry_reason_code"] = "NO_EXECUTABLE_PRICE"
+        elif result.get("score", 0) < 60:
+            result["entry_reason_code"] = "ENTRY_SCORE_BELOW_MINIMUM"
         else:
+            result["entry_reason_code"] = "ENTRY_VALIDATION_FAILED"
             result["reason"] = "Weak setup"
 
         return result
