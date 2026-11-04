@@ -110,3 +110,57 @@ def test_serialize_sweep():
     assert payload["active"] is True
     assert payload["trendline"]["direction"] == "SUPPORT"
     assert payload["direction"] == "SELL_SIDE"
+
+
+
+def test_best_fit_cache_reuses_geometry_without_sharing_mutable_state():
+    engine = TrendlineEngine(min_touches=2)
+    points = [
+        {"index": 2, "price": 100.0},
+        {"index": 5, "price": 101.5},
+        {"index": 8, "price": 103.0},
+    ]
+    candles = sample_candles()
+
+    first = engine._best_fit(points, candles)[0]
+    first.slope = 999.0
+    second = engine._best_fit(points, candles)[0]
+
+    assert second.slope == 0.5
+    assert second.slope != first.slope
+    assert len(engine._fit_cache) == 1
+
+
+def test_best_fit_cache_is_bounded():
+    engine = TrendlineEngine(min_touches=2)
+    candles = sample_candles()
+
+    for offset in range(engine._fit_cache_maxsize + 20):
+        points = [
+            {"index": 2, "price": 100.0 + offset},
+            {"index": 5, "price": 101.5 + offset},
+            {"index": 8, "price": 103.0 + offset},
+        ]
+        engine._best_fit(points, candles)
+
+    assert len(engine._fit_cache) <= engine._fit_cache_maxsize
+
+
+def test_best_fit_cache_rechecks_break_state_for_current_candles():
+    engine = TrendlineEngine(min_touches=2)
+    points = [
+        {"index": 2, "price": 100.0},
+        {"index": 5, "price": 101.5},
+        {"index": 8, "price": 103.0},
+    ]
+    candles = sample_candles()
+
+    first = engine._best_fit(points, candles)[0]
+    assert first.broken is False
+
+    # Same swing geometry, but the latest candle now breaks the support line.
+    candles[10] = c(10, 104.0, 104.2, 103.0, 104.1)
+    second = engine._best_fit(points, candles)[0]
+
+    assert second.broken is True
+    assert second.break_index == 10

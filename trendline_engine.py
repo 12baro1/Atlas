@@ -46,6 +46,11 @@ class TrendlineEngine:
         self.min_touches = min_touches
         self.max_lookback = max_lookback
         self.tolerance_pct = tolerance_pct
+        # Swing points usually remain unchanged across many adjacent candles.
+        # Cache the exact fitted geometry so backtests do not solve the same
+        # pairwise fit thousands of times. Broken-state checks remain per call.
+        self._fit_cache = {}
+        self._fit_cache_maxsize = 256
 
     def detect(
         self,
@@ -84,6 +89,23 @@ class TrendlineEngine:
 
     def _best_fit(self, points, candles):
         """En çok temasa sahip, tolerans dahilindeki doğruyu bulur."""
+        # The fit depends only on the ordered swing-point coordinates, not on
+        # the candle window. Cache exact inputs without changing fit semantics.
+        cache_key = tuple(
+            (int(point["index"]), float(point["price"])) for point in points
+        )
+        cached = self._fit_cache.get(cache_key, ...)
+        if cached is not ...:
+            if cached is None:
+                return []
+            cached_values = dict(cached)
+            cached_values["touch_indices"] = list(cached_values["touch_indices"])
+            trendline = Trendline(**cached_values)
+            # Geometry is cached, but break status depends on the current
+            # candle window and must be recalculated on every analysis.
+            self._check_break(trendline, candles)
+            return [trendline]
+
         # Referans index aralığı
         candidates = []
         for i in range(len(points)):
@@ -114,22 +136,29 @@ class TrendlineEngine:
                     )
 
         if not candidates:
+            if len(self._fit_cache) >= self._fit_cache_maxsize:
+                self._fit_cache.pop(next(iter(self._fit_cache)))
+            self._fit_cache[cache_key] = None
             return []
 
         # En çok temasa sahip, ardından en güncel olanı seç
         candidates.sort(key=lambda c: (c["touches"], c["end_index"]), reverse=True)
         chosen = candidates[0]
 
-        trendline = Trendline(
-            slope=chosen["slope"],
-            intercept=chosen["intercept"],
-            direction="RESISTANCE" if chosen["slope"] < 0 else "SUPPORT",
-            start_index=chosen["start_index"],
-            end_index=chosen["end_index"],
-            touches=chosen["touches"],
-            touch_indices=chosen["touch_indices"],
-            price_at_end=chosen["intercept"] + chosen["slope"] * chosen["end_index"],
-        )
+        cached_values = {
+            "slope": chosen["slope"],
+            "intercept": chosen["intercept"],
+            "direction": "RESISTANCE" if chosen["slope"] < 0 else "SUPPORT",
+            "start_index": chosen["start_index"],
+            "end_index": chosen["end_index"],
+            "touches": chosen["touches"],
+            "touch_indices": list(chosen["touch_indices"]),
+            "price_at_end": chosen["intercept"] + chosen["slope"] * chosen["end_index"],
+        }
+        if len(self._fit_cache) >= self._fit_cache_maxsize:
+            self._fit_cache.pop(next(iter(self._fit_cache)))
+        self._fit_cache[cache_key] = dict(cached_values)
+        trendline = Trendline(**cached_values)
 
         # Kırılma tespiti
         self._check_break(trendline, candles)
