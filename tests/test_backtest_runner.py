@@ -565,3 +565,13 @@ def test_trade_history_contains_actual_fill_and_plan_diagnostics():
     assert trade["signal_time"] == 1
     assert trade["entry_time"] == 2
     assert trade["exit_reason"] == "TP1"
+
+
+def test_partial_exit_reports_trailing_stop_not_last_tp_as_exit_reason():
+    candles = [
+        _tl(10.0, h=11.1, l=10.1, cl=10.6, t=1),
+        _tl(10.5, h=10.6, l=9.9, cl=10.0, t=2),
+    ]
+    out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], candles, "LONG")
+    assert out["exit_reason"] == "TRAILING_STOP"
+    assert out["exit_offset"] == 1
