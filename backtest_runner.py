@@ -233,17 +233,21 @@ def simulate_trade_partial(
 class BacktestRunner:
     """Fiyat serisini ileri sararak engine sinyallerini tetikler ve sonuç toplar."""
 
-    def __init__(self, analyze_fn=None, fee_rate=0.0020, partial_exits=True, tp_weights=None):
+    def __init__(self, analyze_fn=None, fee_rate=0.0020, partial_exits=True, tp_weights=None,
+                 limit_expiry_bars=8):
         self.analyze_fn = analyze_fn
         self.fee_rate = float(fee_rate)
         self.partial_exits = bool(partial_exits)
         self.tp_weights = tp_weights
+        self.limit_expiry_bars = max(1, int(limit_expiry_bars))
         self.full_exit_calls = 0
         self.history = []
         self.total = 0
         self.wins = 0
         self.candidate_signals = 0
         self.unfilled_limits = 0
+        self.expired_limits = 0
+        self.stale_limits_cancelled = 0
         self.open_trades = 0
         self.invalid_candidates = 0
         self.no_followup_data = 0
@@ -274,6 +278,7 @@ class BacktestRunner:
             fee_rate=self.fee_rate,
             partial_exits=self.partial_exits,
             tp_weights=self.tp_weights,
+            limit_expiry_bars=self.limit_expiry_bars,
         )
 
     def run(self, data, on_signal=None, step=1, lenient=False):
@@ -354,14 +359,14 @@ class BacktestRunner:
                 self.raw_short_signals += 1
             else:
                 self.non_directional_results += 1
-            trade = self._to_trade(result, candles, idx + 1, lenient=lenient)
+            trade = self._to_trade(result, candles, idx + 1, lenient=lenient, signal_index=idx)
             if trade is None:
                 continue
             self._record(trade)
 
         return self.statistics()
 
-    def _to_trade(self, result, candles, entry_index, lenient=False):
+    def _to_trade(self, result, candles, entry_index, lenient=False, signal_index=None):
         """analyze çıktısından trade üretir; geçersizse None."""
         decision = (result or {}).get("decision") or {}
         signal = (result or {}).get("signal") or {}
@@ -416,8 +421,17 @@ class BacktestRunner:
                 self.invalid_candidates += 1
                 return None
             is_long = signal_dir == "LONG"
-            for candidate_index in range(entry_index, len(candles)):
+            expiry_index = min(len(candles), entry_index + self.limit_expiry_bars)
+            for candidate_index in range(entry_index, expiry_index):
                 candle = candles[candidate_index]
+                target_already_hit = any(
+                    (candle.high >= target if is_long else candle.low <= target)
+                    for target in (_num(risk.get('tp1')), _num(risk.get('tp2')), _num(risk.get('tp3')))
+                    if target is not None
+                )
+                if target_already_hit:
+                    self.stale_limits_cancelled += 1
+                    return None
                 touched = candle.low <= limit_price if is_long else candle.high >= limit_price
                 if not touched:
                     continue
@@ -438,6 +452,10 @@ class BacktestRunner:
                 fill_index = candidate_index
                 break
             if fill_index is None:
+                if len(candles) < entry_index + self.limit_expiry_bars:
+                    self.no_followup_data += 1
+                else:
+                    self.expired_limits += 1
                 self.unfilled_limits += 1
                 return None
 
