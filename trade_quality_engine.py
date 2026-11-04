@@ -253,6 +253,7 @@ class TradeQualityEngine:
                         f"LIMIT entry exceeds configured distance ({max_limit_atr:g} ATR / {max_limit_pct * 100:g}%)"
                     )
             if entry_type == "MARKET":
+                max_market_atr = max(0.0, float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_ATR", 0.35)))
                 max_market_pct = max(0.0, float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003)))
                 too_far_by_atr = bool(atr and atr > 0 and distance > atr * max_market_atr)
                 too_far_by_percent = distance_pct > max_market_pct
