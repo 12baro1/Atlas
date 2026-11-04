@@ -106,7 +106,8 @@ class Config:
     MAX_MARKET_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_MARKET_ENTRY_DISTANCE_ATR", "0.35"))
     # Refuse actionable output when the latest closed 15m candle is too old.
     MAX_15M_CANDLE_AGE_SECONDS = 1800
-    MIN_STOP_PERCENT = 0.0005
+    # Percentage floor complements ATR and execution-cost buffers; it must not dominate structural stops on high-priced markets.
+    MIN_STOP_PERCENT = 0.0001
     MIN_TICK_DISTANCE_FALLBACK = 0.01
     STOP_SPREAD_BUFFER_RATE = 0.0002
     STOP_SLIPPAGE_BUFFER_RATE = 0.0003
