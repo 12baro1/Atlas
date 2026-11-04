@@ -258,6 +258,9 @@ class BacktestRunner:
         self.raw_short_signals = 0
         self.non_directional_results = 0
         self.action_counts = {}
+        self.wait_reason_counts = {}
+        self.signal_reason_counts = {}
+        self.mtf_alignment_counts = {}
 
     def reset(self):
         self.__init__(
@@ -299,6 +302,19 @@ class BacktestRunner:
             signal_dir = str(signal.get("signal", "")).upper()
             action = str(decision.get("action", "MISSING")).upper() or "MISSING"
             self.action_counts[action] = self.action_counts.get(action, 0) + 1
+            if signal_dir not in {"LONG", "SHORT"}:
+                wait_reason = str(signal.get("wait_reason") or "unspecified")
+                self.wait_reason_counts[wait_reason] = self.wait_reason_counts.get(wait_reason, 0) + 1
+            signal_reason = str(signal.get("signal_reason") or "unspecified")
+            self.signal_reason_counts[signal_reason] = self.signal_reason_counts.get(signal_reason, 0) + 1
+            analysis = result.get("analysis") if isinstance(result, dict) else {}
+            mtf = (analysis or {}).get("mtf") if isinstance(analysis, dict) else {}
+            if isinstance(mtf, dict):
+                alignment = "|".join(
+                    f"{key}={str(mtf.get(key, 'UNKNOWN')).upper()}"
+                    for key in ("entry", "weekly", "daily", "h4")
+                )
+                self.mtf_alignment_counts[alignment] = self.mtf_alignment_counts.get(alignment, 0) + 1
             if signal_dir == "LONG":
                 self.raw_long_signals += 1
             elif signal_dir == "SHORT":
@@ -579,6 +595,12 @@ class BacktestRunner:
                 "raw_short_signals": self.raw_short_signals,
                 "non_directional_results": self.non_directional_results,
                 "action_counts": dict(self.action_counts),
+            "wait_reason_counts": dict(self.wait_reason_counts),
+            "signal_reason_counts": dict(self.signal_reason_counts),
+            "mtf_alignment_counts": dict(self.mtf_alignment_counts),
+                "wait_reason_counts": dict(self.wait_reason_counts),
+                "signal_reason_counts": dict(self.signal_reason_counts),
+                "mtf_alignment_counts": dict(self.mtf_alignment_counts),
                 "unfilled_limits": self.unfilled_limits,
                 "open_trades": self.open_trades,
                 "invalid_candidates": self.invalid_candidates,
