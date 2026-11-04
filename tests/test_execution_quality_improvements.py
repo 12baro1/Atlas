@@ -36,13 +36,12 @@ def _quality_payload(entry_price):
 
 
 def test_structural_stop_inside_cost_adjusted_atr_floor_is_accepted_without_moving_it(monkeypatch):
-    import utils.atr
+    import risk_engine
 
+    monkeypatch.setattr(risk_engine, "calculate_atr", lambda candles, period=14: 265.97142857)
     monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.05)
     monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", False)
     monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
-    monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 265.97142857)
-
     entry = 77834.3
     structural_stop = 77890.49714285713
     risk = RiskEngine().calculate(
@@ -60,13 +59,12 @@ def test_structural_stop_inside_cost_adjusted_atr_floor_is_accepted_without_movi
 
 
 def test_structural_stop_that_cannot_cover_execution_costs_is_still_rejected(monkeypatch):
-    import utils.atr
+    import risk_engine
 
+    monkeypatch.setattr(risk_engine, "calculate_atr", lambda candles, period=14: 88.27857143)
     monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.05)
     monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", False)
     monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
-    monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 88.27857143)
-
     risk = RiskEngine().calculate(
         entry=77504.9,
         stop_loss=77520.72785714285,
