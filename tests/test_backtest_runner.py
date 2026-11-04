@@ -188,7 +188,7 @@ def test_limit_order_is_not_filled_without_price_touch():
     result = {
         "decision": {"action": "EXECUTE"},
         "signal": {"signal": "LONG"},
-        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 100.0, "tp2": 105.0, "tp3": 110.0},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 105.0, "tp2": 110.0, "tp3": 115.0},
         "analysis": {"entry": {"entry_type": "LIMIT"}},
     }
     assert runner._to_trade(result, candles, entry_index=0) is None
