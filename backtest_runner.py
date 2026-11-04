@@ -265,6 +265,8 @@ class BacktestRunner:
         self.entry_type_counts = {}
         self.risk_reason_counts = {}
         self.target_reason_counts = {}
+        self.target_missing_rr_counts = {}
+        self.stop_atr_buckets = {}
 
     def reset(self):
         self.__init__(
@@ -329,10 +331,23 @@ class BacktestRunner:
             if isinstance(risk_meta, dict) and risk_meta.get("risk_setup_valid") is False:
                 risk_reason = str(risk_meta.get("reason_code") or risk_meta.get("risk_setup_reason") or "unspecified")
                 self.risk_reason_counts[risk_reason] = self.risk_reason_counts.get(risk_reason, 0) + 1
+            if isinstance(risk_meta, dict):
+                atr_value = _num(risk_meta.get("atr"))
+                stop_distance = _num(risk_meta.get("requested_risk"))
+                if stop_distance is None:
+                    stop_distance = _num(risk_meta.get("risk"))
+                if atr_value and atr_value > 0 and stop_distance is not None:
+                    ratio = stop_distance / atr_value
+                    bucket = "<0.10 ATR" if ratio < 0.10 else "<0.25 ATR" if ratio < 0.25 else "<0.50 ATR" if ratio < 0.50 else ">=0.50 ATR"
+                    self.stop_atr_buckets[bucket] = self.stop_atr_buckets.get(bucket, 0) + 1
             target_meta = (analysis or {}).get("dynamic_tp") if isinstance(analysis, dict) else {}
             if isinstance(target_meta, dict):
                 target_reason = str(target_meta.get("reason") or "unspecified")
                 self.target_reason_counts[target_reason] = self.target_reason_counts.get(target_reason, 0) + 1
+                missing_rr = target_meta.get("missing_rr_level")
+                if missing_rr is not None:
+                    label = f"{float(missing_rr):g}R"
+                    self.target_missing_rr_counts[label] = self.target_missing_rr_counts.get(label, 0) + 1
             if signal_dir == "LONG":
                 self.raw_long_signals += 1
             elif signal_dir == "SHORT":
@@ -620,6 +635,8 @@ class BacktestRunner:
                 "entry_type_counts": dict(self.entry_type_counts),
                 "risk_reason_counts": dict(self.risk_reason_counts),
                 "target_reason_counts": dict(self.target_reason_counts),
+                "target_missing_rr_counts": dict(self.target_missing_rr_counts),
+                "stop_atr_buckets": dict(self.stop_atr_buckets),
                 "unfilled_limits": self.unfilled_limits,
                 "open_trades": self.open_trades,
                 "invalid_candidates": self.invalid_candidates,
@@ -669,6 +686,8 @@ class BacktestRunner:
             "entry_type_counts": dict(self.entry_type_counts),
             "risk_reason_counts": dict(self.risk_reason_counts),
             "target_reason_counts": dict(self.target_reason_counts),
+            "target_missing_rr_counts": dict(self.target_missing_rr_counts),
+            "stop_atr_buckets": dict(self.stop_atr_buckets),
             "unfilled_limits": self.unfilled_limits,
             "open_trades": self.open_trades,
             "invalid_candidates": self.invalid_candidates,
