@@ -73,8 +73,15 @@ def test_structural_stop_that_cannot_cover_execution_costs_is_still_rejected(mon
         tick_size=0.1,
     )
 
-    assert risk["risk_setup_valid"] is False
-    assert risk["reason_code"] == "UNSAFE_WIDE_OR_EXPAND_DISABLED"
+    # Execution costs are no longer misclassified as a structural stop
+    # distance requirement. The structural stop is preserved here; the
+    # downstream quality gate rejects the setup if weighted net RR is poor.
+    assert risk["risk_setup_valid"] is True
+    assert risk["stop_adjusted"] is False
+    assert risk["stop_loss"] == pytest.approx(77520.72785714285)
+    assert risk["minimum_stop_distance"] < risk["requested_risk"]
+    assert risk["spread_buffer"] > 0
+    assert risk["slippage_buffer"] > 0
 
 
 def test_limit_entry_uses_configured_three_atr_and_five_percent_cap(monkeypatch):
