@@ -161,6 +161,8 @@ def simulate_trade_partial(
     next_level_idx = 0
     reached_tp = 0
     trailing_stop = stop
+    exit_reason = None
+    exit_offset = None
 
     for candle_offset, candle in enumerate(future_candles):
         low = candle.low
@@ -223,8 +225,9 @@ def simulate_trade_partial(
                 break
 
         if closed_frac >= 1.0 - 1e-9:
-            exit_reason = f"TP{reached_tp}"
-            exit_offset = candle_offset
+            if exit_reason is None:
+                exit_reason = f"TP{reached_tp}"
+                exit_offset = candle_offset
             break
 
     if closed_frac < 1.0 - 1e-9:
