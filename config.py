@@ -104,6 +104,10 @@ class Config:
     MAX_LIMIT_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_ATR", "3.0"))
     MAX_LIMIT_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_PERCENT", "0.05"))
     MAX_MARKET_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_MARKET_ENTRY_DISTANCE_ATR", "0.35"))
+    MAX_MARKET_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_MARKET_ENTRY_DISTANCE_PERCENT", "0.003"))
+    # Entry score is a diagnostic prefilter; the hard SMC/confirmation gate
+    # remains authoritative for execution eligibility.
+    ENTRY_MIN_SCORE = float(os.getenv("ATLAS_ENTRY_MIN_SCORE", "50"))
     # Refuse actionable output when the latest closed 15m candle is too old.
     MAX_15M_CANDLE_AGE_SECONDS = 1800
     # Percentage floor complements ATR and execution-cost buffers; it must not dominate structural stops on high-priced markets.

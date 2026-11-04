@@ -100,8 +100,27 @@ class TradeQualityEngine:
                 if not sweep.get("is_breakout") or breakout_side != expected_breakout:
                     blockers.append("Compression trade requires a directional range breakout")
             elif regime_name == "TRANSITION":
-                if not (sweep_active and expected_sweep and post.get("confirmed") and confirmation.get("confirmed")):
-                    blockers.append("Transition regime requires sweep and structure confirmation")
+                # A transition can be either a confirmed reversal or a
+                # still-valid pullback continuation. Do not force a fresh
+                # liquidity sweep on the continuation path: require aligned
+                # MTF + trend, a real POI LIMIT and closed-15m confirmation.
+                transition_reversal = bool(
+                    sweep_active
+                    and expected_sweep
+                    and post.get("confirmed")
+                    and post.get("direction") == expected_trend
+                    and confirmation.get("confirmed")
+                )
+                transition_continuation = bool(
+                    str(entry.get("entry_type") or "").upper() == "LIMIT"
+                    and str(mtf.get("entry", mtf.get("direction", ""))).upper() == direction
+                    and trend_direction == expected_trend
+                    and entry.get("poi_source") in {"FVG", "ORDER_BLOCK"}
+                    and isinstance(entry.get("poi_zone"), dict)
+                    and confirmation.get("confirmed")
+                )
+                if not (transition_reversal or transition_continuation):
+                    blockers.append("Transition regime requires a confirmed reversal or aligned POI pullback")
             elif regime_name == "HIGH_VOLATILITY":
                 if not risk.get("risk_setup_valid"):
                     blockers.append("High-volatility setup has invalid risk geometry")
@@ -147,6 +166,19 @@ class TradeQualityEngine:
             blockers.append(risk.get("risk_setup_reason") or "Risk engine rejected the stop")
         if risk.get("stop_adjusted"):
             blockers.append("Stop was changed by risk sizing; original structure must be recalculated")
+        net_rr_value = risk.get("weighted_net_rr", risk.get("net_rr"))
+        if net_rr_value is not None:
+            try:
+                net_rr_value = float(net_rr_value)
+            except (TypeError, ValueError, OverflowError):
+                net_rr_value = None
+            minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
+            if net_rr_value is None:
+                blockers.append("Cost-adjusted net RR is unavailable")
+            elif net_rr_value < minimum_net_rr:
+                blockers.append(
+                    f"Cost-adjusted net RR {net_rr_value:.2f}R is below minimum {minimum_net_rr:.2f}R"
+                )
 
         tp_values = [targets.get("tp1"), targets.get("tp2"), targets.get("tp3")]
         if any(value is None for value in tp_values):
@@ -207,24 +239,31 @@ class TradeQualityEngine:
             if risk_distance < atr * 0.5:
                 blockers.append("High-volatility stop is tighter than 0.5 ATR")
 
-        if current is not None and entry_price is not None and atr and atr > 0:
+        if current is not None and entry_price is not None:
             distance = abs(current - entry_price)
+            distance_pct = distance / max(abs(current), 1e-12)
             entry_type = str(entry.get("entry_type") or "").upper()
             if entry_type == "LIMIT":
                 max_limit_atr = max(0.0, float(getattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_ATR", 3.0)))
                 max_limit_pct = max(0.0, float(getattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_PERCENT", 0.05)))
-                distance_pct = distance / max(abs(current), 1e-12)
-                if distance > atr * max_limit_atr or distance_pct > max_limit_pct:
+                too_far_by_atr = bool(atr and atr > 0 and distance > atr * max_limit_atr)
+                too_far_by_percent = distance_pct > max_limit_pct
+                if too_far_by_atr or too_far_by_percent:
                     blockers.append(
                         f"LIMIT entry exceeds configured distance ({max_limit_atr:g} ATR / {max_limit_pct * 100:g}%)"
                     )
             if entry_type == "MARKET":
                 max_market_atr = max(0.0, float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_ATR", 0.35)))
-                if distance > atr * max_market_atr:
+                max_market_pct = max(0.0, float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003)))
+                too_far_by_atr = bool(atr and atr > 0 and distance > atr * max_market_atr)
+                too_far_by_percent = distance_pct > max_market_pct
+                if too_far_by_atr or too_far_by_percent:
                     blockers.append("MARKET entry is already too far from the calculated trigger")
+                if not atr or atr <= 0:
+                    blockers.append("MARKET entry distance cannot be validated without ATR")
             if len(tp_prices) == 3:
                 tp1_reached = current >= tp_prices[0] if direction == "LONG" else current <= tp_prices[0]
-                if tp1_reached and entry.get("entry_type") != "LIMIT":
+                if tp1_reached and entry_type != "LIMIT":
                     blockers.append("TP1 has already been reached; market entry would be chasing")
 
         # Keep the blocker list stable and free of duplicate messages.

@@ -281,9 +281,31 @@ class EntryEngine:
             result["entry_zone_crossed"] = True
             return result
 
-        selected_poi = selected_fvg or selected_ob
+        # Trend continuation must retain its fresh FVG/OTE requirement. In
+        # other regimes, choose the closest valid FVG or OB instead of always
+        # preferring an FVG even when a materially nearer OB is available.
+        selected_poi_source = None
+        if requires_ote:
+            selected_poi = selected_fvg
+            selected_poi_source = "FVG" if selected_poi else None
+        else:
+            poi_options = []
+            if selected_fvg:
+                candidate = next((item for item in fvg_candidates if item[2] is selected_fvg), None)
+                if candidate:
+                    poi_options.append((candidate[0], candidate[1], 0, "FVG", selected_fvg))
+            if selected_ob:
+                candidate = next((item for item in ob_candidates if item[2] is selected_ob), None)
+                if candidate:
+                    poi_options.append((candidate[0], candidate[1], 1, "ORDER_BLOCK", selected_ob))
+            if poi_options:
+                _, _, _, selected_poi_source, selected_poi = min(poi_options, key=lambda item: item[:3])
+                selected_fvg = selected_poi if selected_poi_source == "FVG" else None
+                selected_ob = selected_poi if selected_poi_source == "ORDER_BLOCK" else None
+            else:
+                selected_poi = None
         if selected_poi:
-            result["poi_source"] = "FVG" if selected_fvg else "ORDER_BLOCK"
+            result["poi_source"] = selected_poi_source
             result["poi_zone"] = {
                 "low": min(float(selected_poi.get("from", selected_poi.get("low"))), float(selected_poi.get("to", selected_poi.get("high")))),
                 "high": max(float(selected_poi.get("from", selected_poi.get("low"))), float(selected_poi.get("to", selected_poi.get("high")))),
@@ -492,7 +514,7 @@ class EntryEngine:
 
         result["valid"] = (
             not result.get("entry_too_far")
-            and result["score"] >= 60
+            and result["score"] >= float(getattr(Config, "ENTRY_MIN_SCORE", 50))
             and result["entry_type"] in {"MARKET", "LIMIT"}
             and result["entry"] is not None
             and result["stop_loss"] is not None
@@ -505,7 +527,7 @@ class EntryEngine:
             result["entry_reason_code"] = "POI_CROSSED"
         elif result.get("entry") is None:
             result["entry_reason_code"] = "NO_EXECUTABLE_PRICE"
-        elif result.get("score", 0) < 60:
+        elif result.get("score", 0) < float(getattr(Config, "ENTRY_MIN_SCORE", 50)):
             result["entry_reason_code"] = "ENTRY_SCORE_BELOW_MINIMUM"
         else:
             result["entry_reason_code"] = "ENTRY_VALIDATION_FAILED"
