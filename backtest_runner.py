@@ -424,21 +424,23 @@ class BacktestRunner:
             expiry_index = min(len(candles), entry_index + self.limit_expiry_bars)
             for candidate_index in range(entry_index, expiry_index):
                 candle = candles[candidate_index]
+                opened = _num(candle.open)
+                if opened is None:
+                    continue
+                gap_fill = (opened <= limit_price) if is_long else (opened >= limit_price)
                 target_already_hit = any(
                     (candle.high >= target if is_long else candle.low <= target)
                     for target in (_num(risk.get('tp1')), _num(risk.get('tp2')), _num(risk.get('tp3')))
                     if target is not None
                 )
-                if target_already_hit:
+                # A target hit before a later intrabar limit touch makes the
+                # pending setup stale. If the candle opens through the limit,
+                # the order fills at the open, so subsequent movement is valid.
+                if target_already_hit and not gap_fill:
                     self.stale_limits_cancelled += 1
                     return None
                 touched = candle.low <= limit_price if is_long else candle.high >= limit_price
                 if not touched:
-                    continue
-                # A gap through a limit order receives the opening price when
-                # that is better than the requested limit.
-                opened = _num(candle.open)
-                if opened is None:
                     continue
                 entry_price = min(limit_price, opened) if is_long else max(limit_price, opened)
                 # If price opens through the limit, fill is at the open and
