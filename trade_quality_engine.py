@@ -4,6 +4,8 @@ Scores remain diagnostic only. This gate checks whether the actual trade geometr
 and the underlying SMC evidence agree before a signal can be executed.
 """
 
+from config import Config
+
 
 class TradeQualityEngine:
     """Validate the complete setup rather than trusting a weighted score."""
