@@ -70,24 +70,28 @@ def simulate_trade(entry, stop_loss, targets, future_candles, direction="LONG", 
 
     is_long = direction in ("LONG", "BUY")
 
-    for candle in future_candles:
+    for offset, candle in enumerate(future_candles):
         low = candle.low
         high = candle.high
 
         if is_long:
             if low <= stop:
-                return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0)}
+                return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0),
+                        "exit_reason": "STOP", "exit_offset": offset}
             for level_no, tp in levels:
                 if high >= tp:
                     rr = abs(tp - entry) / risk_distance
-                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr)}
+                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr),
+                            "exit_reason": f"TP{level_no}", "exit_offset": offset}
         else:
             if high >= stop:
-                return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0)}
+                return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0),
+                        "exit_reason": "STOP", "exit_offset": offset}
             for level_no, tp in levels:
                 if low <= tp:
                     rr = abs(entry - tp) / risk_distance
-                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr)}
+                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr),
+                            "exit_reason": f"TP{level_no}", "exit_offset": offset}
 
     return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
 
@@ -158,7 +162,7 @@ def simulate_trade_partial(
     reached_tp = 0
     trailing_stop = stop
 
-    for candle in future_candles:
+    for candle_offset, candle in enumerate(future_candles):
         low = candle.low
         high = candle.high
 
@@ -175,6 +179,8 @@ def simulate_trade_partial(
                     rr_stop = (entry - trailing_stop) / risk_distance
                 realized_rr += remaining * rr_stop
                 closed_frac = 1.0
+            exit_reason = "STOP" if reached_tp == 0 else "TRAILING_STOP"
+            exit_offset = candle_offset
             break
 
         # 2) TP seviyelerine en yakından başlayarak kısmi çıkış.
@@ -212,9 +218,13 @@ def simulate_trade_partial(
                     rr_stop = (entry - trailing_stop) / risk_distance
                 realized_rr += remaining * rr_stop
                 closed_frac = 1.0
+                exit_reason = "STOP" if reached_tp == 0 else "TRAILING_STOP"
+                exit_offset = candle_offset
                 break
 
         if closed_frac >= 1.0 - 1e-9:
+            exit_reason = f"TP{reached_tp}"
+            exit_offset = candle_offset
             break
 
     if closed_frac < 1.0 - 1e-9:
@@ -227,6 +237,8 @@ def simulate_trade_partial(
         "tp": reached_tp,
         "net_rr": _num(realized_rr, 4),
         "levels": [level_no for level_no, _ in levels[:next_level_idx]],
+        "exit_reason": exit_reason,
+        "exit_offset": exit_offset,
     }
 
 
