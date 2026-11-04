@@ -95,13 +95,15 @@ class Config:
     ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK = _env_or_rc("ATLAS_ENTRY_ALLOW_STRUCTURE_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
     ROUND_TRIP_COST_RATE = 0.0020
     ATR_PERIOD = 14
-    MIN_STOP_ATR_MULTIPLIER = 0.75
+    # Structural invalidation remains primary; ATR is a volatility floor, not a demand to force every stop to 0.75 ATR.
+    MIN_STOP_ATR_MULTIPLIER = 0.05
     STOP_STRUCTURE_BUFFER_ATR = 0.10
     # Sweep-triggered MARKET entry expires shortly after the confirmed close break.
     SWEEP_MARKET_ENTRY_MAX_AGE_BARS = int(os.getenv("ATLAS_SWEEP_MARKET_ENTRY_MAX_AGE_BARS", "2"))
     # Maximum distance for pending LIMIT entries from the current market.
     MAX_LIMIT_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_ATR", "3.0"))
     MAX_LIMIT_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_PERCENT", "0.05"))
+    MAX_MARKET_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_MARKET_ENTRY_DISTANCE_ATR", "0.35"))
     # Refuse actionable output when the latest closed 15m candle is too old.
     MAX_15M_CANDLE_AGE_SECONDS = 1800
     MIN_STOP_PERCENT = 0.0005
