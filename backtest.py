@@ -321,6 +321,8 @@ def _combine_stats(all_stats):
         "target_missing_rr_counts": {},
         "stop_atr_buckets": {},
         "unfilled_limits": 0,
+        "expired_limits": 0,
+        "stale_limits_cancelled": 0,
         "open_trades": 0,
         "invalid_candidates": 0,
         "no_followup_data": 0,
@@ -333,7 +335,7 @@ def _combine_stats(all_stats):
             "total", "wins", "tp1", "tp2", "tp3",
             "candidate_signals", "analysis_calls", "empty_results",
             "raw_long_signals", "raw_short_signals", "non_directional_results",
-            "unfilled_limits", "open_trades",
+            "unfilled_limits", "expired_limits", "stale_limits_cancelled", "open_trades",
             "invalid_candidates", "no_followup_data",
         ):
             combined[key] += int(stats.get(key, 0) or 0)
@@ -388,6 +390,8 @@ def _report(stats, name):
     print(f"  Kapanan işlem  : {stats['total']}")
     print(f"  Açık işlem     : {stats.get('open_trades', 0)}")
     print(f"  Dolmayan LIMIT : {stats.get('unfilled_limits', 0)}")
+    print(f"  Süresi dolan LIMIT: {stats.get('expired_limits', 0)}")
+    print(f"  Hedefe geç kalan LIMIT iptali: {stats.get('stale_limits_cancelled', 0)}")
     print(f"  Geçersiz aday  : {stats.get('invalid_candidates', 0)}")
     print(f"  Takipsiz son mum: {stats.get('no_followup_data', 0)}")
     if not stats["total"]:
@@ -413,6 +417,18 @@ def _report(stats, name):
                 f"Beklenti {side.get('expectancy', 0)} R | "
                 f"PF {side.get('profit_factor', 0)}"
             )
+
+    print("  İŞLEM DEFTERİ | yön, emir, sinyal zamanı, dolum gecikmesi, planlanan/gerçekleşen giriş, SL, TP'ler, sonuç, net R")
+    for trade_no, trade in enumerate(stats.get("trade_history", []), 1):
+        tps = "/".join("-" if value is None else f"{value:g}" for value in trade.get("tps", []))
+        print(
+            f"    #{trade_no} {trade.get('direction')} {trade.get('entry_type')} | "
+            f"signal={trade.get('signal_time')} fill={trade.get('entry_time')} "
+            f"delay={trade.get('fill_delay_bars')} bar | "
+            f"plan={trade.get('planned_entry')} fill={trade.get('entry')} "
+            f"SL={trade.get('stop_loss')} TP={tps} | "
+            f"{trade.get('exit_reason')} {trade.get('net_rr')}R"
+        )
 
     if stats["total"] >= 20 and stats["expectancy"] > 0 and stats["profit_factor"] >= 1.3:
         print("  YORUM: Edge pozitif görünüyor; daha uzun örnekle doğrulanmalı.")
@@ -456,6 +472,10 @@ def main():
     parser.add_argument("--symbol", default="BTC/USDT:USDT", help="Tek sembol (Bybit swap)")
     parser.add_argument("--symbols", help="Virgülle ayrılmış sembol listesi (çoklu tarama; --symbol'dan öncelikli)")
     parser.add_argument("--days", type=int, default=60, help="Kaç gün geriye gidilecek")
+    parser.add_argument(
+        "--limit-expiry-bars", type=int, default=8,
+        help="LIMIT emrinin en fazla kaç adet 15m mum bekleyeceği (varsayılan: 8 = 2 saat)",
+    )
     parser.add_argument("--tf", choices=("15m",), default="15m", help="Giriş zaman dilimi (şimdilik yalnızca 15m)")
     parser.add_argument(
         "--lenient",
@@ -466,6 +486,8 @@ def main():
 
     if args.days <= 0:
         parser.error("--days must be greater than zero")
+    if args.limit_expiry_bars <= 0:
+        parser.error("--limit-expiry-bars must be greater than zero")
 
     # Config.refresh_from_env() runs again inside AtlasEngine.__init__, so
     # disable live-only features in the environment before constructing it.
@@ -492,6 +514,7 @@ def main():
             analyze_fn=build_analyze_fn(engine),
             fee_rate=float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.002)),
             tp_weights=_configured_partial_tp_weights(),
+            limit_expiry_bars=args.limit_expiry_bars,
         )
         stats = runner.run(data, step=5, lenient=args.lenient)
         _report(stats, symbol)
