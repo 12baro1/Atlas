@@ -553,14 +553,23 @@ class BacktestRunner:
             base_rr = round(base_rr - fee_rr, 4)
         net_rr = base_rr
 
+        signal_index = max(0, int(signal_index if signal_index is not None else entry_index - 1))
+        exit_reason = ("STOP" if outcome.get("result") == "LOSS"
+                       else f"TP{outcome.get('tp', 0)}" if outcome.get("tp", 0)
+                       else "UNKNOWN")
         return {
+            "signal_index": signal_index,
+            "signal_time": int(candles[signal_index].time),
             "entry_index": fill_index,
+            "entry_time": int(candles[fill_index].time),
+            "fill_delay_bars": max(0, fill_index - entry_index),
             "entry_type": entry_type,
-            "planned_entry": planned_entry,
+            "planned_entry": _num(planned_entry),
             "direction": signal_dir,
             "entry": entry_price,
             "stop_loss": stop,
             "tps": tps,
+            "exit_reason": exit_reason,
             "result": outcome.get("result"),
             "tp": outcome.get("tp", 0),
             "net_rr": round(max(net_rr, -99.0), 4),
@@ -656,6 +665,9 @@ class BacktestRunner:
                 "target_missing_rr_counts": dict(self.target_missing_rr_counts),
                 "stop_atr_buckets": dict(self.stop_atr_buckets),
                 "unfilled_limits": self.unfilled_limits,
+                "expired_limits": self.expired_limits,
+                "stale_limits_cancelled": self.stale_limits_cancelled,
+                "trade_history": list(self.history),
                 "open_trades": self.open_trades,
                 "invalid_candidates": self.invalid_candidates,
                 "no_followup_data": self.no_followup_data,
@@ -707,6 +719,9 @@ class BacktestRunner:
             "target_missing_rr_counts": dict(self.target_missing_rr_counts),
             "stop_atr_buckets": dict(self.stop_atr_buckets),
             "unfilled_limits": self.unfilled_limits,
+            "expired_limits": self.expired_limits,
+            "stale_limits_cancelled": self.stale_limits_cancelled,
+            "trade_history": list(self.history),
             "open_trades": self.open_trades,
             "invalid_candidates": self.invalid_candidates,
             "no_followup_data": self.no_followup_data,
