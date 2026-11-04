@@ -141,6 +141,7 @@ class EntryEngine:
                 ote_low = ote_high = None
         if requires_ote and (ote_low is None or ote_high is None or ote_low >= ote_high):
             result["reason"] = "4H OTE levels unavailable for trend continuation"
+            result["entry_reason_code"] = "OTE_UNAVAILABLE"
             result["entry_type_reason"] = result["reason"]
             result["entry_zone_crossed"] = True
             return result
@@ -275,6 +276,7 @@ class EntryEngine:
 
         if requires_ote and selected_fvg is None:
             result["reason"] = "Trend continuation requires a fresh directional FVG overlapping 4H OTE"
+            result["entry_reason_code"] = "NO_FRESH_FVG_IN_OTE"
             result["entry_type_reason"] = result["reason"]
             result["entry_zone_crossed"] = True
             return result
@@ -479,10 +481,12 @@ class EntryEngine:
         if result["entry"] is not None and result["stop_loss"] is not None:
             if direction == "LONG" and result["stop_loss"] >= result["entry"]:
                 result["reason"] = "Invalid LONG: stop-loss must be below entry"
+                result["entry_reason_code"] = "INVALID_STOP_DIRECTION"
                 result["checks"].append("✗ SL direction")
                 return result
             if direction == "SHORT" and result["stop_loss"] <= result["entry"]:
                 result["reason"] = "Invalid SHORT: stop-loss must be above entry"
+                result["entry_reason_code"] = "INVALID_STOP_DIRECTION"
                 result["checks"].append("✗ SL direction")
                 return result
 
