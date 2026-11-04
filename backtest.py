@@ -311,6 +311,9 @@ def _combine_stats(all_stats):
         "raw_short_signals": 0,
         "non_directional_results": 0,
         "action_counts": {},
+        "wait_reason_counts": {},
+        "signal_reason_counts": {},
+        "mtf_alignment_counts": {},
         "unfilled_limits": 0,
         "open_trades": 0,
         "invalid_candidates": 0,
@@ -328,8 +331,9 @@ def _combine_stats(all_stats):
             "invalid_candidates", "no_followup_data",
         ):
             combined[key] += int(stats.get(key, 0) or 0)
-        for action, count in (stats.get("action_counts") or {}).items():
-            combined["action_counts"][action] = combined["action_counts"].get(action, 0) + int(count or 0)
+        for key in ("action_counts", "wait_reason_counts", "signal_reason_counts", "mtf_alignment_counts"):
+            for label, count in (stats.get(key) or {}).items():
+                combined[key][label] = combined[key].get(label, 0) + int(count or 0)
         combined["net_rr"] += float(stats.get("net_rr", 0) or 0)
         combined["gross_profit_rr"] += float(stats.get("gross_profit_rr", 0) or 0)
         combined["gross_loss_rr"] += float(stats.get("gross_loss_rr", 0) or 0)
@@ -356,6 +360,12 @@ def _report(stats, name):
     print(f"  Ham LONG/SHORT : {stats.get('raw_long_signals', 0)}/{stats.get('raw_short_signals', 0)}")
     print(f"  Yönsüz sonuç   : {stats.get('non_directional_results', 0)}")
     print(f"  Karar aksiyonları: {stats.get('action_counts', {})}")
+    if stats.get("wait_reason_counts"):
+        print(f"  WAIT nedenleri : {stats['wait_reason_counts']}")
+    if stats.get("signal_reason_counts"):
+        print(f"  Sinyal nedenleri: {stats['signal_reason_counts']}")
+    if stats.get("mtf_alignment_counts"):
+        print(f"  MTF yönleri    : {stats['mtf_alignment_counts']}")
     print(f"  Aday sinyal    : {stats.get('candidate_signals', 0)}")
     print(f"  Kapanan işlem  : {stats['total']}")
     print(f"  Açık işlem     : {stats.get('open_trades', 0)}")
