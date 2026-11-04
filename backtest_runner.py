@@ -428,18 +428,19 @@ class BacktestRunner:
                 if opened is None:
                     continue
                 gap_fill = (opened <= limit_price) if is_long else (opened >= limit_price)
+                touched = candle.low <= limit_price if is_long else candle.high >= limit_price
                 target_already_hit = any(
                     (candle.high >= target if is_long else candle.low <= target)
                     for target in (_num(risk.get('tp1')), _num(risk.get('tp2')), _num(risk.get('tp3')))
                     if target is not None
                 )
-                # A target hit before a later intrabar limit touch makes the
-                # pending setup stale. If the candle opens through the limit,
-                # the order fills at the open, so subsequent movement is valid.
-                if target_already_hit and not gap_fill:
+                # If a target is reached on a candle that never touches the
+                # pending entry, cancel the stale order. If both are touched
+                # in one candle, OHLC cannot reveal the path: keep the fill but
+                # apply the conservative fill-candle handling below.
+                if target_already_hit and not touched:
                     self.stale_limits_cancelled += 1
                     return None
-                touched = candle.low <= limit_price if is_long else candle.high >= limit_price
                 if not touched:
                     continue
                 entry_price = min(limit_price, opened) if is_long else max(limit_price, opened)
