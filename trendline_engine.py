@@ -100,7 +100,11 @@ class TrendlineEngine:
                 return []
             cached_values = dict(cached)
             cached_values["touch_indices"] = list(cached_values["touch_indices"])
-            return [Trendline(**cached_values)]
+            trendline = Trendline(**cached_values)
+            # Geometry is cached, but break status depends on the current
+            # candle window and must be recalculated on every analysis.
+            self._check_break(trendline, candles)
+            return [trendline]
 
         # Referans index aralığı
         candidates = []
