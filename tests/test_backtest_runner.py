@@ -188,7 +188,7 @@ def test_limit_order_is_not_filled_without_price_touch():
     result = {
         "decision": {"action": "EXECUTE"},
         "signal": {"signal": "LONG"},
-        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 100.0, "tp2": 105.0, "tp3": 110.0},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 105.0, "tp2": 110.0, "tp3": 115.0},
         "analysis": {"entry": {"entry_type": "LIMIT"}},
     }
     assert runner._to_trade(result, candles, entry_index=0) is None
@@ -507,3 +507,71 @@ def test_runner_reports_wait_reasons_and_mtf_alignment():
     assert stats["mtf_alignment_counts"] == {
         "entry=NONE|weekly=BULLISH|daily=NEUTRAL|h4=BEARISH": 2
     }
+
+
+def test_limit_order_expires_after_configured_bars():
+    runner = BacktestRunner(partial_exits=False, limit_expiry_bars=2)
+    candles = [
+        _candle(1, 100.0, 101.0, 98.0, 99.0),
+        _candle(2, 99.0, 100.0, 96.0, 97.0),
+        _candle(3, 97.0, 99.0, 96.0, 98.0),
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 105.0, "tp2": 110.0, "tp3": 115.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=0) is None
+    stats = runner.statistics()
+    assert stats["expired_limits"] == 1
+    assert stats["unfilled_limits"] == 1
+
+
+def test_limit_order_is_cancelled_if_target_hits_before_fill():
+    runner = BacktestRunner(partial_exits=False, limit_expiry_bars=4)
+    candles = [
+        _candle(1, 99.0, 101.0, 96.0, 100.0),  # TP reached; limit 95 untouched
+        _candle(2, 100.0, 101.0, 94.0, 95.0),
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 100.0, "tp2": 105.0, "tp3": 110.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=0) is None
+    assert runner.statistics()["stale_limits_cancelled"] == 1
+
+
+def test_trade_history_contains_actual_fill_and_plan_diagnostics():
+    runner = BacktestRunner(partial_exits=False, limit_expiry_bars=4)
+    candles = [
+        _candle(1, 100.0, 100.0, 96.0, 99.0),  # not filled
+        _candle(2, 99.0, 100.0, 94.0, 95.0),   # fills at 95 intrabar
+        _candle(3, 95.0, 102.0, 94.0, 101.0),  # TP1
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 101.0, "tp2": 105.0, "tp3": 110.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    trade = runner._to_trade(result, candles, entry_index=0, signal_index=0)
+    assert trade is not None
+    assert trade["planned_entry"] == 95.0
+    assert trade["entry"] == 95.0
+    assert trade["fill_delay_bars"] == 1
+    assert trade["signal_time"] == 1
+    assert trade["entry_time"] == 2
+    assert trade["exit_reason"] == "TP1"
+
+
+def test_partial_exit_reports_trailing_stop_not_last_tp_as_exit_reason():
+    candles = [
+        _tl(10.0, h=11.1, l=10.1, cl=10.6, t=1),
+        _tl(10.5, h=10.6, l=9.9, cl=10.0, t=2),
+    ]
+    out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], candles, "LONG")
+    assert out["exit_reason"] == "TRAILING_STOP"
+    assert out["exit_offset"] == 1

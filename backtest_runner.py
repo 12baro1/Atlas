@@ -70,24 +70,28 @@ def simulate_trade(entry, stop_loss, targets, future_candles, direction="LONG", 
 
     is_long = direction in ("LONG", "BUY")
 
-    for candle in future_candles:
+    for offset, candle in enumerate(future_candles):
         low = candle.low
         high = candle.high
 
         if is_long:
             if low <= stop:
-                return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0)}
+                return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0),
+                        "exit_reason": "STOP", "exit_offset": offset}
             for level_no, tp in levels:
                 if high >= tp:
                     rr = abs(tp - entry) / risk_distance
-                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr)}
+                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr),
+                            "exit_reason": f"TP{level_no}", "exit_offset": offset}
         else:
             if high >= stop:
-                return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0)}
+                return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0),
+                        "exit_reason": "STOP", "exit_offset": offset}
             for level_no, tp in levels:
                 if low <= tp:
                     rr = abs(entry - tp) / risk_distance
-                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr)}
+                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr),
+                            "exit_reason": f"TP{level_no}", "exit_offset": offset}
 
     return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
 
@@ -157,8 +161,10 @@ def simulate_trade_partial(
     next_level_idx = 0
     reached_tp = 0
     trailing_stop = stop
+    exit_reason = None
+    exit_offset = None
 
-    for candle in future_candles:
+    for candle_offset, candle in enumerate(future_candles):
         low = candle.low
         high = candle.high
 
@@ -175,6 +181,8 @@ def simulate_trade_partial(
                     rr_stop = (entry - trailing_stop) / risk_distance
                 realized_rr += remaining * rr_stop
                 closed_frac = 1.0
+            exit_reason = "STOP" if reached_tp == 0 else "TRAILING_STOP"
+            exit_offset = candle_offset
             break
 
         # 2) TP seviyelerine en yakından başlayarak kısmi çıkış.
@@ -212,9 +220,14 @@ def simulate_trade_partial(
                     rr_stop = (entry - trailing_stop) / risk_distance
                 realized_rr += remaining * rr_stop
                 closed_frac = 1.0
+                exit_reason = "STOP" if reached_tp == 0 else "TRAILING_STOP"
+                exit_offset = candle_offset
                 break
 
         if closed_frac >= 1.0 - 1e-9:
+            if exit_reason is None:
+                exit_reason = f"TP{reached_tp}"
+                exit_offset = candle_offset
             break
 
     if closed_frac < 1.0 - 1e-9:
@@ -227,23 +240,29 @@ def simulate_trade_partial(
         "tp": reached_tp,
         "net_rr": _num(realized_rr, 4),
         "levels": [level_no for level_no, _ in levels[:next_level_idx]],
+        "exit_reason": exit_reason,
+        "exit_offset": exit_offset,
     }
 
 
 class BacktestRunner:
     """Fiyat serisini ileri sararak engine sinyallerini tetikler ve sonuç toplar."""
 
-    def __init__(self, analyze_fn=None, fee_rate=0.0020, partial_exits=True, tp_weights=None):
+    def __init__(self, analyze_fn=None, fee_rate=0.0020, partial_exits=True, tp_weights=None,
+                 limit_expiry_bars=8):
         self.analyze_fn = analyze_fn
         self.fee_rate = float(fee_rate)
         self.partial_exits = bool(partial_exits)
         self.tp_weights = tp_weights
+        self.limit_expiry_bars = max(1, int(limit_expiry_bars))
         self.full_exit_calls = 0
         self.history = []
         self.total = 0
         self.wins = 0
         self.candidate_signals = 0
         self.unfilled_limits = 0
+        self.expired_limits = 0
+        self.stale_limits_cancelled = 0
         self.open_trades = 0
         self.invalid_candidates = 0
         self.no_followup_data = 0
@@ -274,6 +293,7 @@ class BacktestRunner:
             fee_rate=self.fee_rate,
             partial_exits=self.partial_exits,
             tp_weights=self.tp_weights,
+            limit_expiry_bars=self.limit_expiry_bars,
         )
 
     def run(self, data, on_signal=None, step=1, lenient=False):
@@ -354,14 +374,14 @@ class BacktestRunner:
                 self.raw_short_signals += 1
             else:
                 self.non_directional_results += 1
-            trade = self._to_trade(result, candles, idx + 1, lenient=lenient)
+            trade = self._to_trade(result, candles, idx + 1, lenient=lenient, signal_index=idx)
             if trade is None:
                 continue
             self._record(trade)
 
         return self.statistics()
 
-    def _to_trade(self, result, candles, entry_index, lenient=False):
+    def _to_trade(self, result, candles, entry_index, lenient=False, signal_index=None):
         """analyze çıktısından trade üretir; geçersizse None."""
         decision = (result or {}).get("decision") or {}
         signal = (result or {}).get("signal") or {}
@@ -416,15 +436,27 @@ class BacktestRunner:
                 self.invalid_candidates += 1
                 return None
             is_long = signal_dir == "LONG"
-            for candidate_index in range(entry_index, len(candles)):
+            expiry_index = min(len(candles), entry_index + self.limit_expiry_bars)
+            for candidate_index in range(entry_index, expiry_index):
                 candle = candles[candidate_index]
-                touched = candle.low <= limit_price if is_long else candle.high >= limit_price
-                if not touched:
-                    continue
-                # A gap through a limit order receives the opening price when
-                # that is better than the requested limit.
                 opened = _num(candle.open)
                 if opened is None:
+                    continue
+                gap_fill = (opened <= limit_price) if is_long else (opened >= limit_price)
+                touched = candle.low <= limit_price if is_long else candle.high >= limit_price
+                target_already_hit = any(
+                    (candle.high >= target if is_long else candle.low <= target)
+                    for target in (_num(risk.get('tp1')), _num(risk.get('tp2')), _num(risk.get('tp3')))
+                    if target is not None
+                )
+                # If a target is reached on a candle that never touches the
+                # pending entry, cancel the stale order. If both are touched
+                # in one candle, OHLC cannot reveal the path: keep the fill but
+                # apply the conservative fill-candle handling below.
+                if target_already_hit and not touched:
+                    self.stale_limits_cancelled += 1
+                    return None
+                if not touched:
                     continue
                 entry_price = min(limit_price, opened) if is_long else max(limit_price, opened)
                 # If price opens through the limit, fill is at the open and
@@ -438,6 +470,10 @@ class BacktestRunner:
                 fill_index = candidate_index
                 break
             if fill_index is None:
+                if len(candles) < entry_index + self.limit_expiry_bars:
+                    self.no_followup_data += 1
+                else:
+                    self.expired_limits += 1
                 self.unfilled_limits += 1
                 return None
 
@@ -469,11 +505,14 @@ class BacktestRunner:
                 signal_dir == "LONG", stop, fill_candle.low, fill_candle.high
             )
             if fill_stop_hit:
-                outcome = {"result": "LOSS", "tp": 0, "net_rr": -1.0, "levels": []}
+                outcome = {"result": "LOSS", "tp": 0, "net_rr": -1.0, "levels": [],
+                           "exit_reason": "STOP", "exit_offset": 0}
+                outcome_start_index = fill_index
             else:
                 # Exclude the fill candle from target simulation. Its high/low
                 # may have occurred before the intrabar limit order was filled.
                 future = candles[fill_index + 1:]
+                outcome_start_index = fill_index + 1
                 if use_partial:
                     outcome = simulate_trade_partial(
                         entry=entry_price,
@@ -495,6 +534,7 @@ class BacktestRunner:
         else:
             # MARKET and gap-through LIMIT orders fill at candle open.
             future = candles[fill_index:]
+            outcome_start_index = fill_index
             if use_partial:
                 outcome = simulate_trade_partial(
                     entry=entry_price,
@@ -535,14 +575,26 @@ class BacktestRunner:
             base_rr = round(base_rr - fee_rr, 4)
         net_rr = base_rr
 
+        signal_index = max(0, int(signal_index if signal_index is not None else entry_index - 1))
+        exit_offset = outcome.get("exit_offset")
+        exit_index = (outcome_start_index + int(exit_offset)
+                      if exit_offset is not None else None)
+        exit_time = int(candles[exit_index].time) if exit_index is not None and exit_index < len(candles) else None
         return {
+            "signal_index": signal_index,
+            "signal_time": int(candles[signal_index].time),
             "entry_index": fill_index,
+            "entry_time": int(candles[fill_index].time),
+            "fill_delay_bars": max(0, fill_index - entry_index),
             "entry_type": entry_type,
-            "planned_entry": planned_entry,
+            "planned_entry": _num(planned_entry),
             "direction": signal_dir,
             "entry": entry_price,
             "stop_loss": stop,
             "tps": tps,
+            "exit_reason": outcome.get("exit_reason", "UNKNOWN"),
+            "exit_index": exit_index,
+            "exit_time": exit_time,
             "result": outcome.get("result"),
             "tp": outcome.get("tp", 0),
             "net_rr": round(max(net_rr, -99.0), 4),
@@ -638,6 +690,9 @@ class BacktestRunner:
                 "target_missing_rr_counts": dict(self.target_missing_rr_counts),
                 "stop_atr_buckets": dict(self.stop_atr_buckets),
                 "unfilled_limits": self.unfilled_limits,
+                "expired_limits": self.expired_limits,
+                "stale_limits_cancelled": self.stale_limits_cancelled,
+                "trade_history": list(self.history),
                 "open_trades": self.open_trades,
                 "invalid_candidates": self.invalid_candidates,
                 "no_followup_data": self.no_followup_data,
@@ -689,6 +744,9 @@ class BacktestRunner:
             "target_missing_rr_counts": dict(self.target_missing_rr_counts),
             "stop_atr_buckets": dict(self.stop_atr_buckets),
             "unfilled_limits": self.unfilled_limits,
+            "expired_limits": self.expired_limits,
+            "stale_limits_cancelled": self.stale_limits_cancelled,
+            "trade_history": list(self.history),
             "open_trades": self.open_trades,
             "invalid_candidates": self.invalid_candidates,
             "no_followup_data": self.no_followup_data,
