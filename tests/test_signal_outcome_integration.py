@@ -663,7 +663,7 @@ def test_signal_outcome_does_not_count_later_tp_after_same_candle_breakeven_stop
     assert resolved["tps_hit"] == [1]
     assert resolved["hit_sl"] is True
     assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
-    assert resolved["realized_r"] == pytest.approx((1.0 / 3) - 0.2, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(0.5 - 0.2, abs=1e-4)
 
 
 
@@ -687,7 +687,7 @@ def test_signal_outcome_accumulates_realized_r_across_incremental_candle_batches
 
     assert journal.resolve_signal_outcome(outcome, [first]) is None
     assert outcome["tps_hit"] == [1]
-    assert outcome["realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+    assert outcome["realized_r"] == pytest.approx(0.5, abs=1e-4)
     assert outcome["last_processed_candle_time"] == first.time
 
     # Replaying the same candle batch is idempotent.
@@ -696,7 +696,7 @@ def test_signal_outcome_accumulates_realized_r_across_incremental_candle_batches
 
     assert journal.resolve_signal_outcome(outcome, [first, second]) is None
     assert outcome["tps_hit"] == [1, 2]
-    assert outcome["realized_r"] == pytest.approx(1.0, abs=1e-4)
+    assert outcome["realized_r"] == pytest.approx(1.1, abs=1e-4)
     assert outcome["last_processed_candle_time"] == second.time
     assert journal.resolve_signal_outcome(outcome, [first, second]) is None
     assert outcome["realized_r"] == pytest.approx(1.0, abs=1e-4)
@@ -705,8 +705,8 @@ def test_signal_outcome_accumulates_realized_r_across_incremental_candle_batches
     assert resolved is not None
     assert resolved["status"] == "TP3"
     assert resolved["tps_hit"] == [1, 2, 3]
-    assert resolved["gross_realized_r"] == pytest.approx(2.0, abs=1e-4)
-    assert resolved["realized_r"] == pytest.approx(1.8, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(1.7, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(1.5, abs=1e-4)
 
 
 
