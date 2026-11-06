@@ -1869,7 +1869,7 @@ class TradeJournal:
     def _signal_partial_weights(self):
         from config import Config
 
-        raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+        raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2")
         if isinstance(raw, dict):
             supplied = [raw.get(f"tp{i}", 1.0) for i in range(1, 4)]
         elif isinstance(raw, str):

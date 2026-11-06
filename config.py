@@ -323,7 +323,7 @@ class Config:
 
     # --- Signal tracking (teorik sinyal sonucu) ---
     SIGNAL_OUTCOME_EXPIRY_HOURS = float(os.getenv("ATLAS_SIGNAL_OUTCOME_EXPIRY_HOURS", "72"))
-    SIGNAL_OUTCOME_PARTIAL_WEIGHTS = os.getenv("ATLAS_SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+    SIGNAL_OUTCOME_PARTIAL_WEIGHTS = os.getenv("ATLAS_SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2")
 
     # --- Manuel işlemler (Telegram /trade) ---
     MANUAL_TRACKING_ENABLED = os.getenv("ATLAS_MANUAL_TRACKING_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
@@ -454,7 +454,7 @@ class Config:
         cls.LEARNING_GLOBAL_FALLBACK = _env_or_rc("ATLAS_LEARNING_GLOBAL_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
         cls.LEARNING_EDGE_CONFIDENCE_FLOOR = float(_env_or_rc("ATLAS_LEARNING_EDGE_CONFIDENCE_FLOOR", "65"))
         cls.SIGNAL_OUTCOME_EXPIRY_HOURS = float(_env_or_rc("ATLAS_SIGNAL_OUTCOME_EXPIRY_HOURS", "72"))
-        cls.SIGNAL_OUTCOME_PARTIAL_WEIGHTS = _env_or_rc("ATLAS_SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+        cls.SIGNAL_OUTCOME_PARTIAL_WEIGHTS = _env_or_rc("ATLAS_SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2")
         cls.MANUAL_TRACKING_ENABLED = _env_or_rc("ATLAS_MANUAL_TRACKING_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
         cls.MANUAL_TRADE_COMMAND_ENABLED = _env_or_rc("ATLAS_MANUAL_TRADE_COMMAND_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
 

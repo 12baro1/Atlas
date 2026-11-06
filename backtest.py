@@ -443,7 +443,7 @@ def _report(stats, name):
 
 def _configured_partial_tp_weights():
     """Use the same partial-close proportions as risk and signal tracking."""
-    raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+    raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2")
     if isinstance(raw, dict):
         values = [raw.get(f"tp{i}", 1.0) for i in range(1, 4)]
     elif isinstance(raw, str):
