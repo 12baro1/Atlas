@@ -111,18 +111,12 @@ def simulate_trade_partial(
     direction="LONG",
     tp_weights=None,
 ):
-    """KISMİ ÇIKIŞ modeli: pozisyon TP seviyelerinde parsellere ayrılır.
+    """Kısmi TP ve gecikmeli trailing-stop simülasyonu.
 
-    Varsayılan ağırlıklar: mevcut TP sayısına eşit bölünür (1 TP %100, 2 TP
-    %50/%50, 3 TP %33.3/%33.3/%33.3). Her TP kapanışında açık kısmın stopu
-    bir sonraki koruma seviyesine (breakeven ya da bir önceki TP) taşınır.
-    Amaç: TP1 sonrası SL (kısmi kazanç geri verilmeden), TP1→TP2/TP3 devam
-    senaryosunu gerçekçi şekilde modellemek.
-
-    Dönüş: {"result": "WIN"/"LOSS"/"OPEN", "tp": ulaşılan en yüksek seviye,
-            "net_rr": gerçekleşen ağırlıklı R}
-      - WINRATE yalnızca TAMAMEN gerçekleşen (kapanan) işlemlerden hesaplanır;
-        pencere bitmeden pozisyon kapanmazsa "OPEN" → istatistiğe girmez.
+    TP ağırlıkları normalize edilir. Bir mumda yalnızca sıradaki tek hedef
+    gerçekleşmiş sayılır; OHLC verisi TP1→TP2 sırasını kanıtlayamaz.
+    TP1 sonrası breakeven, TP2 sonrası TP1 stopu bir sonraki mumdan itibaren
+    etkinleşir. Stopta gap varsa gerçekleşme fiyatı mum açılışıdır.
     """
     direction = (direction or "LONG").upper()
     entry = _num(entry)
@@ -136,7 +130,6 @@ def simulate_trade_partial(
     if risk_distance == 0:
         return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
 
-    # Ağırlıklar: geçilmezse TP sayısına göre eşit bölünür (toplam = 1.0).
     n = len(levels)
     if tp_weights and isinstance(tp_weights, dict):
         weights = []
@@ -152,10 +145,9 @@ def simulate_trade_partial(
     if not math.isfinite(total_w) or total_w <= 0:
         weights = [1.0] * n
         total_w = float(n)
-    weights = [w / total_w for w in weights]  # normalize
+    weights = [w / total_w for w in weights]
 
     is_long = direction in ("LONG", "BUY")
-
     realized_rr = 0.0
     closed_frac = 0.0
     next_level_idx = 0
@@ -165,73 +157,61 @@ def simulate_trade_partial(
     exit_offset = None
 
     for candle_offset, candle in enumerate(future_candles):
-        low = candle.low
-        high = candle.high
+        low = _num(candle.low)
+        high = _num(candle.high)
+        opened = _num(getattr(candle, "open", None))
+        if low is None or high is None:
+            continue
 
-        # 1) Stop önceliği: kalan pozisyon önce SL'den çıkar.
-        sl_hit = _candle_touched_stop(is_long, trailing_stop, low, high)
-        if sl_hit:
+        # Mum açılışı stopun ötesindeyse stop fiyatı değil açılış fiyatı kullanılır.
+        if is_long:
+            stop_gap = opened is not None and opened <= trailing_stop
+            stop_touched = low <= trailing_stop
+            stop_fill = opened if stop_gap else trailing_stop
+        else:
+            stop_gap = opened is not None and opened >= trailing_stop
+            stop_touched = high >= trailing_stop
+            stop_fill = opened if stop_gap else trailing_stop
+
+        if stop_touched:
             remaining = 1.0 - closed_frac
             if remaining > 0.0:
-                # Stop seviyesine göre R: breakeven'de 0R, orijinal SL'de -1R,
-                # pozitif taşınan stoplarda (TP1 eşiği) +R doğru modellenir.
-                if is_long:
-                    rr_stop = (trailing_stop - entry) / risk_distance
-                else:
-                    rr_stop = (entry - trailing_stop) / risk_distance
+                rr_stop = (
+                    (stop_fill - entry) / risk_distance
+                    if is_long
+                    else (entry - stop_fill) / risk_distance
+                )
                 realized_rr += remaining * rr_stop
                 closed_frac = 1.0
             exit_reason = "STOP" if reached_tp == 0 else "TRAILING_STOP"
             exit_offset = candle_offset
             break
 
-        # 2) TP seviyelerine en yakından başlayarak kısmi çıkış.
-        while next_level_idx < len(levels):
+        # OHLC mumunda hedeflerin sırası bilinemez: mum başına yalnızca bir TP say.
+        if next_level_idx < len(levels):
             level_no, tp_price = levels[next_level_idx]
-            hit = (high >= tp_price) if is_long else (low <= tp_price)
-            if not hit:
-                break
-            weight = weights[next_level_idx]
-            rr = abs(tp_price - entry) / risk_distance
-            realized_rr += weight * rr
-            closed_frac += weight
-            reached_tp = level_no
-            next_level_idx += 1
-            # Koruma stopunu taşınma: TP1 → breakeven, TP2 → TP1 seviyesi.
-            available_level_numbers = {number for number, _ in levels}
-            if level_no == 1 and len(levels) > 1:
-                trailing_stop = entry
-            elif level_no == 2 and 1 in available_level_numbers and 3 in available_level_numbers:
-                # After the actual TP2 (not simply the second listed target),
-                # protect the remaining position at the actual TP1 price.
-                trailing_stop = next(price for number, price in levels if number == 1)
+            hit = high >= tp_price if is_long else low <= tp_price
+            if hit:
+                weight = weights[next_level_idx]
+                rr = abs(tp_price - entry) / risk_distance
+                realized_rr += weight * rr
+                closed_frac += weight
+                reached_tp = level_no
+                next_level_idx += 1
 
-            if closed_frac >= 1.0 - 1e-9:
-                break
+                # Yeni trailing stop sonraki mumda aktif olur.
+                available = {number for number, _ in levels}
+                if level_no == 1 and len(levels) > 1:
+                    trailing_stop = entry
+                elif level_no == 2 and 1 in available and 3 in available:
+                    trailing_stop = next(price for number, price in levels if number == 1)
 
-            # A newly moved stop can also be touched in this candle. OHLC data
-            # cannot reveal the intrabar path, so close the remainder at that
-            # protective stop instead of optimistically counting later targets.
-            if _candle_touched_stop(is_long, trailing_stop, low, high):
-                remaining = 1.0 - closed_frac
-                if is_long:
-                    rr_stop = (trailing_stop - entry) / risk_distance
-                else:
-                    rr_stop = (entry - trailing_stop) / risk_distance
-                realized_rr += remaining * rr_stop
-                closed_frac = 1.0
-                exit_reason = "STOP" if reached_tp == 0 else "TRAILING_STOP"
-                exit_offset = candle_offset
-                break
-
-        if closed_frac >= 1.0 - 1e-9:
-            if exit_reason is None:
-                exit_reason = f"TP{reached_tp}"
-                exit_offset = candle_offset
-            break
+                if closed_frac >= 1.0 - 1e-9:
+                    exit_reason = f"TP{reached_tp}"
+                    exit_offset = candle_offset
+                    break
 
     if closed_frac < 1.0 - 1e-9:
-        # Pencere içinde pozisyon tam kapanmadı: gerçekleşmemiş, istatistiğe girmez.
         return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
 
     result = "WIN" if realized_rr > 0.0 else "LOSS"
@@ -243,7 +223,6 @@ def simulate_trade_partial(
         "exit_reason": exit_reason,
         "exit_offset": exit_offset,
     }
-
 
 class BacktestRunner:
     """Fiyat serisini ileri sararak engine sinyallerini tetikler ve sonuç toplar."""
