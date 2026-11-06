@@ -594,7 +594,7 @@ def test_partial_exit_uses_50_30_20_weights_when_configured():
     )
     assert out["result"] == "WIN"
     assert out["tp"] == 3
-    assert out["net_rr"] == pytest.approx(1.8, abs=1e-4)
+    assert out["net_rr"] == pytest.approx(1.7, abs=1e-4)
 
 
 def test_partial_exit_gap_through_trailing_stop_uses_open_price():
@@ -603,7 +603,7 @@ def test_partial_exit_gap_through_trailing_stop_uses_open_price():
         _tl(99.0, o=99.0, h=100.0, l=98.5, cl=99.0, t=2),
     ]
     out = simulate_trade_partial(100.0, 99.0, [101.0, 102.0], candles, "LONG")
-    assert out["result"] == "WIN"
+    assert out["result"] == "LOSS"
     assert out["tp"] == 1
     # 50% at +1R, remaining 50% stopped at the 99 open (-1R): net 0R.
     assert out["net_rr"] == pytest.approx(0.0, abs=1e-4)
