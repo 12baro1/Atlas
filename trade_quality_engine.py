@@ -127,9 +127,11 @@ class TradeQualityEngine:
         else:
             warnings.append("4H regime unavailable; other structural checks remain mandatory")
 
-        # Optional specialist motors are not mandatory when inactive. When
-        # active and sufficiently confident, however, they may not contradict
-        # the proposed direction.
+        # Specialist motors are confluence evidence, not universal vetoes.
+        # Their aggregate direction can come from a different timeframe/setup
+        # than the proposed entry. Keep high-confidence disagreement visible,
+        # but let execution-critical structure, entry, sweep, regime, risk and
+        # target checks decide whether the trade is executable.
         for name, module in (
             ("SMT", smt),
             ("Unicorn", unicorn),
@@ -145,7 +147,7 @@ class TradeQualityEngine:
                 confidence = 0.0
             module_direction = self._module_direction(module)
             if confidence >= 75 and module_direction in {"LONG", "SHORT"} and module_direction != direction:
-                blockers.append(f"{name} high-confidence direction conflicts with the trade")
+                warnings.append(f"{name} high-confidence direction conflicts with the trade")
 
         phase = str((market_phase or {}).get("phase", "")).strip()
         if phase and phase.lower() == "manipulation":
