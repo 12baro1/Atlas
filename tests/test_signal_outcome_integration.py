@@ -56,10 +56,10 @@ def test_signal_outcome_resolves_tp1_to_sl(tmp_path):
     assert resolved is not None
     assert resolved["status"] == "SL"
     assert len(resolved.get("tps_hit") or []) == 1
-    # Default 1,1,1 weights are normalized to thirds: TP1 closes one third.
-    assert resolved["gross_realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+    # Default 50/30/20 weights: TP1 closes half the position.
+    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
     assert resolved["fee_rr"] == pytest.approx(0.2, abs=1e-4)
-    assert resolved["realized_r"] == pytest.approx((1.0 / 3) - 0.2, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(0.5 - 0.2, abs=1e-4)
 
 
 def test_signal_outcome_expires_after_expiry(tmp_path, monkeypatch):
@@ -662,7 +662,7 @@ def test_signal_outcome_does_not_count_later_tp_after_same_candle_breakeven_stop
     assert resolved is not None
     assert resolved["tps_hit"] == [1]
     assert resolved["hit_sl"] is True
-    assert resolved["gross_realized_r"] == pytest.approx(1.0 / 3, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
     assert resolved["realized_r"] == pytest.approx((1.0 / 3) - 0.2, abs=1e-4)
 
 
