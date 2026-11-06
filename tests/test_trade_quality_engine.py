@@ -129,12 +129,23 @@ def test_unknown_regime_is_warning_not_an_automatic_trade_block():
     assert result["warnings"]
 
 
-def test_high_confidence_specialist_motor_conflict_blocks_setup():
+def test_high_confidence_specialist_motor_conflict_is_advisory():
     payload = base_payload()
     payload["smt"] = {"active": True, "direction": "BEARISH", "confidence": 88}
     result = TradeQualityEngine().evaluate(**payload)
+    assert result["allowed"] is True
+    assert result["blockers"] == []
+    assert any("SMT" in item for item in result["warnings"])
+
+
+def test_specialist_conflict_does_not_override_structural_execution_blockers():
+    payload = base_payload()
+    payload["smt"] = {"active": True, "direction": "BEARISH", "confidence": 88}
+    payload["confirmation"] = {"confirmed": False, "reason": "15m confirmation missing"}
+    result = TradeQualityEngine().evaluate(**payload)
     assert result["allowed"] is False
-    assert any("SMT" in item for item in result["blockers"])
+    assert any("15m confirmation missing" in item for item in result["blockers"])
+    assert any("SMT" in item for item in result["warnings"])
 
 
 def test_learning_blocks_only_when_sample_is_sufficient_and_expectancy_is_negative():
