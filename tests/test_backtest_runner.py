@@ -173,13 +173,17 @@ def test_runner_applies_round_trip_fee_rate_once():
 
 
 
-def test_partial_tp1_and_breakeven_in_same_candle_does_not_count_tp2():
-    # OHLC cannot prove TP2 came before the newly moved breakeven stop.
-    candle = _tl(10.5, o=10.0, h=12.5, l=9.9, cl=10.5)
-    out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], [candle], "LONG")
+def test_partial_tp1_trailing_stop_activates_on_next_candle_and_skips_tp2_same_bar():
+    # TP1 is counted; neither the same-bar breakeven touch nor TP2 is assumed
+    # to have occurred after TP1. The new stop becomes active next candle.
+    first = _tl(10.5, o=10.0, h=12.5, l=9.9, cl=10.5)
+    second = _tl(10.0, o=10.5, h=10.6, l=9.9, cl=10.0)
+    out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], [first, second], "LONG")
     assert out["result"] == "WIN"
     assert out["tp"] == 1
     assert out["net_rr"] == 0.5
+    assert out["exit_reason"] == "TRAILING_STOP"
+    assert out["exit_offset"] == 1
 
 
 def test_limit_order_is_not_filled_without_price_touch():
@@ -575,3 +579,32 @@ def test_partial_exit_reports_trailing_stop_not_last_tp_as_exit_reason():
     out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], candles, "LONG")
     assert out["exit_reason"] == "TRAILING_STOP"
     assert out["exit_offset"] == 1
+
+
+
+def test_partial_exit_uses_50_30_20_weights_when_configured():
+    candles = [
+        _tl(100.0, o=100.0, h=101.2, l=100.1, cl=101.0, t=1),
+        _tl(101.2, o=101.2, h=102.2, l=101.1, cl=102.0, t=2),
+        _tl(102.2, o=102.2, h=103.2, l=102.1, cl=103.0, t=3),
+    ]
+    out = simulate_trade_partial(
+        100.0, 99.0, [101.0, 102.0, 103.0], candles, "LONG",
+        tp_weights={"tp1": 0.5, "tp2": 0.3, "tp3": 0.2},
+    )
+    assert out["result"] == "WIN"
+    assert out["tp"] == 3
+    assert out["net_rr"] == pytest.approx(1.8, abs=1e-4)
+
+
+def test_partial_exit_gap_through_trailing_stop_uses_open_price():
+    candles = [
+        _tl(100.0, o=100.0, h=101.2, l=100.1, cl=101.0, t=1),
+        _tl(99.0, o=99.0, h=100.0, l=98.5, cl=99.0, t=2),
+    ]
+    out = simulate_trade_partial(100.0, 99.0, [101.0, 102.0], candles, "LONG")
+    assert out["result"] == "WIN"
+    assert out["tp"] == 1
+    # 50% at +1R, remaining 50% stopped at the 99 open (-1R): net 0R.
+    assert out["net_rr"] == pytest.approx(0.0, abs=1e-4)
+    assert out["exit_reason"] == "TRAILING_STOP"
