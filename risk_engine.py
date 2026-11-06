@@ -21,7 +21,7 @@ class RiskEngine:
     def _resolve_partial_exit_weights(self, rr_by_tp):
         """Match the signal journal's normalized TP exit weights."""
         names = ("tp1", "tp2", "tp3")
-        raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "1.0,1.0,1.0")
+        raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2")
         if isinstance(raw, dict):
             supplied = [raw.get(name, 1.0) for name in names]
         elif isinstance(raw, str):
