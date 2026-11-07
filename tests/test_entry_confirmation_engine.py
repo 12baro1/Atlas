@@ -76,8 +76,7 @@ def test_bullish_confirmation_expires_after_newer_bearish_break():
         _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
     )
     assert result["confirmed"] is False
-    assert result["reason"] == "Latest 15m break opposes entry direction"
-
+    assert result["reason"] == "Latest 15m break opposes entry direction without a reclaimed pullback swing"
 
 
 def test_counter_bos_pullback_can_confirm_after_reclaimed_higher_low():
