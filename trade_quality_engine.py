@@ -183,8 +183,9 @@ class TradeQualityEngine:
                 )
 
         tp_values = [targets.get("tp1"), targets.get("tp2"), targets.get("tp3")]
-        if any(value is None for value in tp_values):
-            blockers.append("Three valid structural targets are not available")
+        available_tp_values = [value for value in tp_values if value is not None]
+        if not available_tp_values:
+            blockers.append("At least one valid structural target is required")
         if targets.get("synthetic_targets"):
             blockers.append("Synthetic RR target is not a market-structure target")
         sources = targets.get("sources") or []
@@ -195,7 +196,7 @@ class TradeQualityEngine:
             entry_price = float(entry.get("entry"))
             stop = float(risk.get("stop_loss", entry.get("stop_loss")))
             current = float(current_price) if current_price is not None else None
-            tp_prices = [float(value) for value in tp_values]
+            tp_prices = [float(value) for value in available_tp_values]
             risk_distance = abs(entry_price - stop)
         except (TypeError, ValueError, OverflowError):
             entry_price = stop = current = risk_distance = None
@@ -205,7 +206,7 @@ class TradeQualityEngine:
             if (direction == "LONG" and stop >= entry_price) or (direction == "SHORT" and stop <= entry_price):
                 blockers.append("Stop-loss is on the wrong side of entry")
 
-        if len(tp_prices) == 3 and direction in {"LONG", "SHORT"}:
+        if tp_prices and direction in {"LONG", "SHORT"}:
             ordered = all(
                 tp_prices[i] < tp_prices[i + 1] for i in range(2)
             ) if direction == "LONG" else all(
@@ -263,7 +264,7 @@ class TradeQualityEngine:
                     blockers.append("MARKET entry is already too far from the calculated trigger")
                 if not atr or atr <= 0:
                     blockers.append("MARKET entry distance cannot be validated without ATR")
-            if len(tp_prices) == 3:
+            if tp_prices:
                 tp1_reached = current >= tp_prices[0] if direction == "LONG" else current <= tp_prices[0]
                 if tp1_reached and entry_type != "LIMIT":
                     blockers.append("TP1 has already been reached; market entry would be chasing")
