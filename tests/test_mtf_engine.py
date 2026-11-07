@@ -89,4 +89,3 @@ def test_ltf_reversal_does_not_override_opposing_higher_timeframe():
     result = MTFEngine().detect([], _bearish(), [], structure, liquidity_sweep=sweep)
     assert result["entry"] == "NONE"
     assert result["valid"] is False
-}
