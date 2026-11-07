@@ -266,8 +266,11 @@ class TradeQualityEngine:
                     blockers.append("MARKET entry distance cannot be validated without ATR")
             if tp_prices:
                 tp1_reached = current >= tp_prices[0] if direction == "LONG" else current <= tp_prices[0]
-                if tp1_reached and entry_type != "LIMIT":
-                    blockers.append("TP1 has already been reached; market entry would be chasing")
+                if tp1_reached:
+                    if entry_type == "LIMIT":
+                        blockers.append("TP1 has already been reached before the pending LIMIT entry; setup is stale")
+                    else:
+                        blockers.append("TP1 has already been reached; market entry would be chasing")
 
         # Keep the blocker list stable and free of duplicate messages.
         blockers = list(dict.fromkeys(str(item) for item in blockers if item))
