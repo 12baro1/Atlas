@@ -30,6 +30,7 @@ from decision_engine import DecisionEngine
 from dynamic_tp_engine import DynamicTPEngine
 from entry_confirmation_engine import EntryConfirmationEngine
 from entry_engine import EntryEngine
+from entry_optimizer import EntryOptimizer
 from fvg_engine import FVGEngine
 from htf_fvg_engine import HTFFVGEngine
 from htf_orderblock_engine import HTFOrderBlockEngine
@@ -135,6 +136,7 @@ class AtlasEngine:
 
         # Sinyal, risk ve operasyon motorları
         self.entry = EntryEngine()
+        self.entry_optimizer = EntryOptimizer()
         self.entry_confirmation = EntryConfirmationEngine()
         self.confluence = ConfluenceEngine()
         self.signal = SignalEngine()
@@ -1018,47 +1020,54 @@ class AtlasEngine:
             ote=ote,
             market_regime=market_regime,
         )
+        optimization = self.entry_optimizer.optimize(
+            entry=entry,
+            current_price=candles[-1].close if candles else None,
+            trend=trend,
+            liquidity_sweep=liquidity_sweep,
+            ote=ote,
+            market_phase=market_phase,
+            market_regime=market_regime,
+            htf_orderblock=htf_orderblock,
+            htf_fvg=htf_fvg,
+            smt=smt,
+            unicorn=unicorn,
+            cisd=cisd,
+            volume_profile=volume_profile,
+            institutional=institutional,
+            orderbook=orderbook,
+        )
         confirmation = self.entry_confirmation.confirm(
             mtf, entry_structure, fvg, entry,
             current_price=candles[-1].close if candles else None,
         )
         orderbook = orderbook or {"active": False, "market_entry_allowed": True}
         entry["orderbook"] = orderbook
+        entry["optimization"] = optimization
         if entry.get("valid") and (orderbook.get("active") or orderbook.get("trade_flow_active")):
             entry_type = str(entry.get("entry_type") or "").upper()
-            if orderbook.get("active") and entry_type == "LIMIT" and entry.get("poi_zone"):
-                try:
-                    candidate = float(orderbook.get("limit_entry_candidate"))
-                    original = float(entry.get("entry"))
-                    current = float(candles[-1].close)
-                    zone = entry["poi_zone"]
-                    low, high = float(zone["low"]), float(zone["high"])
-                    direction = str(entry.get("direction") or "").upper()
-                    favorable = candidate <= original if direction == "LONG" else candidate >= original
-                    stop = float(entry.get("stop_loss"))
-                    on_entry_side = candidate < current if direction == "LONG" else candidate > current
-                    stop_valid = candidate > stop if direction == "LONG" else candidate < stop
-                    shift_pct = abs(candidate - original) / original * 100.0
-                    if low <= candidate <= high and favorable and on_entry_side and stop_valid and shift_pct <= 0.20:
-                        entry["entry"] = candidate
-                        orderbook["limit_entry_adjustment"] = {"from": original, "to": candidate}
-                        entry.setdefault("checks", []).append("✓ Order book LIMIT fiyatı POI içinde iyileştirildi")
-                except (TypeError, ValueError, KeyError, ZeroDivisionError, IndexError):
-                    pass
-            if orderbook.get("opposing"):
-                entry["valid"] = False
-                entry["reason"] = "Order book yönün karşısında güçlü hacim gösteriyor"
-                entry["entry_reason_code"] = "ORDERBOOK_CONFLICT"
-                entry.setdefault("checks", []).append("✗ Order book karşı yön baskısı")
-                confirmation["confirmed"] = False
-                confirmation["reason"] = entry["reason"]
-            elif entry_type == "MARKET" and not orderbook.get("market_entry_allowed", True):
-                entry["valid"] = False
-                entry["reason"] = "Order book spread/derinlik koşulları market girişine uygun değil"
-                entry["entry_reason_code"] = "MARKET_MICROSTRUCTURE_REJECTED"
-                entry.setdefault("checks", []).append("✗ Order book market girişini onaylamadı")
-                confirmation["confirmed"] = False
-                confirmation["reason"] = entry["reason"]
+            if orderbook.get("opposing") or (entry_type == "MARKET" and not orderbook.get("market_entry_allowed", True)):
+                # Microstructure conflict changes execution style first; it does
+                # not erase a structurally valid POI setup by itself.
+                current = float(candles[-1].close) if candles else None
+                price = float(entry.get("entry")) if entry.get("entry") is not None else None
+                direction = str(entry.get("direction") or "").upper()
+                can_fall_back_to_limit = bool(
+                    entry.get("poi_zone") and current is not None and price is not None
+                    and ((direction == "LONG" and price < current) or (direction == "SHORT" and price > current))
+                )
+                if can_fall_back_to_limit:
+                    entry["entry_type"] = "LIMIT"
+                    entry["requires_pullback"] = True
+                    entry["entry_type_reason"] = "Order-flow karşı baskısı nedeniyle daha iyi POI LIMIT girişi"
+                    entry.setdefault("checks", []).append("! Microstructure: MARKET yerine LIMIT seçildi")
+                else:
+                    entry["valid"] = False
+                    entry["reason"] = "Order-flow çatışması için geçerli pullback LIMIT seviyesi yok"
+                    entry["entry_reason_code"] = "ORDERBOOK_CONFLICT_NO_LIMIT"
+                    entry.setdefault("checks", []).append("✗ Microstructure çatışması ve geçerli LIMIT yok")
+                    confirmation["confirmed"] = False
+                    confirmation["reason"] = entry["reason"]
             else:
                 entry.setdefault("checks", []).append(
                     "✓ Order book yönü destekli" if orderbook.get("supportive") else "✓ Order book engel oluşturmuyor"

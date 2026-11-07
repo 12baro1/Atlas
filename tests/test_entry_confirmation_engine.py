@@ -198,3 +198,19 @@ def test_short_counter_bos_can_confirm_after_reclaiming_prior_structure_boundary
     )
     assert result["confirmed"] is True
     assert result["confirmation_mode"] == "reclaimed_prior_structure_boundary"
+
+
+
+def test_conflicting_secondary_evidence_requires_choch_or_reclaimed_pullback():
+    entry = _entry("LONG")
+    entry["confirmation_requirements"] = {"require_choch_or_reclaim": True, "reasons": ["weak_volume"]}
+    fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
+
+    bos_only = [{"label": "HH", "bos": True, "choch": False, "direction": "BULLISH"}]
+    result = EntryConfirmationEngine().confirm(_mtf(), bos_only, fvg, entry, current_price=100.0)
+    assert result["confirmed"] is False
+    assert "requires 15m CHoCH" in result["reason"]
+
+    choch = [{"label": "HH", "bos": True, "choch": True, "direction": "BULLISH"}]
+    result = EntryConfirmationEngine().confirm(_mtf(), choch, fvg, entry, current_price=100.0)
+    assert result["confirmed"] is True

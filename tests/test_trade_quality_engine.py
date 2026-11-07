@@ -148,11 +148,33 @@ def test_specialist_conflict_does_not_override_structural_execution_blockers():
     assert any("SMT" in item for item in result["warnings"])
 
 
-def test_learning_blocks_only_when_sample_is_sufficient_and_expectancy_is_negative():
+def test_negative_learning_history_changes_entry_quality_but_does_not_veto_by_itself():
     payload = base_payload()
     payload["setup_quality"] = {
         "learning": {"matched": True, "sample_count": 25, "expected_r": -0.15}
     }
     result = TradeQualityEngine().evaluate(**payload)
-    assert result["allowed"] is False
-    assert any("Learning history" in item for item in result["blockers"])
+    assert result["allowed"] is True
+    assert any("Learning history" in item for item in result["warnings"])
+
+
+
+def test_trend_disagreement_is_entry_evidence_not_an_automatic_veto():
+    payload = base_payload()
+    payload["trend"] = {"trend": "BEARISH"}
+    result = evaluate(payload)
+    assert result["allowed"] is True
+    assert any("Trend conflict" in item for item in result["warnings"])
+
+
+def test_opposing_sweep_can_be_reclaimed_before_entry():
+    payload = base_payload()
+    payload["liquidity_sweep"] = {
+        "is_sweep": True,
+        "buy_side": True,
+        "sell_side": False,
+        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+    }
+    result = evaluate(payload)
+    assert result["allowed"] is True
+    assert any("Counter-side sweep reclaimed" in item for item in result["warnings"])

@@ -59,7 +59,7 @@ class TradeQualityEngine:
         trend_direction = str(trend.get("trend", "NEUTRAL")).upper()
         expected_trend = "BULLISH" if direction == "LONG" else "BEARISH"
         if direction in {"LONG", "SHORT"} and trend_direction not in {expected_trend, "NEUTRAL", "RANGE", "NONE"}:
-            blockers.append("Trend engine conflicts with the proposed direction")
+            warnings.append("Trend conflict: entry optimizer must demand a deeper POI price")
 
         sweep_active = bool(sweep.get("is_sweep"))
         buy_side = bool(sweep.get("buy_side"))
@@ -70,7 +70,10 @@ class TradeQualityEngine:
         if sweep.get("ambiguous_sweep") or sweep.get("sweep_side") == "DUAL":
             blockers.append("Both-side liquidity sweep is ambiguous")
         elif sweep_active and opposing_sweep:
-            blockers.append("Liquidity sweep direction conflicts with the trade")
+            if confirmation.get("confirmed") and post.get("confirmed") and post.get("direction") == expected_trend:
+                warnings.append("Counter-side sweep reclaimed by aligned structure; use optimized deeper POI entry")
+            else:
+                blockers.append("Counter-side sweep lacks aligned post-sweep structure confirmation")
         elif sweep_active and not expected_sweep:
             blockers.append("Sweep side does not support the proposed direction")
         if sweep_active and post.get("confirmed") and post.get("direction") != expected_trend:
@@ -152,7 +155,10 @@ class TradeQualityEngine:
         phase = str((market_phase or {}).get("phase", "")).strip()
         if phase and phase.lower() == "manipulation":
             if not (sweep_active and expected_sweep and post.get("confirmed")):
-                blockers.append("Market phase indicates manipulation without confirmed reversal")
+                if confirmation.get("confirmed") and isinstance(entry.get("poi_zone"), dict):
+                    warnings.append("Manipulation phase: entry requires the optimized POI pullback and closed-15m confirmation")
+                else:
+                    blockers.append("Market phase indicates manipulation without confirmed reversal")
 
         learning = (setup_quality or {}).get("learning") if isinstance(setup_quality, dict) else None
         if isinstance(learning, dict) and learning.get("matched"):
@@ -162,7 +168,7 @@ class TradeQualityEngine:
             except (TypeError, ValueError, OverflowError):
                 sample_count, expected_r = 0, None
             if sample_count >= 20 and expected_r is not None and expected_r <= 0:
-                blockers.append("Learning history shows non-positive expectancy for this setup")
+                warnings.append("Learning history is negative: require a more favorable optimized entry")
 
         if not risk.get("risk_setup_valid"):
             blockers.append(risk.get("risk_setup_reason") or "Risk engine rejected the stop")
