@@ -50,7 +50,9 @@ class TradeQualityEngine:
         if not entry.get("valid"):
             blockers.append(entry.get("reason") or "Entry is invalid")
         if not confirmation.get("confirmed"):
-            blockers.append(confirmation.get("reason") or "15m confirmation missing")
+            warnings.append(confirmation.get("reason") or "15m evidence unavailable; POI geometry remains primary")
+        if confirmation.get("15m_conflict"):
+            warnings.append("15m structure opposes the primary setup; retain as entry-placement evidence")
 
         expected_mtf = direction
         if not mtf.get("valid") or str(mtf.get("entry", mtf.get("direction", ""))).upper() != expected_mtf:
@@ -68,16 +70,11 @@ class TradeQualityEngine:
         expected_sweep = sell_side if direction == "LONG" else buy_side
         opposing_sweep = buy_side if direction == "LONG" else sell_side
         if sweep.get("ambiguous_sweep") or sweep.get("sweep_side") == "DUAL":
-            blockers.append("Both-side liquidity sweep is ambiguous")
-        elif sweep_active and opposing_sweep:
-            if confirmation.get("confirmed") and post.get("confirmed") and post.get("direction") == expected_trend:
-                warnings.append("Counter-side sweep reclaimed by aligned structure; use optimized deeper POI entry")
-            else:
-                blockers.append("Counter-side sweep lacks aligned post-sweep structure confirmation")
-        elif sweep_active and not expected_sweep:
-            blockers.append("Sweep side does not support the proposed direction")
+            warnings.append("Liquidity sweep is ambiguous; sweep evidence has reduced directional value")
+        elif sweep_active and (opposing_sweep or not expected_sweep):
+            warnings.append("Sweep evidence opposes the setup; use it to refine the POI entry")
         if sweep_active and post.get("confirmed") and post.get("direction") != expected_trend:
-            blockers.append("Post-sweep structure confirmation conflicts with the trade")
+            warnings.append("Post-sweep structure conflicts with the setup")
 
         regime_name = str(regime.get("regime", "UNKNOWN")).upper()
         bias = str(regime.get("directional_bias", "NEUTRAL")).upper()
@@ -91,17 +88,16 @@ class TradeQualityEngine:
                     and post.get("direction") == expected_trend
                 )
                 if bias not in {"NEUTRAL", regime_bias} and not countertrend_reversal:
-                    blockers.append("Proposed direction opposes the 4H market regime")
+                    warnings.append("Market regime opposes the primary MTF setup; POI entry must reflect this pressure")
                 if not (entry.get("ote_confluence") or ote.get("valid")):
-                    blockers.append("4H OTE and executable POI do not overlap")
+                    warnings.append("OTE confluence is absent; selected valid POI remains the entry anchor")
             elif regime_name == "RANGING":
-                if not (sweep_active and expected_sweep and post.get("confirmed") and post.get("direction") == expected_trend):
-                    blockers.append("Range trade requires an edge liquidity sweep and confirmed reversal")
+                warnings.append("Ranging regime: sweep evidence informs entry placement, not a veto")
             elif regime_name == "COMPRESSION":
                 breakout_side = str(sweep.get("breakout_side", "")).upper()
                 expected_breakout = "BUY_SIDE" if direction == "LONG" else "SELL_SIDE"
                 if not sweep.get("is_breakout") or breakout_side != expected_breakout:
-                    blockers.append("Compression trade requires a directional range breakout")
+                    warnings.append("Compression without aligned breakout; use a conservative POI LIMIT")
             elif regime_name == "TRANSITION":
                 # A transition can be either a confirmed reversal or a
                 # still-valid pullback continuation. Do not force a fresh
@@ -123,7 +119,7 @@ class TradeQualityEngine:
                     and confirmation.get("confirmed")
                 )
                 if not (transition_reversal or transition_continuation):
-                    blockers.append("Transition regime requires a confirmed reversal or aligned POI pullback")
+                    warnings.append("Transition regime lacks a clear reversal/continuation signature")
             elif regime_name == "HIGH_VOLATILITY":
                 if not risk.get("risk_setup_valid"):
                     blockers.append("High-volatility setup has invalid risk geometry")
@@ -158,7 +154,7 @@ class TradeQualityEngine:
                 if confirmation.get("confirmed") and isinstance(entry.get("poi_zone"), dict):
                     warnings.append("Manipulation phase: entry requires the optimized POI pullback and closed-15m confirmation")
                 else:
-                    blockers.append("Market phase indicates manipulation without confirmed reversal")
+                    warnings.append("Manipulation phase without confirmed reversal; favor a deeper POI entry")
 
         learning = (setup_quality or {}).get("learning") if isinstance(setup_quality, dict) else None
         if isinstance(learning, dict) and learning.get("matched"):
