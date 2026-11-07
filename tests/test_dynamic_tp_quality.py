@@ -92,7 +92,7 @@ def test_short_targets_use_only_sell_side_liquidity_and_fresh_opposing_pois():
     assert targets == [97.0, 96.0, 95.0]
 
 
-def test_strict_target_failure_reports_candidate_coverage_and_missing_rr_level():
+def test_partial_structural_target_reports_missing_rr_level_without_fabrication():
     result = DynamicTPEngine().calculate(
         direction="LONG",
         entry=100.0,
@@ -104,9 +104,13 @@ def test_strict_target_failure_reports_candidate_coverage_and_missing_rr_level()
         allow_rr_fallback=False,
     )
 
-    assert result["reason"] == "no_valid_structural_targets"
+    assert result["reason"] == "market_structure"
+    assert result["tp1"] == 101.5
+    assert result["tp2"] is None
+    assert result["tp3"] is None
     assert result["candidate_count"] == 1
     assert result["candidate_targets"] == [101.5]
+    assert result["target_rrs"] == [1.5]
     assert result["missing_rr_level"] == 2.0
     assert result["best_candidate_rr"] == 1.5
 
