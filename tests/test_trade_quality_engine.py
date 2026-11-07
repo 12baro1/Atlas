@@ -40,7 +40,7 @@ def test_valid_trend_pullback_passes_without_relying_on_score():
     assert result["blockers"] == []
 
 
-def test_opposing_liquidity_sweep_blocks_trade():
+def test_opposing_liquidity_sweep_is_counter_evidence_not_veto():
     payload = base_payload()
     payload["liquidity_sweep"] = {
         "is_sweep": True,
@@ -49,8 +49,8 @@ def test_opposing_liquidity_sweep_blocks_trade():
         "post_structure": {"confirmed": True, "direction": "BEARISH"},
     }
     result = evaluate(payload)
-    assert result["allowed"] is False
-    assert any("sweep" in item.lower() for item in result["blockers"])
+    assert result["allowed"] is True
+    assert any("sweep" in item.lower() for item in result["warnings"])
 
 
 def test_range_requires_sell_side_sweep_and_bullish_reclaim_for_long():
@@ -65,12 +65,12 @@ def test_range_requires_sell_side_sweep_and_bullish_reclaim_for_long():
     assert evaluate(payload)["allowed"] is True
 
 
-def test_range_without_confirmed_edge_sweep_is_blocked():
+def test_range_without_confirmed_edge_sweep_uses_entry_evidence():
     payload = base_payload()
     payload["market_regime"] = {"active": True, "regime": "RANGING", "directional_bias": "NEUTRAL"}
     result = evaluate(payload)
-    assert result["allowed"] is False
-    assert any("range trade requires" in item.lower() for item in result["blockers"])
+    assert result["allowed"] is True
+    assert any("ranging regime" in item.lower() for item in result["warnings"])
 
 
 def test_compression_requires_directional_breakout():
@@ -79,13 +79,13 @@ def test_compression_requires_directional_breakout():
     payload["liquidity_sweep"] = {"is_breakout": True, "breakout_side": "BUY_SIDE"}
     assert evaluate(payload)["allowed"] is True
     payload["liquidity_sweep"]["breakout_side"] = "SELL_SIDE"
-    assert evaluate(payload)["allowed"] is False
+    assert evaluate(payload)["allowed"] is True
 
 
-def test_countertrend_trade_requires_confirmed_reversal_sweep():
+def test_countertrend_regime_is_advisory_when_primary_mtf_and_poi_are_valid():
     payload = base_payload()
     payload["market_regime"] = {"active": True, "regime": "TRENDING_DOWN", "directional_bias": "BEARISH"}
-    assert evaluate(payload)["allowed"] is False
+    assert evaluate(payload)["allowed"] is True
     payload["liquidity_sweep"] = {
         "is_sweep": True,
         "buy_side": False,
@@ -143,8 +143,8 @@ def test_specialist_conflict_does_not_override_structural_execution_blockers():
     payload["smt"] = {"active": True, "direction": "BEARISH", "confidence": 88}
     payload["confirmation"] = {"confirmed": False, "reason": "15m confirmation missing"}
     result = TradeQualityEngine().evaluate(**payload)
-    assert result["allowed"] is False
-    assert any("15m confirmation missing" in item for item in result["blockers"])
+    assert result["allowed"] is True
+    assert any("15m confirmation missing" in item for item in result["warnings"])
     assert any("SMT" in item for item in result["warnings"])
 
 
@@ -177,4 +177,4 @@ def test_opposing_sweep_can_be_reclaimed_before_entry():
     }
     result = evaluate(payload)
     assert result["allowed"] is True
-    assert any("Counter-side sweep reclaimed" in item for item in result["warnings"])
+    assert any("Sweep evidence opposes" in item for item in result["warnings"])

@@ -65,7 +65,7 @@ class SetupQualityEngine:
             "setup_fingerprint": build_fingerprint(active_features),
             "blockers": blockers,
             "reasons": reasons,
-            "trade_allowed": direction in ["LONG", "SHORT"] and total >= 58 and not blockers,
+            "trade_allowed": direction in ["LONG", "SHORT"] and not blockers,
         }
 
     def _market_structure(self, direction, mtf, trend, structure):
@@ -82,7 +82,7 @@ class SetupQualityEngine:
         score = 35 + (25 if trend_ok else -20) + (20 if continuation else 0) + (15 if bos else 0) + (5 if choch else 0)
         if fake_choch:
             score -= 30
-        return self._score(score, "Trend/structure aligned" if trend_ok else "Trend mismatch", blocker=not trend_ok or fake_choch)
+        return self._score(score, "Trend/structure aligned" if trend_ok else "Trend/structure disagreement used as evidence")
 
     def _liquidity_sweep(self, direction, sweep):
         sweep = sweep if isinstance(sweep, dict) else {}
@@ -92,9 +92,9 @@ class SetupQualityEngine:
             post = sweep.get("post_structure") or {}
             expected_direction = "BULLISH" if direction == "LONG" else "BEARISH"
             if sweep.get("ambiguous_sweep") or opposing_side or not expected_side:
-                return self._score(0, "Liquidity sweep direction conflicts with setup", True)
+                return self._score(30, "Liquidity sweep conflicts; retained as counter-evidence")
             if post.get("confirmed") and post.get("direction") != expected_direction:
-                return self._score(0, "Post-sweep structure direction conflicts with setup", True)
+                return self._score(35, "Post-sweep structure conflicts; retained as counter-evidence")
             score = 65 + min(25, float(sweep.get("strength_score", 0) or 0) * 0.25)
             if post.get("confirmed"):
                 score += 10
@@ -150,7 +150,7 @@ class SetupQualityEngine:
     def _manipulation_filter(self, direction, candles, sweep, phase):
         phase_name = (phase or {}).get("phase", "")
         if phase_name in ["Manipulation", "Distribution"] and not sweep.get("post_structure", {}).get("confirmed"):
-            return self._score(35, "Manipulation risk not reclaimed", True)
+            return self._score(35, "Manipulation risk not reclaimed; use deeper POI pricing")
         return self._score(72 if sweep.get("is_sweep") else 58, "Stop-hunt/manipulation filter passed")
 
     def _session(self, session):
@@ -163,7 +163,7 @@ class SetupQualityEngine:
         near_bonus = 0
         if current and entry.get("entry"):
             near_bonus = max(0, 15 - abs(entry["entry"] - current) / current * 1000)
-        return self._score(55 + mode_bonus + near_bonus + (8 if confirmation.get("confirmed") else -12), "Entry quality")
+        return self._score(55 + mode_bonus + near_bonus + (5 if confirmation.get("confirmed") else 0), "Entry/POI quality; 15m confirmation is advisory")
 
     def _external(self, direction, *mods):
         score = 55

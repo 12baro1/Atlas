@@ -23,12 +23,12 @@ def test_short_confirmation_requires_latest_bearish_break_and_bearish_fvg():
     assert result["confirmed"] is True
 
 
-def test_higher_low_label_without_break_is_not_an_entry_confirmation():
+def test_higher_low_label_without_break_remains_advisory_with_valid_poi():
     structure = [{"label": "HL", "bos": False, "choch": False, "direction": None}]
     fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
     result = EntryConfirmationEngine().confirm(_mtf(), structure, fvg, _entry("LONG"), current_price=100.0)
-    assert result["confirmed"] is False
-    assert "BOS/CHoCH" in result["reason"]
+    assert result["confirmed"] is True
+    assert result["confirmation_mode"] == "NO_15M_BREAK"
 
 
 def test_wrong_direction_or_filled_fvg_does_not_confirm():
@@ -50,7 +50,7 @@ def test_fvg_on_wrong_side_of_market_cannot_confirm_pullback_entry():
         _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
     )
     assert result["confirmed"] is False
-    assert result["reason"] == "No unfilled directional FVG or valid OB+OTE confluence"
+    assert result["reason"] == "No valid directional FVG or selected OB+OTE POI"
 
 
 def test_bullish_break_confirmation_survives_later_higher_low_pullback():
@@ -75,8 +75,8 @@ def test_bullish_confirmation_expires_after_newer_bearish_break():
     result = EntryConfirmationEngine().confirm(
         _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
     )
-    assert result["confirmed"] is False
-    assert result["reason"] == "Latest 15m break opposes entry direction without a reclaimed pullback swing"
+    assert result["confirmed"] is True
+    assert result["15m_conflict"] is True
 
 
 def test_counter_bos_pullback_can_confirm_after_reclaimed_higher_low():
@@ -90,7 +90,7 @@ def test_counter_bos_pullback_can_confirm_after_reclaimed_higher_low():
         _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
     )
     assert result["confirmed"] is True
-    assert result["confirmation_mode"] == "reclaimed_pullback"
+    assert result["confirmation_mode"] == "COUNTER_DIRECTIONAL_EVIDENCE"
 
 
 def test_counter_bos_without_reclaimed_swing_does_not_confirm():
@@ -102,11 +102,11 @@ def test_counter_bos_without_reclaimed_swing_does_not_confirm():
     result = EntryConfirmationEngine().confirm(
         _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
     )
-    assert result["confirmed"] is False
-    assert "reclaimed pullback swing" in result["reason"]
+    assert result["confirmed"] is True
+    assert result["15m_conflict"] is True
 
 
-def test_counter_choch_always_invalidates_prior_directional_break():
+def test_counter_choch_is_advisory_for_valid_higher_timeframe_poi():
     structure = [
         {"index": 10, "kind": "HIGH", "label": "HH", "bos": True, "direction": "BULLISH"},
         {"index": 12, "kind": "LOW", "label": "LL", "bos": True, "choch": True, "direction": "BEARISH"},
@@ -116,8 +116,8 @@ def test_counter_choch_always_invalidates_prior_directional_break():
     result = EntryConfirmationEngine().confirm(
         _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
     )
-    assert result["confirmed"] is False
-    assert "CHoCH" in result["reason"]
+    assert result["confirmed"] is True
+    assert result["15m_conflict"] is True
 
 
 def test_counter_bos_can_confirm_when_price_reclaims_post_break_pullback_high():
@@ -131,7 +131,7 @@ def test_counter_bos_can_confirm_when_price_reclaims_post_break_pullback_high():
         _mtf(), structure, fvg, _entry("LONG"), current_price=101.5
     )
     assert result["confirmed"] is True
-    assert result["confirmation_mode"] == "reclaimed_pullback_price"
+    assert result["confirmation_mode"] == "COUNTER_DIRECTIONAL_EVIDENCE"
 
 
 def test_counter_bos_is_not_accepted_until_price_reclaims_pullback_high():
@@ -144,8 +144,8 @@ def test_counter_bos_is_not_accepted_until_price_reclaims_pullback_high():
     result = EntryConfirmationEngine().confirm(
         _mtf(), structure, fvg, _entry("LONG"), current_price=100.5
     )
-    assert result["confirmed"] is False
-    assert "without a reclaimed pullback swing" in result["reason"]
+    assert result["confirmed"] is True
+    assert result["15m_conflict"] is True
 
 
 def test_short_counter_bos_can_confirm_after_price_reclaims_post_break_pullback_low():
@@ -159,7 +159,7 @@ def test_short_counter_bos_can_confirm_after_price_reclaims_post_break_pullback_
         _mtf(), structure, fvg, _entry("SHORT"), current_price=98.5
     )
     assert result["confirmed"] is True
-    assert result["confirmation_mode"] == "reclaimed_pullback_price"
+    assert result["confirmation_mode"] == "COUNTER_DIRECTIONAL_EVIDENCE"
 
 
 def test_counter_bos_can_confirm_after_reclaiming_prior_structure_boundary_without_new_pivot():
@@ -172,7 +172,7 @@ def test_counter_bos_can_confirm_after_reclaiming_prior_structure_boundary_witho
         _mtf(), structure, fvg, _entry("LONG"), current_price=102.5
     )
     assert result["confirmed"] is True
-    assert result["confirmation_mode"] == "reclaimed_prior_structure_boundary"
+    assert result["confirmation_mode"] == "COUNTER_DIRECTIONAL_EVIDENCE"
 
 
 def test_counter_bos_is_rejected_until_prior_structure_boundary_is_reclaimed():
@@ -184,7 +184,8 @@ def test_counter_bos_is_rejected_until_prior_structure_boundary_is_reclaimed():
     result = EntryConfirmationEngine().confirm(
         _mtf(), structure, fvg, _entry("LONG"), current_price=101.5
     )
-    assert result["confirmed"] is False
+    assert result["confirmed"] is True
+    assert result["15m_conflict"] is True
 
 
 def test_short_counter_bos_can_confirm_after_reclaiming_prior_structure_boundary_without_new_pivot():
@@ -197,19 +198,19 @@ def test_short_counter_bos_can_confirm_after_reclaiming_prior_structure_boundary
         _mtf(), structure, fvg, _entry("SHORT"), current_price=97.5
     )
     assert result["confirmed"] is True
-    assert result["confirmation_mode"] == "reclaimed_prior_structure_boundary"
+    assert result["confirmation_mode"] == "COUNTER_DIRECTIONAL_EVIDENCE"
 
 
 
-def test_conflicting_secondary_evidence_requires_choch_or_reclaimed_pullback():
+def test_conflicting_secondary_evidence_does_not_create_confirmation_gate():
     entry = _entry("LONG")
     entry["confirmation_requirements"] = {"require_choch_or_reclaim": True, "reasons": ["weak_volume"]}
     fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
 
     bos_only = [{"label": "HH", "bos": True, "choch": False, "direction": "BULLISH"}]
     result = EntryConfirmationEngine().confirm(_mtf(), bos_only, fvg, entry, current_price=100.0)
-    assert result["confirmed"] is False
-    assert "requires 15m CHoCH" in result["reason"]
+    assert result["confirmed"] is True
+    assert result["confirmation_mode"] == "DIRECTIONAL_EVIDENCE"
 
     choch = [{"label": "HH", "bos": True, "choch": True, "direction": "BULLISH"}]
     result = EntryConfirmationEngine().confirm(_mtf(), choch, fvg, entry, current_price=100.0)

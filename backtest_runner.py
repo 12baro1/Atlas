@@ -342,6 +342,7 @@ class BacktestRunner:
                     f"side={str(sweep_meta.get('sweep_side') or 'NONE').upper()}"
                 )
                 self.liquidity_sweep_state_counts[sweep_key] = self.liquidity_sweep_state_counts.get(sweep_key, 0) + 1
+            entry_meta = (analysis or {}).get("entry") if isinstance(analysis, dict) else {}
             confirmation_meta = (analysis or {}).get("confirmation") if isinstance(analysis, dict) else {}
             if isinstance(confirmation_meta, dict):
                 confirmed = bool(confirmation_meta.get("confirmed"))
@@ -349,16 +350,28 @@ class BacktestRunner:
                 self.confirmation_outcome_counts[outcome] = self.confirmation_outcome_counts.get(outcome, 0) + 1
                 reason = str(confirmation_meta.get("reason") or "unspecified")
                 self.confirmation_reason_counts[reason] = self.confirmation_reason_counts.get(reason, 0) + 1
+
+                # The optimizer stores its profile on the entry payload. Read
+                # that source first; confirmation also mirrors it for consumers.
+                profile = (
+                    confirmation_meta.get("confirmation_profile")
+                    or (entry_meta.get("confirmation_profile") if isinstance(entry_meta, dict) else None)
+                    or {}
+                )
+                profile_mode = str(profile.get("mode") or "UNAVAILABLE").upper() if isinstance(profile, dict) else "UNAVAILABLE"
                 requirements = (
                     confirmation_meta.get("requirements")
                     or confirmation_meta.get("confirmation_requirements")
+                    or (entry_meta.get("confirmation_requirements") if isinstance(entry_meta, dict) else None)
                     or {}
                 )
-                if isinstance(requirements, dict):
-                    labels = [str(key) for key, enabled in requirements.items() if enabled]
-                    label = "+".join(sorted(labels)) if labels else "STANDARD_OR_NONE"
-                    self.confirmation_requirement_counts[label] = self.confirmation_requirement_counts.get(label, 0) + 1
-            entry_meta = (analysis or {}).get("entry") if isinstance(analysis, dict) else {}
+                if isinstance(requirements, dict) and requirements.get("require_choch_or_reclaim"):
+                    label = "CHOCH_OR_RECLAIM"
+                elif profile_mode == "DIRECTIONAL_BREAK":
+                    label = "DIRECTIONAL_BREAK"
+                else:
+                    label = profile_mode
+                self.confirmation_requirement_counts[label] = self.confirmation_requirement_counts.get(label, 0) + 1
             if isinstance(entry_meta, dict):
                 entry_reason = str(entry_meta.get("entry_reason_code") or entry_meta.get("reason") or "unspecified")
                 self.entry_reason_counts[entry_reason] = self.entry_reason_counts.get(entry_reason, 0) + 1

@@ -1062,12 +1062,26 @@ class AtlasEngine:
                     entry["entry_type_reason"] = "Order-flow karşı baskısı nedeniyle daha iyi POI LIMIT girişi"
                     entry.setdefault("checks", []).append("! Microstructure: MARKET yerine LIMIT seçildi")
                 else:
-                    entry["valid"] = False
-                    entry["reason"] = "Order-flow çatışması için geçerli pullback LIMIT seviyesi yok"
-                    entry["entry_reason_code"] = "ORDERBOOK_CONFLICT_NO_LIMIT"
-                    entry.setdefault("checks", []).append("✗ Microstructure çatışması ve geçerli LIMIT yok")
-                    confirmation["confirmed"] = False
-                    confirmation["reason"] = entry["reason"]
+                    # Keep the structurally valid setup. If the optimizer's
+                    # price is not on the pullback side, anchor the LIMIT at
+                    # the favorable edge of the already selected POI.
+                    zone = entry.get("poi_zone") if isinstance(entry.get("poi_zone"), dict) else {}
+                    try:
+                        edge = float(zone.get("low" if direction == "LONG" else "high"))
+                        stop = float(entry.get("stop_loss"))
+                        edge_valid = edge > 0 and (
+                            (direction == "LONG" and edge > stop and edge < current)
+                            or (direction == "SHORT" and edge < stop and edge > current)
+                        )
+                    except (TypeError, ValueError, OverflowError):
+                        edge_valid = False
+                    if edge_valid:
+                        entry["entry"] = edge
+                    entry["entry_type"] = "LIMIT"
+                    entry["requires_pullback"] = True
+                    entry["entry_type_reason"] = "Order-flow karşı baskısı: geçerli POI LIMIT tercih edildi"
+                    entry.setdefault("checks", []).append("! Order-flow çatışması sinyali iptal etmedi; LIMIT'e çevrildi")
+                    confirmation["execution_advisory"] = "ORDERBOOK_COUNTERPRESSURE"
             else:
                 entry.setdefault("checks", []).append(
                     "✓ Order book yönü destekli" if orderbook.get("supportive") else "✓ Order book engel oluşturmuyor"
