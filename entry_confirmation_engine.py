@@ -164,15 +164,33 @@ class EntryConfirmationEngine:
                     continue
             active_fvg = True
             break
-        if not active_fvg:
-            result["reason"] = "No unfilled directional FVG"
+        # A fresh directional FVG is the preferred confirmation context.
+        # In its absence, an unmitigated directional OB already selected by
+        # EntryEngine is acceptable only when it overlaps the 4H OTE.
+        poi_zone = entry.get("poi_zone") if isinstance(entry.get("poi_zone"), dict) else {}
+        try:
+            poi_low = float(poi_zone.get("low"))
+            poi_high = float(poi_zone.get("high"))
+            valid_poi_zone = 0 < poi_low < poi_high
+        except (TypeError, ValueError, OverflowError):
+            valid_poi_zone = False
+        ob_ote_confluence = bool(
+            entry.get("poi_source") == "ORDER_BLOCK"
+            and entry.get("ote_confluence")
+            and valid_poi_zone
+        )
+        if not active_fvg and not ob_ote_confluence:
+            result["reason"] = "No unfilled directional FVG or valid OB+OTE confluence"
             return result
 
         result["confirmed"] = True
         result["confirmation_mode"] = confirmation_mode
+        result["poi_confirmation"] = "FVG" if active_fvg else "ORDER_BLOCK_OTE"
         result["reason"] = (
-            "15m reclaimed pullback structure and directional FVG confirmed"
+            "15m reclaimed pullback structure confirmed with "
+            + ("directional FVG" if active_fvg else "directional OB + 4H OTE")
             if confirmation_mode.startswith("reclaimed_pullback")
-            else "15m structure break and directional FVG confirmed"
+            else "15m structure break confirmed with "
+            + ("directional FVG" if active_fvg else "directional OB + 4H OTE")
         )
         return result
