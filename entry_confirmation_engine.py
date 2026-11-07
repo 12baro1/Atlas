@@ -27,65 +27,55 @@ class EntryConfirmationEngine:
             result["reason"] = "No direction"
             return result
 
-        # Keep the latest confirmed directional break active through ordinary
-        # pullback pivots (HL/LH). It expires only when a newer opposing BOS/CHoCH
-        # appears; a swing label by itself is not a new break.
-        break_events = [
-            item for item in structure
+        break_positions = [
+            i for i, item in enumerate(structure)
             if isinstance(item, dict) and (item.get("bos") or item.get("choch"))
         ]
-        if not break_events:
+        if not break_positions:
             result["reason"] = "15m directional BOS/CHoCH missing"
             return result
 
-        last_break = break_events[-1]
+        last_break_position = break_positions[-1]
+        last_break = structure[last_break_position]
         label = str(last_break.get("label", "")).upper()
         event_direction = str(last_break.get("direction", "")).upper()
         confirmation_mode = "directional_break"
 
         if event_direction != expected:
-            # An opposing CHoCH is a genuine structural reversal and always
-            # invalidates the prior directional confirmation.
+            # A counter-directional CHoCH is a confirmed structural reversal,
+            # not a pullback; it remains an unconditional rejection.
             if last_break.get("choch"):
                 result["reason"] = "Latest 15m CHoCH reverses entry direction"
                 return result
 
-            # A counter-directional BOS can be a failed liquidity probe during
-            # a pullback. Preserve continuation only when a prior BOS in the
-            # intended direction exists and price structure subsequently prints
-            # a reclaimed HL (LONG) / LH (SHORT). This is not a generic bypass.
             prior_aligned_break = any(
-                str(item.get("direction", "")).upper() == expected
-                and bool(item.get("bos"))
-                for item in break_events[:-1]
+                str(structure[i].get("direction", "")).upper() == expected
+                and bool(structure[i].get("bos"))
+                for i in break_positions[:-1]
             )
+            if not prior_aligned_break:
+                result["reason"] = "Latest 15m break opposes entry direction without a prior aligned BOS"
+                return result
+
             recovery_label = "HL" if direction == "LONG" else "LH"
             recovery_kind = "LOW" if direction == "LONG" else "HIGH"
             reclaim_kind = "HIGH" if direction == "LONG" else "LOW"
-            last_break_position = structure.index(last_break)
             post_break_swings = [
                 item for item in structure[last_break_position + 1:]
                 if isinstance(item, dict)
             ]
 
-            # Preferred confirmation: the structure engine has explicitly
-            # labelled a higher low / lower high after the counter BOS.
             reclaimed_swing = any(
                 str(item.get("label", "")).upper() == recovery_label
                 and str(item.get("kind", item.get("type", ""))).upper() == recovery_kind
                 for item in post_break_swings
             )
 
-            # Some 15m feeds have not yet relabelled the recovery pivot as
-            # HL/LH, even though the pullback's opposing swing is confirmed.
-            # In that case require the latest close to reclaim that pivot:
-            # LONG must close above the post-break HIGH; SHORT below the LOW.
-            # A counter-directional CHoCH is still an unconditional rejection.
-            reclaimed_price = False
             try:
                 price = float(current_price) if current_price is not None else None
             except (TypeError, ValueError, OverflowError):
                 price = None
+
             reclaim_pivots = []
             for item in post_break_swings:
                 kind = str(item.get("kind", item.get("type", ""))).upper()
@@ -97,15 +87,40 @@ class EntryConfirmationEngine:
                     continue
                 if pivot_price > 0:
                     reclaim_pivots.append(pivot_price)
+
+            reclaim_source = "post_break_pullback"
+            # A confirmed counter-BOS can occur before the next pullback pivot
+            # is confirmed. In that case, use the last pre-break structure level
+            # as a stricter reclaim threshold. This requires price to recover
+            # the prior range boundary, not merely bounce from the counter-BOS.
+            if not reclaim_pivots:
+                reclaim_source = "prior_structure_boundary"
+                for item in reversed(structure[:last_break_position]):
+                    kind = str(item.get("kind", item.get("type", ""))).upper()
+                    if kind != reclaim_kind:
+                        continue
+                    try:
+                        pivot_price = float(item.get("price", item.get("high" if direction == "LONG" else "low")))
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if pivot_price > 0:
+                        reclaim_pivots.append(pivot_price)
+                        break
+
+            reclaimed_price = False
             if price is not None and reclaim_pivots:
                 reclaim_level = reclaim_pivots[-1]
                 reclaimed_price = price > reclaim_level if direction == "LONG" else price < reclaim_level
 
             reclaimed = reclaimed_swing or reclaimed_price
-            if not (prior_aligned_break and reclaimed):
+            if not reclaimed:
                 result["reason"] = "Latest 15m break opposes entry direction without a reclaimed pullback swing"
                 return result
-            confirmation_mode = "reclaimed_pullback" if reclaimed_swing else "reclaimed_pullback_price"
+            confirmation_mode = (
+                "reclaimed_pullback" if reclaimed_swing else
+                "reclaimed_pullback_price" if reclaim_source == "post_break_pullback" else
+                "reclaimed_prior_structure_boundary"
+            )
 
         elif direction == "LONG" and label != "HH":
             result["reason"] = "Bullish structural break missing"
@@ -115,8 +130,6 @@ class EntryConfirmationEngine:
             return result
 
         expected_fvg = "BULLISH" if direction == "LONG" else "BEARISH"
-        # Confirmation must use an FVG that is actually reachable as a
-        # pullback zone, matching EntryEngine's price-side selection rule.
         try:
             price = float(current_price) if current_price is not None else None
         except (TypeError, ValueError):
