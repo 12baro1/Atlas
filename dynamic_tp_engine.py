@@ -49,6 +49,10 @@ class DynamicTPEngine:
             )
 
             if target is None and not allow_rr_fallback:
+                # Structural targets already found remain usable. Stop looking
+                # for farther RR tiers instead of invalidating the whole setup.
+                if selected_targets:
+                    break
                 candidate_rr = [
                     round((entry - price if direction == "SHORT" else price - entry) / risk, 4)
                     for price in targets
@@ -59,7 +63,7 @@ class DynamicTPEngine:
                     "tp2": None,
                     "tp3": None,
                     "reason": "no_valid_structural_targets",
-                    "sources": selected_sources + ["missing_structural_target"],
+                    "sources": ["missing_structural_target"],
                     "synthetic_targets": False,
                     "atr": round(atr_snapshot, 8),
                     "candidate_count": len(targets),
@@ -74,6 +78,19 @@ class DynamicTPEngine:
             selected_targets.append(target)
             selected_sources.append(source)
             previous_target = target
+
+        if not selected_targets:
+            return {
+                "tp1": None, "tp2": None, "tp3": None,
+                "reason": "no_valid_structural_targets",
+                "sources": ["missing_structural_target"],
+                "synthetic_targets": False,
+                "atr": round(atr_snapshot, 8),
+                "candidate_count": len(targets),
+                "candidate_targets": [round(float(price), 8) for price in targets],
+                "missing_rr_level": self.MIN_RR_LEVELS[0],
+                "best_candidate_rr": None,
+            }
 
         tp1, tp2, tp3 = self._order_target_levels(
             direction=direction,
@@ -204,8 +221,10 @@ class DynamicTPEngine:
             if reward > 0 and value not in candidates:
                 candidates.append(value)
         candidates.sort(key=lambda price: abs(price - entry))
-        if len(candidates) < 3:
-            return None, None, None
+        # Keep every real structural objective, even when fewer than three
+        # exist. Missing levels stay None; they are never synthesized or nudged.
+        candidates = candidates[:3]
+        candidates.extend([None] * (3 - len(candidates)))
         return candidates[0], candidates[1], candidates[2]
 
     def _nudge_level(self, entry, risk, direction, picked, used):
