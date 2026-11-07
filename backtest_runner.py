@@ -787,6 +787,8 @@ class BacktestRunner:
             "unfilled_limits": self.unfilled_limits,
             "expired_limits": self.expired_limits,
             "stale_limits_cancelled": self.stale_limits_cancelled,
+            "stale_limit_signal_candle_target": self.stale_limit_signal_candle_target,
+            "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
             "trade_history": list(self.history),
             "open_trades": self.open_trades,
             "invalid_candidates": self.invalid_candidates,
