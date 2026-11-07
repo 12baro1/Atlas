@@ -453,8 +453,10 @@ def _report(stats, name):
         print(f"  MTF kaynakları : {stats['mtf_entry_source_counts']}")
     if stats.get("liquidity_sweep_state_counts"):
         print(f"  Sweep durumu   : {stats['liquidity_sweep_state_counts']}")
-    if stats.get("confirmation_reason_counts"):
-        print(f"  Onay nedenleri : {stats['confirmation_reason_counts']}")
+    print(f"  Onay sonucu    : {stats.get('confirmation_outcome_counts', {})}")
+    print(f"  Onay nedenleri : {stats.get('confirmation_reason_counts', {})}")
+    print(f"  Onay şart profili: {stats.get('confirmation_requirement_counts', {})}")
+    print(f"  Entry tür nedeni: {stats.get('entry_type_reason_counts', {})}")
     if stats.get("entry_validity_counts"):
         print(f"  Entry geçerliliği: {stats['entry_validity_counts']}")
     if stats.get("decision_blocker_counts"):
