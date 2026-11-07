@@ -446,6 +446,21 @@ class BacktestRunner:
                 self.invalid_candidates += 1
                 return None
             is_long = signal_dir == "LONG"
+
+            # A LIMIT is submitted only after the signal candle closes. If a
+            # structural target was already touched during that candle, the
+            # pending order is stale before it even exists.
+            if signal_index is not None and 0 <= signal_index < entry_index and signal_index < len(candles):
+                signal_candle = candles[signal_index]
+                target_hit_before_order = any(
+                    (signal_candle.high >= target if is_long else signal_candle.low <= target)
+                    for target in (_num(risk.get("tp1")), _num(risk.get("tp2")), _num(risk.get("tp3")))
+                    if target is not None
+                )
+                if target_hit_before_order:
+                    self.stale_limits_cancelled += 1
+                    return None
+
             expiry_index = min(len(candles), entry_index + self.limit_expiry_bars)
             for candidate_index in range(entry_index, expiry_index):
                 candle = candles[candidate_index]
