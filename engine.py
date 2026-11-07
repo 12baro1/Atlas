@@ -1190,7 +1190,15 @@ class AtlasEngine:
             confirmation["confirmed"] = False
             confirmation["reason"] = "TP1 already reached; wait for a fresh setup"
         elif tp1_reached and entry_type == "LIMIT":
-            entry.setdefault("checks", []).append("✓ LIMIT entry preserved; TP1 already crossed")
+            # A pending pullback order is also stale once its structural TP1
+            # has already traded. Do not publish an order with no remaining
+            # target path; wait for a fresh POI/setup instead.
+            entry["valid"] = False
+            entry["reason"] = "TP1 already reached before LIMIT entry; wait for a fresh setup"
+            entry["entry_reason_code"] = "TP1_ALREADY_REACHED"
+            entry.setdefault("checks", []).append("✗ TP1 already reached; stale LIMIT entry blocked")
+            confirmation["confirmed"] = False
+            confirmation["reason"] = "TP1 already reached before LIMIT entry; wait for a fresh setup"
 
         risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles)
 
