@@ -384,7 +384,7 @@ class EntryEngine:
             )
 
             limit_entry = min(float(selected_fvg["from"]), float(selected_fvg["to"])) if selected_fvg else (self._safe_price(selected_ob.get("low")) if selected_ob else None)
-            if requires_ote and limit_entry is not None:
+            if use_ote_filter and limit_entry is not None:
                 limit_entry = max(limit_entry, ote_low)
             if current_price is not None and result["stop_loss"] is not None:
                 zone_low = self._safe_price(min(selected_fvg.get("from"), selected_fvg.get("to"))) if selected_fvg else (
