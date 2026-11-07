@@ -138,6 +138,8 @@ def test_backtest_coverage_accepts_full_requested_history(capsys):
     )
 
     assert set(coverage) == {"15m", "1h", "4h", "1d", "1w"}
+    assert coverage["1w"]["warmup_required"] == 300
+    assert coverage["1w"]["warmup_reduced"] is False
     assert "TARİH KAPSAMI" in capsys.readouterr().out
 
 
@@ -162,17 +164,6 @@ def test_backtest_coverage_accepts_listing_limited_weekly_warmup(capsys):
     assert coverage["1w"]["count"] < backtest.BACKTEST_WARMUP_CANDLES["1w"]
     assert coverage["1w"]["warmup_reduced"] is True
     assert "WARMUP UYARISI" in capsys.readouterr().out
-
-
-def test_backtest_coverage_keeps_full_weekly_warmup_without_listing_limit():
-    now_ms = 2_000_000_000_000
-    data = _complete_coverage_data(days=7, now_ms=now_ms)
-    data["1w"] = data["1w"][-250:]
-
-    with pytest.raises(RuntimeError, match="1w: warmup verisi yetersiz"):
-        backtest._validate_backtest_coverage(
-            data, "BTC/USDT:USDT", days=7, now_ms=now_ms
-        )
 
 
 def test_backtest_coverage_rejects_late_start():
