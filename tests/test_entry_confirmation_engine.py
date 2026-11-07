@@ -160,3 +160,41 @@ def test_short_counter_bos_can_confirm_after_price_reclaims_post_break_pullback_
     )
     assert result["confirmed"] is True
     assert result["confirmation_mode"] == "reclaimed_pullback_price"
+
+
+def test_counter_bos_can_confirm_after_reclaiming_prior_structure_boundary_without_new_pivot():
+    structure = [
+        {"index": 10, "kind": "HIGH", "label": "HH", "price": 102.0, "bos": True, "direction": "BULLISH"},
+        {"index": 12, "kind": "LOW", "label": "LL", "price": 98.0, "bos": True, "direction": "BEARISH"},
+    ]
+    fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("LONG"), current_price=102.5
+    )
+    assert result["confirmed"] is True
+    assert result["confirmation_mode"] == "reclaimed_prior_structure_boundary"
+
+
+def test_counter_bos_is_rejected_until_prior_structure_boundary_is_reclaimed():
+    structure = [
+        {"index": 10, "kind": "HIGH", "label": "HH", "price": 102.0, "bos": True, "direction": "BULLISH"},
+        {"index": 12, "kind": "LOW", "label": "LL", "price": 98.0, "bos": True, "direction": "BEARISH"},
+    ]
+    fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("LONG"), current_price=101.5
+    )
+    assert result["confirmed"] is False
+
+
+def test_short_counter_bos_can_confirm_after_reclaiming_prior_structure_boundary_without_new_pivot():
+    structure = [
+        {"index": 10, "kind": "LOW", "label": "LL", "price": 98.0, "bos": True, "direction": "BEARISH"},
+        {"index": 12, "kind": "HIGH", "label": "HH", "price": 102.0, "bos": True, "direction": "BULLISH"},
+    ]
+    fvg = [{"type": "BEARISH", "from": 103.0, "to": 105.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("SHORT"), current_price=97.5
+    )
+    assert result["confirmed"] is True
+    assert result["confirmation_mode"] == "reclaimed_prior_structure_boundary"
