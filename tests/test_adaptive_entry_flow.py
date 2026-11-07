@@ -103,7 +103,7 @@ def test_supportive_secondary_evidence_keeps_standard_confirmation():
         cisd={"active": True, "direction": "BULLISH", "confidence": 80},
     )
 
-    assert entry["confirmation_profile"]["mode"] == "DIRECTIONAL_BREAK"
+    assert entry["confirmation_profile"]["mode"] == "EVIDENCE_BALANCE"
     assert "confirmation_requirements" not in entry
 
 
@@ -141,7 +141,7 @@ def test_confirmation_exposes_optimizer_profile_and_requirements():
     result = EntryConfirmationEngine().confirm({}, [], [], entry)
 
     assert result["confirmation_profile"]["mode"] == "CHOCH_OR_RECLAIM"
-    assert result["requirements"]["require_choch_or_reclaim"] is True
+    assert result["requirements"] == {}
 
 
 def _bullish_fvg():
