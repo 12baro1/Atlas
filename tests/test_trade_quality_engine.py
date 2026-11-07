@@ -148,11 +148,30 @@ def test_specialist_conflict_does_not_override_structural_execution_blockers():
     assert any("SMT" in item for item in result["warnings"])
 
 
-def test_learning_blocks_only_when_sample_is_sufficient_and_expectancy_is_negative():
+def test_negative_learning_expectancy_is_advisory_not_a_hard_veto():
     payload = base_payload()
     payload["setup_quality"] = {
         "learning": {"matched": True, "sample_count": 25, "expected_r": -0.15}
     }
     result = TradeQualityEngine().evaluate(**payload)
-    assert result["allowed"] is False
-    assert any("Learning history" in item for item in result["blockers"])
+    assert result["allowed"] is True
+    assert result["blockers"] == []
+    assert any("Learning history" in item for item in result["warnings"])
+
+
+def test_secondary_trend_conflict_is_warning_when_primary_structure_is_valid():
+    payload = base_payload()
+    payload["trend"] = {"trend": "BEARISH"}
+    result = TradeQualityEngine().evaluate(**payload)
+    assert result["allowed"] is True
+    assert result["blockers"] == []
+    assert any("Trend engine conflicts" in item for item in result["warnings"])
+
+
+def test_manipulation_phase_does_not_duplicate_mandatory_15m_confirmation():
+    payload = base_payload()
+    payload["market_phase"] = {"phase": "Manipulation"}
+    result = TradeQualityEngine().evaluate(**payload)
+    assert result["allowed"] is True
+    assert result["blockers"] == []
+    assert any("Market phase indicates manipulation" in item for item in result["warnings"])
