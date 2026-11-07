@@ -33,6 +33,40 @@ def test_load_historical_excludes_unclosed_candles(monkeypatch, timeframe):
     assert [c.time for c in data[timeframe]] == [now_ms - duration]
 
 
+def test_market_listing_time_reads_bybit_launch_timestamp(monkeypatch):
+    class FakeExchange:
+        def load_markets(self):
+            return {
+                "ETH/USDT:USDT": {
+                    "info": {"launchTime": "1615766400000"}
+                }
+            }
+
+    monkeypatch.setattr(backtest, "exchange", FakeExchange())
+
+    assert backtest._market_listing_time_ms("ETH/USDT:USDT") == 1615766400000
+
+
+def test_load_historical_clamps_since_to_market_listing(monkeypatch):
+    now_ms = 2_000_000_000_000
+    listing_time_ms = now_ms - 50 * 86_400_000
+    seen = []
+
+    def fake_fetch(symbol, timeframe, since_ms, limit=1000):
+        seen.append((timeframe, since_ms))
+        return []
+
+    monkeypatch.setattr(backtest, "_fetch_history", fake_fetch)
+    monkeypatch.setattr(backtest, "TIMEFRAMES", {"1w": 300, "1d": 500})
+
+    backtest.load_historical(
+        "ETH/USDT:USDT", days=1, now_ms=now_ms,
+        listing_time_ms=listing_time_ms,
+    )
+
+    assert all(since == listing_time_ms for _, since in seen)
+
+
 def test_load_historical_does_not_mutate_source_candle_list(monkeypatch):
     now_ms = 10 * 24 * 60 * 60 * 1000
     duration = backtest.TIMEFRAME_DURATION_MS["15m"]
@@ -105,6 +139,40 @@ def test_backtest_coverage_accepts_full_requested_history(capsys):
 
     assert set(coverage) == {"15m", "1h", "4h", "1d", "1w"}
     assert "TARİH KAPSAMI" in capsys.readouterr().out
+
+
+def test_backtest_coverage_accepts_listing_limited_weekly_warmup(capsys):
+    now_ms = 2_000_000_000_000
+    days = 7
+    listing_time_ms = now_ms - 295 * backtest.TIMEFRAME_DURATION_MS["1w"]
+    data = _complete_coverage_data(days=days, now_ms=now_ms)
+    weekly_duration = backtest.TIMEFRAME_DURATION_MS["1w"]
+    first_weekly = int(listing_time_ms // weekly_duration) * weekly_duration
+    last_weekly = (int(now_ms // weekly_duration) - 1) * weekly_duration
+    data["1w"] = [
+        _candle(timestamp)
+        for timestamp in range(first_weekly, last_weekly + 1, weekly_duration)
+    ]
+
+    coverage = backtest._validate_backtest_coverage(
+        data, "ETH/USDT:USDT", days=days, now_ms=now_ms,
+        listing_time_ms=listing_time_ms,
+    )
+
+    assert coverage["1w"]["count"] < backtest.BACKTEST_WARMUP_CANDLES["1w"]
+    assert coverage["1w"]["warmup_reduced"] is True
+    assert "WARMUP UYARISI" in capsys.readouterr().out
+
+
+def test_backtest_coverage_keeps_full_weekly_warmup_without_listing_limit():
+    now_ms = 2_000_000_000_000
+    data = _complete_coverage_data(days=7, now_ms=now_ms)
+    data["1w"] = data["1w"][-250:]
+
+    with pytest.raises(RuntimeError, match="1w: warmup verisi yetersiz"):
+        backtest._validate_backtest_coverage(
+            data, "BTC/USDT:USDT", days=7, now_ms=now_ms
+        )
 
 
 def test_backtest_coverage_rejects_late_start():
