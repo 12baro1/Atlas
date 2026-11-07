@@ -201,6 +201,8 @@ class EntryEngine:
         fvg_candidates = []
         crossed_matching_fvg = False
         crossed_matching_ob = False
+        ote_excluded_matching_fvg = False
+        ote_excluded_matching_ob = False
         for gap in fvg:
             if gap.get("filled", False) or gap.get("type") != ("BULLISH" if direction == "LONG" else "BEARISH"):
                 continue
@@ -209,6 +211,7 @@ class EntryEngine:
             if lower is None or upper is None or lower >= upper:
                 continue
             if not overlaps_ote(lower, upper):
+                ote_excluded_matching_fvg = True
                 continue
             if current_price is not None:
                 # A LONG pullback zone must be below market; a SHORT zone above it.
@@ -256,6 +259,7 @@ class EntryEngine:
             if low is None or high is None or low >= high:
                 continue
             if not overlaps_ote(low, high):
+                ote_excluded_matching_ob = True
                 continue
             if current_price is not None:
                 if direction == "LONG" and low > current_price:
@@ -320,7 +324,11 @@ class EntryEngine:
             # A crossed candidate is replaced by the nearest still-actionable
             # POI found above; never reuse the crossed price.
             result["entry_zone_crossed"] = False
-        elif crossed_matching_fvg or crossed_matching_ob:
+        elif crossed_matching_fvg or crossed_matching_ob or (
+            use_ote_filter and (ote_excluded_matching_fvg or ote_excluded_matching_ob)
+        ):
+            # A directional POI excluded by the active 4H OTE location
+            # constraint is still reported as a crossed/unusable entry zone.
             result["entry_zone_crossed"] = True
 
         # -------------------------
