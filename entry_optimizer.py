@@ -31,8 +31,9 @@ class EntryOptimizer:
 
     def optimize(
         self, entry, current_price=None, trend=None, liquidity_sweep=None,
-        ote=None, htf_orderblock=None, htf_fvg=None, smt=None, unicorn=None,
-        cisd=None, volume_profile=None, institutional=None, orderbook=None,
+        ote=None, market_phase=None, market_regime=None, htf_orderblock=None,
+        htf_fvg=None, smt=None, unicorn=None, cisd=None, volume_profile=None,
+        institutional=None, orderbook=None,
     ):
         entry = entry if isinstance(entry, dict) else {}
         direction = str(entry.get("direction", "NONE")).upper()
@@ -59,7 +60,6 @@ class EntryOptimizer:
             return raw if direction == "LONG" else high - (high - low) * position
 
         aligned = "BULLISH" if direction == "LONG" else "BEARISH"
-        opposed = "BEARISH" if direction == "LONG" else "BULLISH"
         weighted_positions = [(0.50, 2.0, "poi_midpoint")]
         evidence = []
 
@@ -107,6 +107,28 @@ class EntryOptimizer:
         add_bias("unicorn", unicorn, 1.3)
         add_bias("cisd", cisd, 1.2)
         add_bias("institutional_flow", institutional, 1.0)
+
+        phase_name = str((market_phase or {}).get("phase", "")).strip().lower()
+        sweep_confirmed = bool(
+            sweep.get("is_sweep")
+            and (sweep.get("post_structure") or {}).get("confirmed")
+            and (sweep.get("post_structure") or {}).get("direction") == aligned
+        )
+        if phase_name == "manipulation" and not sweep_confirmed:
+            weighted_positions.append((0.14, 2.0, "manipulation_phase"))
+            evidence.append({"source": "market_phase", "bias": "MANIPULATION_RISK", "weight": 2.0})
+        elif phase_name == "distribution" and direction == "LONG":
+            weighted_positions.append((0.20, 1.2, "distribution_phase"))
+            evidence.append({"source": "market_phase", "bias": "COUNTERPRESSURE", "weight": 1.2})
+        elif phase_name == "accumulation" and direction == "SHORT":
+            weighted_positions.append((0.20, 1.2, "accumulation_phase"))
+            evidence.append({"source": "market_phase", "bias": "COUNTERPRESSURE", "weight": 1.2})
+
+        regime_bias = self._direction((market_regime or {}).get("directional_bias"))
+        if regime_bias != "NONE":
+            regime_aligned = regime_bias == direction
+            weighted_positions.append((0.60 if regime_aligned else 0.18, 1.3, "market_regime"))
+            evidence.append({"source": "market_regime", "bias": "ALIGNED" if regime_aligned else "OPPOSED", "weight": 1.3})
 
         # Use actionable prices only when they lie inside the selected POI.
         weighted_levels = []
