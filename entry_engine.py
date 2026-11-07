@@ -135,8 +135,11 @@ class EntryEngine:
         if isinstance(ote, dict):
             try:
                 fib_values = [float(ote.get("fib62")), float(ote.get("fib79"))]
-                explicitly_invalid_ote = ote.get("valid") is False
-                if not explicitly_invalid_ote and all(math.isfinite(value) and value > 0 for value in fib_values):
+                # Numeric 4H OTE bounds remain a usable location constraint
+                # even when the upstream validity flag is false. Fall back to
+                # directional POIs only when the bounds themselves are absent
+                # or malformed.
+                if all(math.isfinite(value) and value > 0 for value in fib_values):
                     ote_low, ote_high = min(fib_values), max(fib_values)
             except (TypeError, ValueError, OverflowError):
                 ote_low = ote_high = None
