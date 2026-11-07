@@ -135,20 +135,25 @@ class EntryEngine:
         if isinstance(ote, dict):
             try:
                 fib_values = [float(ote.get("fib62")), float(ote.get("fib79"))]
-                explicitly_invalid_ote = ote.get("valid") is False
-                if not explicitly_invalid_ote and all(math.isfinite(value) and value > 0 for value in fib_values):
+                # Numeric 4H OTE bounds remain a usable location constraint
+                # even when the upstream validity flag is false. Fall back to
+                # directional POIs only when the bounds themselves are absent
+                # or malformed.
+                if all(math.isfinite(value) and value > 0 for value in fib_values):
                     ote_low, ote_high = min(fib_values), max(fib_values)
             except (TypeError, ValueError, OverflowError):
                 ote_low = ote_high = None
-        if requires_ote and (ote_low is None or ote_high is None or ote_low >= ote_high):
-            result["reason"] = "4H OTE levels unavailable for trend continuation"
-            result["entry_reason_code"] = "OTE_UNAVAILABLE"
-            result["entry_type_reason"] = result["reason"]
-            result["entry_zone_crossed"] = True
-            return result
+        use_ote_filter = bool(
+            requires_ote and ote_low is not None and ote_high is not None and ote_low < ote_high
+        )
+        if requires_ote and not use_ote_filter:
+            # OTE is a preferred confluence in trend continuation, not a
+            # prerequisite for using an otherwise fresh directional POI.
+            result["checks"].append("! 4H OTE unavailable; directional FVG/OB POI fallback active")
+            result["ote_fallback_used"] = True
 
         def overlaps_ote(lower, upper):
-            return not requires_ote or (ote_low <= upper and ote_high >= lower)
+            return not use_ote_filter or (ote_low <= upper and ote_high >= lower)
 
         # Place the stop a small ATR buffer beyond the structural invalidation
         # level. RiskEngine still rejects stops that remain too tight; it does
@@ -196,6 +201,8 @@ class EntryEngine:
         fvg_candidates = []
         crossed_matching_fvg = False
         crossed_matching_ob = False
+        ote_excluded_matching_fvg = False
+        ote_excluded_matching_ob = False
         for gap in fvg:
             if gap.get("filled", False) or gap.get("type") != ("BULLISH" if direction == "LONG" else "BEARISH"):
                 continue
@@ -204,6 +211,7 @@ class EntryEngine:
             if lower is None or upper is None or lower >= upper:
                 continue
             if not overlaps_ote(lower, upper):
+                ote_excluded_matching_fvg = True
                 continue
             if current_price is not None:
                 # A LONG pullback zone must be below market; a SHORT zone above it.
@@ -251,6 +259,7 @@ class EntryEngine:
             if low is None or high is None or low >= high:
                 continue
             if not overlaps_ote(low, high):
+                ote_excluded_matching_ob = True
                 continue
             if current_price is not None:
                 if direction == "LONG" and low > current_price:
@@ -296,11 +305,14 @@ class EntryEngine:
             _, _, _, selected_poi_source, selected_poi = min(poi_options, key=lambda item: item[:3])
             selected_fvg = selected_poi if selected_poi_source == "FVG" else None
             selected_ob = selected_poi if selected_poi_source == "ORDER_BLOCK" else None
-        if requires_ote and selected_poi is None:
+        if use_ote_filter and selected_poi is None:
             result["reason"] = "No fresh directional FVG or unmitigated OB overlaps 4H OTE"
             result["entry_reason_code"] = "POI_CROSSED" if (crossed_matching_fvg or crossed_matching_ob) else "NO_VALID_POI_IN_OTE"
             result["entry_type_reason"] = result["reason"]
-            result["entry_zone_crossed"] = bool(crossed_matching_fvg or crossed_matching_ob)
+            result["entry_zone_crossed"] = bool(
+                crossed_matching_fvg or crossed_matching_ob
+                or ote_excluded_matching_fvg or ote_excluded_matching_ob
+            )
             return result
         if selected_poi:
             result["poi_source"] = selected_poi_source
@@ -315,7 +327,11 @@ class EntryEngine:
             # A crossed candidate is replaced by the nearest still-actionable
             # POI found above; never reuse the crossed price.
             result["entry_zone_crossed"] = False
-        elif crossed_matching_fvg or crossed_matching_ob:
+        elif crossed_matching_fvg or crossed_matching_ob or (
+            use_ote_filter and (ote_excluded_matching_fvg or ote_excluded_matching_ob)
+        ):
+            # A directional POI excluded by the active 4H OTE location
+            # constraint is still reported as a crossed/unusable entry zone.
             result["entry_zone_crossed"] = True
 
         # -------------------------
@@ -329,7 +345,7 @@ class EntryEngine:
             )
 
             limit_entry = max(float(selected_fvg["from"]), float(selected_fvg["to"])) if selected_fvg else (self._safe_price(selected_ob.get("high")) if selected_ob else None)
-            if requires_ote and limit_entry is not None:
+            if use_ote_filter and limit_entry is not None:
                 limit_entry = min(limit_entry, ote_high)
             if current_price is not None and result["stop_loss"] is not None:
                 zone_low = self._safe_price(min(selected_fvg.get("from"), selected_fvg.get("to"))) if selected_fvg else (
@@ -353,7 +369,7 @@ class EntryEngine:
                     and post.get("direction") == "BULLISH"
                     and 0 <= confirmation_age <= max_confirmation_age
                 )
-                inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high and (not requires_ote or ote_low <= current_price <= ote_high)
+                inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high and (not use_ote_filter or ote_low <= current_price <= ote_high)
                 if inside_poi and sweep_confirmed and current_price > result["stop_loss"]:
                     result["entry"] = current_price
                     result["entry_type"] = "MARKET"
@@ -382,7 +398,7 @@ class EntryEngine:
             )
 
             limit_entry = min(float(selected_fvg["from"]), float(selected_fvg["to"])) if selected_fvg else (self._safe_price(selected_ob.get("low")) if selected_ob else None)
-            if requires_ote and limit_entry is not None:
+            if use_ote_filter and limit_entry is not None:
                 limit_entry = max(limit_entry, ote_low)
             if current_price is not None and result["stop_loss"] is not None:
                 zone_low = self._safe_price(min(selected_fvg.get("from"), selected_fvg.get("to"))) if selected_fvg else (

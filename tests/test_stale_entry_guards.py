@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from entry_engine import EntryEngine
-from engine import _tp1_already_reached
+from engine import _tp1_already_reached, _tp1_touched_on_signal_candle
 
 
 def test_short_setup_is_stale_when_price_has_crossed_tp1():
@@ -151,3 +151,43 @@ def test_invalid_pending_limit_hides_hypothetical_levels():
     assert "Giriş" not in output
     assert "Stop Loss" not in output
     assert "TP1" not in output
+
+
+def test_trending_setup_uses_directional_poi_when_4h_ote_is_unavailable():
+    engine = EntryEngine()
+    result = engine.generate(
+        {"entry": "LONG"},
+        [
+            {"label": "LL", "price": 95.0, "kind": "LOW"},
+            {"label": "HH", "price": 110.0, "kind": "HIGH"},
+        ],
+        [{"type": "BULLISH", "from": 100.0, "to": 102.0, "strength": 1.0}],
+        [],
+        current_price=110.0,
+        candles=None,
+        ote=None,
+        market_regime={"regime": "TRENDING_UP"},
+    )
+    assert result["valid"] is True
+    assert result["entry_reason_code"] == "ENTRY_READY"
+    assert result["entry_type"] == "LIMIT"
+    assert result["entry"] == 102.0
+    assert result["ote_fallback_used"] is True
+
+
+class _Candle:
+    def __init__(self, high, low):
+        self.high = high
+        self.low = low
+
+
+def test_long_limit_is_stale_when_signal_candle_wick_touches_tp1():
+    assert _tp1_touched_on_signal_candle("LONG", _Candle(102.0, 99.0), 101.0) is True
+
+
+def test_short_limit_is_stale_when_signal_candle_wick_touches_tp1():
+    assert _tp1_touched_on_signal_candle("SHORT", _Candle(101.0, 98.0), 99.0) is True
+
+
+def test_signal_candle_without_tp1_touch_keeps_limit_eligible():
+    assert _tp1_touched_on_signal_candle("LONG", _Candle(100.8, 99.0), 101.0) is False
