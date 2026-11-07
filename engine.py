@@ -30,6 +30,7 @@ from decision_engine import DecisionEngine
 from dynamic_tp_engine import DynamicTPEngine
 from entry_confirmation_engine import EntryConfirmationEngine
 from entry_engine import EntryEngine
+from entry_optimizer import EntryOptimizer
 from fvg_engine import FVGEngine
 from htf_fvg_engine import HTFFVGEngine
 from htf_orderblock_engine import HTFOrderBlockEngine
@@ -135,6 +136,7 @@ class AtlasEngine:
 
         # Sinyal, risk ve operasyon motorları
         self.entry = EntryEngine()
+        self.entry_optimizer = EntryOptimizer()
         self.entry_confirmation = EntryConfirmationEngine()
         self.confluence = ConfluenceEngine()
         self.signal = SignalEngine()
@@ -1018,12 +1020,28 @@ class AtlasEngine:
             ote=ote,
             market_regime=market_regime,
         )
+        optimization = self.entry_optimizer.optimize(
+            entry=entry,
+            current_price=candles[-1].close if candles else None,
+            trend=trend,
+            liquidity_sweep=liquidity_sweep,
+            ote=ote,
+            htf_orderblock=htf_orderblock,
+            htf_fvg=htf_fvg,
+            smt=smt,
+            unicorn=unicorn,
+            cisd=cisd,
+            volume_profile=volume_profile,
+            institutional=institutional,
+            orderbook=orderbook,
+        )
         confirmation = self.entry_confirmation.confirm(
             mtf, entry_structure, fvg, entry,
             current_price=candles[-1].close if candles else None,
         )
         orderbook = orderbook or {"active": False, "market_entry_allowed": True}
         entry["orderbook"] = orderbook
+        entry["optimization"] = optimization
         if entry.get("valid") and (orderbook.get("active") or orderbook.get("trade_flow_active")):
             entry_type = str(entry.get("entry_type") or "").upper()
             if orderbook.get("active") and entry_type == "LIMIT" and entry.get("poi_zone"):
