@@ -159,7 +159,7 @@ def test_short_counter_bos_can_confirm_after_price_reclaims_post_break_pullback_
         _mtf(), structure, fvg, _entry("SHORT"), current_price=98.5
     )
     assert result["confirmed"] is True
-    assert result["confirmation_mode"] == "reclaimed_pullback_price"
+    assert result["confirmation_mode"] == "COUNTER_DIRECTIONAL_EVIDENCE"
 
 
 def test_counter_bos_can_confirm_after_reclaiming_prior_structure_boundary_without_new_pivot():
