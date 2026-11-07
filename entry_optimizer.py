@@ -62,6 +62,7 @@ class EntryOptimizer:
         aligned = "BULLISH" if direction == "LONG" else "BEARISH"
         weighted_positions = [(0.50, 2.0, "poi_midpoint")]
         evidence = []
+        stronger_confirmation_reasons = []
 
         def add_bias(name, module, weight=1.0):
             if not isinstance(module, dict) or not module.get("active"):
@@ -79,12 +80,16 @@ class EntryOptimizer:
             strength = weight * (0.5 + confidence / 100.0)
             weighted_positions.append((position, strength, name))
             evidence.append({"source": name, "bias": "ALIGNED" if side == direction else "OPPOSED", "weight": round(strength, 3)})
+            if side != direction and confidence >= 70:
+                stronger_confirmation_reasons.append(f"{name}_opposes")
 
         trend_side = self._direction((trend or {}).get("trend"))
         if trend_side != "NONE":
             aligned_trend = trend_side == direction
             weighted_positions.append((0.62 if aligned_trend else 0.22, 1.5, "trend"))
             evidence.append({"source": "trend", "bias": "ALIGNED" if aligned_trend else "OPPOSED", "weight": 1.5})
+            if not aligned_trend:
+                stronger_confirmation_reasons.append("trend_opposes")
 
         sweep = liquidity_sweep if isinstance(liquidity_sweep, dict) else {}
         if sweep.get("is_sweep"):
@@ -102,6 +107,7 @@ class EntryOptimizer:
             elif opposing or not expected:
                 weighted_positions.append((0.18, 1.8, "sweep_counterpressure"))
                 evidence.append({"source": "liquidity_sweep", "bias": "COUNTERPRESSURE", "weight": 1.8})
+                stronger_confirmation_reasons.append("liquidity_sweep_counterpressure")
 
         add_bias("smt", smt, 1.1)
         add_bias("unicorn", unicorn, 1.3)
@@ -138,6 +144,14 @@ class EntryOptimizer:
         vp = volume_profile if isinstance(volume_profile, dict) else {}
         vp_best = vp.get("best") if isinstance(vp.get("best"), dict) else vp
         if vp_best.get("active"):
+            try:
+                vp_confidence = float(vp_best.get("confidence", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                vp_confidence = 0.0
+            vp_direction = self._direction(vp_best.get("direction"))
+            if vp_confidence < 45 or (vp_direction not in {"NONE", direction} and vp_confidence >= 55):
+                stronger_confirmation_reasons.append("weak_or_opposing_volume_profile")
+                weighted_positions.append((0.18, 1.5, "volume_profile_counterpressure"))
             self._add_level(weighted_levels, vp_best.get("poc"), 1.5, "volume_poc", low, high)
             for level in (vp_best.get("hvn") or [])[:3]:
                 self._add_level(weighted_levels, level, 0.8, "volume_hvn", low, high)
@@ -172,6 +186,7 @@ class EntryOptimizer:
             if book.get("opposing"):
                 weighted_positions.append((0.16, 1.6, "orderbook_counterpressure"))
                 evidence.append({"source": "orderbook", "bias": "COUNTERPRESSURE", "weight": 1.6})
+                stronger_confirmation_reasons.append("orderbook_opposes")
             elif book.get("supportive"):
                 weighted_positions.append((0.58, 1.0, "orderbook_support"))
                 evidence.append({"source": "orderbook", "bias": "SUPPORTIVE", "weight": 1.0})
@@ -201,6 +216,11 @@ class EntryOptimizer:
                 return {"applied": False, "reason": "Optimized LIMIT is not on pullback side", "evidence": evidence}
 
         entry["entry"] = optimized
+        if stronger_confirmation_reasons:
+            entry["confirmation_requirements"] = {
+                "require_choch_or_reclaim": True,
+                "reasons": list(dict.fromkeys(stronger_confirmation_reasons)),
+            }
         entry["entry_optimizer"] = {
             "applied": True,
             "original_entry": original,
