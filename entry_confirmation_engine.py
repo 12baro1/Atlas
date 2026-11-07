@@ -129,6 +129,15 @@ class EntryConfirmationEngine:
             result["reason"] = "Bearish structural break missing"
             return result
 
+        requirements = entry.get("confirmation_requirements") if isinstance(entry.get("confirmation_requirements"), dict) else {}
+        if requirements.get("require_choch_or_reclaim") and confirmation_mode == "directional_break" and not last_break.get("choch"):
+            reasons = ", ".join(requirements.get("reasons") or [])
+            result["reason"] = (
+                "Secondary-engine conflict requires 15m CHoCH or reclaimed pullback structure"
+                + (f" ({reasons})" if reasons else "")
+            )
+            return result
+
         expected_fvg = "BULLISH" if direction == "LONG" else "BEARISH"
         try:
             price = float(current_price) if current_price is not None else None
