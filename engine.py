@@ -1044,25 +1044,6 @@ class AtlasEngine:
         entry["optimization"] = optimization
         if entry.get("valid") and (orderbook.get("active") or orderbook.get("trade_flow_active")):
             entry_type = str(entry.get("entry_type") or "").upper()
-            if orderbook.get("active") and entry_type == "LIMIT" and entry.get("poi_zone"):
-                try:
-                    candidate = float(orderbook.get("limit_entry_candidate"))
-                    original = float(entry.get("entry"))
-                    current = float(candles[-1].close)
-                    zone = entry["poi_zone"]
-                    low, high = float(zone["low"]), float(zone["high"])
-                    direction = str(entry.get("direction") or "").upper()
-                    favorable = candidate <= original if direction == "LONG" else candidate >= original
-                    stop = float(entry.get("stop_loss"))
-                    on_entry_side = candidate < current if direction == "LONG" else candidate > current
-                    stop_valid = candidate > stop if direction == "LONG" else candidate < stop
-                    shift_pct = abs(candidate - original) / original * 100.0
-                    if low <= candidate <= high and favorable and on_entry_side and stop_valid and shift_pct <= 0.20:
-                        entry["entry"] = candidate
-                        orderbook["limit_entry_adjustment"] = {"from": original, "to": candidate}
-                        entry.setdefault("checks", []).append("✓ Order book LIMIT fiyatı POI içinde iyileştirildi")
-                except (TypeError, ValueError, KeyError, ZeroDivisionError, IndexError):
-                    pass
             if orderbook.get("opposing") or (entry_type == "MARKET" and not orderbook.get("market_entry_allowed", True)):
                 # Microstructure conflict changes execution style first; it does
                 # not erase a structurally valid POI setup by itself.
