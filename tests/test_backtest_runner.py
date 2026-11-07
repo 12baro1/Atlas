@@ -657,3 +657,20 @@ def test_runner_reports_stage_rejection_diagnostics():
         "Entry invalid": 1,
         "RR below minimum": 1,
     }
+
+
+def test_limit_is_cancelled_when_target_was_hit_on_signal_candle():
+    runner = BacktestRunner(partial_exits=False, limit_expiry_bars=4)
+    candles = [
+        _candle(1, 99.0, 101.0, 96.0, 99.5),  # TP1 hit before order submission
+        _candle(2, 99.5, 100.0, 94.0, 95.0),   # later touches the pending limit
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 100.0, "tp2": 105.0, "tp3": 110.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=1, signal_index=0) is None
+    assert runner.statistics()["stale_limits_cancelled"] == 1
+    assert runner.statistics()["candidate_signals"] == 1
