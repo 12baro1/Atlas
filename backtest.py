@@ -383,6 +383,8 @@ def _combine_stats(all_stats):
         "unfilled_limits": 0,
         "expired_limits": 0,
         "stale_limits_cancelled": 0,
+        "stale_limit_signal_candle_target": 0,
+        "stale_limit_target_before_fill": 0,
         "open_trades": 0,
         "invalid_candidates": 0,
         "no_followup_data": 0,
@@ -395,7 +397,8 @@ def _combine_stats(all_stats):
             "total", "wins", "tp1", "tp2", "tp3",
             "candidate_signals", "analysis_calls", "empty_results",
             "raw_long_signals", "raw_short_signals", "non_directional_results",
-            "unfilled_limits", "expired_limits", "stale_limits_cancelled", "open_trades",
+            "unfilled_limits", "expired_limits", "stale_limits_cancelled",
+            "stale_limit_signal_candle_target", "stale_limit_target_before_fill", "open_trades",
             "invalid_candidates", "no_followup_data",
         ):
             combined[key] += int(stats.get(key, 0) or 0)
@@ -462,6 +465,8 @@ def _report(stats, name):
     print(f"  Dolmayan LIMIT : {stats.get('unfilled_limits', 0)}")
     print(f"  Süresi dolan LIMIT: {stats.get('expired_limits', 0)}")
     print(f"  Hedefe geç kalan LIMIT iptali: {stats.get('stale_limits_cancelled', 0)}")
+    print(f"    - Sinyal mumu hedefi önceden gördü: {stats.get('stale_limit_signal_candle_target', 0)}")
+    print(f"    - Dolumdan önce sonraki mum hedefi gördü: {stats.get('stale_limit_target_before_fill', 0)}")
     print(f"  Geçersiz aday  : {stats.get('invalid_candidates', 0)}")
     print(f"  Takipsiz son mum: {stats.get('no_followup_data', 0)}")
     if not stats["total"]:

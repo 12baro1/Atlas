@@ -145,3 +145,28 @@ def test_recent_h4_opposing_break_supersedes_older_bos():
     result = MTFEngine().detect([], [], h4, [])
     assert result["h4"] == "BEARISH"
     assert result["entry"] == "SHORT"
+
+
+def test_h4_bos_remains_active_after_ordinary_swings_are_appended():
+    h4 = [
+        {"kind": "HIGH", "label": "HH", "bos": True, "direction": "BULLISH"},
+        {"kind": "HIGH", "label": "H?"},
+        {"kind": "LOW", "label": "L?"},
+        {"kind": "HIGH", "label": "H?"},
+        {"kind": "LOW", "label": "L?"},
+        {"kind": "HIGH", "label": "H?"},
+    ]
+    result = MTFEngine().detect([], [], h4, [])
+    assert result["h4"] == "BULLISH"
+    assert result["entry"] == "LONG"
+
+
+def test_latest_h4_opposing_break_overrides_an_older_complete_swing_pair():
+    h4 = [
+        {"kind": "HIGH", "label": "HH"},
+        {"kind": "LOW", "label": "HL"},
+        {"kind": "EVENT", "label": "LL", "bos": True, "direction": "BEARISH"},
+    ]
+    result = MTFEngine().detect([], [], h4, [])
+    assert result["h4"] == "BEARISH"
+    assert result["entry"] == "SHORT"

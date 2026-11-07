@@ -546,6 +546,26 @@ def test_limit_order_is_cancelled_if_target_hits_before_fill():
     }
     assert runner._to_trade(result, candles, entry_index=0) is None
     assert runner.statistics()["stale_limits_cancelled"] == 1
+    assert runner.statistics()["stale_limit_target_before_fill"] == 1
+
+
+def test_signal_candle_target_touch_is_counted_separately_for_stale_limit():
+    runner = BacktestRunner(partial_exits=False, limit_expiry_bars=4)
+    candles = [
+        _candle(1, 99.0, 101.0, 96.0, 99.0),
+        _candle(2, 99.0, 100.0, 94.0, 95.0),
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 100.0, "tp2": 105.0, "tp3": 110.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=1, signal_index=0) is None
+    stats = runner.statistics()
+    assert stats["stale_limits_cancelled"] == 1
+    assert stats["stale_limit_signal_candle_target"] == 1
+    assert stats["stale_limit_target_before_fill"] == 0
 
 
 def test_trade_history_contains_actual_fill_and_plan_diagnostics():

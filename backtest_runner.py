@@ -242,6 +242,8 @@ class BacktestRunner:
         self.unfilled_limits = 0
         self.expired_limits = 0
         self.stale_limits_cancelled = 0
+        self.stale_limit_signal_candle_target = 0
+        self.stale_limit_target_before_fill = 0
         self.open_trades = 0
         self.invalid_candidates = 0
         self.no_followup_data = 0
@@ -459,6 +461,7 @@ class BacktestRunner:
                 )
                 if target_hit_before_order:
                     self.stale_limits_cancelled += 1
+                    self.stale_limit_signal_candle_target += 1
                     return None
 
             expiry_index = min(len(candles), entry_index + self.limit_expiry_bars)
@@ -480,6 +483,7 @@ class BacktestRunner:
                 # apply the conservative fill-candle handling below.
                 if target_already_hit and not touched:
                     self.stale_limits_cancelled += 1
+                    self.stale_limit_target_before_fill += 1
                     return None
                 if not touched:
                     continue
@@ -722,6 +726,8 @@ class BacktestRunner:
                 "unfilled_limits": self.unfilled_limits,
                 "expired_limits": self.expired_limits,
                 "stale_limits_cancelled": self.stale_limits_cancelled,
+                "stale_limit_signal_candle_target": self.stale_limit_signal_candle_target,
+                "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
                 "trade_history": list(self.history),
                 "open_trades": self.open_trades,
                 "invalid_candidates": self.invalid_candidates,
@@ -781,6 +787,8 @@ class BacktestRunner:
             "unfilled_limits": self.unfilled_limits,
             "expired_limits": self.expired_limits,
             "stale_limits_cancelled": self.stale_limits_cancelled,
+            "stale_limit_signal_candle_target": self.stale_limit_signal_candle_target,
+            "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
             "trade_history": list(self.history),
             "open_trades": self.open_trades,
             "invalid_candidates": self.invalid_candidates,
