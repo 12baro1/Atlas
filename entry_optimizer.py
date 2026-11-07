@@ -231,11 +231,40 @@ class EntryOptimizer:
                 return {"applied": False, "reason": "Optimized LIMIT is not on pullback side", "evidence": evidence}
 
         entry["entry"] = optimized
-        if stronger_confirmation_reasons:
+
+        # Confirmation strictness follows the balance of secondary evidence.
+        # Supportive evidence permits the normal directional break; material
+        # counter-evidence requires a 15m CHoCH or reclaimed pullback structure.
+        aligned_weight = sum(
+            float(item.get("weight", 0) or 0)
+            for item in evidence
+            if item.get("bias") in {"ALIGNED", "SUPPORTIVE", "CONFIRMED"}
+        )
+        opposing_weight = sum(
+            float(item.get("weight", 0) or 0)
+            for item in evidence
+            if item.get("bias") in {"OPPOSED", "COUNTERPRESSURE", "MANIPULATION_RISK", "WEAK"}
+        )
+        require_strong_confirmation = (
+            opposing_weight >= 1.5
+            and opposing_weight >= max(1.5, aligned_weight * 0.65)
+        )
+        if require_strong_confirmation:
             entry["confirmation_requirements"] = {
                 "require_choch_or_reclaim": True,
-                "reasons": list(dict.fromkeys(stronger_confirmation_reasons)),
+                "reasons": list(dict.fromkeys(stronger_confirmation_reasons))
+                or ["secondary_evidence_conflict"],
+                "aligned_weight": round(aligned_weight, 3),
+                "opposing_weight": round(opposing_weight, 3),
             }
+        else:
+            entry.pop("confirmation_requirements", None)
+        entry["confirmation_profile"] = {
+            "mode": "CHOCH_OR_RECLAIM" if require_strong_confirmation else "DIRECTIONAL_BREAK",
+            "aligned_weight": round(aligned_weight, 3),
+            "opposing_weight": round(opposing_weight, 3),
+            "evidence_balance": round(aligned_weight - opposing_weight, 3),
+        }
         entry["entry_optimizer"] = {
             "applied": True,
             "original_entry": original,
