@@ -317,7 +317,7 @@ def test_trend_regime_requires_fvg_or_orderblock_overlap_with_4h_ote():
         fvg=[{"type": "BULLISH", "from": 99.8, "to": 100.0, "filled": False}],
         orderblocks=[],
         current_price=100.5,
-        ote={"valid": False, "fib62": 100.2, "fib79": 99.7},
+        ote={"valid": True, "fib62": 100.2, "fib79": 99.7},
         market_regime={"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
     )
     assert result["valid"] is True
@@ -341,19 +341,20 @@ def test_trend_regime_rejects_poi_outside_4h_ote():
     assert result["entry_zone_crossed"] is True
 
 
-def test_trend_regime_requires_fvg_even_when_orderblock_overlaps_ote():
+def test_trend_regime_accepts_unmitigated_orderblock_overlapping_valid_ote_without_fvg():
     result = EntryEngine().generate(
         mtf={"entry": "LONG"},
         structure=[{"label": "HL", "kind": "LOW", "price": 98.8}],
         fvg=[],
         orderblocks=[{"type": "BULLISH", "low": 99.8, "high": 100.1, "mitigated": False}],
         current_price=100.5,
-        ote={"valid": False, "fib62": 100.2, "fib79": 99.7},
+        ote={"valid": True, "fib62": 100.2, "fib79": 99.7},
         market_regime={"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
     )
-    assert result["valid"] is False
-    assert result["entry"] is None
-    assert "fresh directional FVG" in result["reason"]
+    assert result["valid"] is True
+    assert result["entry"] == 100.1
+    assert result["poi_source"] == "ORDER_BLOCK"
+    assert result["ote_confluence"] is True
 
 
 def test_entry_engine_prefers_nearest_fresh_fvg_before_weaker_farther_zone():

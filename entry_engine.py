@@ -135,7 +135,8 @@ class EntryEngine:
         if isinstance(ote, dict):
             try:
                 fib_values = [float(ote.get("fib62")), float(ote.get("fib79"))]
-                if all(math.isfinite(value) and value > 0 for value in fib_values):
+                explicitly_invalid_ote = ote.get("valid") is False
+                if not explicitly_invalid_ote and all(math.isfinite(value) and value > 0 for value in fib_values):
                     ote_low, ote_high = min(fib_values), max(fib_values)
             except (TypeError, ValueError, OverflowError):
                 ote_low = ote_high = None
@@ -194,6 +195,7 @@ class EntryEngine:
         selected_fvg = None
         fvg_candidates = []
         crossed_matching_fvg = False
+        crossed_matching_ob = False
         for gap in fvg:
             if gap.get("filled", False) or gap.get("type") != ("BULLISH" if direction == "LONG" else "BEARISH"):
                 continue
@@ -252,8 +254,10 @@ class EntryEngine:
                 continue
             if current_price is not None:
                 if direction == "LONG" and low > current_price:
+                    crossed_matching_ob = True
                     continue
                 if direction == "SHORT" and high < current_price:
+                    crossed_matching_ob = True
                     continue
                 distance = 0.0 if low <= current_price <= high else (
                     current_price - high if direction == "LONG" else low - current_price
@@ -274,36 +278,30 @@ class EntryEngine:
         else:
             result["checks"].append("✗ Order Block")
 
-        if requires_ote and selected_fvg is None:
-            result["reason"] = "Trend continuation requires a fresh directional FVG overlapping 4H OTE"
-            result["entry_reason_code"] = "NO_FRESH_FVG_IN_OTE"
-            result["entry_type_reason"] = result["reason"]
-            result["entry_zone_crossed"] = True
-            return result
-
-        # Trend continuation must retain its fresh FVG/OTE requirement. In
-        # other regimes, choose the closest valid FVG or OB instead of always
-        # preferring an FVG even when a materially nearer OB is available.
+        # In trend continuation, either a fresh directional FVG or an
+        # unmitigated directional OB overlapping the 4H OTE is a valid POI.
+        # FVG is preferred only when it is at least as close as the OB.
+        poi_options = []
+        if selected_fvg:
+            candidate = next((item for item in fvg_candidates if item[2] is selected_fvg), None)
+            if candidate:
+                poi_options.append((candidate[0], candidate[1], 0, "FVG", selected_fvg))
+        if selected_ob:
+            candidate = next((item for item in ob_candidates if item[2] is selected_ob), None)
+            if candidate:
+                poi_options.append((candidate[0], candidate[1], 1, "ORDER_BLOCK", selected_ob))
         selected_poi_source = None
-        if requires_ote:
-            selected_poi = selected_fvg
-            selected_poi_source = "FVG" if selected_poi else None
-        else:
-            poi_options = []
-            if selected_fvg:
-                candidate = next((item for item in fvg_candidates if item[2] is selected_fvg), None)
-                if candidate:
-                    poi_options.append((candidate[0], candidate[1], 0, "FVG", selected_fvg))
-            if selected_ob:
-                candidate = next((item for item in ob_candidates if item[2] is selected_ob), None)
-                if candidate:
-                    poi_options.append((candidate[0], candidate[1], 1, "ORDER_BLOCK", selected_ob))
-            if poi_options:
-                _, _, _, selected_poi_source, selected_poi = min(poi_options, key=lambda item: item[:3])
-                selected_fvg = selected_poi if selected_poi_source == "FVG" else None
-                selected_ob = selected_poi if selected_poi_source == "ORDER_BLOCK" else None
-            else:
-                selected_poi = None
+        selected_poi = None
+        if poi_options:
+            _, _, _, selected_poi_source, selected_poi = min(poi_options, key=lambda item: item[:3])
+            selected_fvg = selected_poi if selected_poi_source == "FVG" else None
+            selected_ob = selected_poi if selected_poi_source == "ORDER_BLOCK" else None
+        if requires_ote and selected_poi is None:
+            result["reason"] = "No fresh directional FVG or unmitigated OB overlaps 4H OTE"
+            result["entry_reason_code"] = "POI_CROSSED" if (crossed_matching_fvg or crossed_matching_ob) else "NO_VALID_POI_IN_OTE"
+            result["entry_type_reason"] = result["reason"]
+            result["entry_zone_crossed"] = bool(crossed_matching_fvg or crossed_matching_ob)
+            return result
         if selected_poi:
             result["poi_source"] = selected_poi_source
             result["poi_zone"] = {
@@ -311,8 +309,14 @@ class EntryEngine:
                 "high": max(float(selected_poi.get("from", selected_poi.get("low"))), float(selected_poi.get("to", selected_poi.get("high")))),
             }
             result["ote_confluence"] = bool(
-                requires_ote and overlaps_ote(result["poi_zone"]["low"], result["poi_zone"]["high"])
+                ote_low is not None and ote_high is not None
+                and ote_low <= result["poi_zone"]["high"] and ote_high >= result["poi_zone"]["low"]
             )
+            # A crossed candidate is replaced by the nearest still-actionable
+            # POI found above; never reuse the crossed price.
+            result["entry_zone_crossed"] = False
+        elif crossed_matching_fvg or crossed_matching_ob:
+            result["entry_zone_crossed"] = True
 
         # -------------------------
         # Entry

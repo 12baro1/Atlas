@@ -50,7 +50,7 @@ def test_fvg_on_wrong_side_of_market_cannot_confirm_pullback_entry():
         _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
     )
     assert result["confirmed"] is False
-    assert result["reason"] == "No unfilled directional FVG"
+    assert result["reason"] == "No unfilled directional FVG or valid OB+OTE confluence"
 
 
 def test_bullish_break_confirmation_survives_later_higher_low_pullback():
