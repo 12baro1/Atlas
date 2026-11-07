@@ -36,6 +36,8 @@ class DynamicTPEngine:
         selected_targets = []
         selected_sources = []
         previous_target = None
+        missing_rr_level = None
+        best_candidate_rr = None
 
         for rr_multiple in self.MIN_RR_LEVELS:
             target, source = self._select_target_for_rr(
@@ -52,6 +54,13 @@ class DynamicTPEngine:
                 # Structural targets already found remain usable. Stop looking
                 # for farther RR tiers instead of invalidating the whole setup.
                 if selected_targets:
+                    missing_rr_level = rr_multiple
+                    candidate_rr = [
+                        round((entry - price if direction == "SHORT" else price - entry) / risk, 4)
+                        for price in targets
+                        if (entry - price if direction == "SHORT" else price - entry) > 0
+                    ]
+                    best_candidate_rr = max(candidate_rr) if candidate_rr else None
                     break
                 candidate_rr = [
                     round((entry - price if direction == "SHORT" else price - entry) / risk, 4)
@@ -114,6 +123,8 @@ class DynamicTPEngine:
                 round((entry - price if direction == "SHORT" else price - entry) / risk, 4)
                 for price in selected_targets
             ],
+            "missing_rr_level": missing_rr_level,
+            "best_candidate_rr": best_candidate_rr,
         }
 
     def _collect_targets(self, direction, entry, liquidity, fvg, orderblocks, structure):
