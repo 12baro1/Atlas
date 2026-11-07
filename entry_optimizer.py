@@ -41,7 +41,7 @@ class EntryOptimizer:
             low, high = float(zone.get("low")), float(zone.get("high"))
         except (TypeError, ValueError, OverflowError):
             return {"applied": False, "reason": "POI zone unavailable", "evidence": []}
-        if direction not in {"LONG", "SHORT"} or not (0 < low < high):
+        if not entry.get("valid") or direction not in {"LONG", "SHORT"} or not (0 < low < high):
             return {"applied": False, "reason": "Invalid direction or POI", "evidence": []}
         original = self._number(entry.get("entry"))
         current = self._number(current_price)
@@ -94,7 +94,8 @@ class EntryOptimizer:
             post_aligned = bool(post.get("confirmed")) and post.get("direction") == aligned
             if expected and post_aligned:
                 weighted_positions.append((0.60, 2.0, "confirmed_sweep"))
-                self._add_level(weighted_levels := [], sweep.get("sweep_level"), 0, "sweep_level", low, high)
+                weighted_levels = []
+                self._add_level(weighted_levels, sweep.get("sweep_level"), 2.0, "sweep_level", low, high)
                 if weighted_levels:
                     weighted_positions.append((to_position(weighted_levels[0][0]), 2.0, "sweep_retest_level"))
                 evidence.append({"source": "liquidity_sweep", "bias": "CONFIRMED", "weight": 2.0})
@@ -109,6 +110,9 @@ class EntryOptimizer:
 
         # Use actionable prices only when they lie inside the selected POI.
         weighted_levels = []
+        if isinstance(ote, dict):
+            self._add_level(weighted_levels, ote.get("fib62"), 1.3, "ote_62", low, high)
+            self._add_level(weighted_levels, ote.get("fib79"), 1.0, "ote_79", low, high)
         vp = volume_profile if isinstance(volume_profile, dict) else {}
         vp_best = vp.get("best") if isinstance(vp.get("best"), dict) else vp
         if vp_best.get("active"):
