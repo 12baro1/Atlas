@@ -151,3 +151,25 @@ def test_invalid_pending_limit_hides_hypothetical_levels():
     assert "Giriş" not in output
     assert "Stop Loss" not in output
     assert "TP1" not in output
+
+
+def test_trending_setup_uses_directional_poi_when_4h_ote_is_unavailable():
+    engine = EntryEngine()
+    result = engine.generate(
+        {"entry": "LONG"},
+        [
+            {"label": "LL", "price": 95.0, "kind": "LOW"},
+            {"label": "HH", "price": 110.0, "kind": "HIGH"},
+        ],
+        [{"type": "BULLISH", "from": 100.0, "to": 102.0, "strength": 1.0}],
+        [],
+        current_price=110.0,
+        candles=None,
+        ote=None,
+        market_regime={"regime": "TRENDING_UP"},
+    )
+    assert result["valid"] is True
+    assert result["entry_reason_code"] == "ENTRY_READY"
+    assert result["entry_type"] == "LIMIT"
+    assert result["entry"] == 102.0
+    assert result["ote_fallback_used"] is True
