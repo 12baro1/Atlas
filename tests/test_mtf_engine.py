@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mtf_engine import MTFEngine
+from trend_engine import TrendEngine
 
 
 def _bullish():
@@ -20,6 +21,21 @@ def _bearish():
     ]
 
 
+def _confirmed_sweep(side="SELL_SIDE"):
+    direction = "BULLISH" if side == "SELL_SIDE" else "BEARISH"
+    label = "HH" if direction == "BULLISH" else "LL"
+    return (
+        [{"label": label, "choch": True, "direction": direction}],
+        {
+            "is_sweep": True,
+            "sell_side": side == "SELL_SIDE",
+            "buy_side": side == "BUY_SIDE",
+            "sweep_side": side,
+            "post_structure": {"confirmed": True, "direction": direction},
+        },
+    )
+
+
 def test_mtf_does_not_treat_missing_structure_as_bearish():
     result = MTFEngine().detect([], [], [], [])
     assert result["weekly"] == result["daily"] == result["h4"] == "NEUTRAL"
@@ -27,20 +43,31 @@ def test_mtf_does_not_treat_missing_structure_as_bearish():
     assert result["valid"] is False
 
 
-def test_mtf_requires_two_complete_bearish_structures_for_short():
-    result = MTFEngine().detect([], _bearish(), _bearish(), [])
-    assert result["weekly"] == "NEUTRAL"
-    assert result["daily"] == result["h4"] == "BEARISH"
+def test_h4_bearish_is_enough_when_weekly_is_neutral():
+    result = MTFEngine().detect([], [], _bearish(), [])
     assert result["entry"] == "SHORT"
+    assert result["entry_source"] == "H4_STRUCTURE"
     assert result["valid"] is True
 
 
-def test_mtf_requires_two_complete_bullish_structures_for_long():
-    result = MTFEngine().detect(_bullish(), _bullish(), [], [])
-    assert result["weekly"] == result["daily"] == "BULLISH"
-    assert result["h4"] == "NEUTRAL"
+def test_h4_bullish_is_enough_when_daily_is_bearish_but_weekly_is_neutral():
+    result = MTFEngine().detect([], _bearish(), _bullish(), [])
     assert result["entry"] == "LONG"
-    assert result["valid"] is True
+    assert result["daily_h4_conflict"] is True
+    assert result["weekly_h4_conflict"] is False
+
+
+def test_weekly_opposing_h4_blocks_direction():
+    result = MTFEngine().detect(_bearish(), [], _bullish(), [])
+    assert result["entry"] == "NONE"
+    assert result["weekly_h4_conflict"] is True
+    assert result["valid"] is False
+
+
+def test_weekly_and_h4_alignment_is_reported():
+    result = MTFEngine().detect(_bearish(), [], _bearish(), [])
+    assert result["entry"] == "SHORT"
+    assert result["entry_source"] == "H4_STRUCTURE"
 
 
 def test_mtf_single_higher_high_is_not_a_bullish_trend():
@@ -49,21 +76,8 @@ def test_mtf_single_higher_high_is_not_a_bullish_trend():
     assert result["entry"] == "NONE"
 
 
-def test_mtf_conflicting_timeframes_do_not_force_a_direction():
-    result = MTFEngine().detect(_bullish(), _bearish(), _bullish(), [])
-    assert result["entry"] == "NONE"
-    assert result["valid"] is False
-
-
-def test_neutral_higher_timeframes_allow_only_sweep_and_choch_confirmed_reversal():
-    structure = [{"label": "HH", "choch": True, "direction": "BULLISH"}]
-    sweep = {
-        "is_sweep": True,
-        "sell_side": True,
-        "buy_side": False,
-        "sweep_side": "SELL_SIDE",
-        "post_structure": {"confirmed": True, "direction": "BULLISH"},
-    }
+def test_neutral_h4_allows_only_sweep_and_choch_confirmed_reversal():
+    structure, sweep = _confirmed_sweep("SELL_SIDE")
     result = MTFEngine().detect([], [], [], structure, liquidity_sweep=sweep)
     assert result["entry"] == "LONG"
     assert result["entry_source"] == "CONFIRMED_15M_REVERSAL"
@@ -71,21 +85,32 @@ def test_neutral_higher_timeframes_allow_only_sweep_and_choch_confirmed_reversal
 
 
 def test_ltf_reversal_without_sweep_confirmation_does_not_create_direction():
-    structure = [{"label": "HH", "choch": True, "direction": "BULLISH"}]
+    structure, _ = _confirmed_sweep("SELL_SIDE")
     result = MTFEngine().detect([], [], [], structure)
     assert result["entry"] == "NONE"
     assert result["valid"] is False
 
 
-def test_ltf_reversal_does_not_override_opposing_higher_timeframe():
-    structure = [{"label": "HH", "choch": True, "direction": "BULLISH"}]
-    sweep = {
-        "is_sweep": True,
-        "sell_side": True,
-        "buy_side": False,
-        "sweep_side": "SELL_SIDE",
-        "post_structure": {"confirmed": True, "direction": "BULLISH"},
-    }
-    result = MTFEngine().detect([], _bearish(), [], structure, liquidity_sweep=sweep)
+def test_ltf_reversal_does_not_override_opposing_weekly_context():
+    structure, sweep = _confirmed_sweep("SELL_SIDE")
+    result = MTFEngine().detect(_bearish(), [], [], structure, liquidity_sweep=sweep)
     assert result["entry"] == "NONE"
     assert result["valid"] is False
+
+
+def test_ltf_reversal_does_not_override_directional_h4_structure():
+    structure, sweep = _confirmed_sweep("SELL_SIDE")
+    result = MTFEngine().detect([], _bearish(), _bearish(), structure, liquidity_sweep=sweep)
+    assert result["entry"] == "SHORT"
+    assert result["entry_source"] == "H4_STRUCTURE"
+
+
+def test_trend_engine_uses_primary_h4_direction_not_flat_three_timeframe_vote():
+    result = TrendEngine().calculate({
+        "entry": "LONG",
+        "weekly": "NEUTRAL",
+        "daily": "BEARISH",
+        "h4": "BULLISH",
+    })
+    assert result["trend"] == "BULLISH"
+    assert result["strength"] == 2
