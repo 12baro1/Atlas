@@ -270,6 +270,9 @@ class BacktestRunner:
         self.mtf_entry_source_counts = {}
         self.liquidity_sweep_state_counts = {}
         self.confirmation_reason_counts = {}
+        self.confirmation_outcome_counts = {}
+        self.confirmation_requirement_counts = {}
+        self.entry_type_reason_counts = {}
         self.entry_validity_counts = {}
         self.decision_blocker_counts = {}
 
@@ -341,13 +344,27 @@ class BacktestRunner:
                 self.liquidity_sweep_state_counts[sweep_key] = self.liquidity_sweep_state_counts.get(sweep_key, 0) + 1
             confirmation_meta = (analysis or {}).get("confirmation") if isinstance(analysis, dict) else {}
             if isinstance(confirmation_meta, dict):
+                confirmed = bool(confirmation_meta.get("confirmed"))
+                outcome = "CONFIRMED" if confirmed else "NOT_CONFIRMED"
+                self.confirmation_outcome_counts[outcome] = self.confirmation_outcome_counts.get(outcome, 0) + 1
                 reason = str(confirmation_meta.get("reason") or "unspecified")
                 self.confirmation_reason_counts[reason] = self.confirmation_reason_counts.get(reason, 0) + 1
+                requirements = (
+                    confirmation_meta.get("requirements")
+                    or confirmation_meta.get("confirmation_requirements")
+                    or {}
+                )
+                if isinstance(requirements, dict):
+                    labels = [str(key) for key, enabled in requirements.items() if enabled]
+                    label = "+".join(sorted(labels)) if labels else "STANDARD_OR_NONE"
+                    self.confirmation_requirement_counts[label] = self.confirmation_requirement_counts.get(label, 0) + 1
             entry_meta = (analysis or {}).get("entry") if isinstance(analysis, dict) else {}
             if isinstance(entry_meta, dict):
                 entry_reason = str(entry_meta.get("entry_reason_code") or entry_meta.get("reason") or "unspecified")
                 self.entry_reason_counts[entry_reason] = self.entry_reason_counts.get(entry_reason, 0) + 1
                 entry_type = str(entry_meta.get("entry_type") or "NONE").upper()
+                type_reason = str(entry_meta.get("entry_type_reason") or "unspecified")
+                self.entry_type_reason_counts[type_reason] = self.entry_type_reason_counts.get(type_reason, 0) + 1
                 validity = "VALID" if entry_meta.get("valid") else "INVALID"
                 self.entry_validity_counts[validity] = self.entry_validity_counts.get(validity, 0) + 1
                 self.entry_type_counts[entry_type] = self.entry_type_counts.get(entry_type, 0) + 1
@@ -721,6 +738,9 @@ class BacktestRunner:
                 "mtf_entry_source_counts": dict(self.mtf_entry_source_counts),
                 "liquidity_sweep_state_counts": dict(self.liquidity_sweep_state_counts),
                 "confirmation_reason_counts": dict(self.confirmation_reason_counts),
+                "confirmation_outcome_counts": dict(self.confirmation_outcome_counts),
+                "confirmation_requirement_counts": dict(self.confirmation_requirement_counts),
+                "entry_type_reason_counts": dict(self.entry_type_reason_counts),
                 "entry_validity_counts": dict(self.entry_validity_counts),
                 "decision_blocker_counts": dict(self.decision_blocker_counts),
                 "unfilled_limits": self.unfilled_limits,
@@ -782,6 +802,9 @@ class BacktestRunner:
             "mtf_entry_source_counts": dict(self.mtf_entry_source_counts),
             "liquidity_sweep_state_counts": dict(self.liquidity_sweep_state_counts),
             "confirmation_reason_counts": dict(self.confirmation_reason_counts),
+            "confirmation_outcome_counts": dict(self.confirmation_outcome_counts),
+            "confirmation_requirement_counts": dict(self.confirmation_requirement_counts),
+            "entry_type_reason_counts": dict(self.entry_type_reason_counts),
             "entry_validity_counts": dict(self.entry_validity_counts),
             "decision_blocker_counts": dict(self.decision_blocker_counts),
             "unfilled_limits": self.unfilled_limits,
