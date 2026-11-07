@@ -52,8 +52,13 @@ def _history_days_for_timeframe(days, timeframe):
         raise ValueError("Backtest days must be greater than zero")
     if timeframe not in TIMEFRAME_DURATION_MS:
         raise ValueError(f"Unsupported backtest timeframe: {timeframe}")
+    # Request two extra closed-candle slots so the currently-forming weekly
+    # candle can be discarded without leaving the 300-candle warmup short.
+    warmup_candles = BACKTEST_WARMUP_CANDLES[timeframe]
+    if timeframe == "1w":
+        warmup_candles += 2
     warmup_days = (
-        BACKTEST_WARMUP_CANDLES[timeframe]
+        warmup_candles
         * TIMEFRAME_DURATION_MS[timeframe]
         / 86_400_000
     )
@@ -189,7 +194,10 @@ def load_historical(symbol, days=60, now_ms=None):
     for tf, limit in TIMEFRAMES.items():
         history_days = _history_days_for_timeframe(days, tf)
         since = now - int(history_days * 86_400_000)
-        candles = _fetch_history(symbol, tf, since_ms=since, limit=limit)
+        fetch_limit = limit + 2 if tf == "1w" else limit
+        candles = _fetch_history(
+            symbol, tf, since_ms=since, limit=fetch_limit
+        )
         # Bybit includes the currently-forming candle in OHLCV responses.
         # A historical decision may only use candles that were fully closed
         # at the backtest's fixed as-of timestamp.
