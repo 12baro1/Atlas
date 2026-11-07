@@ -1063,20 +1063,28 @@ class AtlasEngine:
                         entry.setdefault("checks", []).append("✓ Order book LIMIT fiyatı POI içinde iyileştirildi")
                 except (TypeError, ValueError, KeyError, ZeroDivisionError, IndexError):
                     pass
-            if orderbook.get("opposing"):
-                entry["valid"] = False
-                entry["reason"] = "Order book yönün karşısında güçlü hacim gösteriyor"
-                entry["entry_reason_code"] = "ORDERBOOK_CONFLICT"
-                entry.setdefault("checks", []).append("✗ Order book karşı yön baskısı")
-                confirmation["confirmed"] = False
-                confirmation["reason"] = entry["reason"]
-            elif entry_type == "MARKET" and not orderbook.get("market_entry_allowed", True):
-                entry["valid"] = False
-                entry["reason"] = "Order book spread/derinlik koşulları market girişine uygun değil"
-                entry["entry_reason_code"] = "MARKET_MICROSTRUCTURE_REJECTED"
-                entry.setdefault("checks", []).append("✗ Order book market girişini onaylamadı")
-                confirmation["confirmed"] = False
-                confirmation["reason"] = entry["reason"]
+            if orderbook.get("opposing") or (entry_type == "MARKET" and not orderbook.get("market_entry_allowed", True)):
+                # Microstructure conflict changes execution style first; it does
+                # not erase a structurally valid POI setup by itself.
+                current = float(candles[-1].close) if candles else None
+                price = float(entry.get("entry")) if entry.get("entry") is not None else None
+                direction = str(entry.get("direction") or "").upper()
+                can_fall_back_to_limit = bool(
+                    entry.get("poi_zone") and current is not None and price is not None
+                    and ((direction == "LONG" and price < current) or (direction == "SHORT" and price > current))
+                )
+                if can_fall_back_to_limit:
+                    entry["entry_type"] = "LIMIT"
+                    entry["requires_pullback"] = True
+                    entry["entry_type_reason"] = "Order-flow karşı baskısı nedeniyle daha iyi POI LIMIT girişi"
+                    entry.setdefault("checks", []).append("! Microstructure: MARKET yerine LIMIT seçildi")
+                else:
+                    entry["valid"] = False
+                    entry["reason"] = "Order-flow çatışması için geçerli pullback LIMIT seviyesi yok"
+                    entry["entry_reason_code"] = "ORDERBOOK_CONFLICT_NO_LIMIT"
+                    entry.setdefault("checks", []).append("✗ Microstructure çatışması ve geçerli LIMIT yok")
+                    confirmation["confirmed"] = False
+                    confirmation["reason"] = entry["reason"]
             else:
                 entry.setdefault("checks", []).append(
                     "✓ Order book yönü destekli" if orderbook.get("supportive") else "✓ Order book engel oluşturmuyor"
