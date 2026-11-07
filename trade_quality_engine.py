@@ -208,7 +208,7 @@ class TradeQualityEngine:
 
         if tp_prices and direction in {"LONG", "SHORT"}:
             ordered = all(
-                tp_prices[i] < tp_prices[i + 1] for i in range(2)
+                tp_prices[i] < tp_prices[i + 1] for i in range(len(tp_prices) - 1)
             ) if direction == "LONG" else all(
                 tp_prices[i] > tp_prices[i + 1] for i in range(2)
             )
