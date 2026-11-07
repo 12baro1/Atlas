@@ -80,6 +80,18 @@ def _tp1_already_reached(direction, current_price, tp1):
     return False
 
 
+def _tp1_touched_on_signal_candle(direction, candle, tp1):
+    """Use the completed signal candle range, not only its close, for stale-order detection."""
+    try:
+        target = float(tp1)
+        extreme = float(candle.high if direction == "LONG" else candle.low)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if not math.isfinite(target) or not math.isfinite(extreme):
+        return False
+    return extreme >= target if direction == "LONG" else extreme <= target
+
+
 class AtlasEngine:
     """Atlas'ın tüm analiz motorlarını yöneten ana sınıf."""
 
@@ -1176,10 +1188,14 @@ class AtlasEngine:
         # TP1 can be crossed while a LIMIT entry is still waiting for a pullback.
         # Preserve that limit setup; only block a late market/confirmation entry.
         current_price = candles[-1].close if candles else None
+        signal_candle = candles[-1] if candles else None
         tp1_reached = (
             entry.get("valid")
-            and current_price is not None
-            and _tp1_already_reached(entry.get("direction"), current_price, dynamic_tp.get("tp1"))
+            and (
+                _tp1_touched_on_signal_candle(entry.get("direction"), signal_candle, dynamic_tp.get("tp1"))
+                if signal_candle is not None
+                else _tp1_already_reached(entry.get("direction"), current_price, dynamic_tp.get("tp1"))
+            )
         )
         entry_type = str(entry.get("entry_type") or "").upper()
         if tp1_reached and entry_type != "LIMIT":
