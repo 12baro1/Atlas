@@ -58,8 +58,11 @@ class TradeQualityEngine:
 
         trend_direction = str(trend.get("trend", "NEUTRAL")).upper()
         expected_trend = "BULLISH" if direction == "LONG" else "BEARISH"
+        # The primary 4H MTF structure and execution confirmation are hard gates.
+        # A separate trend-motor disagreement is retained as context, not a
+        # second directional veto that can duplicate the higher-timeframe gate.
         if direction in {"LONG", "SHORT"} and trend_direction not in {expected_trend, "NEUTRAL", "RANGE", "NONE"}:
-            blockers.append("Trend engine conflicts with the proposed direction")
+            warnings.append("Trend engine conflicts with the proposed direction")
 
         sweep_active = bool(sweep.get("is_sweep"))
         buy_side = bool(sweep.get("buy_side"))
@@ -152,7 +155,9 @@ class TradeQualityEngine:
         phase = str((market_phase or {}).get("phase", "")).strip()
         if phase and phase.lower() == "manipulation":
             if not (sweep_active and expected_sweep and post.get("confirmed")):
-                blockers.append("Market phase indicates manipulation without confirmed reversal")
+                # Closed-15m confirmation remains mandatory above; phase labels
+                # are contextual and should not duplicate that structural gate.
+                warnings.append("Market phase indicates manipulation without a matching confirmed sweep")
 
         learning = (setup_quality or {}).get("learning") if isinstance(setup_quality, dict) else None
         if isinstance(learning, dict) and learning.get("matched"):
@@ -162,7 +167,9 @@ class TradeQualityEngine:
             except (TypeError, ValueError, OverflowError):
                 sample_count, expected_r = 0, None
             if sample_count >= 20 and expected_r is not None and expected_r <= 0:
-                blockers.append("Learning history shows non-positive expectancy for this setup")
+                # Historical buckets are advisory: they can be regime- or
+                # symbol-specific and must not override a currently valid SMC setup.
+                warnings.append("Learning history shows non-positive expectancy for this setup")
 
         if not risk.get("risk_setup_valid"):
             blockers.append(risk.get("risk_setup_reason") or "Risk engine rejected the stop")
