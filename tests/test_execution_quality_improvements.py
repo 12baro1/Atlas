@@ -109,3 +109,16 @@ def test_limit_entry_respects_percent_cap_even_inside_atr_cap(monkeypatch):
     result = TradeQualityEngine().evaluate(**_quality_payload(106.0))
     assert result["allowed"] is False
     assert any("configured distance" in item for item in result["blockers"])
+
+
+def test_pending_limit_is_rejected_when_tp1_was_already_reached(monkeypatch):
+    import utils.atr
+
+    monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 2.5)
+    payload = _quality_payload(102.5)
+    payload["current_price"] = 107.5
+
+    result = TradeQualityEngine().evaluate(**payload)
+
+    assert result["allowed"] is False
+    assert any("pending LIMIT entry" in item and "stale" in item for item in result["blockers"])
