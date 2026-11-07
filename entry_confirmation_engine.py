@@ -41,14 +41,44 @@ class EntryConfirmationEngine:
         last_break = break_events[-1]
         label = str(last_break.get("label", "")).upper()
         event_direction = str(last_break.get("direction", "")).upper()
-        if event_direction != expected:
-            result["reason"] = "Latest 15m break opposes entry direction"
-            return result
+        confirmation_mode = "directional_break"
 
-        if direction == "LONG" and label != "HH":
+        if event_direction != expected:
+            # An opposing CHoCH is a genuine structural reversal and always
+            # invalidates the prior directional confirmation.
+            if last_break.get("choch"):
+                result["reason"] = "Latest 15m CHoCH reverses entry direction"
+                return result
+
+            # A counter-directional BOS can be a failed liquidity probe during
+            # a pullback. Preserve continuation only when a prior BOS in the
+            # intended direction exists and price structure subsequently prints
+            # a reclaimed HL (LONG) / LH (SHORT). This is not a generic bypass.
+            prior_aligned_break = any(
+                str(item.get("direction", "")).upper() == expected
+                and bool(item.get("bos"))
+                for item in break_events[:-1]
+            )
+            recovery_label = "HL" if direction == "LONG" else "LH"
+            last_break_position = structure.index(last_break)
+            reclaimed = any(
+                isinstance(item, dict)
+                and str(item.get("label", "")).upper() == recovery_label
+                and (
+                    str(item.get("kind", item.get("type", ""))).upper()
+                    == ("LOW" if direction == "LONG" else "HIGH")
+                )
+                for item in structure[last_break_position + 1:]
+            )
+            if not (prior_aligned_break and reclaimed):
+                result["reason"] = "Latest 15m break opposes entry direction without a reclaimed pullback swing"
+                return result
+            confirmation_mode = "reclaimed_pullback"
+
+        elif direction == "LONG" and label != "HH":
             result["reason"] = "Bullish structural break missing"
             return result
-        if direction == "SHORT" and label != "LL":
+        elif direction == "SHORT" and label != "LL":
             result["reason"] = "Bearish structural break missing"
             return result
 
@@ -85,5 +115,10 @@ class EntryConfirmationEngine:
             return result
 
         result["confirmed"] = True
-        result["reason"] = "15m structure break and directional FVG confirmed"
+        result["confirmation_mode"] = confirmation_mode
+        result["reason"] = (
+            "15m reclaimed pullback swing and directional FVG confirmed"
+            if confirmation_mode == "reclaimed_pullback"
+            else "15m structure break and directional FVG confirmed"
+        )
         return result
