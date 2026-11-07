@@ -244,6 +244,8 @@ class BacktestRunner:
         self.stale_limits_cancelled = 0
         self.stale_limit_signal_candle_target = 0
         self.stale_limit_target_before_fill = 0
+        self.market_fallback_fills = 0
+        self.market_fallback_rejected_rr = 0
         self.open_trades = 0
         self.invalid_candidates = 0
         self.no_followup_data = 0
@@ -512,8 +514,41 @@ class BacktestRunner:
                 # in one candle, OHLC cannot reveal the path: keep the fill but
                 # apply the conservative fill-candle handling below.
                 if target_already_hit and not touched:
+                    # The pending LIMIT missed, but the next candle may still
+                    # open before TP1. Reassess a MARKET entry at that candle's
+                    # open; never assume a fill after the target was reached.
+                    # Require the nearest remaining structural target to retain
+                    # at least 1.50R after round-trip costs.
+                    open_before_tp1 = (
+                        opened < _num(risk.get("tp1"))
+                        if is_long else opened > _num(risk.get("tp1"))
+                    )
+                    fallback_stop = _num(stop)
+                    fallback_tp1 = _num(risk.get("tp1"))
+                    fallback_risk = abs(opened - fallback_stop) if fallback_stop is not None else 0.0
+                    fallback_reward = (
+                        fallback_tp1 - opened if is_long else opened - fallback_tp1
+                    ) if fallback_tp1 is not None else 0.0
+                    fallback_net_rr = (
+                        (fallback_reward - abs(opened) * self.fee_rate) / fallback_risk
+                        if fallback_risk > 0 else 0.0
+                    )
+                    valid_fallback_geometry = (
+                        fallback_stop is not None
+                        and ((is_long and fallback_stop < opened) or (not is_long and fallback_stop > opened))
+                        and fallback_reward > 0
+                    )
+                    if open_before_tp1 and valid_fallback_geometry and fallback_net_rr >= 1.50:
+                        entry_price = opened
+                        fill_index = candidate_index
+                        entry_type = "MARKET_FALLBACK"
+                        limit_intrabar_fill = False
+                        self.market_fallback_fills += 1
+                        break
                     self.stale_limits_cancelled += 1
                     self.stale_limit_target_before_fill += 1
+                    if open_before_tp1 and fallback_net_rr < 1.50:
+                        self.market_fallback_rejected_rr += 1
                     return None
                 if not touched:
                     continue
@@ -761,6 +796,10 @@ class BacktestRunner:
                 "stale_limits_cancelled": self.stale_limits_cancelled,
                 "stale_limit_signal_candle_target": self.stale_limit_signal_candle_target,
                 "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
+            "market_fallback_fills": self.market_fallback_fills,
+            "market_fallback_rejected_rr": self.market_fallback_rejected_rr,
+                "market_fallback_fills": self.market_fallback_fills,
+                "market_fallback_rejected_rr": self.market_fallback_rejected_rr,
                 "trade_history": list(self.history),
                 "open_trades": self.open_trades,
                 "invalid_candidates": self.invalid_candidates,
