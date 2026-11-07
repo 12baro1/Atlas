@@ -1140,8 +1140,9 @@ class AtlasEngine:
             structure=entry_structure,
         )
 
-        # A tradable setup must have structural targets; do not present fabricated RR levels as market targets.
-        if entry.get("valid") and not all(dynamic_tp.get(key) is not None for key in ("tp1", "tp2", "tp3")):
+        # Require at least one real structural objective. Missing TP2/TP3
+        # remain empty; TradeQualityEngine checks the final available target RR.
+        if entry.get("valid") and not any(dynamic_tp.get(key) is not None for key in ("tp1", "tp2", "tp3")):
             entry["valid"] = False
             entry["reason"] = dynamic_tp.get("reason") or "No valid structural TP targets"
             entry["entry_reason_code"] = "NO_STRUCTURAL_TARGETS"

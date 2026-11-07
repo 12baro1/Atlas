@@ -92,7 +92,7 @@ def test_short_targets_use_only_sell_side_liquidity_and_fresh_opposing_pois():
     assert targets == [97.0, 96.0, 95.0]
 
 
-def test_strict_target_failure_reports_candidate_coverage_and_missing_rr_level():
+def test_partial_structural_target_reports_missing_rr_level_without_fabrication():
     result = DynamicTPEngine().calculate(
         direction="LONG",
         entry=100.0,
@@ -104,8 +104,68 @@ def test_strict_target_failure_reports_candidate_coverage_and_missing_rr_level()
         allow_rr_fallback=False,
     )
 
-    assert result["reason"] == "no_valid_structural_targets"
+    assert result["reason"] == "market_structure"
+    assert result["tp1"] == 101.5
+    assert result["tp2"] is None
+    assert result["tp3"] is None
     assert result["candidate_count"] == 1
     assert result["candidate_targets"] == [101.5]
+    assert result["target_rrs"] == [1.5]
     assert result["missing_rr_level"] == 2.0
     assert result["best_candidate_rr"] == 1.5
+
+
+def test_one_structural_target_is_preserved_without_synthetic_levels():
+    result = DynamicTPEngine().calculate(
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        liquidity=[{"type": "BUY_SIDE", "price": 103.5}],
+        fvg=[],
+        orderblocks=[],
+        structure=[],
+        allow_rr_fallback=False,
+    )
+    assert result["tp1"] == 103.5
+    assert result["tp2"] is None
+    assert result["tp3"] is None
+    assert result["sources"] == ["market_structure"]
+    assert result["synthetic_targets"] is False
+
+
+def test_two_structural_targets_are_preserved_without_fabricating_tp3():
+    result = DynamicTPEngine().calculate(
+        direction="SHORT",
+        entry=100.0,
+        stop_loss=101.0,
+        liquidity=[
+            {"type": "SELL_SIDE", "price": 98.5},
+            {"type": "SELL_SIDE", "price": 96.5},
+        ],
+        fvg=[],
+        orderblocks=[],
+        structure=[],
+        allow_rr_fallback=False,
+    )
+    assert result["tp1"] == 98.5
+    assert result["tp2"] == 96.5
+    assert result["tp3"] is None
+    assert result["sources"] == ["market_structure", "market_structure"]
+    assert result["synthetic_targets"] is False
+
+
+def test_no_structural_target_still_fails_in_strict_mode():
+    result = DynamicTPEngine().calculate(
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        liquidity=[{"type": "BUY_SIDE", "price": 100.5}],
+        fvg=[],
+        orderblocks=[],
+        structure=[],
+        allow_rr_fallback=False,
+    )
+    assert result["tp1"] is None
+    assert result["tp2"] is None
+    assert result["tp3"] is None
+    assert result["reason"] == "no_valid_structural_targets"

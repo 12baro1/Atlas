@@ -60,20 +60,52 @@ class EntryConfirmationEngine:
                 for item in break_events[:-1]
             )
             recovery_label = "HL" if direction == "LONG" else "LH"
+            recovery_kind = "LOW" if direction == "LONG" else "HIGH"
+            reclaim_kind = "HIGH" if direction == "LONG" else "LOW"
             last_break_position = structure.index(last_break)
-            reclaimed = any(
-                isinstance(item, dict)
-                and str(item.get("label", "")).upper() == recovery_label
-                and (
-                    str(item.get("kind", item.get("type", ""))).upper()
-                    == ("LOW" if direction == "LONG" else "HIGH")
-                )
-                for item in structure[last_break_position + 1:]
+            post_break_swings = [
+                item for item in structure[last_break_position + 1:]
+                if isinstance(item, dict)
+            ]
+
+            # Preferred confirmation: the structure engine has explicitly
+            # labelled a higher low / lower high after the counter BOS.
+            reclaimed_swing = any(
+                str(item.get("label", "")).upper() == recovery_label
+                and str(item.get("kind", item.get("type", ""))).upper() == recovery_kind
+                for item in post_break_swings
             )
+
+            # Some 15m feeds have not yet relabelled the recovery pivot as
+            # HL/LH, even though the pullback's opposing swing is confirmed.
+            # In that case require the latest close to reclaim that pivot:
+            # LONG must close above the post-break HIGH; SHORT below the LOW.
+            # A counter-directional CHoCH is still an unconditional rejection.
+            reclaimed_price = False
+            try:
+                price = float(current_price) if current_price is not None else None
+            except (TypeError, ValueError, OverflowError):
+                price = None
+            reclaim_pivots = []
+            for item in post_break_swings:
+                kind = str(item.get("kind", item.get("type", ""))).upper()
+                if kind != reclaim_kind:
+                    continue
+                try:
+                    pivot_price = float(item.get("price", item.get("high" if direction == "LONG" else "low")))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if pivot_price > 0:
+                    reclaim_pivots.append(pivot_price)
+            if price is not None and reclaim_pivots:
+                reclaim_level = reclaim_pivots[-1]
+                reclaimed_price = price > reclaim_level if direction == "LONG" else price < reclaim_level
+
+            reclaimed = reclaimed_swing or reclaimed_price
             if not (prior_aligned_break and reclaimed):
                 result["reason"] = "Latest 15m break opposes entry direction without a reclaimed pullback swing"
                 return result
-            confirmation_mode = "reclaimed_pullback"
+            confirmation_mode = "reclaimed_pullback" if reclaimed_swing else "reclaimed_pullback_price"
 
         elif direction == "LONG" and label != "HH":
             result["reason"] = "Bullish structural break missing"
@@ -117,8 +149,8 @@ class EntryConfirmationEngine:
         result["confirmed"] = True
         result["confirmation_mode"] = confirmation_mode
         result["reason"] = (
-            "15m reclaimed pullback swing and directional FVG confirmed"
-            if confirmation_mode == "reclaimed_pullback"
+            "15m reclaimed pullback structure and directional FVG confirmed"
+            if confirmation_mode.startswith("reclaimed_pullback")
             else "15m structure break and directional FVG confirmed"
         )
         return result

@@ -118,3 +118,45 @@ def test_counter_choch_always_invalidates_prior_directional_break():
     )
     assert result["confirmed"] is False
     assert "CHoCH" in result["reason"]
+
+
+def test_counter_bos_can_confirm_when_price_reclaims_post_break_pullback_high():
+    structure = [
+        {"index": 10, "kind": "HIGH", "label": "HH", "price": 102.0, "bos": True, "direction": "BULLISH"},
+        {"index": 12, "kind": "LOW", "label": "LL", "price": 98.0, "bos": True, "direction": "BEARISH"},
+        {"index": 14, "kind": "HIGH", "label": "LH", "price": 101.0, "bos": False, "direction": None},
+    ]
+    fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("LONG"), current_price=101.5
+    )
+    assert result["confirmed"] is True
+    assert result["confirmation_mode"] == "reclaimed_pullback_price"
+
+
+def test_counter_bos_is_not_accepted_until_price_reclaims_pullback_high():
+    structure = [
+        {"index": 10, "kind": "HIGH", "label": "HH", "price": 102.0, "bos": True, "direction": "BULLISH"},
+        {"index": 12, "kind": "LOW", "label": "LL", "price": 98.0, "bos": True, "direction": "BEARISH"},
+        {"index": 14, "kind": "HIGH", "label": "LH", "price": 101.0, "bos": False, "direction": None},
+    ]
+    fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("LONG"), current_price=100.5
+    )
+    assert result["confirmed"] is False
+    assert "without a reclaimed pullback swing" in result["reason"]
+
+
+def test_short_counter_bos_can_confirm_after_price_reclaims_post_break_pullback_low():
+    structure = [
+        {"index": 10, "kind": "LOW", "label": "LL", "price": 98.0, "bos": True, "direction": "BEARISH"},
+        {"index": 12, "kind": "HIGH", "label": "HH", "price": 102.0, "bos": True, "direction": "BULLISH"},
+        {"index": 14, "kind": "LOW", "label": "HL", "price": 99.0, "bos": False, "direction": None},
+    ]
+    fvg = [{"type": "BEARISH", "from": 103.0, "to": 105.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("SHORT"), current_price=98.5
+    )
+    assert result["confirmed"] is True
+    assert result["confirmation_mode"] == "reclaimed_pullback_price"
