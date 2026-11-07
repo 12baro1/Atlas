@@ -446,6 +446,16 @@ def _report(stats, name):
         print(f"  Eksik TP RR    : {stats['target_missing_rr_counts']}")
     if stats.get("stop_atr_buckets"):
         print(f"  Stop / ATR     : {stats['stop_atr_buckets']}")
+    if stats.get("mtf_entry_source_counts"):
+        print(f"  MTF kaynakları : {stats['mtf_entry_source_counts']}")
+    if stats.get("liquidity_sweep_state_counts"):
+        print(f"  Sweep durumu   : {stats['liquidity_sweep_state_counts']}")
+    if stats.get("confirmation_reason_counts"):
+        print(f"  Onay nedenleri : {stats['confirmation_reason_counts']}")
+    if stats.get("entry_validity_counts"):
+        print(f"  Entry geçerliliği: {stats['entry_validity_counts']}")
+    if stats.get("decision_blocker_counts"):
+        print(f"  Karar engelleri: {stats['decision_blocker_counts']}")
     print(f"  Aday sinyal    : {stats.get('candidate_signals', 0)}")
     print(f"  Kapanan işlem  : {stats['total']}")
     print(f"  Açık işlem     : {stats.get('open_trades', 0)}")
