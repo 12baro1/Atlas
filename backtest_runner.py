@@ -359,8 +359,6 @@ class BacktestRunner:
                     or {}
                 )
                 profile_mode = str(profile.get("mode") or "UNAVAILABLE").upper() if isinstance(profile, dict) else "UNAVAILABLE"
-                self.confirmation_requirement_counts[profile_mode] = self.confirmation_requirement_counts.get(profile_mode, 0) + 1
-
                 requirements = (
                     confirmation_meta.get("requirements")
                     or confirmation_meta.get("confirmation_requirements")
@@ -369,8 +367,10 @@ class BacktestRunner:
                 )
                 if isinstance(requirements, dict) and requirements.get("require_choch_or_reclaim"):
                     label = "CHOCH_OR_RECLAIM"
+                elif profile_mode == "DIRECTIONAL_BREAK":
+                    label = "DIRECTIONAL_BREAK"
                 else:
-                    label = "STANDARD_OR_NONE" if profile_mode != "UNAVAILABLE" else "UNAVAILABLE"
+                    label = profile_mode
                 self.confirmation_requirement_counts[label] = self.confirmation_requirement_counts.get(label, 0) + 1
             if isinstance(entry_meta, dict):
                 entry_reason = str(entry_meta.get("entry_reason_code") or entry_meta.get("reason") or "unspecified")
