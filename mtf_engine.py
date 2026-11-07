@@ -9,7 +9,7 @@ equal vote that can cancel a valid 4H direction.
 class MTFEngine:
 
     @staticmethod
-    def _trend_from_structure(structure):
+    def _trend_from_structure(structure, allow_recent_break=False):
         if not isinstance(structure, (list, tuple)) or not structure:
             return "NEUTRAL"
 
@@ -25,10 +25,35 @@ class MTFEngine:
             elif kind == "LOW" or label in {"HL", "LL", "L?"}:
                 last_low = label
 
+        # A complete HH+HL / LH+LL sequence remains the strongest trend evidence.
         if last_high == "HH" and last_low == "HL":
             return "BULLISH"
         if last_high == "LH" and last_low == "LL":
             return "BEARISH"
+
+        # On 4H only, a recent confirmed BOS may establish directional bias
+        # before the next opposite swing confirms the full trend sequence.
+        # A lone HH/LL label is never enough: the event must be an explicit BOS,
+        # recent in the structure, and not superseded by an opposing BOS/CHoCH.
+        if allow_recent_break:
+            events = [
+                (index, item)
+                for index, item in enumerate(structure)
+                if isinstance(item, dict) and (item.get("bos") or item.get("choch"))
+                and str(item.get("direction", "")).upper() in {"BULLISH", "BEARISH"}
+            ]
+            if events:
+                index, latest = events[-1]
+                direction = str(latest.get("direction", "")).upper()
+                label = str(latest.get("label", "")).upper()
+                expected_label = "HH" if direction == "BULLISH" else "LL"
+                if (
+                    bool(latest.get("bos"))
+                    and label == expected_label
+                    and index >= max(0, len(structure) - 4)
+                ):
+                    return direction
+
         return "NEUTRAL"
 
     @staticmethod
@@ -78,7 +103,7 @@ class MTFEngine:
     def detect(self, weekly, daily, h4, entry, liquidity_sweep=None):
         weekly_trend = self._trend_from_structure(weekly)
         daily_trend = self._trend_from_structure(daily)
-        h4_trend = self._trend_from_structure(h4)
+        h4_trend = self._trend_from_structure(h4, allow_recent_break=True)
 
         trends = [weekly_trend, daily_trend, h4_trend]
         bulls = trends.count("BULLISH")
