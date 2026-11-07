@@ -916,6 +916,7 @@ class AtlasEngine:
             daily_structure,
             h4_structure,
             entry_structure,
+            liquidity_sweep=liquidity_sweep,
         )
         trend = self.trend.calculate(mtf)
 

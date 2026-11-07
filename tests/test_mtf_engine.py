@@ -53,3 +53,39 @@ def test_mtf_conflicting_timeframes_do_not_force_a_direction():
     result = MTFEngine().detect(_bullish(), _bearish(), _bullish(), [])
     assert result["entry"] == "NONE"
     assert result["valid"] is False
+
+
+def test_neutral_higher_timeframes_allow_only_sweep_and_choch_confirmed_reversal():
+    structure = [{"label": "HH", "choch": True, "direction": "BULLISH"}]
+    sweep = {
+        "is_sweep": True,
+        "sell_side": True,
+        "buy_side": False,
+        "sweep_side": "SELL_SIDE",
+        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+    }
+    result = MTFEngine().detect([], [], [], structure, liquidity_sweep=sweep)
+    assert result["entry"] == "LONG"
+    assert result["entry_source"] == "CONFIRMED_15M_REVERSAL"
+    assert result["valid"] is True
+
+
+def test_ltf_reversal_without_sweep_confirmation_does_not_create_direction():
+    structure = [{"label": "HH", "choch": True, "direction": "BULLISH"}]
+    result = MTFEngine().detect([], [], [], structure)
+    assert result["entry"] == "NONE"
+    assert result["valid"] is False
+
+
+def test_ltf_reversal_does_not_override_opposing_higher_timeframe():
+    structure = [{"label": "HH", "choch": True, "direction": "BULLISH"}]
+    sweep = {
+        "is_sweep": True,
+        "sell_side": True,
+        "buy_side": False,
+        "sweep_side": "SELL_SIDE",
+        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+    }
+    result = MTFEngine().detect([], _bearish(), [], structure, liquidity_sweep=sweep)
+    assert result["entry"] == "NONE"
+    assert result["valid"] is False
