@@ -135,7 +135,8 @@ class EntryEngine:
         if isinstance(ote, dict):
             try:
                 fib_values = [float(ote.get("fib62")), float(ote.get("fib79"))]
-                if all(math.isfinite(value) and value > 0 for value in fib_values):
+                explicitly_invalid_ote = ote.get("valid") is False
+                if not explicitly_invalid_ote and all(math.isfinite(value) and value > 0 for value in fib_values):
                     ote_low, ote_high = min(fib_values), max(fib_values)
             except (TypeError, ValueError, OverflowError):
                 ote_low = ote_high = None
@@ -359,11 +360,6 @@ class EntryEngine:
                     result["entry_type_reason"] = "Sell-side sweep + bullish structure confirmation inside POI"
                     result["score"] += 10
                     result["checks"].append("✓ Sweep-confirmed market entry")
-                elif inside_poi and zone_low < current_price:
-                    result["entry"] = zone_low
-                    result["entry_type"] = "LIMIT"
-                    result["requires_pullback"] = True
-                    result["entry_type_reason"] = "POI içinden daha derin geçerli LONG LIMIT seviyesi"
                 elif limit_entry is not None and current_price > limit_entry:
                     result["entry"] = limit_entry
                     result["entry_type"] = "LIMIT"
@@ -417,11 +413,6 @@ class EntryEngine:
                     result["entry_type_reason"] = "Buy-side sweep + bearish structure confirmation inside POI"
                     result["score"] += 10
                     result["checks"].append("✓ Sweep-confirmed market entry")
-                elif inside_poi and current_price < zone_high:
-                    result["entry"] = zone_high
-                    result["entry_type"] = "LIMIT"
-                    result["requires_pullback"] = True
-                    result["entry_type_reason"] = "POI içinden daha derin geçerli SHORT LIMIT seviyesi"
                 elif limit_entry is not None and current_price < limit_entry:
                     result["entry"] = limit_entry
                     result["entry_type"] = "LIMIT"
