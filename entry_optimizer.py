@@ -156,6 +156,21 @@ class EntryOptimizer:
             for level in (vp_best.get("hvn") or [])[:3]:
                 self._add_level(weighted_levels, level, 0.8, "volume_hvn", low, high)
         inst = institutional if isinstance(institutional, dict) else {}
+        volume_delta = inst.get("volume_delta") if isinstance(inst.get("volume_delta"), dict) else {}
+        try:
+            volume_imbalance = float(volume_delta.get("imbalance"))
+        except (TypeError, ValueError, OverflowError):
+            volume_imbalance = None
+        if volume_imbalance is not None:
+            delta_side = self._direction(volume_delta.get("direction"))
+            if abs(volume_imbalance) < 0.08:
+                weighted_positions.append((0.28, 1.0, "weak_volume_delta"))
+                stronger_confirmation_reasons.append("weak_volume_delta")
+                evidence.append({"source": "volume_delta", "bias": "WEAK", "imbalance": volume_imbalance})
+            elif delta_side not in {"NONE", direction}:
+                weighted_positions.append((0.18, 1.3, "opposing_volume_delta"))
+                stronger_confirmation_reasons.append("opposing_volume_delta")
+                evidence.append({"source": "volume_delta", "bias": "OPPOSED", "imbalance": volume_imbalance})
         self._add_level(weighted_levels, inst.get("vwap"), 1.0, "institutional_vwap", low, high)
         self._add_level(weighted_levels, inst.get("anchored_vwap"), 1.2, "anchored_vwap", low, high)
 
