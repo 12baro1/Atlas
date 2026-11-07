@@ -47,18 +47,13 @@ class EntryConfirmationEngine:
         confirmation_mode = "directional_break"
 
         if event_direction != expected:
-            # A counter-directional CHoCH is a confirmed structural reversal,
-            # not a pullback; it remains an unconditional rejection.
-            if last_break.get("choch"):
-                result["reason"] = "Latest 15m CHoCH reverses entry direction"
-                return result
-
+            counter_choch = bool(last_break.get("choch"))
             prior_aligned_break = any(
                 str(structure[i].get("direction", "")).upper() == expected
                 and bool(structure[i].get("bos"))
                 for i in break_positions[:-1]
             )
-            if not prior_aligned_break:
+            if not counter_choch and not prior_aligned_break:
                 result["reason"] = "Latest 15m break opposes entry direction without a prior aligned BOS"
                 return result
 
@@ -69,8 +64,7 @@ class EntryConfirmationEngine:
                 item for item in structure[last_break_position + 1:]
                 if isinstance(item, dict)
             ]
-
-            reclaimed_swing = any(
+            recovered_structure = any(
                 str(item.get("label", "")).upper() == recovery_label
                 and str(item.get("kind", item.get("type", ""))).upper() == recovery_kind
                 for item in post_break_swings
@@ -81,7 +75,10 @@ class EntryConfirmationEngine:
             except (TypeError, ValueError, OverflowError):
                 price = None
 
-            reclaim_pivots = []
+            # A counter-CHoCH is a genuine local reversal. It is not accepted
+            # as a pullback by itself: price must first form the directional
+            # recovery swing and reclaim the post-CHoCH opposing pivot.
+            post_reclaim_pivots = []
             for item in post_break_swings:
                 kind = str(item.get("kind", item.get("type", ""))).upper()
                 if kind != reclaim_kind:
@@ -91,41 +88,55 @@ class EntryConfirmationEngine:
                 except (TypeError, ValueError, OverflowError):
                     continue
                 if pivot_price > 0:
-                    reclaim_pivots.append(pivot_price)
+                    post_reclaim_pivots.append(pivot_price)
 
-            reclaim_source = "post_break_pullback"
-            # A confirmed counter-BOS can occur before the next pullback pivot
-            # is confirmed. In that case, use the last pre-break structure level
-            # as a stricter reclaim threshold. This requires price to recover
-            # the prior range boundary, not merely bounce from the counter-BOS.
-            if not reclaim_pivots:
-                reclaim_source = "prior_structure_boundary"
-                for item in reversed(structure[:last_break_position]):
-                    kind = str(item.get("kind", item.get("type", ""))).upper()
-                    if kind != reclaim_kind:
-                        continue
-                    try:
-                        pivot_price = float(item.get("price", item.get("high" if direction == "LONG" else "low")))
-                    except (TypeError, ValueError, OverflowError):
-                        continue
-                    if pivot_price > 0:
-                        reclaim_pivots.append(pivot_price)
-                        break
-
-            reclaimed_price = False
-            if price is not None and reclaim_pivots:
-                reclaim_level = reclaim_pivots[-1]
+            if counter_choch:
+                if not recovered_structure or not post_reclaim_pivots or price is None:
+                    result["reason"] = (
+                        "Counter 15m CHoCH needs a post-reversal recovery swing and reclaimed pivot"
+                    )
+                    return result
+                reclaim_level = post_reclaim_pivots[-1]
                 reclaimed_price = price > reclaim_level if direction == "LONG" else price < reclaim_level
+                if not reclaimed_price:
+                    result["reason"] = (
+                        "Counter 15m CHoCH recovery formed but reclaim level has not been broken"
+                    )
+                    return result
+                confirmation_mode = "reclaimed_counter_choch"
+            else:
+                reclaim_pivots = list(post_reclaim_pivots)
+                reclaim_source = "post_break_pullback"
+                # For a counter-BOS, the previous range boundary remains a
+                # stricter fallback when no post-break pivot has formed yet.
+                if not reclaim_pivots:
+                    reclaim_source = "prior_structure_boundary"
+                    for item in reversed(structure[:last_break_position]):
+                        kind = str(item.get("kind", item.get("type", ""))).upper()
+                        if kind != reclaim_kind:
+                            continue
+                        try:
+                            pivot_price = float(item.get("price", item.get("high" if direction == "LONG" else "low")))
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                        if pivot_price > 0:
+                            reclaim_pivots.append(pivot_price)
+                            break
 
-            reclaimed = reclaimed_swing or reclaimed_price
-            if not reclaimed:
-                result["reason"] = "Latest 15m break opposes entry direction without a reclaimed pullback swing"
-                return result
-            confirmation_mode = (
-                "reclaimed_pullback" if reclaimed_swing else
-                "reclaimed_pullback_price" if reclaim_source == "post_break_pullback" else
-                "reclaimed_prior_structure_boundary"
-            )
+                reclaimed_price = False
+                if price is not None and reclaim_pivots:
+                    reclaim_level = reclaim_pivots[-1]
+                    reclaimed_price = price > reclaim_level if direction == "LONG" else price < reclaim_level
+                if not recovered_structure and not reclaimed_price:
+                    result["reason"] = (
+                        "Latest 15m counter-BOS has no reclaimed pullback structure"
+                    )
+                    return result
+                confirmation_mode = (
+                    "reclaimed_pullback" if recovered_structure else
+                    "reclaimed_pullback_price" if reclaim_source == "post_break_pullback" else
+                    "reclaimed_prior_structure_boundary"
+                )
 
         elif direction == "LONG" and label != "HH":
             result["reason"] = "Bullish structural break missing"
@@ -191,11 +202,20 @@ class EntryConfirmationEngine:
         result["confirmed"] = True
         result["confirmation_mode"] = confirmation_mode
         result["poi_confirmation"] = "FVG" if active_fvg else "ORDER_BLOCK_OTE"
-        result["reason"] = (
-            "15m reclaimed pullback structure confirmed with "
-            + ("directional FVG" if active_fvg else "directional OB + 4H OTE")
-            if confirmation_mode.startswith("reclaimed_pullback")
-            else "15m structure break confirmed with "
-            + ("directional FVG" if active_fvg else "directional OB + 4H OTE")
-        )
+        result["reentry_triggered"] = confirmation_mode.startswith("reclaimed_")
+        if confirmation_mode == "reclaimed_counter_choch":
+            result["reason"] = (
+                "15m counter-CHoCH recovered and reclaim confirmed with "
+                + ("directional FVG" if active_fvg else "directional OB + 4H OTE")
+            )
+        elif confirmation_mode.startswith("reclaimed_"):
+            result["reason"] = (
+                "15m reclaimed pullback structure confirmed with "
+                + ("directional FVG" if active_fvg else "directional OB + 4H OTE")
+            )
+        else:
+            result["reason"] = (
+                "15m structure break confirmed with "
+                + ("directional FVG" if active_fvg else "directional OB + 4H OTE")
+            )
         return result
