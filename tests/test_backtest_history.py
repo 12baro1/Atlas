@@ -19,7 +19,7 @@ def test_backtest_fetches_timeframe_specific_warmup_history():
     assert backtest._history_days_for_timeframe(60, "1h") > 100
     assert backtest._history_days_for_timeframe(60, "4h") >= 226
     assert backtest._history_days_for_timeframe(60, "1d") == 560
-    assert backtest._history_days_for_timeframe(60, "1w") == 2160
+    assert backtest._history_days_for_timeframe(60, "1w") == 2174
 
 
 def test_load_historical_uses_distinct_since_dates(monkeypatch):
@@ -33,7 +33,8 @@ def test_load_historical_uses_distinct_since_dates(monkeypatch):
     monkeypatch.setattr(backtest, "_fetch_history", fake_fetch)
     backtest.load_historical("BTC/USDT:USDT", days=60, now_ms=now_ms)
 
-    assert captured["1w"][0] == now_ms - int(2160 * 86_400_000)
+    assert captured["1w"][0] == now_ms - int(2174 * 86_400_000)
+    assert captured["1w"][1] == 302
     assert captured["1d"][0] == now_ms - int(560 * 86_400_000)
     assert captured["15m"][0] == now_ms - int(
         backtest._history_days_for_timeframe(60, "15m") * 86_400_000
