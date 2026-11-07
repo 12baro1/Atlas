@@ -122,3 +122,24 @@ def test_material_secondary_conflict_requires_choch_or_reclaim():
 
     assert entry["confirmation_profile"]["mode"] == "CHOCH_OR_RECLAIM"
     assert entry["confirmation_requirements"]["require_choch_or_reclaim"] is True
+
+
+def test_confirmation_exposes_optimizer_profile_and_requirements():
+    entry = {
+        "valid": False,
+        "direction": "LONG",
+        "confirmation_profile": {
+            "mode": "CHOCH_OR_RECLAIM",
+            "aligned_weight": 1.0,
+            "opposing_weight": 2.0,
+        },
+        "confirmation_requirements": {
+            "require_choch_or_reclaim": True,
+            "reasons": ["unicorn_opposes"],
+        },
+    }
+    result = EntryConfirmationEngine().confirm({}, [], [], entry)
+
+    assert result["confirmation_profile"]["mode"] == "CHOCH_OR_RECLAIM"
+    assert result["requirements"]["require_choch_or_reclaim"] is True
+
