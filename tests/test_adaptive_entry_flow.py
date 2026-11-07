@@ -143,3 +143,73 @@ def test_confirmation_exposes_optimizer_profile_and_requirements():
     assert result["confirmation_profile"]["mode"] == "CHOCH_OR_RECLAIM"
     assert result["requirements"]["require_choch_or_reclaim"] is True
 
+
+def _bullish_fvg():
+    return [{"type": "BULLISH", "from": 108.0, "to": 110.0, "filled": False}]
+
+
+def test_counter_choch_can_confirm_long_only_after_recovery_and_reclaim():
+    structure = [
+        {"kind": "HIGH", "label": "HH", "price": 110.0, "bos": True, "direction": "BULLISH"},
+        {"kind": "LOW", "label": "HL", "price": 100.0},
+        {"kind": "LOW", "label": "LL", "choch": True, "direction": "BEARISH"},
+        {"kind": "LOW", "label": "HL", "price": 104.0},
+        {"kind": "HIGH", "label": "HH", "price": 112.0},
+    ]
+    entry = {"valid": True, "direction": "LONG", "entry": 105.0,
+             "poi_source": "ORDER_BLOCK", "poi_zone": {"low": 103.0, "high": 106.0},
+             "ote_confluence": True}
+    engine = EntryConfirmationEngine()
+
+    not_reclaimed = engine.confirm(
+        {"valid": True}, structure, _bullish_fvg(), entry, current_price=111.0
+    )
+    assert not_reclaimed["confirmed"] is False
+    assert "reclaim level" in not_reclaimed["reason"]
+
+    reclaimed = engine.confirm(
+        {"valid": True}, structure, _bullish_fvg(), entry, current_price=113.0
+    )
+    assert reclaimed["confirmed"] is True
+    assert reclaimed["confirmation_mode"] == "reclaimed_counter_choch"
+    assert reclaimed["reentry_triggered"] is True
+
+
+def test_counter_choch_can_confirm_short_only_after_recovery_and_reclaim():
+    structure = [
+        {"kind": "LOW", "label": "LL", "price": 90.0, "bos": True, "direction": "BEARISH"},
+        {"kind": "HIGH", "label": "LH", "price": 100.0},
+        {"kind": "HIGH", "label": "HH", "choch": True, "direction": "BULLISH"},
+        {"kind": "HIGH", "label": "LH", "price": 96.0},
+        {"kind": "LOW", "label": "LL", "price": 88.0},
+    ]
+    entry = {"valid": True, "direction": "SHORT", "entry": 95.0,
+             "poi_source": "ORDER_BLOCK", "poi_zone": {"low": 94.0, "high": 97.0},
+             "ote_confluence": True}
+    fvg = [{"type": "BEARISH", "from": 90.0, "to": 92.0, "filled": False}]
+
+    result = EntryConfirmationEngine().confirm(
+        {"valid": True}, structure, fvg, entry, current_price=87.0
+    )
+
+    assert result["confirmed"] is True
+    assert result["confirmation_mode"] == "reclaimed_counter_choch"
+    assert result["reentry_triggered"] is True
+
+
+def test_counter_choch_without_post_reversal_recovery_is_rejected():
+    structure = [
+        {"kind": "HIGH", "label": "HH", "price": 110.0, "bos": True, "direction": "BULLISH"},
+        {"kind": "LOW", "label": "LL", "choch": True, "direction": "BEARISH"},
+        {"kind": "HIGH", "label": "HH", "price": 112.0},
+    ]
+    entry = {"valid": True, "direction": "LONG", "entry": 105.0,
+             "poi_source": "ORDER_BLOCK", "poi_zone": {"low": 103.0, "high": 106.0},
+             "ote_confluence": True}
+
+    result = EntryConfirmationEngine().confirm(
+        {"valid": True}, structure, _bullish_fvg(), entry, current_price=113.0
+    )
+
+    assert result["confirmed"] is False
+    assert "recovery swing" in result["reason"]
