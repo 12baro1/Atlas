@@ -148,11 +148,11 @@ def test_specialist_conflict_does_not_override_structural_execution_blockers():
     assert any("SMT" in item for item in result["warnings"])
 
 
-def test_learning_blocks_only_when_sample_is_sufficient_and_expectancy_is_negative():
+def test_negative_learning_history_changes_entry_quality_but_does_not_veto_by_itself():
     payload = base_payload()
     payload["setup_quality"] = {
         "learning": {"matched": True, "sample_count": 25, "expected_r": -0.15}
     }
     result = TradeQualityEngine().evaluate(**payload)
-    assert result["allowed"] is False
-    assert any("Learning history" in item for item in result["blockers"])
+    assert result["allowed"] is True
+    assert any("Learning history" in item for item in result["warnings"])
