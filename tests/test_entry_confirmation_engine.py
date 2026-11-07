@@ -77,3 +77,45 @@ def test_bullish_confirmation_expires_after_newer_bearish_break():
     )
     assert result["confirmed"] is False
     assert result["reason"] == "Latest 15m break opposes entry direction"
+
+
+
+def test_counter_bos_pullback_can_confirm_after_reclaimed_higher_low():
+    structure = [
+        {"index": 10, "kind": "HIGH", "label": "HH", "bos": True, "direction": "BULLISH"},
+        {"index": 12, "kind": "LOW", "label": "LL", "bos": True, "direction": "BEARISH"},
+        {"index": 14, "kind": "LOW", "label": "HL", "bos": False, "direction": None},
+    ]
+    fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
+    )
+    assert result["confirmed"] is True
+    assert result["confirmation_mode"] == "reclaimed_pullback"
+
+
+def test_counter_bos_without_reclaimed_swing_does_not_confirm():
+    structure = [
+        {"index": 10, "kind": "HIGH", "label": "HH", "bos": True, "direction": "BULLISH"},
+        {"index": 12, "kind": "LOW", "label": "LL", "bos": True, "direction": "BEARISH"},
+    ]
+    fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
+    )
+    assert result["confirmed"] is False
+    assert "reclaimed pullback swing" in result["reason"]
+
+
+def test_counter_choch_always_invalidates_prior_directional_break():
+    structure = [
+        {"index": 10, "kind": "HIGH", "label": "HH", "bos": True, "direction": "BULLISH"},
+        {"index": 12, "kind": "LOW", "label": "LL", "bos": True, "choch": True, "direction": "BEARISH"},
+        {"index": 14, "kind": "LOW", "label": "HL", "bos": False, "direction": None},
+    ]
+    fvg = [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": False}]
+    result = EntryConfirmationEngine().confirm(
+        _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
+    )
+    assert result["confirmed"] is False
+    assert "CHoCH" in result["reason"]
