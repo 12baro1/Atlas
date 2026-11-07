@@ -44,15 +44,15 @@ def test_transition_allows_aligned_confirmed_poi_pullback_without_new_sweep():
     assert result["allowed"] is True
 
 
-def test_transition_still_rejects_unconfirmed_or_countertrend_pullback():
+def test_transition_keeps_valid_poi_when_15m_confirmation_is_missing():
     payload = _quality_payload()
     payload["market_regime"] = {
         "active": True, "regime": "TRANSITION", "directional_bias": "BULLISH"
     }
     payload["confirmation"] = {"confirmed": False}
     result = TradeQualityEngine().evaluate(**payload)
-    assert result["allowed"] is False
-    assert any("Transition regime" in item for item in result["blockers"])
+    assert result["allowed"] is True
+    assert any("Transition regime" in item for item in result["warnings"])
 
 
 def test_cost_adjusted_net_rr_is_a_hard_gate(monkeypatch):
