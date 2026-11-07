@@ -65,7 +65,7 @@ class SetupQualityEngine:
             "setup_fingerprint": build_fingerprint(active_features),
             "blockers": blockers,
             "reasons": reasons,
-            "trade_allowed": direction in ["LONG", "SHORT"] and total >= 58 and not blockers,
+            "trade_allowed": direction in ["LONG", "SHORT"] and not blockers,
         }
 
     def _market_structure(self, direction, mtf, trend, structure):
