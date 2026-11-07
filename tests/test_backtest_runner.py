@@ -608,3 +608,52 @@ def test_partial_exit_gap_through_trailing_stop_uses_open_price():
     # 50% at +1R, remaining 50% stopped at the 99 open (-1R): net 0R.
     assert out["net_rr"] == pytest.approx(0.0, abs=1e-4)
     assert out["exit_reason"] == "TRAILING_STOP"
+
+
+def test_runner_reports_stage_rejection_diagnostics():
+    candles = _rising_series(500)
+
+    def fake_analyze(window):
+        if len(window["15m"]) != 400:
+            return None
+        return {
+            "decision": {
+                "action": "WAIT",
+                "critical_blockers": ["Entry invalid", "RR below minimum"],
+            },
+            "signal": {"signal": "WAIT", "wait_reason": "Entry not confirmed"},
+            "risk": {},
+            "analysis": {
+                "mtf": {
+                    "entry": "NONE",
+                    "entry_source": "NONE",
+                    "weekly": "NEUTRAL",
+                    "daily": "BEARISH",
+                    "h4": "NEUTRAL",
+                },
+                "liquidity_sweep": {
+                    "is_sweep": True,
+                    "sweep_side": "SELL_SIDE",
+                    "post_structure": {"confirmed": False},
+                },
+                "confirmation": {
+                    "confirmed": False,
+                    "reason": "15m directional BOS/CHoCH missing",
+                },
+                "entry": {"valid": False, "reason": "No MTF direction"},
+            },
+        }
+
+    stats = BacktestRunner(analyze_fn=fake_analyze).run({"15m": candles})
+    assert stats["mtf_entry_source_counts"] == {"NONE": 1}
+    assert stats["liquidity_sweep_state_counts"] == {
+        "sweep=True|confirmed=False|side=SELL_SIDE": 1
+    }
+    assert stats["confirmation_reason_counts"] == {
+        "15m directional BOS/CHoCH missing": 1
+    }
+    assert stats["entry_validity_counts"] == {"INVALID": 1}
+    assert stats["decision_blocker_counts"] == {
+        "Entry invalid": 1,
+        "RR below minimum": 1,
+    }
