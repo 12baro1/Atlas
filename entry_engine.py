@@ -309,7 +309,10 @@ class EntryEngine:
             result["reason"] = "No fresh directional FVG or unmitigated OB overlaps 4H OTE"
             result["entry_reason_code"] = "POI_CROSSED" if (crossed_matching_fvg or crossed_matching_ob) else "NO_VALID_POI_IN_OTE"
             result["entry_type_reason"] = result["reason"]
-            result["entry_zone_crossed"] = bool(crossed_matching_fvg or crossed_matching_ob)
+            result["entry_zone_crossed"] = bool(
+                crossed_matching_fvg or crossed_matching_ob
+                or ote_excluded_matching_fvg or ote_excluded_matching_ob
+            )
             return result
         if selected_poi:
             result["poi_source"] = selected_poi_source
