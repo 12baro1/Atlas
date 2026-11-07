@@ -1,8 +1,10 @@
 """Multi-timeframe market structure direction.
 
-A single last swing is not enough to establish trend: a bullish trend needs
-both a higher high and a higher low; bearish needs a lower high and a lower low.
+The trading hierarchy is weekly context -> 4H directional structure -> 15m
+execution confirmation. Daily structure is retained as context, not as an
+equal vote that can cancel a valid 4H direction.
 """
+
 
 class MTFEngine:
 
@@ -45,7 +47,6 @@ class MTFEngine:
         elif side == "BUY_SIDE":
             direction, expected = "SHORT", "BEARISH"
         else:
-            # Legacy payloads may expose side only through buy_side/sell_side.
             if liquidity_sweep.get("sell_side") and not liquidity_sweep.get("buy_side"):
                 direction, expected = "LONG", "BULLISH"
             elif liquidity_sweep.get("buy_side") and not liquidity_sweep.get("sell_side"):
@@ -82,25 +83,45 @@ class MTFEngine:
         trends = [weekly_trend, daily_trend, h4_trend]
         bulls = trends.count("BULLISH")
         bears = trends.count("BEARISH")
+        weekly_h4_conflict = (
+            weekly_trend in {"BULLISH", "BEARISH"}
+            and h4_trend in {"BULLISH", "BEARISH"}
+            and weekly_trend != h4_trend
+        )
+        daily_h4_conflict = (
+            daily_trend in {"BULLISH", "BEARISH"}
+            and h4_trend in {"BULLISH", "BEARISH"}
+            and daily_trend != h4_trend
+        )
 
         entry_signal = "NONE"
-        entry_source = "HTF_ALIGNMENT"
-        if bulls >= 2 and bears == 0:
+        entry_source = "NONE"
+        direction_reason = "h4_structure_neutral"
+
+        # 4H is the primary directional timeframe. A genuine weekly conflict
+        # blocks the setup; daily disagreement is reported as context only.
+        if h4_trend == "BULLISH" and not weekly_h4_conflict:
             entry_signal = "LONG"
-        elif bears >= 2 and bulls == 0:
+            entry_source = "H4_STRUCTURE"
+            direction_reason = "h4_bullish"
+        elif h4_trend == "BEARISH" and not weekly_h4_conflict:
             entry_signal = "SHORT"
+            entry_source = "H4_STRUCTURE"
+            direction_reason = "h4_bearish"
+        elif weekly_h4_conflict:
+            direction_reason = "weekly_h4_conflict"
         else:
-            # A lower-timeframe reversal is an alternative entry path only
-            # when a real liquidity sweep, post-sweep reclaim and closed 15m
-            # CHoCH agree. It cannot override a conflicting HTF structure.
-            if bulls == 0 or bears == 0:
-                reversal = self._confirmed_ltf_reversal(entry, liquidity_sweep)
-                if reversal == "LONG" and bears == 0:
-                    entry_signal = reversal
-                    entry_source = "CONFIRMED_15M_REVERSAL"
-                elif reversal == "SHORT" and bulls == 0:
-                    entry_signal = reversal
-                    entry_source = "CONFIRMED_15M_REVERSAL"
+            # 15m can establish direction only when 4H is neutral. It still
+            # requires a real liquidity sweep, post-sweep reclaim and CHoCH.
+            reversal = self._confirmed_ltf_reversal(entry, liquidity_sweep)
+            if reversal == "LONG" and weekly_trend != "BEARISH":
+                entry_signal = reversal
+                entry_source = "CONFIRMED_15M_REVERSAL"
+                direction_reason = "confirmed_15m_reversal"
+            elif reversal == "SHORT" and weekly_trend != "BULLISH":
+                entry_signal = reversal
+                entry_source = "CONFIRMED_15M_REVERSAL"
+                direction_reason = "confirmed_15m_reversal"
 
         return {
             "trend": weekly_trend,
@@ -108,7 +129,10 @@ class MTFEngine:
             "daily": daily_trend,
             "h4": h4_trend,
             "entry": entry_signal,
-            "entry_source": entry_source if entry_signal != "NONE" else "NONE",
+            "entry_source": entry_source,
+            "direction_reason": direction_reason,
+            "weekly_h4_conflict": weekly_h4_conflict,
+            "daily_h4_conflict": daily_h4_conflict,
             "valid": entry_signal != "NONE",
             "bullish_timeframes": bulls,
             "bearish_timeframes": bears,
