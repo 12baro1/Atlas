@@ -113,9 +113,6 @@ class EntryOptimizer:
         if isinstance(ote, dict):
             self._add_level(weighted_levels, ote.get("fib62"), 1.3, "ote_62", low, high)
             self._add_level(weighted_levels, ote.get("fib79"), 1.0, "ote_79", low, high)
-        if isinstance(ote, dict):
-            self._add_level(weighted_levels, ote.get("fib62"), 1.3, "ote_62", low, high)
-            self._add_level(weighted_levels, ote.get("fib79"), 1.0, "ote_79", low, high)
         vp = volume_profile if isinstance(volume_profile, dict) else {}
         vp_best = vp.get("best") if isinstance(vp.get("best"), dict) else vp
         if vp_best.get("active"):
