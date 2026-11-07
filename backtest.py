@@ -45,6 +45,40 @@ BACKTEST_WARMUP_CANDLES = {
 }
 
 
+def _market_listing_time_ms(symbol):
+    """Return the exchange-reported listing timestamp for a swap market."""
+    try:
+        markets = exchange.load_markets()
+    except Exception as exc:
+        raise RuntimeError(
+            f"{symbol}: Bybit market metadata yüklenemedi: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+
+    market = markets.get(symbol) if isinstance(markets, dict) else None
+    if not market:
+        return None
+
+    info = market.get("info") or {}
+    raw_timestamp = (
+        info.get("launchTime")
+        or info.get("launch_time")
+        or market.get("listing")
+    )
+    if raw_timestamp in (None, ""):
+        return None
+    try:
+        timestamp = int(float(raw_timestamp))
+    except (TypeError, ValueError, OverflowError):
+        logging.warning("%s için geçersiz listing timestamp: %r", symbol, raw_timestamp)
+        return None
+
+    # Normalize second-based timestamps while preserving Bybit's millisecond values.
+    if timestamp < 10_000_000_000:
+        timestamp *= 1000
+    return timestamp
+
+
 def _history_days_for_timeframe(days, timeframe):
     """Fetch enough prehistory for each timeframe's structure warmup."""
     days = float(days)
@@ -185,15 +219,16 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
         ordered.append(candle)
     return ordered
 
-def load_historical(symbol, days=60, now_ms=None):
-    """Load the evaluation window plus sufficient timeframe-specific warmup."""
+def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None):
+    """Load evaluation history, clamped to the market's actual listing date."""
     if float(days) <= 0:
         raise ValueError("Backtest days must be greater than zero")
     now = time.time() * 1000 if now_ms is None else float(now_ms)
     data = {"symbol": symbol}
     for tf, limit in TIMEFRAMES.items():
         history_days = _history_days_for_timeframe(days, tf)
-        since = now - int(history_days * 86_400_000)
+        requested_since = now - int(history_days * 86_400_000)
+        since = max(requested_since, listing_time_ms) if listing_time_ms else requested_since
         fetch_limit = limit + 2 if tf == "1w" else limit
         candles = _fetch_history(
             symbol, tf, since_ms=since, limit=fetch_limit
@@ -234,8 +269,8 @@ def _validate_backtest_history(data, symbol):
     return counts
 
 
-def _validate_backtest_coverage(data, symbol, days, now_ms):
-    """Ensure every timeframe covers the requested evaluation and warmup window."""
+def _validate_backtest_coverage(data, symbol, days, now_ms, listing_time_ms=None):
+    """Validate coverage, allowing only listing-date-limited warmup reductions."""
     now = float(now_ms)
     coverage = {}
     for tf in ("15m", "1h", "4h", "1d", "1w"):
@@ -243,6 +278,7 @@ def _validate_backtest_coverage(data, symbol, days, now_ms):
         duration = TIMEFRAME_DURATION_MS[tf]
         history_days = _history_days_for_timeframe(days, tf)
         requested_start = now - history_days * 86_400_000
+        effective_start = max(requested_start, listing_time_ms) if listing_time_ms else requested_start
         if not candles:
             raise RuntimeError(f"{symbol} {tf}: tarihsel veri yok; backtest durduruldu.")
 
@@ -250,11 +286,12 @@ def _validate_backtest_coverage(data, symbol, days, now_ms):
         last_close = max(c.time + duration for c in candles)
         # Candle boundaries are timeframe-aligned; allow two full intervals
         # for exchange boundary/availability differences, but not partial history.
-        if first_open > requested_start + 2 * duration:
-            missing_days = (first_open - requested_start) / 86_400_000
+        if first_open > effective_start + 2 * duration:
+            missing_days = (first_open - effective_start) / 86_400_000
             raise RuntimeError(
-                f"{symbol} {tf}: başlangıç verisi eksik. İstenen geçmiş "
-                f"{history_days:.1f} gün; ilk mum {missing_days:.1f} gün geç geliyor."
+                f"{symbol} {tf}: başlangıç verisi eksik. İstenen başlangıç "
+                f"{history_days:.1f} günlük geçmiş; kullanılabilir başlangıca göre "
+                f"ilk mum {missing_days:.1f} gün geç geliyor."
             )
         if last_close < now - 2 * duration:
             stale_days = (now - last_close) / 86_400_000
@@ -272,6 +309,12 @@ def _validate_backtest_coverage(data, symbol, days, now_ms):
                 "backtest durduruldu."
             )
         minimum = BACKTEST_WARMUP_CANDLES[tf]
+        if listing_time_ms is not None and listing_time_ms > requested_start:
+            # Keep the normal warmup requirement (300 weekly candles, etc.)
+            # whenever the market has existed long enough. Reduce it only by
+            # the amount that is mathematically unavailable before listing.
+            available_since_listing = max(0, int((now - effective_start) // duration))
+            minimum = min(minimum, max(1, available_since_listing - 2))
         if len(candles) < minimum:
             raise RuntimeError(
                 f"{symbol} {tf}: warmup verisi yetersiz ({len(candles)} mum; "
@@ -282,11 +325,20 @@ def _validate_backtest_coverage(data, symbol, days, now_ms):
             "last_close": last_close,
             "count": len(candles),
             "requested_days": round(history_days, 1),
+            "warmup_required": minimum,
+            "warmup_reduced": minimum < BACKTEST_WARMUP_CANDLES[tf],
         }
     print("TARİH KAPSAMI | " + " | ".join(
         f"{tf}: {item['requested_days']}g / {item['count']} mum"
         for tf, item in coverage.items()
     ))
+    reduced = [
+        f"{tf}: {item['count']} mum (normal warmup {BACKTEST_WARMUP_CANDLES[tf]})"
+        for tf, item in coverage.items()
+        if item["warmup_reduced"]
+    ]
+    if reduced:
+        print("WARMUP UYARISI | Piyasa listelenme tarihi nedeniyle azaltıldı | " + " | ".join(reduced))
     return coverage
 
 
@@ -515,9 +567,18 @@ def main():
     print(f"VERİ SAĞLAYICISI | {_history_provider_name}")
     all_stats = []
     for symbol in symbols:
-        data = load_historical(symbol, days=args.days)
+        listing_time_ms = _market_listing_time_ms(symbol)
+        if listing_time_ms is not None:
+            listing_date = time.strftime("%Y-%m-%d", time.gmtime(listing_time_ms / 1000))
+            print(f"MARKET LİSTELENME | {symbol}: {listing_date}")
+        data = load_historical(
+            symbol, days=args.days, listing_time_ms=listing_time_ms
+        )
         _validate_backtest_history(data, symbol)
-        _validate_backtest_coverage(data, symbol, args.days, time.time() * 1000)
+        _validate_backtest_coverage(
+            data, symbol, args.days, time.time() * 1000,
+            listing_time_ms=listing_time_ms,
+        )
         runner = BacktestRunner(
             analyze_fn=build_analyze_fn(engine),
             fee_rate=float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.002)),
