@@ -105,7 +105,7 @@ class EntryConfirmationEngine:
             if not (prior_aligned_break and reclaimed):
                 result["reason"] = "Latest 15m break opposes entry direction without a reclaimed pullback swing"
                 return result
-            confirmation_mode = "reclaimed_pullback_swing" if reclaimed_swing else "reclaimed_pullback_price"
+            confirmation_mode = "reclaimed_pullback" if reclaimed_swing else "reclaimed_pullback_price"
 
         elif direction == "LONG" and label != "HH":
             result["reason"] = "Bullish structural break missing"
