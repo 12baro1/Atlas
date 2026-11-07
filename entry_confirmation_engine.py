@@ -4,10 +4,15 @@
 class EntryConfirmationEngine:
 
     def confirm(self, mtf, structure, fvg, entry, current_price=None):
-        result = {"confirmed": False, "reason": "Weak confirmation"}
+        entry = entry if isinstance(entry, dict) else {}
+        result = {
+            "confirmed": False,
+            "reason": "Weak confirmation",
+            "confirmation_profile": entry.get("confirmation_profile") or {"mode": "UNAVAILABLE"},
+            "requirements": entry.get("confirmation_requirements") or {},
+        }
 
         mtf = mtf if isinstance(mtf, dict) else {}
-        entry = entry if isinstance(entry, dict) else {}
         structure = structure if isinstance(structure, list) else []
         fvg = fvg if isinstance(fvg, list) else []
 
