@@ -114,3 +114,34 @@ def test_trend_engine_uses_primary_h4_direction_not_flat_three_timeframe_vote():
     })
     assert result["trend"] == "BULLISH"
     assert result["strength"] == 2
+
+
+
+def test_h4_recent_confirmed_bos_can_set_direction_before_full_swing_pair():
+    h4 = [
+        {"kind": "LOW", "label": "LL"},
+        {"kind": "HIGH", "label": "LH"},
+        {"kind": "LOW", "label": "LL"},
+        {"kind": "HIGH", "label": "HH", "bos": True, "direction": "BULLISH"},
+    ]
+    result = MTFEngine().detect([], [], h4, [])
+    assert result["h4"] == "BULLISH"
+    assert result["entry"] == "LONG"
+    assert result["entry_source"] == "H4_STRUCTURE"
+
+
+def test_h4_lone_swing_label_without_confirmed_bos_stays_neutral():
+    h4 = [{"kind": "HIGH", "label": "HH"}]
+    result = MTFEngine().detect([], [], h4, [])
+    assert result["h4"] == "NEUTRAL"
+    assert result["entry"] == "NONE"
+
+
+def test_recent_h4_opposing_break_supersedes_older_bos():
+    h4 = [
+        {"kind": "HIGH", "label": "HH", "bos": True, "direction": "BULLISH"},
+        {"kind": "LOW", "label": "LL", "bos": True, "direction": "BEARISH"},
+    ]
+    result = MTFEngine().detect([], [], h4, [])
+    assert result["h4"] == "BEARISH"
+    assert result["entry"] == "SHORT"
