@@ -265,6 +265,11 @@ class BacktestRunner:
         self.target_reason_counts = {}
         self.target_missing_rr_counts = {}
         self.stop_atr_buckets = {}
+        self.mtf_entry_source_counts = {}
+        self.liquidity_sweep_state_counts = {}
+        self.confirmation_reason_counts = {}
+        self.entry_validity_counts = {}
+        self.decision_blocker_counts = {}
 
     def reset(self):
         self.__init__(
@@ -320,12 +325,38 @@ class BacktestRunner:
                     for key in ("entry", "weekly", "daily", "h4")
                 )
                 self.mtf_alignment_counts[alignment] = self.mtf_alignment_counts.get(alignment, 0) + 1
+            if isinstance(mtf, dict):
+                source = str(mtf.get("entry_source") or "UNKNOWN").upper()
+                self.mtf_entry_source_counts[source] = self.mtf_entry_source_counts.get(source, 0) + 1
+            sweep_meta = (analysis or {}).get("liquidity_sweep") if isinstance(analysis, dict) else {}
+            if isinstance(sweep_meta, dict):
+                post = sweep_meta.get("post_structure") or {}
+                sweep_key = (
+                    f"sweep={bool(sweep_meta.get('is_sweep'))}|"
+                    f"confirmed={bool(post.get('confirmed'))}|"
+                    f"side={str(sweep_meta.get('sweep_side') or 'NONE').upper()}"
+                )
+                self.liquidity_sweep_state_counts[sweep_key] = self.liquidity_sweep_state_counts.get(sweep_key, 0) + 1
+            confirmation_meta = (analysis or {}).get("confirmation") if isinstance(analysis, dict) else {}
+            if isinstance(confirmation_meta, dict):
+                reason = str(confirmation_meta.get("reason") or "unspecified")
+                self.confirmation_reason_counts[reason] = self.confirmation_reason_counts.get(reason, 0) + 1
             entry_meta = (analysis or {}).get("entry") if isinstance(analysis, dict) else {}
             if isinstance(entry_meta, dict):
                 entry_reason = str(entry_meta.get("entry_reason_code") or entry_meta.get("reason") or "unspecified")
                 self.entry_reason_counts[entry_reason] = self.entry_reason_counts.get(entry_reason, 0) + 1
                 entry_type = str(entry_meta.get("entry_type") or "NONE").upper()
+                validity = "VALID" if entry_meta.get("valid") else "INVALID"
+                self.entry_validity_counts[validity] = self.entry_validity_counts.get(validity, 0) + 1
                 self.entry_type_counts[entry_type] = self.entry_type_counts.get(entry_type, 0) + 1
+            blockers = decision.get("critical_blockers") or decision.get("blockers") or []
+            if isinstance(blockers, str):
+                blockers = [blockers]
+            if isinstance(blockers, (list, tuple)):
+                for blocker in blockers:
+                    key = str(blocker).strip()
+                    if key:
+                        self.decision_blocker_counts[key] = self.decision_blocker_counts.get(key, 0) + 1
             risk_meta = result.get("risk") if isinstance(result, dict) else {}
             if isinstance(risk_meta, dict) and risk_meta.get("risk_setup_valid") is False:
                 risk_reason = str(risk_meta.get("reason_code") or risk_meta.get("risk_setup_reason") or "unspecified")
@@ -668,6 +699,16 @@ class BacktestRunner:
                 "target_reason_counts": dict(self.target_reason_counts),
                 "target_missing_rr_counts": dict(self.target_missing_rr_counts),
                 "stop_atr_buckets": dict(self.stop_atr_buckets),
+            "mtf_entry_source_counts": dict(self.mtf_entry_source_counts),
+            "liquidity_sweep_state_counts": dict(self.liquidity_sweep_state_counts),
+            "confirmation_reason_counts": dict(self.confirmation_reason_counts),
+            "entry_validity_counts": dict(self.entry_validity_counts),
+            "decision_blocker_counts": dict(self.decision_blocker_counts),
+                "mtf_entry_source_counts": dict(self.mtf_entry_source_counts),
+                "liquidity_sweep_state_counts": dict(self.liquidity_sweep_state_counts),
+                "confirmation_reason_counts": dict(self.confirmation_reason_counts),
+                "entry_validity_counts": dict(self.entry_validity_counts),
+                "decision_blocker_counts": dict(self.decision_blocker_counts),
                 "unfilled_limits": self.unfilled_limits,
                 "expired_limits": self.expired_limits,
                 "stale_limits_cancelled": self.stale_limits_cancelled,
