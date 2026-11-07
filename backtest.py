@@ -380,6 +380,10 @@ def _combine_stats(all_stats):
         "target_reason_counts": {},
         "target_missing_rr_counts": {},
         "stop_atr_buckets": {},
+        "confirmation_outcome_counts": {},
+        "confirmation_reason_counts": {},
+        "confirmation_requirement_counts": {},
+        "entry_type_reason_counts": {},
         "unfilled_limits": 0,
         "expired_limits": 0,
         "stale_limits_cancelled": 0,
@@ -402,7 +406,7 @@ def _combine_stats(all_stats):
             "invalid_candidates", "no_followup_data",
         ):
             combined[key] += int(stats.get(key, 0) or 0)
-        for key in ("action_counts", "wait_reason_counts", "signal_reason_counts", "mtf_alignment_counts", "entry_reason_counts", "entry_type_counts", "risk_reason_counts", "target_reason_counts", "target_missing_rr_counts", "stop_atr_buckets"):
+        for key in ("action_counts", "wait_reason_counts", "signal_reason_counts", "mtf_alignment_counts", "entry_reason_counts", "entry_type_counts", "risk_reason_counts", "target_reason_counts", "target_missing_rr_counts", "stop_atr_buckets", "confirmation_outcome_counts", "confirmation_reason_counts", "confirmation_requirement_counts", "entry_type_reason_counts"):
             for label, count in (stats.get(key) or {}).items():
                 combined[key][label] = combined[key].get(label, 0) + int(count or 0)
         combined["net_rr"] += float(stats.get("net_rr", 0) or 0)
