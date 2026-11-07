@@ -1026,6 +1026,8 @@ class AtlasEngine:
             trend=trend,
             liquidity_sweep=liquidity_sweep,
             ote=ote,
+            market_phase=market_phase,
+            market_regime=market_regime,
             htf_orderblock=htf_orderblock,
             htf_fvg=htf_fvg,
             smt=smt,
