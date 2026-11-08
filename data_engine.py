@@ -135,8 +135,8 @@ def get_market_data(symbol, force_refresh=False):
     return data
 
 
-# Korrelasyon evreni: BTC/ETH (dominance endeksleri Bybit'te yok; oysalar UNKNOWN
-# kalir ve korrelasyon motoru yalnizca gercek veriye dayanarak engel karari verir).
+# Cross-market evidence universe: BTC/ETH 4H candles. Dominance indexes are
+# not fetched from this Bybit data provider and must not be fabricated.
 _CORRELATION_SYMBOLS = {
     "BTC": ("BTC/USDT:USDT", "4h", 200),
     "ETH": ("ETH/USDT:USDT", "4h", 200),
