@@ -178,3 +178,35 @@ def test_opposing_sweep_can_be_reclaimed_before_entry():
     result = evaluate(payload)
     assert result["allowed"] is True
     assert any("Sweep evidence opposes" in item for item in result["warnings"])
+
+
+
+def test_confirmed_sweep_reversal_can_override_mtf_direction_conflict():
+    payload = base_payload()
+    payload["entry"]["direction_source"] = "CONFIRMED_SWEEP_REVERSAL"
+    payload["mtf"] = {"valid": True, "entry": "SHORT"}
+    payload["trend"] = {"trend": "BEARISH"}
+    payload["market_regime"] = {
+        "active": True, "regime": "TRENDING_DOWN", "directional_bias": "BEARISH"
+    }
+    payload["liquidity_sweep"] = {
+        "is_sweep": True, "sell_side": True, "buy_side": False,
+        "sweep_side": "SELL_SIDE",
+        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+    }
+    result = evaluate(payload)
+    assert result["allowed"] is True
+    assert "Multi-timeframe direction is not aligned" not in result["blockers"]
+
+
+def test_unconfirmed_countertrend_candidate_remains_blocked_by_mtf_conflict():
+    payload = base_payload()
+    payload["entry"]["direction_source"] = "CONFIRMED_SWEEP_REVERSAL"
+    payload["mtf"] = {"valid": True, "entry": "SHORT"}
+    payload["liquidity_sweep"] = {
+        "is_sweep": True, "sell_side": True, "buy_side": False,
+        "post_structure": {"confirmed": False, "direction": "BULLISH"},
+    }
+    result = evaluate(payload)
+    assert result["allowed"] is False
+    assert "Multi-timeframe direction is not aligned" in result["blockers"]
