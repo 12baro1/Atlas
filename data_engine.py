@@ -81,45 +81,53 @@ def get_market_data(symbol, force_refresh=False):
     # Derivatives context is optional: unsupported endpoints or exchange
     # hiccups must not break OHLCV analysis.
     data["open_interest"] = []
-    try:
-        fetch_oi = getattr(exchange, "fetch_open_interest_history", None)
-        if callable(fetch_oi):
+    fetch_oi = getattr(exchange, "fetch_open_interest_history", None)
+    if callable(fetch_oi):
+        try:
             records = fetch_oi(symbol, timeframe="1h", limit=100) or []
+            records = sorted(records, key=lambda item: item.get("timestamp") or 0)
             data["open_interest"] = [
                 float(item.get("openInterestValue") or item.get("openInterestAmount"))
                 for item in records
                 if isinstance(item, dict)
                 and (item.get("openInterestValue") is not None or item.get("openInterestAmount") is not None)
             ]
-        if not data["open_interest"]:
-            fetch_oi_snapshot = getattr(exchange, "fetch_open_interest", None)
-            if callable(fetch_oi_snapshot):
+        except Exception:
+            data["open_interest"] = []
+    if not data["open_interest"]:
+        fetch_oi_snapshot = getattr(exchange, "fetch_open_interest", None)
+        if callable(fetch_oi_snapshot):
+            try:
                 snapshot = fetch_oi_snapshot(symbol) or {}
                 value = snapshot.get("openInterestValue") or snapshot.get("openInterestAmount")
                 if value is not None:
                     data["open_interest"] = [float(value)]
-    except Exception:
-        data["open_interest"] = []
+            except Exception:
+                pass
 
     data["funding_rate"] = []
-    try:
-        fetch_funding_history = getattr(exchange, "fetch_funding_rate_history", None)
-        if callable(fetch_funding_history):
+    fetch_funding_history = getattr(exchange, "fetch_funding_rate_history", None)
+    if callable(fetch_funding_history):
+        try:
             records = fetch_funding_history(symbol, limit=100) or []
+            records = sorted(records, key=lambda item: item.get("timestamp") or 0)
             data["funding_rate"] = [
                 float(item.get("fundingRate"))
                 for item in records
                 if isinstance(item, dict) and item.get("fundingRate") is not None
             ]
-        if not data["funding_rate"]:
-            fetch_funding = getattr(exchange, "fetch_funding_rate", None)
-            if callable(fetch_funding):
+        except Exception:
+            data["funding_rate"] = []
+    if not data["funding_rate"]:
+        fetch_funding = getattr(exchange, "fetch_funding_rate", None)
+        if callable(fetch_funding):
+            try:
                 snapshot = fetch_funding(symbol) or {}
                 value = snapshot.get("fundingRate")
                 if value is not None:
                     data["funding_rate"] = [float(value)]
-    except Exception:
-        data["funding_rate"] = []
+            except Exception:
+                pass
 
     for timeframe, c_limit in TIMEFRAMES.items():
         data[timeframe] = fetch_candles(symbol, timeframe, c_limit, force_refresh=force_refresh)
