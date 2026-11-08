@@ -263,9 +263,11 @@ class BacktestRunner:
     """Fiyat serisini ileri sararak engine sinyallerini tetikler ve sonuç toplar."""
 
     def __init__(self, analyze_fn=None, fee_rate=0.0020, partial_exits=True, tp_weights=None,
-                 limit_expiry_bars=8):
+                 limit_expiry_bars=8, spread_rate=0.0, slippage_rate=0.0):
         self.analyze_fn = analyze_fn
-        self.fee_rate = float(fee_rate)
+        self.fee_rate = self._safe_cost_rate(fee_rate)
+        self.spread_rate = self._safe_cost_rate(spread_rate)
+        self.slippage_rate = self._safe_cost_rate(slippage_rate)
         self.partial_exits = bool(partial_exits)
         self.tp_weights = tp_weights
         self.limit_expiry_bars = max(1, int(limit_expiry_bars))
@@ -314,6 +316,14 @@ class BacktestRunner:
         self.entry_validity_counts = {}
         self.decision_blocker_counts = {}
 
+    @staticmethod
+    def _safe_cost_rate(value):
+        try:
+            rate = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+        return rate if math.isfinite(rate) and rate > 0 else 0.0
+
     def reset(self):
         self.__init__(
             analyze_fn=self.analyze_fn,
@@ -321,6 +331,8 @@ class BacktestRunner:
             partial_exits=self.partial_exits,
             tp_weights=self.tp_weights,
             limit_expiry_bars=self.limit_expiry_bars,
+            spread_rate=self.spread_rate,
+            slippage_rate=self.slippage_rate,
         )
 
     def run(self, data, on_signal=None, step=1, lenient=False):
@@ -721,19 +733,25 @@ class BacktestRunner:
             return None
 
         risk_distance = abs(entry_price - stop)
-        # fee_rate is ROUND-TRIP cost (same meaning as Config.ROUND_TRIP_COST_RATE).
-        fee_rr = (abs(entry_price) * self.fee_rate) / risk_distance if risk_distance > 0 else self.fee_rate
+        # Match RiskEngine's modeled fee + spread + slippage cost components.
+        # Spread/slippage are percentage proxies here; exact exchange tick/market
+        # impact is unavailable in OHLCV-only historical replay.
+        fee_cost = abs(entry_price) * self.fee_rate
+        spread_cost = abs(entry_price) * self.spread_rate
+        slippage_cost = abs(entry_price) * self.slippage_rate
+        fee_rr = fee_cost / risk_distance if risk_distance > 0 else self.fee_rate
+        spread_slippage_rr = (spread_cost + slippage_cost) / risk_distance if risk_distance > 0 else 0.0
+        execution_cost_rr = fee_rr + spread_slippage_rr
         base_rr = outcome.get("net_rr", 0.0)
         if not use_partial:
             if outcome.get("result") == "WIN":
-                base_rr = max(0.0, base_rr - fee_rr)
+                base_rr = max(0.0, base_rr - execution_cost_rr)
             else:
-                base_rr = -(1.0 + fee_rr)
+                base_rr = -(1.0 + execution_cost_rr)
         else:
-            # Kısmi modelde her parça kapanışında fee ayrı ayrı işlemiştir
-            # (simulate_trade_partial gerçekleşen R'a gayret etmez); burada
-            # pozisyon başına gerçekleşen ağırlıklı R'den tek turluk fee düşülür.
-            base_rr = round(base_rr - fee_rr, 4)
+            # Partial exits are aggregated to one position-level realized R;
+            # apply the same modeled round-trip execution cost once.
+            base_rr = round(base_rr - execution_cost_rr, 4)
         net_rr = base_rr
 
         signal_index = max(0, int(signal_index if signal_index is not None else entry_index - 1))
@@ -768,6 +786,10 @@ class BacktestRunner:
             "result": outcome.get("result"),
             "tp": outcome.get("tp", 0),
             "net_rr": round(max(net_rr, -99.0), 4),
+            "fee_rr": round(fee_rr, 4),
+            "spread_slippage_rr": round(spread_slippage_rr, 4),
+            "execution_cost_rr": round(execution_cost_rr, 4),
+            "cost_model": "round_trip_fee_plus_spread_slippage_proxy",
             "_w": net_rr > 0.0,
             "_tp": outcome.get("tp", 0),
             "_levels": outcome.get("levels") or [],
