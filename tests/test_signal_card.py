@@ -104,38 +104,27 @@ def test_signal_card_labels_confidence_as_score_not_probability():
     assert "92%" not in rendered
 
 
-def test_pending_pullback_is_wait_not_invalid_signal():
+def test_invalid_pending_limit_is_not_presented_as_actionable():
     result = _blocked_result()
     result["decision"] = {
         "action": "SKIP",
-        "reason": "Signal direction invalid; Entry invalid; Risk cannot be calculated; RR below quality minimum: None < 3",
-        "critical_blockers": [
-            "Signal direction invalid",
-            "Entry invalid",
-            "Risk cannot be calculated",
-            "RR below quality minimum: None < 3",
-            "OTE missing",
-        ],
+        "reason": "Entry invalid; Risk cannot be calculated",
+        "critical_blockers": ["Entry invalid", "Risk cannot be calculated"],
     }
     result["analysis"]["entry"] = {
         "valid": False,
+        "direction": "SHORT",
         "entry": 79345.6,
         "stop_loss": 80265.7,
         "entry_type": "LIMIT",
-        "entry_type_reason": "Wait for pullback to bearish POI",
+        "entry_type_reason": "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor",
     }
+    rendered = format_card_text(build_signal_card(result))
+    assert "İŞLEME GİRME" in rendered
+    assert "LIMIT BEKLE" not in rendered
+    assert "Giriş" not in rendered
+    assert "Stop Loss" not in rendered
 
-    card = build_signal_card(result)
-
-    assert card["verdict"] == "BEKLE"
-    assert card["direction"] is None
-    assert card["entry"] == 79345.6
-    assert "OTE missing" in card["critical_blocks"]
-    assert "Signal direction invalid" not in card["critical_blocks"]
-    assert "Entry invalid" not in card["critical_blocks"]
-    assert "Risk cannot be calculated" not in card["critical_blocks"]
-    assert not any(item.startswith("RR below quality minimum:") for item in card["critical_blocks"])
-    assert "Wait for pullback to bearish POI" in card["critical_blocks"]
 
 
 def test_market_trade_card_shows_clear_entry_permission():
@@ -244,3 +233,15 @@ def test_terminal_card_displays_setup_reasoning_instead_of_quality_score():
     assert "Karşı kanıt: SMT SHORT" in rendered
     assert "Kalite" not in rendered
     assert "/100" not in rendered
+
+
+
+def test_pending_limit_with_invalid_risk_is_not_shown_as_actionable():
+    result = _result()
+    result["analysis"]["entry"].update({
+        "valid": True, "entry_type": "LIMIT", "direction": "LONG",
+    })
+    result["risk"]["risk_setup_valid"] = False
+    rendered = format_card_text(build_signal_card(result))
+    assert "İŞLEME GİRME" in rendered
+    assert "LIMIT BEKLE" not in rendered
