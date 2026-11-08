@@ -1,7 +1,7 @@
 """
 signal_card.py
 Atlas için tek yönlü, net ve okunabilir işlem önerisi (sinyal kartı) üretir.
-Manuel işlem kullanıcısına: YÖN, giriş/stop/TP, kalite puanı ve çelişkileri tek bakışta sunar.
+Manuel işlem kullanıcısına: yön, giriş/stop/TP ve setup gerekçesini tek bakışta sunar.
 """
 
 import math
