@@ -389,7 +389,6 @@ class AtlasEngine:
             h4_fvg=context_state.get("h4_fvg", []),
             daily_fvg=context_state.get("daily_fvg", []),
             inducement=structure_state.get("inducement"),
-            premium_discount=context_state.get("premium_discount"),
             trendline_liquidity=structure_state.get("trendline_liquidity", []),
         )
 
