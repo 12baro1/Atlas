@@ -150,7 +150,8 @@ class SetupReasoningEngine:
                  market_regime=None, htf_orderblock=None, htf_fvg=None, smt=None,
                  unicorn=None, cisd=None, volume_profile=None, institutional=None,
                  orderbook=None, correlation=None, market_phase=None,
-                 liquidity=None, external_structure=None,\n                 higher_timeframe_orderblocks=None, higher_timeframe_fvg=None):
+                 liquidity=None, external_structure=None,
+                 higher_timeframe_orderblocks=None, higher_timeframe_fvg=None):
         base_entry = base_entry if isinstance(base_entry, dict) else {}
         current = self._number(current_price)
         if current is None or current <= 0:
@@ -180,7 +181,12 @@ class SetupReasoningEngine:
         for direction, direction_source in self._candidate_directions(mtf, sweep):
             expected = "BULLISH" if direction == "LONG" else "BEARISH"
             poi_items = []
-            poi_groups = (\n                ("ORDER_BLOCK", orderblocks), ("FVG", fvg),\n                ("HTF_ORDER_BLOCK", higher_timeframe_orderblocks or []),\n                ("HTF_FVG", higher_timeframe_fvg or []),\n            )\n            for source, items in poi_groups:
+            poi_groups = (
+                ("ORDER_BLOCK", orderblocks), ("FVG", fvg),
+                ("HTF_ORDER_BLOCK", higher_timeframe_orderblocks or []),
+                ("HTF_FVG", higher_timeframe_fvg or []),
+            )
+            for source, items in poi_groups:
                 for index, item in enumerate(items):
                     if not isinstance(item, dict):
                         continue
