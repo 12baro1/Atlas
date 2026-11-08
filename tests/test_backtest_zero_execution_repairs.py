@@ -60,7 +60,7 @@ def test_cost_adjusted_net_rr_is_a_hard_gate(monkeypatch):
     payload["risk"]["weighted_net_rr"] = 1.2
     monkeypatch.setattr(Config, "MINIMUM_NET_RR", 1.5, raising=False)
     result = TradeQualityEngine().evaluate(**payload)
-    assert result["allowed"] is True
+    assert result["allowed"] is False
     assert any("Cost-adjusted net RR" in item for item in result["blockers"])
 
 
