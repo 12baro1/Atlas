@@ -57,11 +57,13 @@ def test_h4_bullish_is_enough_when_daily_is_bearish_but_weekly_is_neutral():
     assert result["weekly_h4_conflict"] is False
 
 
-def test_weekly_opposing_h4_blocks_direction():
+def test_weekly_opposing_h4_is_context_not_directional_veto():
     result = MTFEngine().detect(_bearish(), [], _bullish(), [])
-    assert result["entry"] == "NONE"
+    assert result["entry"] == "LONG"
+    assert result["entry_source"] == "H4_STRUCTURE"
     assert result["weekly_h4_conflict"] is True
-    assert result["valid"] is False
+    assert result["valid"] is True
+    assert result["direction_reason"] == "h4_bullish_weekly_countertrend"
 
 
 def test_weekly_and_h4_alignment_is_reported():
