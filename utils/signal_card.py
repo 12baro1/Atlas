@@ -32,7 +32,7 @@ def _price(value):
     return round(number, 12)
 
 
-def _verdict(decision, signal, entry):
+def _verdict(decision, signal, entry, risk=None):
     """Tek bir net karar döndürür: AL, SAT, BEKLE veya ATLA."""
     action = str((decision or {}).get("action", "WAIT") or "").upper()
     signal_dir = str((signal or {}).get("signal", "WAIT") or "").upper()
@@ -42,7 +42,13 @@ def _verdict(decision, signal, entry):
         entry_dir = None
 
     # LIMIT orders are conditional and must never be shown as immediate entry permission.
-    pending_limit = entry_type == "LIMIT"
+    risk = risk if isinstance(risk, dict) else {}
+    pending_limit = (
+        entry_type == "LIMIT"
+        and bool((entry or {}).get("valid"))
+        and risk.get("risk_setup_valid", True) is not False
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
+    )
     if pending_limit:
         pending_direction = signal_dir if signal_dir in ("LONG", "SHORT") else entry_dir
         return ("BEKLE", pending_direction, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
@@ -86,8 +92,13 @@ def build_signal_card(result):
     setup_reasoning = entry.get("setup_reasoning") or {}
     symbol = result.get("symbol", "UNKNOWN")
 
-    verdict_label, direction, verdict_reason = _verdict(decision, signal, entry)
-    pending_pullback = str(entry.get("entry_type") or "").upper() == "LIMIT"
+    verdict_label, direction, verdict_reason = _verdict(decision, signal, entry, risk)
+    pending_pullback = (
+        str(entry.get("entry_type") or "").upper() == "LIMIT"
+        and bool(entry.get("valid"))
+        and risk.get("risk_setup_valid", True) is not False
+        and str(decision.get("action") or "").upper() in ("EXECUTE", "EXECUTE_WITH_CAUTION")
+    )
 
     card = {
         "symbol": symbol,
@@ -104,6 +115,8 @@ def build_signal_card(result):
         "setup_allowed": bool(setup_quality.get("trade_allowed", False)),
         "entry": None,
         "entry_type": str(entry.get("entry_type") or "BELİRSİZ").upper(),
+        "entry_valid": bool(entry.get("valid")),
+        "risk_setup_valid": risk.get("risk_setup_valid", True) is not False,
         "entry_type_reason": entry.get("entry_type_reason") or "",
         "entry_distance_label": entry.get("entry_distance_label") or "",
         "entry_distance_pct": _num(entry.get("entry_distance_pct"), 3),
@@ -223,6 +236,9 @@ def format_card_text(card):
     entry_type = str(card.get("entry_type") or "").upper()
     pending_limit = (
         entry_type == "LIMIT"
+        and card.get("entry_valid")
+        and card.get("risk_setup_valid")
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
         and card.get("direction") in ("LONG", "SHORT")
         and card.get("entry") is not None
         and card.get("stop_loss") is not None
