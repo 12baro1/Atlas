@@ -73,3 +73,23 @@ def test_optimizer_does_not_manufacture_entry_without_valid_setup():
 
     assert result["applied"] is False
     assert entry["entry"] == 105.0
+
+
+
+def test_proxy_evidence_has_less_entry_weight_than_live_evidence():
+    live_entry = _entry()
+    proxy_entry = _entry()
+    live = EntryOptimizer().optimize(
+        live_entry, current_price=120.0,
+        institutional={"active": True, "direction": "BULLISH", "confidence": 90,
+                       "cvd": {"source": "bybit_recent_trades", "is_proxy": False}},
+    )
+    proxy = EntryOptimizer().optimize(
+        proxy_entry, current_price=120.0,
+        institutional={"active": True, "direction": "BULLISH", "confidence": 90,
+                       "cvd": {"source": "candle_direction_proxy", "is_proxy": True}},
+    )
+    live_weight = next(x["weight"] for x in live["evidence"] if x["source"] == "institutional_flow")
+    proxy_weight = next(x["weight"] for x in proxy["evidence"] if x["source"] == "institutional_flow")
+    assert live_weight > proxy_weight
+    assert next(x for x in proxy["evidence"] if x["source"] == "institutional_flow")["data_quality"] == "PROXY"
