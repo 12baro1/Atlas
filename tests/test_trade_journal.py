@@ -64,3 +64,23 @@ def test_trade_journal_records_lifecycle_and_reports(tmp_path):
     assert report["analysis"]["total_snapshots"] == 2
     assert "strengths" in report
     assert "weaknesses" in report
+
+
+def test_repeated_close_event_is_ignored_without_double_counting(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "journal.sqlite")
+    trade = journal.register_trade(
+        trade={"side": "LONG", "entry": 100.0, "stop_loss": 99.0, "tp1": 101.0, "tp2": 102.0, "tp3": 103.0},
+        analysis=_analysis(80, 80),
+        symbol="BTC/USDT:USDT",
+        timestamp=T0,
+    )
+
+    first = journal.close_trade(trade["id"], exit_price=101.0, result="WIN", timestamp=T0 + 60_000)
+    duplicate = journal.close_trade(trade["id"], exit_price=98.0, result="LOSS", timestamp=T0 + 120_000)
+
+    assert first["result"] == "WIN"
+    assert duplicate is None
+    assert len(journal.closed_trades()) == 1
+    assert journal.summary()["total_trades"] == 1
+    assert journal.summary()["wins"] == 1
+    assert journal.summary()["losses"] == 0
