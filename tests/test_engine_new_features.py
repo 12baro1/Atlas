@@ -109,3 +109,22 @@ def test_internal_external_structure():
     assert len(external) >= 1
     assert external[0]["index"] == 2
     assert all(item["index"] != 2 for item in internal)
+
+
+def test_dynamic_tp_uses_trendline_liquidity_as_structural_targets(engine):
+    result = engine._calculate_dynamic_tp(
+        entry={"valid": True, "direction": "LONG", "entry": 100.0, "stop_loss": 99.0},
+        liquidity=[],
+        fvg=[],
+        orderblocks=[],
+        candles=None,
+        structure=[],
+        trendline_liquidity=[
+            {"type": "BUY_SIDE", "price": 102.0},
+            {"type": "BUY_SIDE", "price": 103.0},
+            {"type": "BUY_SIDE", "price": 104.0},
+        ],
+    )
+    assert result["tp1"] == pytest.approx(102.0)
+    assert result["tp2"] == pytest.approx(103.0)
+    assert result["tp3"] == pytest.approx(104.0)
