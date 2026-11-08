@@ -31,7 +31,7 @@ class SetupReasoningEngine:
     def _bounds(item, source):
         if not isinstance(item, dict):
             return None
-        if source == "FVG":
+        if source in {"FVG", "HTF_FVG"}:
             first, second = item.get("from"), item.get("to")
         else:
             first, second = item.get("low"), item.get("high")
@@ -150,7 +150,7 @@ class SetupReasoningEngine:
                  market_regime=None, htf_orderblock=None, htf_fvg=None, smt=None,
                  unicorn=None, cisd=None, volume_profile=None, institutional=None,
                  orderbook=None, correlation=None, market_phase=None,
-                 liquidity=None, external_structure=None):
+                 liquidity=None, external_structure=None,\n                 higher_timeframe_orderblocks=None, higher_timeframe_fvg=None):
         base_entry = base_entry if isinstance(base_entry, dict) else {}
         current = self._number(current_price)
         if current is None or current <= 0:
@@ -180,7 +180,7 @@ class SetupReasoningEngine:
         for direction, direction_source in self._candidate_directions(mtf, sweep):
             expected = "BULLISH" if direction == "LONG" else "BEARISH"
             poi_items = []
-            for source, items in (("ORDER_BLOCK", orderblocks), ("FVG", fvg)):
+            poi_groups = (\n                ("ORDER_BLOCK", orderblocks), ("FVG", fvg),\n                ("HTF_ORDER_BLOCK", higher_timeframe_orderblocks or []),\n                ("HTF_FVG", higher_timeframe_fvg or []),\n            )\n            for source, items in poi_groups:
                 for index, item in enumerate(items):
                     if not isinstance(item, dict):
                         continue
@@ -188,7 +188,7 @@ class SetupReasoningEngine:
                         continue
                     if item.get("mitigated") if source == "ORDER_BLOCK" else item.get("filled"):
                         continue
-                    bounds = self._bounds(item, "OB" if source == "ORDER_BLOCK" else "FVG")
+                    bounds = self._bounds(item, "FVG" if source in {"FVG", "HTF_FVG"} else "OB")
                     if not bounds:
                         continue
                     low, high = bounds
@@ -227,16 +227,6 @@ class SetupReasoningEngine:
                     direction, mtf, sweep, structure, ote, htf_orderblock, htf_fvg,
                     smt, unicorn, cisd, volume_profile, institutional, orderbook,
                     correlation, market_phase, regime,
-                )
-                # A nearby opposite POI of the other type is a genuine overlap,
-                # not another independent motor vote.
-                overlapping = any(
-                    other_source != source and other_low <= high and other_high >= low
-                    and other_dir == direction
-                    for other_dir, other_source, other_low, other_high in [
-                        (d, s, lo, hi) for d, _ in self._candidate_directions(mtf, sweep)
-                        for s, _, _, lo, hi, _ in poi_items if d == direction
-                    ]
                 )
                 candidate = {
                     "valid": True, "direction": direction, "entry": entry_price,
@@ -278,7 +268,7 @@ class SetupReasoningEngine:
                 candidate.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL",
                 candidate.get("ote_confluence", False),
                 distance * -1.0,
-                candidate.get("poi_source") == "ORDER_BLOCK",
+                candidate.get("poi_source") in {"ORDER_BLOCK", "HTF_ORDER_BLOCK"},
             )
         selected = max(candidates, key=rank)
         selected = dict(selected)
