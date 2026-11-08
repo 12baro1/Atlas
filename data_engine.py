@@ -1,4 +1,5 @@
 import time
+import math
 import ccxt
 from core.candle import Candle
 
@@ -30,11 +31,52 @@ _cache = {}
 
 
 def _fetch(symbol, timeframe, limit):
-    raw = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-    return [
-        Candle(time=c[0], open=c[1], high=c[2], low=c[3], close=c[4], volume=c[5])
-        for c in raw
-    ]
+    """Fetch validated, fully closed candles only.
+
+    Bybit/CCXT commonly includes the currently forming candle as the final
+    OHLCV row. Returning it to SMC/MTF engines creates moving structure and
+    inconsistent signals. Invalid, duplicate, or out-of-order rows are
+    discarded; the last candle is retained only after its timeframe closes.
+    """
+    raw = exchange.fetch_ohlcv(symbol, timeframe, limit=limit) or []
+    try:
+        timeframe_ms = int(exchange.parse_timeframe(timeframe) * 1000)
+        now_ms = int(exchange.milliseconds())
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        timeframe_ms = 0
+        now_ms = 0
+
+    candles = []
+    previous_time = None
+    for row in raw:
+        if not isinstance(row, (list, tuple)) or len(row) < 6:
+            continue
+        try:
+            timestamp = int(row[0])
+            values = [float(value) for value in row[1:6]]
+        except (TypeError, ValueError, OverflowError):
+            continue
+        open_price, high, low, close, volume = values
+        if timestamp <= 0 or any(not math.isfinite(v) for v in values):
+            continue
+        if min(open_price, high, low, close) <= 0 or volume < 0:
+            continue
+        if high < max(open_price, close, low) or low > min(open_price, close, high):
+            continue
+        if previous_time is not None and timestamp <= previous_time:
+            continue
+        previous_time = timestamp
+        if timeframe_ms > 0 and now_ms > 0 and timestamp + timeframe_ms > now_ms:
+            continue
+        candles.append(Candle(
+            time=timestamp,
+            open=open_price,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
+        ))
+    return candles
 
 
 def fetch_candles(symbol, timeframe, limit, force_refresh=False):

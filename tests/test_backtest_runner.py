@@ -827,3 +827,34 @@ def test_runner_step_five_is_explicitly_less_frequent():
 
     assert stats["analysis_calls"] == 1
     assert analyzed == [301]
+
+
+def test_partial_backtest_applies_round_trip_fee_exactly_once():
+    runner = BacktestRunner(fee_rate=0.002, partial_exits=True)
+    candles = [_candle(1, 100.0, 101.5, 100.1, 101.0)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 100.0, "stop_loss": 99.0, "tp1": 101.0, "tp2": None, "tp3": None},
+    }
+
+    trade = runner._to_trade(result, candles, entry_index=0)
+
+    # One fully closed partial tranche: gross +1R, one round-trip fee = -0.2R.
+    assert trade is not None
+    assert trade["net_rr"] == 0.8
+
+
+def test_partial_backtest_stop_loss_includes_round_trip_fee_once():
+    runner = BacktestRunner(fee_rate=0.002, partial_exits=True)
+    candles = [_candle(1, 100.0, 100.5, 98.5, 99.0)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 100.0, "stop_loss": 99.0, "tp1": 101.0, "tp2": None, "tp3": None},
+    }
+
+    trade = runner._to_trade(result, candles, entry_index=0)
+
+    assert trade is not None
+    assert trade["net_rr"] == -1.2
