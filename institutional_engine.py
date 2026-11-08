@@ -32,7 +32,7 @@ class InstitutionalAnalysisEngine:
 
         # Prefer actual Bybit taker-side trades when available. Candle-color
         # volume remains an explicitly labelled proxy, never a claimed CVD feed.
-        trade_flow = self._trade_flow(data.get("recent_trades"))
+        trade_flow = self._trade_flow(data.get("recent_trades"), now_ms=data.get("analysis_timestamp_ms"))
         if trade_flow:
             cvd = trade_flow["cvd"]
             volume_delta = trade_flow["volume_delta"]
@@ -194,8 +194,8 @@ class InstitutionalAnalysisEngine:
             "is_proxy": True,
         }
 
-    def _trade_flow(self, trades):
-        """Build taker buy/sell delta from CCXT/Bybit recent public trades."""
+    def _trade_flow(self, trades, now_ms=None):
+        """Build fresh taker buy/sell delta from timestamped public trades."""
         if not isinstance(trades, (list, tuple)) or len(trades) < 5:
             return None
         buy_volume = 0.0
@@ -215,6 +215,14 @@ class InstitutionalAnalysisEngine:
                 continue
             if amount <= 0:
                 continue
+            timestamp = trade.get("timestamp") or info.get("timestamp") or info.get("time")
+            if now_ms is not None and timestamp is not None:
+                try:
+                    age_ms = float(now_ms) - float(timestamp)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if not (0 <= age_ms <= 30_000):
+                    continue
             if side == "buy":
                 buy_volume += amount
             elif side == "sell":
@@ -237,6 +245,7 @@ class InstitutionalAnalysisEngine:
             "source": "bybit_recent_trades",
             "is_proxy": False,
             "trade_count": used,
+            "timestamp_validated": now_ms is not None,
         }
         volume_delta = {
             "bullish": round(buy_volume, 8),
@@ -247,6 +256,7 @@ class InstitutionalAnalysisEngine:
             "source": "bybit_recent_trades",
             "is_proxy": False,
             "trade_count": used,
+            "timestamp_validated": now_ms is not None,
         }
         return {"cvd": cvd, "volume_delta": volume_delta}
 
