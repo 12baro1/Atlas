@@ -288,6 +288,27 @@ class SetupReasoningEngine:
                     direction == "SHORT" and stop <= entry_price
                 ):
                     continue
+
+                support, opposition = self._evidence(
+                    direction, mtf, sweep, structure, ote, htf_orderblock, htf_fvg,
+                    smt, unicorn, cisd, volume_profile, institutional, orderbook,
+                    correlation, market_phase, regime,
+                )
+                # Counterpressure refines the fill location inside this same POI;
+                # it never removes an otherwise valid structural scenario.
+                entry_depth_reason = None
+                if opposition and not (inside and market_confirmed):
+                    deeper = low + (high - low) * 0.38 if direction == "LONG" else high - (high - low) * 0.38
+                    if (direction == "LONG" and current > deeper) or (direction == "SHORT" and current < deeper):
+                        entry_price = deeper
+                        entry_depth_reason = "Karşı baskı nedeniyle POI içinde daha derin LIMIT tercih edildi"
+
+                risk = abs(entry_price - stop)
+                if risk <= 0 or (direction == "LONG" and stop >= entry_price) or (
+                    direction == "SHORT" and stop <= entry_price
+                ):
+                    continue
+
                 target_fvg = list(fvg) + list(higher_timeframe_fvg or [])
                 target_obs = list(orderblocks) + list(higher_timeframe_orderblocks or [])
                 targets = self._targets(
@@ -295,23 +316,7 @@ class SetupReasoningEngine:
                     fvg=target_fvg, orderblocks=target_obs, structure=structure,
                 )
                 projected_rr = abs(targets[-1] - entry_price) / risk if targets else None
-                support, opposition = self._evidence(
-                    direction, mtf, sweep, structure, ote, htf_orderblock, htf_fvg,
-                    smt, unicorn, cisd, volume_profile, institutional, orderbook,
-                    correlation, market_phase, regime,
-                )
-                # Counterpressure changes the requested fill location, not the
-                # existence of a structurally valid setup. Move deeper into
-                # the same POI instead of discarding it.
-                pressure_present = bool(opposition)
-                entry_depth_reason = None
-                if pressure_present and not (inside and market_confirmed):
-                    deeper = low + (high - low) * 0.38 if direction == "LONG" else high - (high - low) * 0.38
-                    if (direction == "LONG" and current > deeper) or (direction == "SHORT" and current < deeper):
-                        entry_price = deeper
-                        risk = abs(entry_price - stop)
-                        projected_rr = abs(targets[-1] - entry_price) / risk if targets and risk > 0 else None
-                        entry_depth_reason = "Counterpressure moved the limit deeper inside the same POI"
+
                 structure_events = [
                     event for event in (structure or [])
                     if isinstance(event, dict) and (event.get("choch") or event.get("bos"))
@@ -333,11 +338,16 @@ class SetupReasoningEngine:
                     and (atr_distance is None or atr_distance <= 2.0)
                     else "UZAK GİRİŞ"
                 )
+                entry_type_reason = (
+                    "Süpürme sonrası reclaim POI içinde doğrulandı"
+                    if inside and market_confirmed
+                    else entry_depth_reason or "Fiyatın seçilen POI giriş bölgesine dönmesi gerekiyor"
+                )
                 candidate = {
                     "valid": True, "direction": direction, "entry": entry_price,
                     "stop_loss": stop, "stop_source": source.lower(),
                     "entry_type": "MARKET" if inside and market_confirmed else "LIMIT",
-                    "entry_type_reason": "Confirmed sweep reclaim inside POI" if inside and market_confirmed else "Pullback to selected POI",
+                    "entry_type_reason": entry_type_reason,
                     "requires_pullback": not (inside and market_confirmed),
                     "poi_source": source, "poi_zone": {"low": low, "high": high},
                     "ote_confluence": ote_overlap, "stop_buffer": atr_buffer,
@@ -349,11 +359,18 @@ class SetupReasoningEngine:
                     "direction_source": direction_source,
                     "projected_target": targets[-1] if targets else None,
                     "projected_rr": projected_rr,
+                    "structure_aligned": structure_aligned,
+                    "orderflow_supportive": orderflow_supportive,
+                    "counterpressure_adjusted": bool(entry_depth_reason),
+                    "entry_depth_reason": entry_depth_reason,
+                    "entry_distance_pct": round(distance_pct * 100, 4) if distance_pct is not None else None,
+                    "entry_distance_atr": round(atr_distance, 3) if atr_distance is not None else None,
+                    "entry_distance_label": distance_label,
                     "supporting_evidence": support,
                     "opposing_evidence": opposition,
                     "reasoning": (
                         f"{direction} {source}: POI {low:g}-{high:g}; "
-                        + ("sweep reclaim confirmed" if inside and market_confirmed else "price can retrace to POI")
+                        + ("süpürme sonrası dönüş teyitli" if inside and market_confirmed else "fiyatın POI bölgesine geri çekilmesi bekleniyor")
                         + (f"; {entry_depth_reason}" if entry_depth_reason else "")
                     ),
                 }
