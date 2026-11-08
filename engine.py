@@ -388,6 +388,9 @@ class AtlasEngine:
             daily_orderblocks=context_state.get("daily_orderblocks", []),
             h4_fvg=context_state.get("h4_fvg", []),
             daily_fvg=context_state.get("daily_fvg", []),
+            inducement=structure_state.get("inducement"),
+            premium_discount=context_state.get("premium_discount"),
+            trendline_liquidity=structure_state.get("trendline_liquidity", []),
         )
 
         decision_state = self.decision.decide(
@@ -1080,6 +1083,9 @@ class AtlasEngine:
         daily_orderblocks=None,
         h4_fvg=None,
         daily_fvg=None,
+        inducement=None,
+        premium_discount=None,
+        trendline_liquidity=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(
@@ -1147,6 +1153,14 @@ class AtlasEngine:
             higher_timeframe_orderblocks=list(h4_orderblocks or []) + list(daily_orderblocks or []),
             higher_timeframe_fvg=list(h4_fvg or []) + list(daily_fvg or []),
             optimization=optimization,
+            breaker=breaker,
+            ifvg=ifvg,
+            trendline_sweep=trendline_sweep,
+            eqh_eql=eqh_eql,
+            inducement=inducement,
+            premium_discount=premium_discount,
+            internal_structure=internal_structure,
+            trendline_liquidity=trendline_liquidity,
         )
         setup_candidates = reasoning.get("candidates", [])
         selected_candidate = reasoning.get("selected")
