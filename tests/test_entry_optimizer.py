@@ -93,3 +93,14 @@ def test_proxy_evidence_has_less_entry_weight_than_live_evidence():
     proxy_weight = next(x["weight"] for x in proxy["evidence"] if x["source"] == "institutional_flow")
     assert live_weight > proxy_weight
     assert next(x for x in proxy["evidence"] if x["source"] == "institutional_flow")["data_quality"] == "PROXY"
+
+
+
+def test_optimizer_does_not_double_count_derived_trend_as_entry_evidence():
+    with_trend = _entry()
+    without_trend = _entry()
+    a = EntryOptimizer().optimize(with_trend, current_price=120.0, trend={"trend": "BULLISH"})
+    b = EntryOptimizer().optimize(without_trend, current_price=120.0)
+    assert a["applied"] is True and b["applied"] is True
+    assert with_trend["entry"] == without_trend["entry"]
+    assert not any(item["source"] == "trend" for item in a["evidence"])
