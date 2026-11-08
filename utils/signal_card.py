@@ -46,13 +46,22 @@ def _verdict(decision, signal, entry, risk=None):
     pending_limit = (
         entry_type == "LIMIT"
         and bool((entry or {}).get("valid"))
+        and bool(risk)
         and risk.get("risk_setup_valid", True) is not False
         and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
     )
-    if pending_limit:
-        pending_direction = signal_dir if signal_dir in ("LONG", "SHORT") else entry_dir
-        return ("BEKLE", pending_direction, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
-    if action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and signal_dir in ("LONG", "SHORT"):
+    if entry_type == "LIMIT":
+        if pending_limit:
+            pending_direction = signal_dir if signal_dir in ("LONG", "SHORT") else entry_dir
+            return ("BEKLE", pending_direction, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
+        return ("ATLA", entry_dir, (decision or {}).get("reason") or risk.get("risk_setup_reason") or "LIMIT setup geçerli değil")
+    if (
+        action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
+        and signal_dir in ("LONG", "SHORT")
+        and bool((entry or {}).get("valid"))
+        and bool(risk)
+        and risk.get("risk_setup_valid", True) is not False
+    ):
         return ("AL" if signal_dir == "LONG" else "SAT", signal_dir, None)
 
     # WAIT is not an actionable terminal decision; show it as no-entry.
@@ -116,7 +125,7 @@ def build_signal_card(result):
         "entry": None,
         "entry_type": str(entry.get("entry_type") or "BELİRSİZ").upper(),
         "entry_valid": bool(entry.get("valid")),
-        "risk_setup_valid": risk.get("risk_setup_valid", True) is not False,
+        "risk_setup_valid": bool(risk) and risk.get("risk_setup_valid", True) is not False,
         "entry_type_reason": entry.get("entry_type_reason") or "",
         "entry_distance_label": entry.get("entry_distance_label") or "",
         "entry_distance_pct": _num(entry.get("entry_distance_pct"), 3),
@@ -243,7 +252,13 @@ def format_card_text(card):
         and card.get("entry") is not None
         and card.get("stop_loss") is not None
     )
-    executable = action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and card.get("direction") in ("LONG", "SHORT")
+    executable = (
+        entry_type == "MARKET"
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
+        and card.get("entry_valid")
+        and card.get("risk_setup_valid")
+        and card.get("direction") in ("LONG", "SHORT")
+    )
     no_trade = not pending_limit and not executable
 
     if pending_limit:
