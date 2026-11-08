@@ -6,6 +6,8 @@ structural validity, target geometry and execution quality.
 """
 import math
 
+from config import Config
+
 
 class SetupReasoningEngine:
     DIRECTIONS = ("LONG", "SHORT")
