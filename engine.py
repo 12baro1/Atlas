@@ -1523,15 +1523,16 @@ class AtlasEngine:
             return "BEARISH"
         return "NONE"
 
-    def _timeframe_mtf_context(self, direction):
+    def _timeframe_mtf_context(self, direction, timeframe):
         direction = str(direction or "NONE").upper()
         valid = direction in {"BULLISH", "BEARISH"}
+        neutral = "NEUTRAL"
         return {
             "valid": valid,
             "entry": "LONG" if direction == "BULLISH" else "SHORT" if direction == "BEARISH" else "NONE",
-            "weekly": "NEUTRAL",
-            "daily": "NEUTRAL",
-            "h4": direction if valid else "NEUTRAL",
+            "weekly": neutral,
+            "daily": direction if valid and timeframe == "1d" else neutral,
+            "h4": direction if valid and timeframe == "4h" else neutral,
         }
 
     def _timeframe_smt_state(self, smt_state, timeframe):
@@ -1579,7 +1580,7 @@ class AtlasEngine:
             )
 
             local_direction = self._timeframe_structure_direction(structure)
-            local_mtf = self._timeframe_mtf_context(local_direction)
+            local_mtf = self._timeframe_mtf_context(local_direction, timeframe)
             local_trend = self.trend.calculate(local_mtf, structure=structure)
             local_fvg = self.fvg.detect(candles)
             local_orderblocks = self.mitigation.detect(candles, self.orderblocks.detect(candles, structure))
