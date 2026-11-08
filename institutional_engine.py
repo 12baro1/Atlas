@@ -30,8 +30,15 @@ class InstitutionalAnalysisEngine:
         anchor_index = self._anchor_index(data, candles)
         anchored_vwap_value = self._vwap(candles[anchor_index:]) if anchor_index < len(candles) else vwap_value
 
-        cvd = self._cumulative_volume_delta(candles)
-        volume_delta = self._volume_delta(candles)
+        # Prefer actual Bybit taker-side trades when available. Candle-color
+        # volume remains an explicitly labelled proxy, never a claimed CVD feed.
+        trade_flow = self._trade_flow(data.get("recent_trades"))
+        if trade_flow:
+            cvd = trade_flow["cvd"]
+            volume_delta = trade_flow["volume_delta"]
+        else:
+            cvd = self._cumulative_volume_delta(candles)
+            volume_delta = self._volume_delta(candles)
         volatility = self._volatility(candles)
         heatmap = self._liquidity_heatmap(candles)
         liquidity_voids = self._liquidity_voids(heatmap)
@@ -159,6 +166,8 @@ class InstitutionalAnalysisEngine:
             "delta_pct": round((delta_value / total_volume) * 100, 2),
             "direction": "LONG" if cumulative > 0 else "SHORT" if cumulative < 0 else "NONE",
             "slope": round((deltas[-1] - deltas[0]) if len(deltas) > 1 else delta_value, 8),
+            "source": "candle_direction_proxy",
+            "is_proxy": True,
         }
 
     def _volume_delta(self, candles):
@@ -181,7 +190,65 @@ class InstitutionalAnalysisEngine:
             "net": round(net, 8),
             "imbalance": round(imbalance, 4),
             "direction": "LONG" if net > 0 else "SHORT" if net < 0 else "NONE",
+            "source": "candle_direction_proxy",
+            "is_proxy": True,
         }
+
+    def _trade_flow(self, trades):
+        """Build taker buy/sell delta from CCXT/Bybit recent public trades."""
+        if not isinstance(trades, (list, tuple)) or len(trades) < 5:
+            return None
+        buy_volume = 0.0
+        sell_volume = 0.0
+        used = 0
+        for trade in trades:
+            if not isinstance(trade, dict):
+                continue
+            info = trade.get("info") if isinstance(trade.get("info"), dict) else {}
+            side = str(trade.get("side") or info.get("side") or "").lower()
+            amount = trade.get("amount")
+            if amount is None:
+                amount = info.get("size") or info.get("qty")
+            try:
+                amount = abs(float(amount))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if amount <= 0:
+                continue
+            if side == "buy":
+                buy_volume += amount
+            elif side == "sell":
+                sell_volume += amount
+            else:
+                continue
+            used += 1
+
+        total = buy_volume + sell_volume
+        if used < 5 or total <= 0:
+            return None
+        net = buy_volume - sell_volume
+        imbalance = net / total
+        cvd = {
+            "value": round(net, 8),
+            "delta": round(net, 8),
+            "delta_pct": round(imbalance * 100, 2),
+            "direction": "LONG" if net > 0 else "SHORT" if net < 0 else "NONE",
+            "slope": round(net, 8),
+            "source": "bybit_recent_trades",
+            "is_proxy": False,
+            "trade_count": used,
+        }
+        volume_delta = {
+            "bullish": round(buy_volume, 8),
+            "bearish": round(sell_volume, 8),
+            "net": round(net, 8),
+            "imbalance": round(imbalance, 4),
+            "direction": cvd["direction"],
+            "source": "bybit_recent_trades",
+            "is_proxy": False,
+            "trade_count": used,
+        }
+        return {"cvd": cvd, "volume_delta": volume_delta}
 
     def _volatility(self, candles):
         ranges = [max(self._price(candle, "high") - self._price(candle, "low"), 1e-9) for candle in candles[-14:]]
