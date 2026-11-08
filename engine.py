@@ -66,6 +66,23 @@ from volume_profile_engine import VolumeProfileEngine
 from utils.structure_labels import label_swings
 
 
+DYNAMIC_ANALYSIS_INPUT_KEYS = (
+    "orderbook",
+    "recent_trades",
+    "open_interest",
+    "funding_rate",
+    "economic_events",
+    "smt_universe",
+)
+
+
+def _has_dynamic_market_context(data):
+    """Return True when a candle-only incremental cache could hide fresh inputs."""
+    if not isinstance(data, dict):
+        return False
+    return any(bool(data.get(key)) for key in DYNAMIC_ANALYSIS_INPUT_KEYS)
+
+
 def _tp1_already_reached(direction, current_price, tp1):
     """Return True when price has already crossed TP1 before the proposed entry."""
     try:
@@ -182,8 +199,10 @@ class AtlasEngine:
 
         symbol = data.get("symbol", "UNKNOWN")
         candles = data["15m"]
-        # A live order-book snapshot changes independently of candle closes; do not reuse a candle-only cached decision.
-        if (not data.get("orderbook")) and bool(getattr(Config, "STATE_ENGINE_ENABLED", True)) and bool(getattr(Config, "INCREMENTAL_ANALYSIS_ENABLED", True)):
+        # Any fresh non-candle input can change the decision without a new 15m close.
+        # Do not restore a candle-only cache when order flow, derivatives, news or
+        # cross-market context is present, even if the order-book request failed.
+        if (not _has_dynamic_market_context(data)) and bool(getattr(Config, "STATE_ENGINE_ENABLED", True)) and bool(getattr(Config, "INCREMENTAL_ANALYSIS_ENABLED", True)):
             cached = self._restore_incremental_if_unchanged(symbol, candles)
             if cached is not None:
                 cached_analysis = cached.get("analysis") if isinstance(cached, dict) else None
@@ -628,6 +647,12 @@ class AtlasEngine:
                         "learning": setup_quality.get("learning") or {},
                         "setup_quality": setup_quality,
                         "motor_diagnostics": (analysis.get("motor_diagnostics") or {}),
+                        "execution_costs": {
+                            "round_trip_cost_rate": risk.get("round_trip_cost_rate"),
+                            "spread_buffer": risk.get("spread_buffer"),
+                            "slippage_buffer": risk.get("slippage_buffer"),
+                            "model": risk.get("cost_model") or "round_trip_fee_plus_spread_slippage",
+                        },
                         "decision": result_payload.get("decision") or {},
                     },
                 )
@@ -1235,6 +1260,7 @@ class AtlasEngine:
         # Preserve that limit setup; only block a late market/confirmation entry.
         current_price = candles[-1].close if candles else None
         signal_candle = candles[-1] if candles else None
+        target_exclusion_price = None
         tp1_reached = (
             entry.get("valid")
             and (
@@ -1252,15 +1278,40 @@ class AtlasEngine:
             confirmation["confirmed"] = False
             confirmation["reason"] = "TP1 already reached; wait for a fresh setup"
         elif tp1_reached and entry_type == "LIMIT":
-            # A pending pullback order is also stale once its structural TP1
-            # has already traded. Do not publish an order with no remaining
-            # target path; wait for a fresh POI/setup instead.
-            entry["valid"] = False
-            entry["reason"] = "TP1 already reached before LIMIT entry; wait for a fresh setup"
-            entry["entry_reason_code"] = "TP1_ALREADY_REACHED"
-            entry.setdefault("checks", []).append("✗ TP1 already reached; stale LIMIT entry blocked")
-            confirmation["confirmed"] = False
-            confirmation["reason"] = "TP1 already reached before LIMIT entry; wait for a fresh setup"
+            # A LIMIT pullback can remain valid after price has traded through
+            # its original TP1. Remove targets crossed by the completed signal
+            # candle and rebuild from remaining structural liquidity.
+            try:
+                target_exclusion_price = float(
+                    signal_candle.high if entry.get("direction") == "LONG" else signal_candle.low
+                )
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                target_exclusion_price = current_price
+            refreshed_targets = self._calculate_dynamic_tp(
+                entry=entry,
+                liquidity=liquidity,
+                fvg=fvg,
+                orderblocks=orderblocks,
+                candles=candles,
+                structure=entry_structure,
+                exclude_targets_through=target_exclusion_price,
+            )
+            if any(refreshed_targets.get(key) is not None for key in ("tp1", "tp2", "tp3")):
+                dynamic_tp = refreshed_targets
+                entry["tp_rebased_after_target_touch"] = True
+                entry["tp_target_exclusion_price"] = target_exclusion_price
+                entry.setdefault("checks", []).append(
+                    "! TP1 önceden görüldü; LIMIT korunarak kalan yapısal hedefler yeniden hesaplandı"
+                )
+            else:
+                entry["valid"] = False
+                entry["reason"] = "TP1 reached before LIMIT fill and no remaining structural target"
+                entry["entry_reason_code"] = "TP1_ALREADY_REACHED_NO_REMAINING_TARGET"
+                entry.setdefault("checks", []).append(
+                    "✗ TP1 geçildi ve kalan yapısal hedef yok; LIMIT geçersiz"
+                )
+                confirmation["confirmed"] = False
+                confirmation["reason"] = entry["reason"]
 
         risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles)
 
@@ -1280,6 +1331,7 @@ class AtlasEngine:
                     candles=candles,
                     structure=entry_structure,
                     stop_price=expanded_stop,
+                    exclude_targets_through=target_exclusion_price,
                 )
                 risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles)
                 self.logger.info(
@@ -2034,7 +2086,7 @@ class AtlasEngine:
             "recent_structure": structure[-3:] if structure else [],
         }
 
-    def _calculate_dynamic_tp(self, entry, liquidity, fvg, orderblocks, candles=None, structure=None, stop_price=None):
+    def _calculate_dynamic_tp(self, entry, liquidity, fvg, orderblocks, candles=None, structure=None, stop_price=None, exclude_targets_through=None):
         """Entry yoksa boş TP şablonu, varsa dinamik hedefler döndürür."""
         if entry.get("entry") is None:
             return {"tp1": None, "tp2": None, "tp3": None}
@@ -2052,6 +2104,7 @@ class AtlasEngine:
                 structure=structure,
                 candles=candles,
                 allow_rr_fallback=bool(getattr(Config, "DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK", False)),
+                exclude_targets_through=exclude_targets_through,
             )
             self.logger.info(
                 "TP calculated | direction=%s stop=%s tp1=%s tp2=%s tp3=%s reason=%s",

@@ -702,6 +702,8 @@ def main():
     print(
         "BACKTEST AYARLARI | "
         f"fee={getattr(Config, 'ROUND_TRIP_COST_RATE', 0.002)} | "
+        f"spread_proxy={getattr(Config, 'STOP_SPREAD_BUFFER_RATE', 0.0002)} | "
+        f"slippage_proxy={getattr(Config, 'STOP_SLIPPAGE_BUFFER_RATE', 0.0003)} | "
         f"partial_tp_weights={_configured_partial_tp_weights()} | "
         f"limit_expiry_bars={args.limit_expiry_bars} | "
         f"minimum_rr={getattr(Config, 'MINIMUM_RR', 'unknown')} | "
@@ -729,6 +731,8 @@ def main():
         runner = BacktestRunner(
             analyze_fn=build_analyze_fn(engine),
             fee_rate=float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.002)),
+            spread_rate=float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002)),
+            slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)),
             tp_weights=_configured_partial_tp_weights(),
             limit_expiry_bars=args.limit_expiry_bars,
         )
