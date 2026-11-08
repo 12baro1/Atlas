@@ -93,11 +93,13 @@ def test_ltf_reversal_without_sweep_confirmation_does_not_create_direction():
     assert result["valid"] is False
 
 
-def test_ltf_reversal_does_not_override_opposing_weekly_context():
+def test_confirmed_ltf_reversal_remains_available_against_weekly_context():
     structure, sweep = _confirmed_sweep("SELL_SIDE")
     result = MTFEngine().detect(_bearish(), [], [], structure, liquidity_sweep=sweep)
-    assert result["entry"] == "NONE"
-    assert result["valid"] is False
+    assert result["entry"] == "LONG"
+    assert result["entry_source"] == "CONFIRMED_15M_REVERSAL"
+    assert result["valid"] is True
+    assert result["direction_reason"] == "confirmed_15m_reversal_weekly_countertrend"
 
 
 def test_ltf_reversal_does_not_override_directional_h4_structure():
