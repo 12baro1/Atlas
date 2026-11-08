@@ -401,8 +401,9 @@ class SetupReasoningEngine:
 
                 target_fvg = list(fvg) + list(higher_timeframe_fvg or [])
                 target_obs = list(orderblocks) + list(higher_timeframe_orderblocks or [])
+                target_liquidity = list(liquidity or []) + list(trendline_liquidity or [])
                 targets = self._targets(
-                    direction, entry_price, liquidity, external_structure,
+                    direction, entry_price, target_liquidity, external_structure,
                     fvg=target_fvg, orderblocks=target_obs, structure=structure,
                 )
                 projected_rr = abs(targets[-1] - entry_price) / risk if targets else None
