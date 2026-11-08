@@ -109,3 +109,35 @@ def test_compose_analysis_includes_smt_key():
 
     assert "smt" in analysis
     assert analysis["smt"]["direction"] == "BULLISH"
+
+
+def test_smt_comparison_series_are_cut_off_at_primary_decision_time():
+    engine = AtlasEngine()
+    capture = _CaptureDetect()
+    engine.smt = capture
+    base = 1_700_000_000_000
+    primary = [_candle(0), _candle(1), _candle(2)]
+    comparison = [
+        _candle(0),
+        _candle(1),
+        _candle(2),
+        _candle(3),
+        _candle(4),
+    ]
+    comparison[-2] = Candle(
+        time=base + 3 * 60_000, open=100, high=102, low=99, close=101, volume=100
+    )
+    comparison[-1] = Candle(
+        time=base + 4 * 60_000, open=100, high=103, low=99, close=102, volume=100
+    )
+    engine._build_smt_state({
+        "symbol": "SOL/USDT:USDT",
+        "15m": primary,
+        "1h": [], "4h": [], "1d": [],
+        "smt_universe": {
+            "BTC/USDT:USDT": {"15m": comparison, "1h": [], "4h": [], "1d": []}
+        },
+    })
+    times = [item.time for item in capture.kwargs["smt_universe"]["BTC/USDT:USDT"]["15m"]]
+    assert times
+    assert max(times) + 15 * 60_000 <= primary[-1].time + 15 * 60_000
