@@ -199,7 +199,7 @@ class SetupReasoningEngine:
                         continue
                     low, high = bounds
                     ote_overlap = bool(ote_bounds and ote_bounds[0] <= high and ote_bounds[1] >= low)
-                    if require_ote and ote_bounds and not ote_overlap:
+                    if require_ote and direction == self._direction(mtf.get("entry")) and ote_bounds and not ote_overlap:
                         continue
                     poi_items.append((source, index, item, low, high, ote_overlap))
             for source, index, item, low, high, ote_overlap in poi_items:
