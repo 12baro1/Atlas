@@ -1254,11 +1254,23 @@ class TradeJournal:
         entry = self._num(outcome.get("entry"))
         stop_loss = self._num(outcome.get("stop_loss"))
         risk_distance = abs(entry - stop_loss) if entry is not None and stop_loss is not None else 0.0
-        fee_rate = self._signal_round_trip_cost_rate()
-        fee_rr = (abs(entry) * fee_rate / risk_distance) if entry is not None and risk_distance > 0 else 0.0
+        payload = outcome.get("payload") if isinstance(outcome.get("payload"), dict) else {}
+        execution_costs = payload.get("execution_costs") if isinstance(payload.get("execution_costs"), dict) else {}
+        fee_rate = self._num(execution_costs.get("round_trip_cost_rate"))
+        if fee_rate is None:
+            fee_rate = self._signal_round_trip_cost_rate()
+        spread_buffer = self._num(execution_costs.get("spread_buffer"), 0.0) or 0.0
+        slippage_buffer = self._num(execution_costs.get("slippage_buffer"), 0.0) or 0.0
+        fee_cost = abs(entry) * fee_rate if entry is not None else 0.0
+        spread_slippage_cost = max(0.0, spread_buffer) + max(0.0, slippage_buffer)
+        fee_rr = fee_cost / risk_distance if entry is not None and risk_distance > 0 else 0.0
+        spread_slippage_rr = spread_slippage_cost / risk_distance if risk_distance > 0 else 0.0
+        execution_cost_rr = fee_rr + spread_slippage_rr
         outcome["gross_realized_r"] = round(gross_realized, 4)
         outcome["fee_rr"] = round(fee_rr, 4)
-        outcome["realized_r"] = round(gross_realized - fee_rr, 4)
+        outcome["spread_slippage_rr"] = round(spread_slippage_rr, 4)
+        outcome["execution_cost_rr"] = round(execution_cost_rr, 4)
+        outcome["realized_r"] = round(gross_realized - execution_cost_rr, 4)
         realized = outcome["realized_r"]
         if outcome.get("hit_sl") and not outcome.get("tps_hit"):
             outcome["status"] = "SL"
