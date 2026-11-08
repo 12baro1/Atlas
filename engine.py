@@ -398,6 +398,7 @@ class AtlasEngine:
             market_phase=context_state.get("market_phase"),
             market_regime=market_regime_state,
             trade_quality=execution_state.get("trade_quality"),
+            setup_consensus=execution_state.get("setup_consensus"),
             cisd=cisd_state,
             volume_profile=volume_profile_state,
             institutional=institutional_state,
