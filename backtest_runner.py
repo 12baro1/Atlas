@@ -74,24 +74,43 @@ def simulate_trade(entry, stop_loss, targets, future_candles, direction="LONG", 
         low = candle.low
         high = candle.high
 
+        opened = _num(getattr(candle, "open", None))
         if is_long:
             if low <= stop:
-                return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0),
-                        "exit_reason": "STOP", "exit_offset": offset}
+                stop_gap = opened is not None and opened <= stop
+                exit_price = opened if stop_gap else stop
+                realized_r = (exit_price - entry) / risk_distance
+                gap_distance = max(0.0, stop - exit_price) if stop_gap else 0.0
+                return {"result": "LOSS", "tp": 0, "net_rr": _num(realized_r),
+                        "exit_reason": "STOP", "exit_offset": offset,
+                        "exit_price": exit_price, "stop_gap": stop_gap,
+                        "stop_gap_distance": _num(gap_distance),
+                        "stop_gap_r": _num(gap_distance / risk_distance)}
             for level_no, tp in levels:
                 if high >= tp:
                     rr = abs(tp - entry) / risk_distance
                     return {"result": "WIN", "tp": level_no, "net_rr": _num(rr),
-                            "exit_reason": f"TP{level_no}", "exit_offset": offset}
+                            "exit_reason": f"TP{level_no}", "exit_offset": offset,
+                            "exit_price": tp, "stop_gap": False,
+                            "stop_gap_distance": 0.0, "stop_gap_r": 0.0}
         else:
             if high >= stop:
-                return {"result": "LOSS", "tp": 0, "net_rr": _num(-1.0),
-                        "exit_reason": "STOP", "exit_offset": offset}
+                stop_gap = opened is not None and opened >= stop
+                exit_price = opened if stop_gap else stop
+                realized_r = (entry - exit_price) / risk_distance
+                gap_distance = max(0.0, exit_price - stop) if stop_gap else 0.0
+                return {"result": "LOSS", "tp": 0, "net_rr": _num(realized_r),
+                        "exit_reason": "STOP", "exit_offset": offset,
+                        "exit_price": exit_price, "stop_gap": stop_gap,
+                        "stop_gap_distance": _num(gap_distance),
+                        "stop_gap_r": _num(gap_distance / risk_distance)}
             for level_no, tp in levels:
                 if low <= tp:
                     rr = abs(entry - tp) / risk_distance
                     return {"result": "WIN", "tp": level_no, "net_rr": _num(rr),
-                            "exit_reason": f"TP{level_no}", "exit_offset": offset}
+                            "exit_reason": f"TP{level_no}", "exit_offset": offset,
+                            "exit_price": tp, "stop_gap": False,
+                            "stop_gap_distance": 0.0, "stop_gap_r": 0.0}
 
     return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
 
@@ -155,6 +174,10 @@ def simulate_trade_partial(
     trailing_stop = stop
     exit_reason = None
     exit_offset = None
+    exit_price = None
+    stop_gap = False
+    stop_gap_distance = 0.0
+    stop_gap_r = 0.0
 
     for candle_offset, candle in enumerate(future_candles):
         low = _num(candle.low)
@@ -185,6 +208,13 @@ def simulate_trade_partial(
                 closed_frac = 1.0
             exit_reason = "STOP" if reached_tp == 0 else "TRAILING_STOP"
             exit_offset = candle_offset
+            exit_price = stop_fill
+            stop_gap = bool(stop_gap)
+            stop_gap_distance = (
+                max(0.0, trailing_stop - stop_fill) if is_long
+                else max(0.0, stop_fill - trailing_stop)
+            ) if stop_gap else 0.0
+            stop_gap_r = stop_gap_distance / risk_distance
             break
 
         # OHLC mumunda hedeflerin sırası bilinemez: mum başına yalnızca bir TP say.
@@ -197,6 +227,7 @@ def simulate_trade_partial(
                 realized_rr += weight * rr
                 closed_frac += weight
                 reached_tp = level_no
+                exit_price = tp_price
                 next_level_idx += 1
 
                 # Yeni trailing stop sonraki mumda aktif olur.
@@ -222,6 +253,10 @@ def simulate_trade_partial(
         "levels": [level_no for level_no, _ in levels[:next_level_idx]],
         "exit_reason": exit_reason,
         "exit_offset": exit_offset,
+        "exit_price": _num(exit_price),
+        "stop_gap": stop_gap,
+        "stop_gap_distance": _num(stop_gap_distance),
+        "stop_gap_r": _num(stop_gap_r),
     }
 
 class BacktestRunner:
@@ -630,7 +665,9 @@ class BacktestRunner:
             )
             if fill_stop_hit:
                 outcome = {"result": "LOSS", "tp": 0, "net_rr": -1.0, "levels": [],
-                           "exit_reason": "STOP", "exit_offset": 0}
+                           "exit_reason": "STOP", "exit_offset": 0,
+                           "exit_price": stop, "stop_gap": False,
+                           "stop_gap_distance": 0.0, "stop_gap_r": 0.0}
                 outcome_start_index = fill_index
             else:
                 # Exclude the fill candle from target simulation. Its high/low
@@ -715,7 +752,16 @@ class BacktestRunner:
             "direction": signal_dir,
             "entry": entry_price,
             "stop_loss": stop,
+            "initial_risk_distance": _num(risk_distance),
             "tps": tps,
+            "exit_price": _num(outcome.get("exit_price")),
+            "stop_gap": bool(outcome.get("stop_gap", False)),
+            "stop_gap_distance": _num(outcome.get("stop_gap_distance", 0.0)),
+            "stop_gap_r": _num(outcome.get("stop_gap_r", 0.0)),
+            "mtf_context": {
+                key: (analysis.get("mtf") or {}).get(key)
+                for key in ("entry", "weekly", "daily", "h4", "entry_source")
+            } if isinstance(analysis.get("mtf"), dict) else {},
             "exit_reason": outcome.get("exit_reason", "UNKNOWN"),
             "exit_index": exit_index,
             "exit_time": exit_time,
@@ -793,6 +839,36 @@ class BacktestRunner:
             }
         return output
 
+    def mtf_trade_breakdown(self):
+        """Closed-trade outcomes grouped by direction and the MTF context at entry."""
+        groups = {}
+        for trade in self.history:
+            context = trade.get("mtf_context") or {}
+            direction = str(trade.get("direction") or "UNKNOWN").upper()
+            key = (
+                f"{direction}|weekly={str(context.get('weekly') or 'UNKNOWN').upper()}"
+                f"|daily={str(context.get('daily') or 'UNKNOWN').upper()}"
+                f"|h4={str(context.get('h4') or 'UNKNOWN').upper()}"
+            )
+            groups.setdefault(key, []).append(trade)
+
+        output = {}
+        for key, trades in sorted(groups.items()):
+            values = [float(item.get("net_rr", 0.0) or 0.0) for item in trades]
+            wins = [value for value in values if value > 0]
+            losses = [value for value in values if value < 0]
+            gross_profit = sum(wins)
+            gross_loss = abs(sum(losses))
+            output[key] = {
+                "total": len(trades),
+                "wins": len(wins),
+                "losses": len(losses),
+                "winrate": round(len(wins) / len(trades) * 100.0, 2) if trades else 0.0,
+                "expectancy": round(sum(values) / len(values), 4) if values else 0.0,
+                "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else round(gross_profit, 4),
+            }
+        return output
+
     def statistics(self):
         if not self.total:
             return {
@@ -840,6 +916,7 @@ class BacktestRunner:
                 "sample_base": "realized_closed_trades",
                 "performance_gate": self.performance_gate(),
                 "direction_breakdown": self.direction_breakdown(),
+                "mtf_trade_breakdown": self.mtf_trade_breakdown(),
             }
         wins = self.wins
         losses = self.total - wins
@@ -915,6 +992,7 @@ class BacktestRunner:
             "sample_base": "realized_closed_trades",
             "performance_gate": self.performance_gate(),
             "direction_breakdown": self.direction_breakdown(),
+            "mtf_trade_breakdown": self.mtf_trade_breakdown(),
         }
 
 
