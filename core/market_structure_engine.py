@@ -8,8 +8,9 @@ class MarketStructureEngine:
     def find_pivots(self,candles,left=5,right=5):
 
         self.pivots=[]
+        self.pivot_right=max(1, int(right))
 
-        for i in range(left,len(candles)-right):
+        for i in range(left,len(candles)-self.pivot_right):
 
             high=candles[i].high
             low=candles[i].low
@@ -35,7 +36,7 @@ class MarketStructureEngine:
                         index=i,
                         price=high,
                         kind="HIGH",
-                        confirmation_index=i + max(right, 10)
+                        confirmation_index=i + self.pivot_right
                     )
                 )
 
@@ -60,7 +61,9 @@ class MarketStructureEngine:
         for pivot in self.pivots:
 
             left=max(0,pivot.index-10)
-            right=min(len(candles),pivot.index+11)
+            # Strength may only use candles available when the pivot is
+            # confirmed; do not score recent pivots with a partial future window.
+            right=min(len(candles),pivot.confirmation_index+1)
 
             score=0
 
