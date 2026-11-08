@@ -55,6 +55,7 @@ from scanner_engine import ScannerEngine
 from session_filter import SessionFilter
 from signal_engine import SignalEngine
 from setup_quality_engine import SetupQualityEngine
+from setup_aggregator import SetupAggregator
 from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
 from trade_manager import TradeManager
@@ -156,6 +157,7 @@ class AtlasEngine:
         self.institutional = InstitutionalAnalysisEngine()
         self.decision = DecisionEngine()
         self.setup_quality = SetupQualityEngine()
+        self.setup_aggregator = SetupAggregator()
         self.state_engine = StateEngine(getattr(Config, "STATE_ENGINE_FILE", "atlas_state.json"))
         self.news_filter = EconomicNewsFilter()
         self.correlation = CorrelationEngine()
@@ -1365,8 +1367,22 @@ class AtlasEngine:
             setup_quality=setup_quality,
         )
 
+        setup_consensus = self.setup_aggregator.aggregate(
+            entry=entry, mtf=mtf, confirmation=confirmation,
+            liquidity_sweep=liquidity_sweep, ote=ote,
+            htf_orderblock=htf_orderblock, htf_fvg=htf_fvg,
+            smt=smt, unicorn=unicorn, cisd=cisd,
+            volume_profile=volume_profile, institutional=institutional,
+            orderbook=orderbook, correlation=correlation,
+            market_phase=market_phase, market_regime=market_regime,
+            breaker=breaker, trendline_sweep=trendline_sweep,
+            optimization=optimization, confluence=confluence,
+            setup_quality=setup_quality, trade_quality=trade_quality,
+        )
+
         analysis_for_signal = {
             "entry": entry,
+            "setup_consensus": setup_consensus,
             "confirmation": confirmation,
             "confluence": confluence,
             "market_phase": market_phase,
@@ -1378,6 +1394,7 @@ class AtlasEngine:
             "institutional": institutional,
             "setup_quality": setup_quality,
             "trade_quality": trade_quality,
+            "setup_consensus": setup_consensus,
             "news_filter": news_filter or {},
             "correlation": correlation or {},
             "cooldown": cooldown or {},
@@ -1403,6 +1420,7 @@ class AtlasEngine:
             "signal": signal,
             "setup_quality": setup_quality,
             "trade_quality": trade_quality,
+            "setup_consensus": setup_consensus,
             "orderbook": orderbook,
         }
 
@@ -1466,6 +1484,7 @@ class AtlasEngine:
             "market_phase": context_state["market_phase"],
             "market_regime": market_regime_state or context_state.get("market_regime", {}),
             "trade_quality": execution_state.get("trade_quality", {}),
+            "setup_consensus": execution_state.get("setup_consensus", {}),
             "smt": smt_state,
             "volume_profile": volume_profile_state or {
                 "active": False,
