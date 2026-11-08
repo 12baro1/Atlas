@@ -101,7 +101,7 @@ class SetupAggregator:
             if correlation.get("supportive"):
                 add("correlation", direction, 0.5, correlation.get("confidence", 60.0), "cross_market")
             if correlation.get("counterpressure"):
-                add("correlation_counterpressure", "SHORT" if direction == "LONG" else "LONG", 0.5 + self._number(correlation.get("counterpressure_score"), 0.0), 60.0, "cross_market")
+                add("correlation_counterpressure", "SHORT" if direction == "LONG" else "LONG", 0.5 + min(1.0, max(0.0, self._number(correlation.get("counterpressure_score"), 0.0))), 60.0, "cross_market")
         elif isinstance(correlation, dict):
             add_module("correlation", correlation, 0.5)
 
