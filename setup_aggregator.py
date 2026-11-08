@@ -86,9 +86,28 @@ class SetupAggregator:
         add_module("cisd", cisd, 1.1)
         add_module("volume_profile", volume_profile, 0.8)
         add_module("institutional_flow", institutional, 0.9)
-        add_module("orderbook", orderbook, 0.7)
-        add_module("correlation", correlation, 0.5)
-        add_module("market_regime", market_regime, 0.7, market_regime.get("directional_bias") if isinstance(market_regime, dict) else None)
+
+        # Order-book and correlation payloads often express support/pressure
+        # relative to the requested side instead of returning a raw direction.
+        if isinstance(orderbook, dict) and (orderbook.get("active") or orderbook.get("trade_flow_active")) and direction != "NONE":
+            if orderbook.get("supportive"):
+                add("orderbook", direction, 0.7, orderbook.get("confidence", 65.0), "microstructure")
+            if orderbook.get("opposing"):
+                add("orderbook_counterpressure", "SHORT" if direction == "LONG" else "LONG", 0.7, orderbook.get("confidence", 65.0), "microstructure")
+        elif isinstance(orderbook, dict):
+            add_module("orderbook", orderbook, 0.7)
+
+        if isinstance(correlation, dict) and correlation.get("active") and direction != "NONE":
+            if correlation.get("supportive"):
+                add("correlation", direction, 0.5, correlation.get("confidence", 60.0), "cross_market")
+            if correlation.get("counterpressure"):
+                add("correlation_counterpressure", "SHORT" if direction == "LONG" else "LONG", 0.5 + self._number(correlation.get("counterpressure_score"), 0.0), 60.0, "cross_market")
+        elif isinstance(correlation, dict):
+            add_module("correlation", correlation, 0.5)
+
+        regime_bias = market_regime.get("directional_bias") if isinstance(market_regime, dict) else None
+        if isinstance(market_regime, dict) and (market_regime.get("active") or regime_bias):
+            add("market_regime", regime_bias, 0.7, market_regime.get("confidence", 60.0))
 
         # POI context is supporting evidence only when a valid directional POI
         # exists. It cannot create a setup in the absence of EntryEngine output.
@@ -156,6 +175,7 @@ class SetupAggregator:
             denominator = support[side] + support[other]
             scores[side] = round(50.0 + 50.0 * (support[side] - support[other]) / denominator, 2) if denominator else 50.0
 
+        evidence_leader = max(scores, key=scores.get)
         selected_score = scores.get(direction, 50.0) if direction != "NONE" else max(scores.values())
         selected_evidence = [item for item in evidence if item["side"] == direction] if direction != "NONE" else []
         counter_evidence = [item for item in evidence if item["side"] != direction] if direction != "NONE" else []
@@ -178,5 +198,11 @@ class SetupAggregator:
             "entry_price": entry.get("entry") if structural_valid else None,
             "entry_type": entry.get("entry_type") if structural_valid else None,
             "optimizer_applied": bool(optimization.get("applied")),
+            "evidence_leader": evidence_leader,
+            "evidence_leader_matches_structure": evidence_leader == direction if direction != "NONE" else False,
+            "market_phase": (market_phase or {}).get("phase") if isinstance(market_phase, dict) else market_phase,
+            "confluence_score": self._number((confluence or {}).get("score"), 0.0) if isinstance(confluence, dict) else 0.0,
+            "setup_quality_score": self._number((setup_quality or {}).get("score"), 0.0) if isinstance(setup_quality, dict) else 0.0,
+            "trade_quality_reason": (trade_quality or {}).get("reason") if isinstance(trade_quality, dict) else None,
             "selection_rule": "best evidence score among structurally valid POI setups; secondary conflicts are soft evidence",
         }
