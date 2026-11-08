@@ -141,3 +141,32 @@ def test_smt_comparison_series_are_cut_off_at_primary_decision_time():
     times = [item.time for item in capture.kwargs["smt_universe"]["BTC/USDT:USDT"]["15m"]]
     assert times
     assert max(times) + 15 * 60_000 <= primary[-1].time + 15 * 60_000
+
+
+
+def test_timeframe_smt_state_does_not_borrow_another_timeframe_divergence():
+    engine = AtlasEngine()
+    state = {
+        "active": True,
+        "direction": "BEARISH",
+        "confidence": 90,
+        "divergences": [
+            {"type": "BEARISH", "timeframe": "4h", "confidence": 90},
+            {"type": "BULLISH", "timeframe": "15m", "confidence": 60},
+        ],
+    }
+    h1 = engine._timeframe_smt_state(state, "1h")
+    m15 = engine._timeframe_smt_state(state, "15m")
+    assert h1["active"] is False
+    assert h1["direction"] == "NONE"
+    assert m15["active"] is True
+    assert m15["direction"] == "BULLISH"
+
+
+def test_timeframe_structure_direction_uses_latest_confirmed_break():
+    engine = AtlasEngine()
+    structure = [
+        {"label": "HH", "bos": True, "direction": "BULLISH"},
+        {"label": "LL", "choch": True, "direction": "BEARISH"},
+    ]
+    assert engine._timeframe_structure_direction(structure) == "BEARISH"
