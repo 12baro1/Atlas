@@ -172,3 +172,4 @@ def test_latest_h4_opposing_break_overrides_an_older_complete_swing_pair():
     result = MTFEngine().detect([], [], h4, [])
     assert result["h4"] == "BEARISH"
     assert result["entry"] == "SHORT"
+
