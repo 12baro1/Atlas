@@ -1,15 +1,9 @@
-"""Market correlation guard for BTC/ETH dominance-aware altcoin signals.
+"""BTC/ETH cross-market context for altcoin entry optimization.
 
-Altcoin LONG sinyalleri yalnizca "gercekten" riskli bir ortamda engellenir:
-  - BTC guclu bir dusus trendinde degilse LONG engellenmez,
-  - USDT.D (risk-off) yukseliyor ve guc esigi asiliyorsa engellenir,
-  - veri yoksa (universe bos/eksik) sistem otomatik olarak LONG/SHORT'u
-    engellemez; noral kabul edilerek sinyalin normal karar surecinden
-    gecmesine izin verir.
-
-Trend gucu ATR-ile-normalize edilmis fiyat sapmasiyla olculur ve esikler
-Config'ten okunur. Eski davranis (universe bosken bile her Altcoin LONG'unu
-engelleme) duzeltildi: veri yokken ve trend zayifken engel yok.
+Correlation is evidence, not a directional veto. Strong opposing market
+pressure moves the shared POI entry deeper and is reported to execution;
+missing BTC/ETH data never blocks an otherwise valid structural setup.
+Trend strength is normalized by ATR so different price scales are comparable.
 """
 
 from utils.atr import atr as calculate_atr
