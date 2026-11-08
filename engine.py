@@ -756,7 +756,7 @@ class AtlasEngine:
         engine.filter_noise()
 
         pivots = engine.validate_sequence()
-        structure = self.choch.detect(self.bos.detect(label_swings(pivots)))
+        structure = self.choch.detect(self.bos.detect(label_swings(pivots), candles=candles))
 
         return {
             "pivots": pivots,
