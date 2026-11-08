@@ -163,7 +163,7 @@ class InstitutionalAnalysisEngine:
         return {
             "value": round(cumulative, 8),
             "delta": round(delta_value, 8),
-            "delta_pct": round((delta_value / total_volume) * 100, 2),
+            "delta_pct": round((cumulative / total_volume) * 100, 2),
             "direction": "LONG" if cumulative > 0 else "SHORT" if cumulative < 0 else "NONE",
             "slope": round((deltas[-1] - deltas[0]) if len(deltas) > 1 else delta_value, 8),
             "source": "candle_direction_proxy",
