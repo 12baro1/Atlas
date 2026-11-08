@@ -401,8 +401,13 @@ def _metrics_for_trades(trades):
         loss = abs(sum(value for value in values if value < 0))
         return round(profit / loss, 4) if loss else round(profit, 4)
     count = len(trades)
+    wins = sum(1 for value in net if value > 0)
+    losses = sum(1 for value in net if value < 0)
     return {
         "total": count,
+        "wins": wins,
+        "losses": losses,
+        "winrate": round(wins / count * 100.0, 2) if count else 0.0,
         "gross_rr": round(sum(gross), 4),
         "gross_expectancy": round(sum(gross) / count, 4) if count else 0.0,
         "gross_profit_factor": pf(gross),
