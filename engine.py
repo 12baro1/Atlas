@@ -1395,7 +1395,6 @@ class AtlasEngine:
             "institutional": institutional,
             "setup_quality": setup_quality,
             "trade_quality": trade_quality,
-            "setup_consensus": setup_consensus,
             "news_filter": news_filter or {},
             "correlation": correlation or {},
             "cooldown": cooldown or {},
