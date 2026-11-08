@@ -83,6 +83,7 @@ def build_signal_card(result):
     confluence = analysis.get("confluence") or {}
     market_phase = analysis.get("market_phase") or {}
     entry = analysis.get("entry") or {}
+    setup_reasoning = entry.get("setup_reasoning") or {}
     symbol = result.get("symbol", "UNKNOWN")
 
     verdict_label, direction, verdict_reason = _verdict(decision, signal, entry)
@@ -108,6 +109,10 @@ def build_signal_card(result):
         "entry_distance_pct": _num(entry.get("entry_distance_pct"), 3),
         "entry_distance_atr": _num(entry.get("entry_distance_atr"), 2),
         "requires_pullback": str(entry.get("entry_type") or "").upper() == "LIMIT",
+        "setup_thesis": setup_reasoning.get("thesis") or "",
+        "supporting_evidence": list(setup_reasoning.get("supporting_evidence") or []),
+        "opposing_evidence": list(setup_reasoning.get("opposing_evidence") or []),
+        "candidate_count": int(setup_reasoning.get("candidate_count", 0) or 0),
         "synthetic_tp_targets": bool(dynamic_tp.get("synthetic_targets", False)),
         "stop_loss": None,
         "tp_levels": [],
@@ -207,7 +212,6 @@ def _summarize(card):
     return (
         f"{card['verdict']} {card['symbol']} @ {entry} | SL {sl} | TP {tps} | "
         f"Ağırlıklı RR ~{card['rr']} | Net RR ~{card.get('net_rr')} | "
-        f"Kalite {card['setup_quality']}/100 | "
         f"{len(card['critical_blocks'])} kritik blok, {len(card['soft_adjustments'])} yumuşak düzeltme"
     )
 
@@ -276,7 +280,11 @@ def format_card_text(card):
         lines.append(f"  Net RR       : {card['net_rr']}")
     if card.get("target_max_rr") is not None:
         lines.append(f"  TP max RR    : {card['target_max_rr']}")
-    if card.get("setup_quality") is not None:
-        lines.append(f"  Kalite    : {card['setup_quality']}/100")
+    if card.get("setup_thesis"):
+        lines.append(f"  Setup     : {card['setup_thesis']}")
+    if card.get("supporting_evidence"):
+        lines.append("  Destek    : " + " | ".join(card["supporting_evidence"][:5]))
+    if card.get("opposing_evidence"):
+        lines.append("  Karşı kanıt: " + " | ".join(card["opposing_evidence"][:5]))
     lines.append(line)
     return "\n".join(lines)
