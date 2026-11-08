@@ -905,3 +905,27 @@ def test_runner_separates_gross_stop_r_from_execution_costs():
     assert trade["gross_rr"] == -1.0
     assert trade["execution_cost_rr"] == 0.5
     assert trade["net_rr"] == -1.5
+
+
+def test_statistics_separate_gross_and_net_pf_and_direction_metrics():
+    runner = BacktestRunner()
+    runner._record({
+        "_w": False, "gross_rr": -1.0, "net_rr": -1.5,
+        "execution_cost_rr": 0.5, "_levels": [], "direction": "SHORT",
+    })
+    runner._record({
+        "_w": True, "gross_rr": 2.0, "net_rr": 1.5,
+        "execution_cost_rr": 0.5, "_levels": [], "direction": "LONG",
+    })
+
+    stats = runner.statistics()
+    assert stats["gross_rr"] == 1.0
+    assert stats["gross_expectancy"] == 0.5
+    assert stats["gross_profit_factor"] == 2.0
+    assert stats["net_rr"] == 0.0
+    assert stats["profit_factor"] == 1.0
+    assert stats["total_execution_cost_rr"] == 1.0
+    assert stats["direction_breakdown"]["LONG"]["gross_rr"] == 2.0
+    assert stats["direction_breakdown"]["LONG"]["net_rr"] == 1.5
+    assert stats["direction_breakdown"]["SHORT"]["gross_rr"] == -1.0
+    assert stats["direction_breakdown"]["SHORT"]["net_rr"] == -1.5
