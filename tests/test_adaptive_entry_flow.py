@@ -88,7 +88,7 @@ def test_ob_without_ote_confluence_remains_valid_structural_poi():
 
     assert result["confirmed"] is True
     assert result["poi_confirmation"] == "ORDER_BLOCK"
-    assert "OB+OTE" in result["reason"]
+    assert "selected structural POI" in result["reason"]
 
 
 def test_supportive_secondary_evidence_keeps_standard_confirmation():
