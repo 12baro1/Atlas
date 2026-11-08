@@ -796,8 +796,6 @@ class BacktestRunner:
                 "stale_limits_cancelled": self.stale_limits_cancelled,
                 "stale_limit_signal_candle_target": self.stale_limit_signal_candle_target,
                 "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
-            "market_fallback_fills": self.market_fallback_fills,
-            "market_fallback_rejected_rr": self.market_fallback_rejected_rr,
                 "market_fallback_fills": self.market_fallback_fills,
                 "market_fallback_rejected_rr": self.market_fallback_rejected_rr,
                 "trade_history": list(self.history),
