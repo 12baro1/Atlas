@@ -101,3 +101,40 @@ def get_correlation_universe(force_refresh=False, candle_factory=None):
         except Exception:
             universe[key] = []
     return universe
+
+# SMT comparison data is shared across a scan and cached per timeframe.
+# 15m data gets a short TTL so scanning many symbols does not refetch BTC/ETH
+# for every altcoin; higher timeframes use progressively longer TTLs.
+_SMT_SYMBOLS = ("BTC/USDT:USDT", "ETH/USDT:USDT")
+_SMT_TIMEFRAMES = ("15m", "1h", "4h", "1d")
+_SMT_CACHE_TTL_SECONDS = {"15m": 45, "1h": 300, "4h": 900, "1d": 3600}
+_smt_cache = {}
+
+
+def get_smt_universe(force_refresh=False):
+    """Return cached BTC/ETH OHLCV comparison data for SMT on all supported TFs."""
+    now = time.time()
+    universe = {}
+    for symbol in _SMT_SYMBOLS:
+        frames = {}
+        for timeframe in _SMT_TIMEFRAMES:
+            key = (symbol, timeframe)
+            cached = _smt_cache.get(key)
+            ttl = _SMT_CACHE_TTL_SECONDS[timeframe]
+            if (
+                not force_refresh
+                and cached is not None
+                and now - cached[1] <= ttl
+            ):
+                frames[timeframe] = cached[0]
+                continue
+            try:
+                candles = _fetch(symbol, timeframe, TIMEFRAMES[timeframe])
+                _smt_cache[key] = (candles, now)
+                frames[timeframe] = candles
+            except Exception:
+                # A temporary exchange failure should not erase a previously
+                # fetched comparison series; the SMT engine can still use it.
+                frames[timeframe] = cached[0] if cached is not None else []
+        universe[symbol] = frames
+    return universe
