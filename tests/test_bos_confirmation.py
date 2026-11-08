@@ -55,6 +55,7 @@ def test_order_block_uses_last_opposing_candle_before_break():
     }])
     assert len(blocks) == 1
     assert blocks[0]["index"] == 4
+    assert blocks[0]["break_index"] == 5
     assert blocks[0]["low"] == candles[4].low
 
 
