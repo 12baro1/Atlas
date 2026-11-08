@@ -2,7 +2,11 @@ from entry_confirmation_engine import EntryConfirmationEngine
 
 
 def _entry(direction):
-    return {"valid": True, "direction": direction, "entry": 100.0}
+    return {
+        "valid": True, "direction": direction, "entry": 100.0,
+        "poi_source": "ORDER_BLOCK", "poi_zone": {"low": 95.0, "high": 97.0},
+        "ote_confluence": False,
+    }
 
 
 def _mtf():
@@ -31,26 +35,27 @@ def test_higher_low_label_without_break_remains_advisory_with_valid_poi():
     assert result["confirmation_mode"] == "NO_15M_BREAK"
 
 
-def test_wrong_direction_or_filled_fvg_does_not_confirm():
+def test_wrong_direction_or_filled_fvg_is_advisory_when_structural_poi_is_valid():
     structure = [{"label": "HH", "bos": True, "choch": False, "direction": "BULLISH"}]
     result = EntryConfirmationEngine().confirm(
         _mtf(), structure, [{"type": "BEARISH", "from": 103.0, "to": 105.0, "filled": False}], _entry("LONG"), current_price=100.0
     )
-    assert result["confirmed"] is False
+    assert result["confirmed"] is True
+    assert result["poi_confirmation"] == "ORDER_BLOCK"
     result = EntryConfirmationEngine().confirm(
         _mtf(), structure, [{"type": "BULLISH", "from": 95.0, "to": 97.0, "filled": True}], _entry("LONG"), current_price=100.0
     )
-    assert result["confirmed"] is False
+    assert result["confirmed"] is True
 
 
-def test_fvg_on_wrong_side_of_market_cannot_confirm_pullback_entry():
+def test_fvg_on_wrong_side_does_not_veto_selected_structural_poi():
     structure = [{"label": "HH", "bos": True, "choch": False, "direction": "BULLISH"}]
     fvg = [{"type": "BULLISH", "from": 103.0, "to": 105.0, "filled": False}]
     result = EntryConfirmationEngine().confirm(
         _mtf(), structure, fvg, _entry("LONG"), current_price=100.0
     )
-    assert result["confirmed"] is False
-    assert result["reason"] == "No valid directional FVG or selected OB+OTE POI"
+    assert result["confirmed"] is True
+    assert result["poi_confirmation"] == "ORDER_BLOCK"
 
 
 def test_bullish_break_confirmation_survives_later_higher_low_pullback():
@@ -215,3 +220,20 @@ def test_conflicting_secondary_evidence_does_not_create_confirmation_gate():
     choch = [{"label": "HH", "bos": True, "choch": True, "direction": "BULLISH"}]
     result = EntryConfirmationEngine().confirm(_mtf(), choch, fvg, entry, current_price=100.0)
     assert result["confirmed"] is True
+
+
+def test_valid_order_block_poi_does_not_require_ote_confluence():
+    entry = _entry("LONG")
+    entry["poi_source"] = "ORDER_BLOCK"
+    entry["ote_confluence"] = False
+    result = EntryConfirmationEngine().confirm(_mtf(), [], [], entry, current_price=100.0)
+    assert result["confirmed"] is True
+    assert result["poi_confirmation"] == "ORDER_BLOCK"
+
+
+def test_missing_structural_poi_remains_a_hard_confirmation_failure():
+    entry = _entry("LONG")
+    entry["poi_zone"] = None
+    result = EntryConfirmationEngine().confirm(_mtf(), [], [], entry, current_price=100.0)
+    assert result["confirmed"] is False
+    assert result["reason"] == "Selected structural POI is unavailable"
