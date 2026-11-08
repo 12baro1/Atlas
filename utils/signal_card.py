@@ -108,10 +108,17 @@ def build_signal_card(result):
     symbol = result.get("symbol", "UNKNOWN")
 
     verdict_label, direction, verdict_reason = _verdict(decision, signal, entry, risk)
+    entry_is_valid = (
+        entry.get("valid") is not False
+        and entry.get("entry") is not None
+        and entry.get("stop_loss") is not None
+    )
+    risk_has_target = any(risk.get(key) is not None for key in ("tp1", "tp2", "tp3"))
+    risk_is_valid = bool(risk) and risk_has_target and risk.get("risk_setup_valid", True) is not False
     pending_pullback = (
         str(entry.get("entry_type") or "").upper() == "LIMIT"
-        and card["entry_valid"]
-        and card["risk_setup_valid"]
+        and entry_is_valid
+        and risk_is_valid
         and str(decision.get("action") or "").upper() in ("EXECUTE", "EXECUTE_WITH_CAUTION", "WAIT")
     )
 
@@ -254,7 +261,7 @@ def format_card_text(card):
         entry_type == "LIMIT"
         and card.get("entry_valid")
         and card.get("risk_setup_valid")
-        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION", "WAIT")
         and card.get("direction") in ("LONG", "SHORT")
         and card.get("entry") is not None
         and card.get("stop_loss") is not None
