@@ -294,6 +294,7 @@ class SetupReasoningEngine:
                     smt, unicorn, cisd, volume_profile, institutional, orderbook,
                     correlation, market_phase, regime,
                 )
+                support.append(f"{source} POI supports {direction}")
                 # Counterpressure refines the fill location inside this same POI;
                 # it never removes an otherwise valid structural scenario.
                 entry_depth_reason = None
