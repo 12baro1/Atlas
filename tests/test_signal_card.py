@@ -227,3 +227,20 @@ def test_card_prefers_weighted_partial_rr_and_displays_net_and_max_target_rr():
     assert "Ağırlıklı RR : 2.0" in rendered
     assert "Net RR       : 1.8" in rendered
     assert "TP max RR    : 3.0" in rendered
+
+
+
+def test_terminal_card_displays_setup_reasoning_instead_of_quality_score():
+    result = _result()
+    result["analysis"]["entry"]["setup_reasoning"] = {
+        "thesis": "LONG FVG: 4H demand reclaimed after sell-side sweep",
+        "candidate_count": 3,
+        "supporting_evidence": ["15m CHoCH LONG", "Order flow supports entry"],
+        "opposing_evidence": ["SMT SHORT"],
+    }
+    rendered = format_card_text(build_signal_card(result))
+    assert "Setup     : LONG FVG" in rendered
+    assert "Destek    : 15m CHoCH LONG" in rendered
+    assert "Karşı kanıt: SMT SHORT" in rendered
+    assert "Kalite" not in rendered
+    assert "/100" not in rendered
