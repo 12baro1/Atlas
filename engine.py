@@ -1173,6 +1173,7 @@ class AtlasEngine:
                 "thesis": selected_candidate.get("reasoning"),
                 "supporting_evidence": selected_candidate.get("supporting_evidence", []),
                 "opposing_evidence": selected_candidate.get("opposing_evidence", []),
+                "market_context": selected_candidate.get("market_context", []),
             }
             entry = selected_candidate
         else:
