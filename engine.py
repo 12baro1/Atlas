@@ -1583,10 +1583,12 @@ class AtlasEngine:
             local_trend = self.trend.calculate(local_mtf, structure=structure)
             local_fvg = self.fvg.detect(candles)
             local_orderblocks = self.mitigation.detect(candles, self.orderblocks.detect(candles, structure))
+            local_high, local_low, local_price = self._price_context(candles)
+            local_premium_discount = self.premium_discount.calculate(local_high, local_low, local_price)
             local_phase = self.market_phase.detect(
                 structure=structure, trend=local_trend, liquidity_sweep=liquidity_sweep,
                 fvg=local_fvg, orderblocks=local_orderblocks,
-                premium_discount={"premium": False, "discount": False, "valid": False},
+                premium_discount=local_premium_discount,
                 mtf=local_mtf, candles=candles,
             )
             payload[timeframe] = {
@@ -1638,13 +1640,14 @@ class AtlasEngine:
             local_direction = self._timeframe_structure_direction(structure)
             local_mtf = self._timeframe_mtf_context(local_direction)
             local_trend = self.trend.calculate(local_mtf, structure=structure)
+            swing_high, swing_low, current_price = self._price_context(candles)
+            local_premium_discount = self.premium_discount.calculate(swing_high, swing_low, current_price)
             local_phase = self.market_phase.detect(
                 structure=structure, trend=local_trend, liquidity_sweep=liquidity_sweep,
                 fvg=fvg, orderblocks=orderblocks,
-                premium_discount={"premium": False, "discount": False, "valid": False},
+                premium_discount=local_premium_discount,
                 mtf=local_mtf, candles=candles,
             )
-            swing_high, swing_low, current_price = self._price_context(candles)
             ote = self.ote.detect(
                 swing_high=swing_high,
                 swing_low=swing_low,
