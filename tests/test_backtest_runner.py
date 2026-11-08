@@ -798,3 +798,32 @@ def test_mtf_trade_breakdown_separates_direction_and_context():
     stats = runner.statistics()
     assert stats["mtf_trade_breakdown"]["LONG|weekly=BEARISH|daily=BEARISH|h4=BULLISH"]["losses"] == 1
     assert stats["mtf_trade_breakdown"]["SHORT|weekly=BEARISH|daily=BEARISH|h4=BEARISH"]["wins"] == 1
+
+
+
+def test_runner_step_one_analyzes_every_closed_15m_candle():
+    candles = _rising_series(305)
+    analyzed = []
+
+    def fake_analyze(window):
+        analyzed.append(len(window["15m"]))
+        return None
+
+    stats = BacktestRunner(analyze_fn=fake_analyze).run({"15m": candles}, step=1)
+
+    assert stats["analysis_calls"] == 5
+    assert analyzed == [301, 302, 303, 304, 305]
+
+
+def test_runner_step_five_is_explicitly_less_frequent():
+    candles = _rising_series(305)
+    analyzed = []
+
+    def fake_analyze(window):
+        analyzed.append(len(window["15m"]))
+        return None
+
+    stats = BacktestRunner(analyze_fn=fake_analyze).run({"15m": candles}, step=5)
+
+    assert stats["analysis_calls"] == 1
+    assert analyzed == [301]
