@@ -76,6 +76,9 @@ class VolumeProfileEngine:
             "bias_strength": self._bias_strength(current_price, poc, vah, val),
             "value_area_position": self._value_area_position(current_price, vah, val),
             "total_volume": round(total_volume, 4),
+            "source": "ohlcv_range_proxy",
+            "is_proxy": True,
+            "method": "candle_range_volume_distribution",
         }
 
     def detect_multi(self, timeframe_payload, bins=36):
@@ -140,12 +143,13 @@ class VolumeProfileEngine:
         return right, left
 
     def _top_nodes(self, histogram, count=3):
-        indexed = list(enumerate(histogram))
+        indexed = [(index, value) for index, value in enumerate(histogram) if value > 0]
         indexed.sort(key=lambda item: item[1], reverse=True)
         return [item[0] for item in indexed[:count]]
 
     def _bottom_nodes(self, histogram, count=3):
-        indexed = list(enumerate(histogram))
+        # Empty bins are not low-volume nodes; exclude them from LVN ranking.
+        indexed = [(index, value) for index, value in enumerate(histogram) if value > 0]
         indexed.sort(key=lambda item: item[1])
         return [item[0] for item in indexed[:count]]
 
@@ -225,4 +229,7 @@ class VolumeProfileEngine:
             "bias_strength": 0,
             "value_area_position": "NONE",
             "total_volume": 0,
+            "source": "ohlcv_range_proxy",
+            "is_proxy": True,
+            "method": "candle_range_volume_distribution",
         }
