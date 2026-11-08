@@ -14,12 +14,29 @@ class OrderBlockEngine:
             if not item.get("bos"):
                 continue
 
-            idx = item["index"]
-
-            if idx <= 0 or idx >= len(candles):
+            idx = int(item.get("index", 0))
+            break_index = item.get("break_index")
+            try:
+                break_index = int(break_index) if break_index is not None else idx
+            except (TypeError, ValueError, OverflowError):
+                break_index = idx
+            if break_index <= 0 or break_index > len(candles):
                 continue
 
-            prev = candles[idx - 1]
+            # The OB is the last opposing candle before the confirmed close
+            # through structure, not blindly the candle before the swing pivot.
+            prev = None
+            search_start = max(0, break_index - 12)
+            for candidate in reversed(candles[search_start:break_index]):
+                if item.get("direction") == "BULLISH" and candidate.close < candidate.open:
+                    prev = candidate
+                    break
+                if item.get("direction") == "BEARISH" and candidate.close > candidate.open:
+                    prev = candidate
+                    break
+            if prev is None:
+                continue
+            ob_index = candles.index(prev)
 
             # -------------------------
             # Bullish Order Block
@@ -57,7 +74,7 @@ class OrderBlockEngine:
 
                     blocks.append({
                         "type": "BULLISH",
-                        "index": idx - 1,
+                        "index": ob_index,
                         "high": prev.high,
                         "low": prev.low,
                         "strength": strength,
