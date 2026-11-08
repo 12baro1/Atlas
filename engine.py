@@ -1048,6 +1048,7 @@ class AtlasEngine:
             volume_profile=volume_profile,
             institutional=institutional,
             orderbook=orderbook,
+            correlation=correlation,
         )
         confirmation = self.entry_confirmation.confirm(
             mtf, entry_structure, fvg, entry,
