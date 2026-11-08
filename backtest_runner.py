@@ -309,6 +309,10 @@ class BacktestRunner:
                 for tf in ("15m", "1h", "4h", "1d", "1w")
             }
             window["symbol"] = data.get("symbol", "SYMBOL")
+            # Preserve comparison universes so SMT and peer-flow motors can
+            # build timestamp-aligned context during historical replay.
+            if data.get("smt_universe"):
+                window["smt_universe"] = data["smt_universe"]
 
             self.analysis_calls += 1
             result = self.analyze_fn(window) if self.analyze_fn else on_signal(window)
