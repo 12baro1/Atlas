@@ -117,18 +117,17 @@ class MTFEngine:
         entry_source = "NONE"
         direction_reason = "h4_structure_neutral"
 
-        # 4H is the primary directional timeframe. A genuine weekly conflict
-        # blocks the setup; daily disagreement is reported as context only.
-        if h4_trend == "BULLISH" and not weekly_h4_conflict:
+        # 4H confirmed structure determines the executable direction.
+        # Weekly/daily disagreement is context for entry placement and risk,
+        # not a second directional veto over a valid 4H BOS/CHoCH.
+        if h4_trend == "BULLISH":
             entry_signal = "LONG"
             entry_source = "H4_STRUCTURE"
-            direction_reason = "h4_bullish"
-        elif h4_trend == "BEARISH" and not weekly_h4_conflict:
+            direction_reason = "h4_bullish_weekly_countertrend" if weekly_h4_conflict else "h4_bullish"
+        elif h4_trend == "BEARISH":
             entry_signal = "SHORT"
             entry_source = "H4_STRUCTURE"
-            direction_reason = "h4_bearish"
-        elif weekly_h4_conflict:
-            direction_reason = "weekly_h4_conflict"
+            direction_reason = "h4_bearish_weekly_countertrend" if weekly_h4_conflict else "h4_bearish"
         else:
             # 15m can establish direction only when 4H is neutral. It still
             # requires a real liquidity sweep, post-sweep reclaim and CHoCH.
