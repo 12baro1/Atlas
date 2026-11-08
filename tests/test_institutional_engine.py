@@ -97,3 +97,10 @@ def test_candle_cvd_is_explicitly_marked_as_proxy():
     assert cvd["source"] == "candle_direction_proxy"
     assert cvd["is_proxy"] is True
     assert delta["source"] == "candle_direction_proxy"
+
+
+def test_funding_rate_uses_decimal_rate_threshold():
+    engine = InstitutionalAnalysisEngine()
+    closes = [100.0, 101.0]
+    assert engine._funding_rate({"funding_rate": [0.0003]}, closes)["bias"] == "SHORT"
+    assert engine._funding_rate({"funding_rate": [-0.0003]}, closes)["bias"] == "LONG"
