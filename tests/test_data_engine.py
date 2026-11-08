@@ -25,7 +25,7 @@ def test_fetch_discards_current_incomplete_candle(monkeypatch):
     now = 10_000_000
     rows = [
         [now - 1_800_000, 100, 103, 99, 102, 10],
-        [now - 900_000, 102, 105, 101, 104, 12],
+        [now, 102, 105, 101, 104, 12],
     ]
     monkeypatch.setattr(data_engine, "exchange", FakeExchange(rows, now))
     candles = data_engine._fetch("BTC/USDT:USDT", "15m", 100)
