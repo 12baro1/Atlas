@@ -934,8 +934,8 @@ class AtlasEngine:
         )
         trend = self.trend.calculate(mtf)
 
-        daily_orderblocks = self.orderblocks.detect(daily, daily_structure)
-        h4_orderblocks = self.orderblocks.detect(h4, h4_structure)
+        daily_orderblocks = self.mitigation.detect(daily, self.orderblocks.detect(daily, daily_structure))
+        h4_orderblocks = self.mitigation.detect(h4, self.orderblocks.detect(h4, h4_structure))
 
         # OTE, 15m verisinin tüm tarihsel tepe/diplerinden değil,
         # son onaylı 4H impuls bacağından hesaplanır.
@@ -951,8 +951,14 @@ class AtlasEngine:
             current_price,
             daily_orderblocks,
             h4_orderblocks,
+            direction=mtf.get("entry", "NONE"),
         )
-        htf_fvg = self.htf_fvg.detect(self.fvg.detect(h4), self.fvg.detect(daily))
+        htf_fvg = self.htf_fvg.detect(
+            self.fvg.detect(h4),
+            self.fvg.detect(daily),
+            current_price=current_price,
+            direction=mtf.get("entry", "NONE"),
+        )
 
         market_phase = self.market_phase.detect(
             structure=entry_structure,
