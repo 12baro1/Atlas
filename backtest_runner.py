@@ -428,7 +428,9 @@ class BacktestRunner:
             # at a time. Keep analyzing candles for diagnostics, but do not
             # count overlapping entries as independent portfolio trades.
             if idx <= busy_until_index:
-                self.overlapping_signals_skipped += 1
+                decision = result.get("decision") if isinstance(result, dict) else {}
+                if isinstance(decision, dict) and str(decision.get("action", "")).upper() == "EXECUTE":
+                    self.overlapping_signals_skipped += 1
                 continue
 
             open_before = self.open_trades
