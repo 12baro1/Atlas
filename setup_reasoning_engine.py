@@ -50,12 +50,12 @@ class SetupReasoningEngine:
         if not isinstance(module, dict):
             return "NONE"
         side = SetupReasoningEngine._direction(
-            module.get("direction") or module.get("bias") or module.get("directional_bias")
+            module.get("direction") or module.get("bias") or module.get("directional_bias") or module.get("type")
         )
         if side != "NONE":
             return side
         best = module.get("best")
-        return SetupReasoningEngine._direction(best.get("direction")) if isinstance(best, dict) else "NONE"
+        return SetupReasoningEngine._direction(best.get("direction") or best.get("type")) if isinstance(best, dict) else "NONE"
 
     def _candidate_directions(self, mtf, sweep):
         directions = []
@@ -177,9 +177,6 @@ class SetupReasoningEngine:
                 supporting.append("Cross-market correlation supports entry")
             if corr_opposing:
                 opposing.append("Cross-market counterpressure")
-        phase = (market_phase or {}).get("phase") if isinstance(market_phase, dict) else None
-        if phase:
-            supporting.append(f"Market phase: {phase}")
         return supporting, opposing
 
     def generate(self, *, base_entry, mtf, structure, fvg, orderblocks,
@@ -188,7 +185,8 @@ class SetupReasoningEngine:
                  unicorn=None, cisd=None, volume_profile=None, institutional=None,
                  orderbook=None, correlation=None, market_phase=None,
                  liquidity=None, external_structure=None,
-                 higher_timeframe_orderblocks=None, higher_timeframe_fvg=None):
+                 higher_timeframe_orderblocks=None, higher_timeframe_fvg=None,
+                 optimization=None):
         base_entry = base_entry if isinstance(base_entry, dict) else {}
         current = self._number(current_price)
         if current is None or current <= 0:
@@ -256,11 +254,28 @@ class SetupReasoningEngine:
                 if direction == "LONG":
                     entry_price = current if inside and market_confirmed else high
                     stop = low - atr_buffer
-                    executable = inside and market_confirmed or current > entry_price
                 else:
                     entry_price = current if inside and market_confirmed else low
                     stop = high + atr_buffer
-                    executable = inside and market_confirmed or current < entry_price
+
+                # Reuse EntryOptimizer's price only for the exact POI it analyzed.
+                optimized_price = self._number((optimization or {}).get("optimized_entry")) if isinstance(optimization, dict) else None
+                base_zone = base_entry.get("poi_zone") if isinstance(base_entry.get("poi_zone"), dict) else {}
+                base_source = str(base_entry.get("poi_source") or "").upper()
+                same_base_poi = (
+                    self._direction(base_entry.get("direction")) == direction
+                    and base_source == source
+                    and self._number(base_zone.get("low")) == low
+                    and self._number(base_zone.get("high")) == high
+                )
+                if optimized_price is not None and same_base_poi and low <= optimized_price <= high and not (inside and market_confirmed):
+                    entry_price = optimized_price
+
+                executable = (
+                    (inside and market_confirmed)
+                    or (direction == "LONG" and current > entry_price)
+                    or (direction == "SHORT" and current < entry_price)
+                )
                 if not executable or entry_price <= 0 or stop <= 0:
                     continue
                 risk = abs(entry_price - stop)
