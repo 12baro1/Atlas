@@ -6,7 +6,7 @@ A living backlog, ordered by risk and user value. Do not mark an item complete w
 
 - [ ] Verify market-data timestamps and higher-timeframe candle boundaries, including exchange timezone and incomplete-candle edge cases.
 - [ ] Audit live analysis paths for look-ahead bias, including cache restoration and all auxiliary SMC modules.
-- [ ] Audit fee/slippage accounting across backtest and signal outcome tracking; prove each cost is applied exactly once.
+- [ ] Validate modeled fee/spread/slippage parity against exchange tick sizes and actual fills; backtest and signal journal now apply configured/captured costs once, but OHLCV proxies cannot prove exact market impact.
 - [ ] Test malformed, missing, stale, and incomplete market data; require WAIT rather than a fabricated setup.
 - [ ] Confirm no execution path can place exchange orders, even if legacy environment variables or credentials are present.
 
@@ -56,7 +56,9 @@ inspection alone.
 ## Verified in integration branch
 
 - [x] Live OHLCV ingestion rejects malformed/non-finite/out-of-order rows and excludes the forming candle; see `tests/test_data_engine.py`.
-- [x] Backtest regression tests cover one round-trip fee deduction for partial and non-partial exit paths; see `tests/test_backtest_runner.py`.
+- [x] Backtest regression tests cover one-time fee, spread and slippage proxy deductions for partial and non-partial exit paths; see `tests/test_backtest_runner.py`.
+- [x] Signal outcome journal tests cover captured fee/spread/slippage deductions after partial exits; see `tests/test_signal_outcome_integration.py`.
+- [x] LIMIT target repricing excludes already-crossed objectives and never fabricates replacement liquidity; see `tests/test_dynamic_tp_quality.py`.
 - [x] Duplicate trade close events are idempotent and do not double-count; see `tests/test_trade_journal.py`.
 
 These are narrowly scoped checks. The broader release-blocker items above remain
