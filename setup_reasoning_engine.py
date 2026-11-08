@@ -186,7 +186,7 @@ class SetupReasoningEngine:
                         continue
                     if str(item.get("type", "")).upper() != expected:
                         continue
-                    if item.get("mitigated") if source == "ORDER_BLOCK" else item.get("filled"):
+                    if item.get("mitigated") if source in {"ORDER_BLOCK", "HTF_ORDER_BLOCK"} else item.get("filled"):
                         continue
                     bounds = self._bounds(item, "FVG" if source in {"FVG", "HTF_FVG"} else "OB")
                     if not bounds:
