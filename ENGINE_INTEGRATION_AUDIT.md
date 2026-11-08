@@ -21,15 +21,18 @@ suite is not evidence of a profitable strategy.
 ## Execution and backtest invariants
 
 - LIMIT orders are not filled unless a later candle touches the limit.
-- A setup whose TP1 has already traded before entry is stale; it must not be
-  presented as a fresh executable order with the old target ladder.
+- A MARKET setup whose TP1 has already traded is stale and must not be chased.
+- A pending LIMIT may remain actionable after its original TP1 trades only when
+  all crossed targets are removed and the remaining structural TP ladder is
+  rebuilt; no remaining target means the LIMIT is invalid.
 - MARKET fills use the next available candle open in the historical simulator.
 - Intrabar ambiguity is resolved conservatively: stop-first where OHLC cannot
   establish event order; partial exits advance only on subsequent candles.
-- Fees/slippage must be applied exactly once per simulated round trip. Existing
-  fee regression coverage verifies the configured round-trip fee in the
-  non-partial path; partial-exit and live-journal parity still require a
-  dedicated end-to-end reconciliation.
+- Configured round-trip fee, spread proxy and slippage proxy are applied once
+  to backtest net R. Live signal outcomes persist the RiskEngine's captured
+  fee rate and absolute spread/slippage buffers and deduct them once after
+  partial-exit realization. OHLCV replay still uses percentage proxies rather
+  than historical order-book spread or exact market impact.
 
 ## Remaining validation before live use
 
@@ -38,8 +41,8 @@ suite is not evidence of a profitable strategy.
   actual taker flow when the provider did not archive them.
 - Complete a frozen-parameter walk-forward and out-of-sample evaluation with
   per-symbol, direction, setup and regime statistics.
-- Reconcile fee, spread and slippage accounting across risk sizing, backtest,
-  and signal outcome journal, including partial exits.
+- Validate modeled fee/spread/slippage parity against exchange instrument tick
+  sizes and actual fills; historical OHLCV cannot establish exact market impact.
 - Test stale-cache restoration, signal expiry, restart recovery, and all legacy
   exchange-order execution paths.
 - Measure each specialist motor with ablation tests; retain only evidence that
@@ -55,7 +58,10 @@ environment variables, legacy credentials, or compatibility modules.
 
 - Live OHLCV ingestion now removes the still-forming final candle and rejects
   non-finite, malformed, duplicate, out-of-order, or impossible OHLC rows.
-- Backtest tests now assert the configured round-trip fee is deducted once for
-  both partial and non-partial exit paths.
+- Backtest tests assert fee, spread and slippage proxies are deducted once.
+- Signal outcome tests assert captured RiskEngine fee/spread/slippage buffers
+  are deducted once after partial-exit realization.
+- LIMIT repricing tests exclude signal-candle-crossed targets and refuse to
+  fabricate a replacement target when no structural objective remains.
 - Trade-journal close transitions are idempotent: a duplicate close event is
   ignored and cannot overwrite the first exit or double-count performance.
