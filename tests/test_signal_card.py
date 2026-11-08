@@ -141,7 +141,7 @@ def test_signal_card_preserves_small_coin_price_precision():
     result["symbol"] = "ARB/USDT:USDT"
     result["signal"] = {"signal": "SHORT", "confidence": 90}
     result["decision"] = {"action": "EXECUTE", "critical_blockers": []}
-    result["analysis"]["entry"] = {"entry": 0.173846, "entry_type": "LIMIT"}
+    result["analysis"]["entry"] = {"valid": True, "direction": "SHORT", "entry": 0.173846, "entry_type": "LIMIT"}
     result["risk"] = {
         "entry": 0.173846,
         "stop_loss": 0.176214,
