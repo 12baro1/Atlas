@@ -69,3 +69,4 @@ def test_institutional_engine_returns_full_analysis_bundle():
     assert result["ai_confidence"] >= 0
     assert result["adaptive_position_sizing"]["factor"] >= 0.7
     assert result["institutional_flow"]["direction"] in ["LONG", "SHORT", "NONE"]
+
