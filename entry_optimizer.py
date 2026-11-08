@@ -114,6 +114,21 @@ class EntryOptimizer:
         add_bias("cisd", cisd, 1.2)
         add_bias("institutional_flow", institutional, 1.0)
 
+        correlation_state = correlation if isinstance(correlation, dict) else {}
+        if correlation_state.get("active"):
+            try:
+                pressure = float(correlation_state.get("counterpressure_score", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                pressure = 0.0
+            if correlation_state.get("counterpressure"):
+                weight = 1.0 + max(0.0, min(1.0, pressure))
+                weighted_positions.append((0.16, weight, "correlation_counterpressure"))
+                evidence.append({"source": "correlation", "bias": "COUNTERPRESSURE", "weight": round(weight, 3)})
+                stronger_confirmation_reasons.append("correlation_counterpressure")
+            elif correlation_state.get("supportive"):
+                weighted_positions.append((0.60, 0.9, "correlation_support"))
+                evidence.append({"source": "correlation", "bias": "SUPPORTIVE", "weight": 0.9})
+
         phase_name = str((market_phase or {}).get("phase", "")).strip().lower()
         sweep_confirmed = bool(
             sweep.get("is_sweep")
