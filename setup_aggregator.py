@@ -99,7 +99,7 @@ class SetupAggregator:
                 ("htf_fvg", htf_fvg, 0.8),
             ):
                 if isinstance(module, dict) and module.get("valid"):
-                    add(name, direction, weight, 70.0, "poi_context")
+                    add(name, module.get("direction") or module.get("type") or direction, weight, module.get("confidence", 70.0), "poi_context")
 
         if isinstance(breaker, list):
             expected = "BULLISH" if direction == "LONG" else "BEARISH"
@@ -121,8 +121,14 @@ class SetupAggregator:
         # EntryOptimizer has already converted price/level evidence into a
         # shared entry. Preserve its evidence verbatim in the central ledger.
         optimization = optimization if isinstance(optimization, dict) else {}
+        existing_motors = {item["motor"] for item in evidence}
         for item in optimization.get("evidence", []) or []:
             if not isinstance(item, dict):
+                continue
+            source_name = str(item.get("source", "entry_optimizer"))
+            # The optimizer consumes several of the same motor outputs. Do
+            # not count the same motor twice in the central consensus.
+            if source_name in existing_motors:
                 continue
             bias = str(item.get("bias", "")).upper()
             side = direction if bias in {"ALIGNED", "SUPPORTIVE", "CONFIRMED"} else (
