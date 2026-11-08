@@ -61,7 +61,11 @@ class EntryConfirmationEngine:
             result["reason"] = "Selected structural POI is unavailable"
             return result
         poi_source = str(entry.get("poi_source") or "STRUCTURAL_POI").upper()
-        poi_confirmation = "FVG" if active_fvg else poi_source
+        poi_confirmation = (
+            "FVG" if active_fvg else
+            "ORDER_BLOCK_OTE" if poi_source == "ORDER_BLOCK" and entry.get("ote_confluence") else
+            poi_source
+        )
 
         breaks = [x for x in structure if isinstance(x, dict) and (x.get("bos") or x.get("choch"))]
         latest = breaks[-1] if breaks else None
