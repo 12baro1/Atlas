@@ -81,13 +81,22 @@ class EntryOptimizer:
                 confidence = 55.0
             quality_source = module.get("cvd") if isinstance(module.get("cvd"), dict) else module
             is_proxy = bool(quality_source.get("is_proxy")) or "proxy" in str(quality_source.get("source", "")).lower()
-            quality_factor = 0.40 if is_proxy else 1.0
+            timestamp_validated = bool(quality_source.get("timestamp_validated"))
+            if is_proxy:
+                quality_factor, data_quality = 0.40, "PROXY"
+            elif name == "institutional_flow" and timestamp_validated:
+                # The trade delta is live; most other institutional features still come from OHLCV.
+                quality_factor, data_quality = 0.75, "MIXED_LIVE_AND_OHLCV"
+            elif name == "institutional_flow":
+                quality_factor, data_quality = 0.50, "UNVERIFIED_OR_OHLCV"
+            else:
+                quality_factor, data_quality = 1.0, "NATIVE_OR_UNMARKED"
             strength = weight * (0.5 + confidence / 100.0) * quality_factor
             weighted_positions.append((position, strength, name))
             evidence.append({
                 "source": name, "bias": "ALIGNED" if side == direction else "OPPOSED",
                 "weight": round(strength, 3),
-                "data_quality": "PROXY" if is_proxy else "LIVE_OR_NATIVE",
+                "data_quality": data_quality,
                 "quality_factor": quality_factor,
             })
             if side != direction and confidence >= 70:
