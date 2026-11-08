@@ -43,12 +43,18 @@ def _verdict(decision, signal, entry, risk=None):
 
     # LIMIT orders are conditional and must never be shown as immediate entry permission.
     risk = risk if isinstance(risk, dict) else {}
+    entry_is_valid = (
+        (entry or {}).get("valid") is not False
+        and (entry or {}).get("entry") is not None
+        and (entry or {}).get("stop_loss") is not None
+    )
+    risk_has_target = any(risk.get(key) is not None for key in ("tp1", "tp2", "tp3"))
+    risk_is_valid = bool(risk) and risk_has_target and risk.get("risk_setup_valid", True) is not False
     pending_limit = (
         entry_type == "LIMIT"
-        and bool((entry or {}).get("valid"))
-        and bool(risk)
-        and risk.get("risk_setup_valid", True) is not False
-        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
+        and entry_is_valid
+        and risk_is_valid
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION", "WAIT")
     )
     if entry_type == "LIMIT":
         if pending_limit:
@@ -59,9 +65,8 @@ def _verdict(decision, signal, entry, risk=None):
         entry_type == "MARKET"
         and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
         and signal_dir in ("LONG", "SHORT")
-        and bool((entry or {}).get("valid"))
-        and bool(risk)
-        and risk.get("risk_setup_valid", True) is not False
+        and entry_is_valid
+        and risk_is_valid
     ):
         return ("AL" if signal_dir == "LONG" else "SAT", signal_dir, None)
 
@@ -105,10 +110,9 @@ def build_signal_card(result):
     verdict_label, direction, verdict_reason = _verdict(decision, signal, entry, risk)
     pending_pullback = (
         str(entry.get("entry_type") or "").upper() == "LIMIT"
-        and bool(entry.get("valid"))
-        and bool(risk)
-        and risk.get("risk_setup_valid", True) is not False
-        and str(decision.get("action") or "").upper() in ("EXECUTE", "EXECUTE_WITH_CAUTION")
+        and card["entry_valid"]
+        and card["risk_setup_valid"]
+        and str(decision.get("action") or "").upper() in ("EXECUTE", "EXECUTE_WITH_CAUTION", "WAIT")
     )
 
     card = {
@@ -126,8 +130,8 @@ def build_signal_card(result):
         "setup_allowed": bool(setup_quality.get("trade_allowed", False)),
         "entry": None,
         "entry_type": str(entry.get("entry_type") or "BELİRSİZ").upper(),
-        "entry_valid": bool(entry.get("valid")),
-        "risk_setup_valid": bool(risk) and risk.get("risk_setup_valid", True) is not False,
+        "entry_valid": (entry.get("valid") is not False and entry.get("entry") is not None and entry.get("stop_loss") is not None),
+        "risk_setup_valid": bool(risk) and any(risk.get(key) is not None for key in ("tp1", "tp2", "tp3")) and risk.get("risk_setup_valid", True) is not False,
         "entry_type_reason": entry.get("entry_type_reason") or "",
         "entry_distance_label": entry.get("entry_distance_label") or "",
         "entry_distance_pct": _num(entry.get("entry_distance_pct"), 3),
