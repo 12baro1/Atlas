@@ -63,7 +63,10 @@ class MarketStructureEngine:
             left=max(0,pivot.index-10)
             # Strength may only use candles available when the pivot is
             # confirmed; do not score recent pivots with a partial future window.
-            right=min(len(candles),pivot.confirmation_index+1)
+            confirmation_index = getattr(pivot, "confirmation_index", None)
+            if confirmation_index is None:
+                confirmation_index = pivot.index + self.pivot_right
+            right=min(len(candles),int(confirmation_index)+1)
 
             score=0
 
