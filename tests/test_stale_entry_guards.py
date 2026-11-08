@@ -100,7 +100,7 @@ def test_terminal_card_uses_only_clear_no_entry_decision():
     assert "BEKLE" not in output
 
 
-def test_pending_limit_card_explains_conditional_limit_entry():
+def test_invalid_pending_limit_card_is_not_actionable():
     from utils.signal_card import build_signal_card, format_card_text
 
     card = build_signal_card({
@@ -120,13 +120,11 @@ def test_pending_limit_card_explains_conditional_limit_entry():
         },
     })
     output = format_card_text(card)
-    assert "LIMIT BEKLE" in output
-    assert "LIMIT (fiyat giriş seviyesine gelirse)" in output
-    assert "Koşul" in output
-    assert "Emir      : LIMIT" in output
-    assert "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor" in output
-    assert "wait for pullback" not in output
-    assert "Sinyal WAIT" not in output
+    assert "İŞLEME GİRME" in output
+    assert "LIMIT BEKLE" not in output
+    assert "Emir      : LIMIT" not in output
+    assert "Giriş     :" not in output
+    assert "Stop Loss :" not in output
 
 
 
