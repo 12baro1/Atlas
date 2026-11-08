@@ -64,12 +64,12 @@ def test_cost_adjusted_net_rr_is_a_hard_gate(monkeypatch):
     assert any("Cost-adjusted net RR" in item for item in result["blockers"])
 
 
-def test_limit_percent_cap_applies_when_atr_is_unavailable():
+def test_limit_percent_distance_is_advisory_when_atr_is_unavailable():
     payload = _quality_payload()
     payload["entry"]["entry"] = 106.0
     payload["current_price"] = 100.0
     result = TradeQualityEngine().evaluate(**payload)
-    assert result["allowed"] is False
+    assert result["allowed"] is True
     assert any("LIMIT entry is far" in item for item in result["warnings"])
 
 
