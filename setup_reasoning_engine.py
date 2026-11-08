@@ -237,7 +237,9 @@ class SetupReasoningEngine:
                  orderbook=None, correlation=None, market_phase=None,
                  liquidity=None, external_structure=None,
                  higher_timeframe_orderblocks=None, higher_timeframe_fvg=None,
-                 optimization=None):
+                 optimization=None, breaker=None, ifvg=None, trendline_sweep=None,
+                 eqh_eql=None, inducement=None, premium_discount=None,
+                 internal_structure=None, trendline_liquidity=None):
         base_entry = base_entry if isinstance(base_entry, dict) else {}
         current = self._number(current_price)
         if current is None or current <= 0:
