@@ -144,9 +144,8 @@ class EntryEngine:
         def overlaps_ote(lower, upper):
             return not use_ote_filter or (ote_low <= upper and ote_high >= lower)
 
-        # Place the stop a small ATR buffer beyond the structural invalidation
-        # level. RiskEngine still rejects stops that remain too tight; it does
-        # not silently widen them into a different setup.
+        # Place the stop far enough beyond the selected POI invalidation edge
+        # to clear the RiskEngine's minimum ATR floor without post-hoc widening.
         atr_buffer = 0.0
         if candles:
             try:
