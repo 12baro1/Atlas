@@ -87,8 +87,8 @@ class DynamicTPEngine:
                     "atr": round(atr_snapshot, 8),
                     "candidate_count": len(targets),
                     "candidate_targets": [round(float(price), 8) for price in targets],
-            "excluded_passed_targets": [round(float(price), 8) for price in excluded_passed_targets],
-            "target_exclusion_price": round(cutoff, 8) if cutoff is not None and cutoff > 0 else None,
+                    "excluded_passed_targets": [round(float(price), 8) for price in excluded_passed_targets],
+                    "target_exclusion_price": round(cutoff, 8) if cutoff is not None and cutoff > 0 else None,
                     "missing_rr_level": rr_multiple,
                     "best_candidate_rr": max(candidate_rr) if candidate_rr else None,
                 }
@@ -109,6 +109,8 @@ class DynamicTPEngine:
                 "atr": round(atr_snapshot, 8),
                 "candidate_count": len(targets),
                 "candidate_targets": [round(float(price), 8) for price in targets],
+                "excluded_passed_targets": [round(float(price), 8) for price in excluded_passed_targets],
+                "target_exclusion_price": round(cutoff, 8) if cutoff is not None and cutoff > 0 else None,
                 "missing_rr_level": self.MIN_RR_LEVELS[0],
                 "best_candidate_rr": None,
             }
@@ -131,6 +133,8 @@ class DynamicTPEngine:
             "atr": round(atr_snapshot, 8),
             "candidate_count": len(targets),
             "candidate_targets": [round(float(price), 8) for price in targets],
+            "excluded_passed_targets": [round(float(price), 8) for price in excluded_passed_targets],
+            "target_exclusion_price": round(cutoff, 8) if cutoff is not None and cutoff > 0 else None,
             "target_rrs": [
                 round((entry - price if direction == "SHORT" else price - entry) / risk, 4)
                 for price in selected_targets
