@@ -263,7 +263,12 @@ class SetupReasoningEngine:
                     direction == "SHORT" and stop <= entry_price
                 ):
                     continue
-                target_fvg = list(fvg) + list(higher_timeframe_fvg or [])\n                target_obs = list(orderblocks) + list(higher_timeframe_orderblocks or [])\n                targets = self._targets(\n                    direction, entry_price, liquidity, external_structure,\n                    fvg=target_fvg, orderblocks=target_obs, structure=structure,\n                )
+                target_fvg = list(fvg) + list(higher_timeframe_fvg or [])
+                target_obs = list(orderblocks) + list(higher_timeframe_orderblocks or [])
+                targets = self._targets(
+                    direction, entry_price, liquidity, external_structure,
+                    fvg=target_fvg, orderblocks=target_obs, structure=structure,
+                )
                 projected_rr = abs(targets[-1] - entry_price) / risk if targets else None
                 support, opposition = self._evidence(
                     direction, mtf, sweep, structure, ote, htf_orderblock, htf_fvg,
