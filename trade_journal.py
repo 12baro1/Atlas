@@ -1259,6 +1259,7 @@ class TradeJournal:
         fee_rate = self._num(execution_costs.get("round_trip_cost_rate"))
         if fee_rate is None:
             fee_rate = self._signal_round_trip_cost_rate()
+        fee_rate = max(0.0, fee_rate)
         spread_buffer = self._num(execution_costs.get("spread_buffer"), 0.0) or 0.0
         slippage_buffer = self._num(execution_costs.get("slippage_buffer"), 0.0) or 0.0
         fee_cost = abs(entry) * fee_rate if entry is not None else 0.0
