@@ -135,6 +135,7 @@ def build_signal_card(result):
         "setup_thesis": setup_reasoning.get("thesis") or "",
         "supporting_evidence": list(setup_reasoning.get("supporting_evidence") or []),
         "opposing_evidence": list(setup_reasoning.get("opposing_evidence") or []),
+        "market_context": list(setup_reasoning.get("market_context") or []),
         "candidate_count": int(setup_reasoning.get("candidate_count", 0) or 0),
         "synthetic_tp_targets": bool(dynamic_tp.get("synthetic_targets", False)),
         "stop_loss": None,
@@ -318,5 +319,7 @@ def format_card_text(card):
         lines.append("  Destek    : " + " | ".join(card["supporting_evidence"][:5]))
     if card.get("opposing_evidence"):
         lines.append("  Karşı kanıt: " + " | ".join(card["opposing_evidence"][:5]))
+    if card.get("market_context"):
+        lines.append("  Bağlam    : " + " | ".join(card["market_context"][:5]))
     lines.append(line)
     return "\n".join(lines)
