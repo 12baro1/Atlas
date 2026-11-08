@@ -226,11 +226,13 @@ def test_terminal_card_displays_setup_reasoning_instead_of_quality_score():
         "candidate_count": 3,
         "supporting_evidence": ["15m CHoCH LONG", "Order flow supports entry"],
         "opposing_evidence": ["SMT SHORT"],
+        "market_context": ["Market phase: Accumulation", "Premium/Discount: Discount"],
     }
     rendered = format_card_text(build_signal_card(result))
     assert "Setup     : LONG FVG" in rendered
     assert "Destek    : 15m CHoCH LONG" in rendered
     assert "Karşı kanıt: SMT SHORT" in rendered
+    assert "Bağlam    : Market phase: Accumulation" in rendered
     assert "Kalite" not in rendered
     assert "/100" not in rendered
 
