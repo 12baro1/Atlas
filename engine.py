@@ -627,6 +627,7 @@ class AtlasEngine:
                         "setup_features": setup_features,
                         "learning": setup_quality.get("learning") or {},
                         "setup_quality": setup_quality,
+                        "motor_diagnostics": (analysis.get("motor_diagnostics") or {}),
                         "decision": result_payload.get("decision") or {},
                     },
                 )
@@ -1423,6 +1424,16 @@ class AtlasEngine:
                 "features": (execution_state.get("setup_quality") or {}).get("features", []),
                 "type": (execution_state.get("setup_quality") or {}).get("setup") or None,
             },
+            "motor_diagnostics": {
+                "entry_optimizer": (execution_state.get("entry") or {}).get("entry_optimizer", {}),
+                "confirmation_profile": (execution_state.get("entry") or {}).get("confirmation_profile", {}),
+                "data_sources": {
+                    "institutional_cvd": ((institutional_state or {}).get("cvd") or {}).get("source"),
+                    "institutional_cvd_is_proxy": ((institutional_state or {}).get("cvd") or {}).get("is_proxy"),
+                    "volume_profile": ((volume_profile_state or {}).get("best") or volume_profile_state or {}).get("source"),
+                    "orderbook": (execution_state.get("entry") or {}).get("orderbook", {}).get("source"),
+                },
+            },
             "news_filter": news_state or {},
             "correlation": correlation_state or {},
             "cooldown": cooldown_state or {},
@@ -1461,6 +1472,7 @@ class AtlasEngine:
         payload["unicorn"] = unicorn_state or {}
         payload["cisd"] = cisd_state or {}
         payload["liquidity_sweep"] = structure_state.get("liquidity_sweep", {})
+        payload["analysis_timestamp_ms"] = int(time.time() * 1000)
 
         # Build peer-asset context from the same timestamp-aligned SMT universe.
         # In backtests, future peer candles are trimmed before they reach the
@@ -1517,8 +1529,8 @@ class AtlasEngine:
         return {
             "valid": valid,
             "entry": "LONG" if direction == "BULLISH" else "SHORT" if direction == "BEARISH" else "NONE",
-            "weekly": direction if valid else "NEUTRAL",
-            "daily": direction if valid else "NEUTRAL",
+            "weekly": "NEUTRAL",
+            "daily": "NEUTRAL",
             "h4": direction if valid else "NEUTRAL",
         }
 
@@ -1589,7 +1601,6 @@ class AtlasEngine:
 
     def _build_unicorn_state(self, data, tf_analysis, context_state, structure_state, smt_state):
         """Unicorn setup tespiti için MTF payload üretir ve sonucu döndürür."""
-        mtf_direction = context_state["mtf"].get("entry", "NONE")
         timeframe_to_structure_key = {
             "15m": "entry",
             "1h": "h1",
