@@ -934,7 +934,7 @@ class AtlasEngine:
             entry_structure,
             liquidity_sweep=liquidity_sweep,
         )
-        trend = self.trend.calculate(mtf)
+        trend = self.trend.calculate(mtf, structure=h4_structure)
 
         daily_orderblocks = self.mitigation.detect(daily, self.orderblocks.detect(daily, daily_structure))
         h4_orderblocks = self.mitigation.detect(h4, self.orderblocks.detect(h4, h4_structure))
@@ -1494,6 +1494,52 @@ class AtlasEngine:
 
         return self.volume_profile.detect_multi(payload)
 
+    def _timeframe_structure_direction(self, structure):
+        """Yalnızca ilgili zaman diliminin kendi onaylı yapısından yön çıkarır."""
+        for item in reversed(structure or []):
+            if not isinstance(item, dict) or not (item.get("bos") or item.get("choch")):
+                continue
+            direction = str(item.get("direction", "")).upper()
+            if direction in {"BULLISH", "BEARISH"}:
+                return direction
+        labels = [str(item.get("label", "")).upper() for item in (structure or []) if isinstance(item, dict)][-6:]
+        bullish = sum(label in {"HH", "HL"} for label in labels)
+        bearish = sum(label in {"LH", "LL"} for label in labels)
+        if bullish >= 2 and bullish > bearish:
+            return "BULLISH"
+        if bearish >= 2 and bearish > bullish:
+            return "BEARISH"
+        return "NONE"
+
+    def _timeframe_mtf_context(self, direction):
+        direction = str(direction or "NONE").upper()
+        valid = direction in {"BULLISH", "BEARISH"}
+        return {
+            "valid": valid,
+            "entry": "LONG" if direction == "BULLISH" else "SHORT" if direction == "BEARISH" else "NONE",
+            "weekly": direction if valid else "NEUTRAL",
+            "daily": direction if valid else "NEUTRAL",
+            "h4": direction if valid else "NEUTRAL",
+        }
+
+    def _timeframe_smt_state(self, smt_state, timeframe):
+        """SMT yalnızca aynı TF'de oluşan divergence'ları kullanır."""
+        state = smt_state if isinstance(smt_state, dict) else {}
+        divergences = [
+            item for item in (state.get("divergences") or [])
+            if isinstance(item, dict) and str(item.get("timeframe", "")).lower() == timeframe
+        ]
+        best = max(divergences, key=lambda item: float(item.get("confidence", 0) or 0), default=None)
+        return {
+            "active": best is not None,
+            "direction": best.get("type", "NONE") if best else "NONE",
+            "confidence": best.get("confidence", 0) if best else 0,
+            "best": best,
+            "divergences": divergences,
+            "timeframes": [timeframe],
+            "source": "timeframe_scoped_smt",
+        }
+
     def _build_cisd_state(self, data, tf_analysis, context_state, smt_state):
         """CISD için MTF payload oluşturur ve sonucu döndürür."""
         timeframe_to_structure_key = {
@@ -1520,12 +1566,23 @@ class AtlasEngine:
                 timeframe=timeframe,
             )
 
+            local_direction = self._timeframe_structure_direction(structure)
+            local_mtf = self._timeframe_mtf_context(local_direction)
+            local_trend = self.trend.calculate(local_mtf, structure=structure)
+            local_fvg = self.fvg.detect(candles)
+            local_orderblocks = self.mitigation.detect(candles, self.orderblocks.detect(candles, structure))
+            local_phase = self.market_phase.detect(
+                structure=structure, trend=local_trend, liquidity_sweep=liquidity_sweep,
+                fvg=local_fvg, orderblocks=local_orderblocks,
+                premium_discount={"premium": False, "discount": False, "valid": False},
+                mtf=local_mtf, candles=candles,
+            )
             payload[timeframe] = {
                 "candles": candles,
                 "structure": structure,
                 "liquidity_sweep": liquidity_sweep,
-                "market_phase": context_state["market_phase"],
-                "smt": smt_state,
+                "market_phase": local_phase,
+                "smt": self._timeframe_smt_state(smt_state, timeframe),
             }
 
         return self.cisd.detect_multi(payload)
@@ -1567,21 +1624,30 @@ class AtlasEngine:
             )
             inducement = self._detect_inducement(structure, liquidity_sweep, eqh_eql)
 
+            local_direction = self._timeframe_structure_direction(structure)
+            local_mtf = self._timeframe_mtf_context(local_direction)
+            local_trend = self.trend.calculate(local_mtf, structure=structure)
+            local_phase = self.market_phase.detect(
+                structure=structure, trend=local_trend, liquidity_sweep=liquidity_sweep,
+                fvg=fvg, orderblocks=orderblocks,
+                premium_discount={"premium": False, "discount": False, "valid": False},
+                mtf=local_mtf, candles=candles,
+            )
             swing_high, swing_low, current_price = self._price_context(candles)
             ote = self.ote.detect(
                 swing_high=swing_high,
                 swing_low=swing_low,
                 current_price=current_price,
-                direction=mtf_direction,
+                direction="LONG" if local_direction == "BULLISH" else "SHORT" if local_direction == "BEARISH" else "NONE",
             )
 
             payload[timeframe] = {
                 "structure": structure,
                 "breaker": breaker,
                 "fvg": fvg,
-                "market_phase": context_state["market_phase"],
+                "market_phase": local_phase,
                 "liquidity_sweep": liquidity_sweep,
-                "smt": smt_state,
+                "smt": self._timeframe_smt_state(smt_state, timeframe),
                 "orderblocks": orderblocks,
                 "eqh_eql": eqh_eql,
                 "inducement": inducement,
