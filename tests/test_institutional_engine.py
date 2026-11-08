@@ -104,3 +104,28 @@ def test_funding_rate_uses_decimal_rate_threshold():
     closes = [100.0, 101.0]
     assert engine._funding_rate({"funding_rate": [0.0003]}, closes)["bias"] == "SHORT"
     assert engine._funding_rate({"funding_rate": [-0.0003]}, closes)["bias"] == "LONG"
+
+
+
+def test_trade_flow_ignores_stale_timestamped_trades():
+    engine = InstitutionalAnalysisEngine()
+    trades = [
+        {"side": "buy", "amount": 1, "timestamp": 1_000},
+        {"side": "sell", "amount": 1, "timestamp": 2_000},
+        {"side": "buy", "amount": 1, "timestamp": 3_000},
+        {"side": "sell", "amount": 1, "timestamp": 4_000},
+        {"side": "buy", "amount": 1, "timestamp": 5_000},
+    ]
+    assert engine._trade_flow(trades, now_ms=100_000) is None
+
+
+def test_trade_flow_keeps_fresh_timestamped_trades():
+    engine = InstitutionalAnalysisEngine()
+    trades = [
+        {"side": "buy", "amount": 1, "timestamp": 90_000 + i}
+        for i in range(5)
+    ]
+    result = engine._trade_flow(trades, now_ms=100_000)
+    assert result is not None
+    assert result["cvd"]["is_proxy"] is False
+    assert result["cvd"]["timestamp_validated"] is True

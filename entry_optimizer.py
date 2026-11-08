@@ -79,19 +79,30 @@ class EntryOptimizer:
                 confidence = max(0.0, min(100.0, float(confidence)))
             except (TypeError, ValueError, OverflowError):
                 confidence = 55.0
-            strength = weight * (0.5 + confidence / 100.0)
+            quality_source = module.get("cvd") if isinstance(module.get("cvd"), dict) else module
+            is_proxy = bool(quality_source.get("is_proxy")) or "proxy" in str(quality_source.get("source", "")).lower()
+            timestamp_validated = bool(quality_source.get("timestamp_validated"))
+            if is_proxy:
+                quality_factor, data_quality = 0.40, "PROXY"
+            elif name == "institutional_flow" and timestamp_validated:
+                # The trade delta is live; most other institutional features still come from OHLCV.
+                quality_factor, data_quality = 0.75, "MIXED_LIVE_AND_OHLCV"
+            elif name == "institutional_flow":
+                quality_factor, data_quality = 0.50, "UNVERIFIED_OR_OHLCV"
+            else:
+                quality_factor, data_quality = 1.0, "NATIVE_OR_UNMARKED"
+            strength = weight * (0.5 + confidence / 100.0) * quality_factor
             weighted_positions.append((position, strength, name))
-            evidence.append({"source": name, "bias": "ALIGNED" if side == direction else "OPPOSED", "weight": round(strength, 3)})
+            evidence.append({
+                "source": name, "bias": "ALIGNED" if side == direction else "OPPOSED",
+                "weight": round(strength, 3),
+                "data_quality": data_quality,
+                "quality_factor": quality_factor,
+            })
             if side != direction and confidence >= 70:
                 stronger_confirmation_reasons.append(f"{name}_opposes")
 
-        trend_side = self._direction((trend or {}).get("trend"))
-        if trend_side != "NONE":
-            aligned_trend = trend_side == direction
-            weighted_positions.append((0.62 if aligned_trend else 0.22, 1.5, "trend"))
-            evidence.append({"source": "trend", "bias": "ALIGNED" if aligned_trend else "OPPOSED", "weight": 1.5})
-            if not aligned_trend:
-                stronger_confirmation_reasons.append("trend_opposes")
+        # Trend, MTF yönünün/structure özetinin türevi olduğundan bağımsız oy sayılmaz.
 
         sweep = liquidity_sweep if isinstance(liquidity_sweep, dict) else {}
         if sweep.get("is_sweep"):
@@ -270,9 +281,16 @@ class EntryOptimizer:
             if vp_confidence < 45 or (vp_direction not in {"NONE", direction} and vp_confidence >= 55):
                 stronger_confirmation_reasons.append("weak_or_opposing_volume_profile")
                 weighted_positions.append((0.18, 1.5, "volume_profile_counterpressure"))
-            self._add_level(weighted_levels, vp_best.get("poc"), 1.5, "volume_poc", low, high)
+            vp_is_proxy = bool(vp_best.get("is_proxy")) or "proxy" in str(vp_best.get("source", "")).lower()
+            vp_quality = 0.40 if vp_is_proxy else 1.0
+            self._add_level(weighted_levels, vp_best.get("poc"), 1.5 * vp_quality, "volume_poc", low, high)
             for level in (vp_best.get("hvn") or [])[:3]:
-                self._add_level(weighted_levels, level, 0.8, "volume_hvn", low, high)
+                self._add_level(weighted_levels, level, 0.8 * vp_quality, "volume_hvn", low, high)
+            evidence.append({
+                "source": "volume_profile", "bias": "CONTEXT",
+                "data_quality": "PROXY" if vp_is_proxy else "LIVE_OR_NATIVE",
+                "quality_factor": vp_quality,
+            })
         inst = institutional if isinstance(institutional, dict) else {}
         volume_delta = inst.get("volume_delta") if isinstance(inst.get("volume_delta"), dict) else {}
         try:
@@ -281,14 +299,14 @@ class EntryOptimizer:
             volume_imbalance = None
         if volume_imbalance is not None:
             delta_side = self._direction(volume_delta.get("direction"))
+            delta_proxy = bool(volume_delta.get("is_proxy")) or "proxy" in str(volume_delta.get("source", "")).lower()
+            delta_quality = 0.40 if delta_proxy else 1.0
             if abs(volume_imbalance) < 0.08:
-                weighted_positions.append((0.28, 1.0, "weak_volume_delta"))
-                stronger_confirmation_reasons.append("weak_volume_delta")
-                evidence.append({"source": "volume_delta", "bias": "WEAK", "imbalance": volume_imbalance})
+                weighted_positions.append((0.28, 1.0 * delta_quality, "weak_volume_delta"))
+                evidence.append({"source": "volume_delta", "bias": "WEAK", "imbalance": volume_imbalance, "data_quality": "PROXY" if delta_proxy else "LIVE", "quality_factor": delta_quality})
             elif delta_side not in {"NONE", direction}:
-                weighted_positions.append((0.18, 1.3, "opposing_volume_delta"))
-                stronger_confirmation_reasons.append("opposing_volume_delta")
-                evidence.append({"source": "volume_delta", "bias": "OPPOSED", "imbalance": volume_imbalance})
+                weighted_positions.append((0.18, 1.3 * delta_quality, "opposing_volume_delta"))
+                evidence.append({"source": "volume_delta", "bias": "OPPOSED", "imbalance": volume_imbalance, "data_quality": "PROXY" if delta_proxy else "LIVE", "quality_factor": delta_quality})
         self._add_level(weighted_levels, inst.get("vwap"), 1.0, "institutional_vwap", low, high)
         self._add_level(weighted_levels, inst.get("anchored_vwap"), 1.2, "anchored_vwap", low, high)
 

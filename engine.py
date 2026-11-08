@@ -627,6 +627,7 @@ class AtlasEngine:
                         "setup_features": setup_features,
                         "learning": setup_quality.get("learning") or {},
                         "setup_quality": setup_quality,
+                        "motor_diagnostics": (analysis.get("motor_diagnostics") or {}),
                         "decision": result_payload.get("decision") or {},
                     },
                 )
@@ -934,7 +935,7 @@ class AtlasEngine:
             entry_structure,
             liquidity_sweep=liquidity_sweep,
         )
-        trend = self.trend.calculate(mtf)
+        trend = self.trend.calculate(mtf, structure=h4_structure)
 
         daily_orderblocks = self.mitigation.detect(daily, self.orderblocks.detect(daily, daily_structure))
         h4_orderblocks = self.mitigation.detect(h4, self.orderblocks.detect(h4, h4_structure))
@@ -1423,6 +1424,69 @@ class AtlasEngine:
                 "features": (execution_state.get("setup_quality") or {}).get("features", []),
                 "type": (execution_state.get("setup_quality") or {}).get("setup") or None,
             },
+            "motor_diagnostics": {
+                "entry_optimizer": (execution_state.get("entry") or {}).get("entry_optimizer", {}),
+                "confirmation_profile": (execution_state.get("entry") or {}).get("confirmation_profile", {}),
+                "motor_outputs": {
+                    "mtf": {
+                        "entry": (context_state.get("mtf") or {}).get("entry"),
+                        "weekly": (context_state.get("mtf") or {}).get("weekly"),
+                        "daily": (context_state.get("mtf") or {}).get("daily"),
+                        "h4": (context_state.get("mtf") or {}).get("h4"),
+                        "entry_source": (context_state.get("mtf") or {}).get("entry_source"),
+                    },
+                    "trend": context_state.get("trend") or {},
+                    "liquidity_sweep": structure_state.get("liquidity_sweep") or {},
+                    "smt": {
+                        "active": (smt_state or {}).get("active"),
+                        "direction": (smt_state or {}).get("direction"),
+                        "confidence": (smt_state or {}).get("confidence"),
+                        "timeframes": (smt_state or {}).get("timeframes"),
+                    },
+                    "unicorn": {
+                        "active": (unicorn_state or {}).get("active"),
+                        "direction": (unicorn_state or {}).get("direction"),
+                        "confidence": (unicorn_state or {}).get("confidence"),
+                        "best_timeframe": ((unicorn_state or {}).get("best") or {}).get("timeframe"),
+                    },
+                    "cisd": {
+                        "active": (cisd_state or {}).get("active"),
+                        "direction": (cisd_state or {}).get("direction"),
+                        "confidence": (cisd_state or {}).get("confidence"),
+                        "best_timeframe": ((cisd_state or {}).get("best") or {}).get("timeframe"),
+                    },
+                    "volume_profile": {
+                        "active": (volume_profile_state or {}).get("active"),
+                        "direction": (volume_profile_state or {}).get("direction"),
+                        "confidence": (volume_profile_state or {}).get("confidence"),
+                        "best_timeframe": ((volume_profile_state or {}).get("best") or {}).get("timeframe"),
+                        "source": ((volume_profile_state or {}).get("best") or {}).get("source"),
+                        "is_proxy": ((volume_profile_state or {}).get("best") or {}).get("is_proxy"),
+                    },
+                    "institutional": {
+                        "active": (institutional_state or {}).get("active"),
+                        "direction": (institutional_state or {}).get("direction"),
+                        "confidence": (institutional_state or {}).get("confidence"),
+                        "cvd_source": ((institutional_state or {}).get("cvd") or {}).get("source"),
+                        "cvd_is_proxy": ((institutional_state or {}).get("cvd") or {}).get("is_proxy"),
+                        "cvd_timestamp_validated": ((institutional_state or {}).get("cvd") or {}).get("timestamp_validated"),
+                        "open_interest_active": ((institutional_state or {}).get("open_interest") or {}).get("active"),
+                        "funding_active": ((institutional_state or {}).get("funding_rate") or {}).get("active"),
+                    },
+                    "orderbook": {
+                        "active": ((execution_state.get("entry") or {}).get("orderbook") or {}).get("active"),
+                        "imbalance": ((execution_state.get("entry") or {}).get("orderbook") or {}).get("imbalance"),
+                        "spread_pct": ((execution_state.get("entry") or {}).get("orderbook") or {}).get("spread_pct"),
+                        "trade_count": ((execution_state.get("entry") or {}).get("orderbook") or {}).get("trade_count"),
+                    },
+                },
+                "data_sources": {
+                    "institutional_cvd": ((institutional_state or {}).get("cvd") or {}).get("source"),
+                    "institutional_cvd_is_proxy": ((institutional_state or {}).get("cvd") or {}).get("is_proxy"),
+                    "volume_profile": ((volume_profile_state or {}).get("best") or volume_profile_state or {}).get("source"),
+                    "orderbook": (execution_state.get("entry") or {}).get("orderbook", {}).get("source"),
+                },
+            },
             "news_filter": news_state or {},
             "correlation": correlation_state or {},
             "cooldown": cooldown_state or {},
@@ -1461,6 +1525,7 @@ class AtlasEngine:
         payload["unicorn"] = unicorn_state or {}
         payload["cisd"] = cisd_state or {}
         payload["liquidity_sweep"] = structure_state.get("liquidity_sweep", {})
+        payload["analysis_timestamp_ms"] = int(time.time() * 1000)
 
         # Build peer-asset context from the same timestamp-aligned SMT universe.
         # In backtests, future peer candles are trimmed before they reach the
@@ -1494,6 +1559,53 @@ class AtlasEngine:
 
         return self.volume_profile.detect_multi(payload)
 
+    def _timeframe_structure_direction(self, structure):
+        """Yalnızca ilgili zaman diliminin kendi onaylı yapısından yön çıkarır."""
+        for item in reversed(structure or []):
+            if not isinstance(item, dict) or not (item.get("bos") or item.get("choch")):
+                continue
+            direction = str(item.get("direction", "")).upper()
+            if direction in {"BULLISH", "BEARISH"}:
+                return direction
+        labels = [str(item.get("label", "")).upper() for item in (structure or []) if isinstance(item, dict)][-6:]
+        bullish = sum(label in {"HH", "HL"} for label in labels)
+        bearish = sum(label in {"LH", "LL"} for label in labels)
+        if bullish >= 2 and bullish > bearish:
+            return "BULLISH"
+        if bearish >= 2 and bearish > bullish:
+            return "BEARISH"
+        return "NONE"
+
+    def _timeframe_mtf_context(self, direction, timeframe):
+        direction = str(direction or "NONE").upper()
+        valid = direction in {"BULLISH", "BEARISH"}
+        neutral = "NEUTRAL"
+        return {
+            "valid": valid,
+            "entry": "LONG" if direction == "BULLISH" else "SHORT" if direction == "BEARISH" else "NONE",
+            "weekly": neutral,
+            "daily": direction if valid and timeframe == "1d" else neutral,
+            "h4": direction if valid and timeframe == "4h" else neutral,
+        }
+
+    def _timeframe_smt_state(self, smt_state, timeframe):
+        """SMT yalnızca aynı TF'de oluşan divergence'ları kullanır."""
+        state = smt_state if isinstance(smt_state, dict) else {}
+        divergences = [
+            item for item in (state.get("divergences") or [])
+            if isinstance(item, dict) and str(item.get("timeframe", "")).lower() == timeframe
+        ]
+        best = max(divergences, key=lambda item: float(item.get("confidence", 0) or 0), default=None)
+        return {
+            "active": best is not None,
+            "direction": best.get("type", "NONE") if best else "NONE",
+            "confidence": best.get("confidence", 0) if best else 0,
+            "best": best,
+            "divergences": divergences,
+            "timeframes": [timeframe],
+            "source": "timeframe_scoped_smt",
+        }
+
     def _build_cisd_state(self, data, tf_analysis, context_state, smt_state):
         """CISD için MTF payload oluşturur ve sonucu döndürür."""
         timeframe_to_structure_key = {
@@ -1520,19 +1632,31 @@ class AtlasEngine:
                 timeframe=timeframe,
             )
 
+            local_direction = self._timeframe_structure_direction(structure)
+            local_mtf = self._timeframe_mtf_context(local_direction, timeframe)
+            local_trend = self.trend.calculate(local_mtf, structure=structure)
+            local_fvg = self.fvg.detect(candles)
+            local_orderblocks = self.mitigation.detect(candles, self.orderblocks.detect(candles, structure))
+            local_high, local_low, local_price = self._price_context(candles)
+            local_premium_discount = self.premium_discount.calculate(local_high, local_low, local_price)
+            local_phase = self.market_phase.detect(
+                structure=structure, trend=local_trend, liquidity_sweep=liquidity_sweep,
+                fvg=local_fvg, orderblocks=local_orderblocks,
+                premium_discount=local_premium_discount,
+                mtf=local_mtf, candles=candles,
+            )
             payload[timeframe] = {
                 "candles": candles,
                 "structure": structure,
                 "liquidity_sweep": liquidity_sweep,
-                "market_phase": context_state["market_phase"],
-                "smt": smt_state,
+                "market_phase": local_phase,
+                "smt": self._timeframe_smt_state(smt_state, timeframe),
             }
 
         return self.cisd.detect_multi(payload)
 
     def _build_unicorn_state(self, data, tf_analysis, context_state, structure_state, smt_state):
         """Unicorn setup tespiti için MTF payload üretir ve sonucu döndürür."""
-        mtf_direction = context_state["mtf"].get("entry", "NONE")
         timeframe_to_structure_key = {
             "15m": "entry",
             "1h": "h1",
@@ -1567,21 +1691,31 @@ class AtlasEngine:
             )
             inducement = self._detect_inducement(structure, liquidity_sweep, eqh_eql)
 
+            local_direction = self._timeframe_structure_direction(structure)
+            local_mtf = self._timeframe_mtf_context(local_direction, timeframe)
+            local_trend = self.trend.calculate(local_mtf, structure=structure)
             swing_high, swing_low, current_price = self._price_context(candles)
+            local_premium_discount = self.premium_discount.calculate(swing_high, swing_low, current_price)
+            local_phase = self.market_phase.detect(
+                structure=structure, trend=local_trend, liquidity_sweep=liquidity_sweep,
+                fvg=fvg, orderblocks=orderblocks,
+                premium_discount=local_premium_discount,
+                mtf=local_mtf, candles=candles,
+            )
             ote = self.ote.detect(
                 swing_high=swing_high,
                 swing_low=swing_low,
                 current_price=current_price,
-                direction=mtf_direction,
+                direction="LONG" if local_direction == "BULLISH" else "SHORT" if local_direction == "BEARISH" else "NONE",
             )
 
             payload[timeframe] = {
                 "structure": structure,
                 "breaker": breaker,
                 "fvg": fvg,
-                "market_phase": context_state["market_phase"],
+                "market_phase": local_phase,
                 "liquidity_sweep": liquidity_sweep,
-                "smt": smt_state,
+                "smt": self._timeframe_smt_state(smt_state, timeframe),
                 "orderblocks": orderblocks,
                 "eqh_eql": eqh_eql,
                 "inducement": inducement,

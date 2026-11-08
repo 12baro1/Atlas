@@ -1,36 +1,53 @@
 """
 trend_engine.py
-Atlas Trend Engine v5
-
-Trend strength follows the primary 4H direction. Weekly alignment adds
-strength; daily remains contextual and cannot independently cancel direction.
+Atlas Trend Engine v6
+Trend, ilgili zaman diliminin kendi onaylı yapısından hesaplanır.
 """
 
 
 class TrendEngine:
 
-    def calculate(self, mtf):
-        direction = str((mtf or {}).get("entry", "NONE")).upper()
-        weekly = (mtf or {}).get("weekly", "NEUTRAL")
+    def calculate(self, mtf, structure=None):
+        mtf = mtf if isinstance(mtf, dict) else {}
+        direction = "NONE"
+        source = "mtf_fallback"
 
-        if direction == "LONG":
-            strength = 3 if weekly == "BULLISH" else 2
+        if structure is not None:
+            source = "structure"
+            for item in reversed(structure or []):
+                if not isinstance(item, dict) or not (item.get("bos") or item.get("choch")):
+                    continue
+                candidate = str(item.get("direction", "")).upper()
+                if candidate in {"BULLISH", "BEARISH"}:
+                    direction = candidate
+                    break
+            if direction == "NONE":
+                labels = [
+                    str(item.get("label", "")).upper()
+                    for item in (structure or []) if isinstance(item, dict)
+                ][-6:]
+                bullish = sum(label in {"HH", "HL"} for label in labels)
+                bearish = sum(label in {"LH", "LL"} for label in labels)
+                if bullish >= 2 and bullish > bearish:
+                    direction = "BULLISH"
+                elif bearish >= 2 and bearish > bullish:
+                    direction = "BEARISH"
+        else:
+            entry = str(mtf.get("entry", "NONE")).upper()
+            direction = "BULLISH" if entry == "LONG" else "BEARISH" if entry == "SHORT" else "NONE"
+
+        if direction in {"BULLISH", "BEARISH"}:
+            weekly = str(mtf.get("weekly", "NEUTRAL")).upper()
+            strength = 3 if weekly == direction else 2
             return {
-                "trend": "BULLISH",
-                "strength": strength,
-                "score": strength * 25,
+                "trend": direction, "strength": strength, "score": strength * 25,
+                "source": "h4_structure" if source == "structure" else source,
+                "derived_from": "h4_structure" if source == "structure" else "mtf_entry",
+                "independent": False,
             }
-
-        if direction == "SHORT":
-            strength = 3 if weekly == "BEARISH" else 2
-            return {
-                "trend": "BEARISH",
-                "strength": strength,
-                "score": strength * 25,
-            }
-
         return {
-            "trend": "RANGE",
-            "strength": 0,
-            "score": 0,
+            "trend": "RANGE", "strength": 0, "score": 0,
+            "source": "h4_structure" if source == "structure" else source,
+            "derived_from": "h4_structure" if source == "structure" else "mtf_entry",
+            "independent": False,
         }

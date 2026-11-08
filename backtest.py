@@ -662,6 +662,7 @@ def main():
     parser.add_argument("--symbol", default="BTC/USDT:USDT", help="Tek sembol (Bybit swap)")
     parser.add_argument("--symbols", help="Virgülle ayrılmış sembol listesi (çoklu tarama; --symbol'dan öncelikli)")
     parser.add_argument("--days", type=int, default=60, help="Kaç gün geriye gidilecek")
+    parser.add_argument("--step", type=int, default=1, help="Kaç adet 15m mumda bir analiz yapılacağı (varsayılan: 1 = her 15 dakika)")
     parser.add_argument(
         "--limit-expiry-bars", type=int, default=8,
         help="LIMIT emrinin en fazla kaç adet 15m mum bekleyeceği (varsayılan: 8 = 2 saat)",
@@ -676,6 +677,8 @@ def main():
 
     if args.days <= 0:
         parser.error("--days must be greater than zero")
+    if args.step <= 0:
+        parser.error("--step must be greater than zero")
     if args.limit_expiry_bars <= 0:
         parser.error("--limit-expiry-bars must be greater than zero")
 
@@ -705,7 +708,7 @@ def main():
         f"min_stop_atr={getattr(Config, 'MIN_STOP_ATR_MULTIPLIER', 'unknown')} | "
         f"auto_expand_stop={getattr(Config, 'AUTO_EXPAND_TIGHT_STOPS', 'unknown')} | "
         f"reject_tight_stops={getattr(Config, 'REJECT_TIGHT_STOPS', 'unknown')} | "
-        f"step=5 | lenient={args.lenient}"
+        f"step={args.step} ({args.step * 15}m) | lenient={args.lenient}"
     )
     all_stats = []
     backtest_now_ms = time.time() * 1000
@@ -729,7 +732,7 @@ def main():
             tp_weights=_configured_partial_tp_weights(),
             limit_expiry_bars=args.limit_expiry_bars,
         )
-        stats = runner.run(data, step=5, lenient=args.lenient)
+        stats = runner.run(data, step=args.step, lenient=args.lenient)
         _report(stats, symbol)
         all_stats.append((symbol, stats))
 
