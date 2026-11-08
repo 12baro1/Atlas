@@ -1575,9 +1575,25 @@ class AtlasEngine:
         smt_universe = data.get("smt_universe") or {}
         selected_altcoins = data.get("selected_altcoins") or []
 
-        if primary_symbol not in smt_universe:
-            smt_universe = dict(smt_universe)
-            smt_universe[primary_symbol] = primary_timeframes
+        # Align every comparison series to the last fully closed primary 15m
+        # candle. This is essential in historical replay: comparison candles
+        # from the future must never leak into an earlier SMT decision.
+        smt_universe = dict(smt_universe)
+        smt_universe[primary_symbol] = primary_timeframes
+        reference_ms = None
+        primary_15m = primary_timeframes.get("15m") or []
+        if primary_15m:
+            reference_ms = int(primary_15m[-1].time) + 15 * 60 * 1000
+        if reference_ms is not None:
+            from timing import closed_htf_candles
+            aligned_universe = {}
+            for comparison_symbol, frames in smt_universe.items():
+                frames = frames if isinstance(frames, dict) else {}
+                aligned_universe[comparison_symbol] = {
+                    timeframe: closed_htf_candles(frames.get(timeframe) or [], reference_ms, timeframe)
+                    for timeframe in self.SMT_TIMEFRAMES
+                }
+            smt_universe = aligned_universe
 
         return self.smt.detect(
             primary_symbol=primary_symbol,
