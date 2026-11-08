@@ -1181,6 +1181,7 @@ class AtlasEngine:
             ifvg=ifvg,
             eqh_eql=eqh_eql,
             internal_structure=internal_structure,
+            current_index=len(candles) - 1 if candles else None,
         )
 
         dynamic_tp = self._calculate_dynamic_tp(
