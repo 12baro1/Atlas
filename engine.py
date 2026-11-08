@@ -1146,6 +1146,7 @@ class AtlasEngine:
             external_structure=external_structure,
             higher_timeframe_orderblocks=list(h4_orderblocks or []) + list(daily_orderblocks or []),
             higher_timeframe_fvg=list(h4_fvg or []) + list(daily_fvg or []),
+            optimization=optimization,
         )
         setup_candidates = reasoning.get("candidates", [])
         selected_candidate = reasoning.get("selected")
