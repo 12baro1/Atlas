@@ -127,7 +127,9 @@ class SetupReasoningEngine:
 
     def _evidence(self, direction, mtf, sweep, structure, ote, htf_orderblock,
                   htf_fvg, smt, unicorn, cisd, volume_profile, institutional,
-                  orderbook, correlation, market_phase, market_regime, breaker=None,\n                  ifvg=None, trendline_sweep=None, eqh_eql=None, inducement=None,\n                  premium_discount=None, internal_structure=None):
+                  orderbook, correlation, market_phase, market_regime, breaker=None,
+                  ifvg=None, trendline_sweep=None, eqh_eql=None, inducement=None,
+                  premium_discount=None, internal_structure=None):
         supporting, opposing = [], []
         expected = "BULLISH" if direction == "LONG" else "BEARISH"
         for label, module in (
@@ -456,6 +458,7 @@ class SetupReasoningEngine:
                     "entry_distance_label": distance_label,
                     "supporting_evidence": support,
                     "opposing_evidence": opposition,
+                    "market_context": market_context,
                     "reasoning": (
                         f"{direction} {source}: POI {low:g}-{high:g}; "
                         + ("süpürme sonrası dönüş teyitli" if inside and market_confirmed else "fiyatın POI bölgesine geri çekilmesi bekleniyor")
