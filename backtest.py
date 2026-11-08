@@ -249,6 +249,46 @@ def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None):
     return data
 
 
+_SMT_HISTORY_CACHE = {}
+
+
+def _load_smt_comparison_history(symbol, timeframe, days, now_ms):
+    """Load cached historical comparison candles for a single SMT timeframe."""
+    history_days = _history_days_for_timeframe(days, timeframe)
+    since_ms = int(float(now_ms) - history_days * 86_400_000)
+    cache_key = (symbol, timeframe, since_ms, int(float(now_ms) // 60_000))
+    if cache_key in _SMT_HISTORY_CACHE:
+        return _SMT_HISTORY_CACHE[cache_key]
+    try:
+        candles = _fetch_history(
+            symbol, timeframe, since_ms=since_ms, limit=TIMEFRAMES[timeframe]
+        )
+        duration = TIMEFRAME_DURATION_MS[timeframe]
+        candles = [item for item in candles if item.time + duration <= now_ms]
+    except Exception as exc:
+        logging.warning("SMT historical comparison unavailable | %s %s: %s", symbol, timeframe, exc)
+        candles = []
+    _SMT_HISTORY_CACHE[cache_key] = candles
+    return candles
+
+
+def attach_historical_smt_universe(data, days, now_ms):
+    """Attach BTC/ETH comparison series aligned by timestamp for replay."""
+    primary_symbol = data.get("symbol")
+    universe = {}
+    for comparison_symbol in ("BTC/USDT:USDT", "ETH/USDT:USDT"):
+        frames = {}
+        for timeframe in ("15m", "1h", "4h", "1d"):
+            if comparison_symbol == primary_symbol:
+                frames[timeframe] = data.get(timeframe) or []
+            else:
+                frames[timeframe] = _load_smt_comparison_history(
+                    comparison_symbol, timeframe, days, now_ms
+                )
+        universe[comparison_symbol] = frames
+    data["smt_universe"] = universe
+    return data
+
 def _validate_backtest_history(data, symbol):
     """Fail loudly instead of reporting a successful zero-call backtest."""
     counts = {
@@ -592,17 +632,19 @@ def main():
     # cooldown 0 olduğu için ardışık tarama bir sonraki sembolü etkilemez.
     print(f"VERİ SAĞLAYICISI | {_history_provider_name}")
     all_stats = []
+    backtest_now_ms = time.time() * 1000
     for symbol in symbols:
         listing_time_ms = _market_listing_time_ms(symbol)
         if listing_time_ms is not None:
             listing_date = time.strftime("%Y-%m-%d", time.gmtime(listing_time_ms / 1000))
             print(f"MARKET LİSTELENME | {symbol}: {listing_date}")
         data = load_historical(
-            symbol, days=args.days, listing_time_ms=listing_time_ms
+            symbol, days=args.days, now_ms=backtest_now_ms, listing_time_ms=listing_time_ms
         )
+        attach_historical_smt_universe(data, args.days, backtest_now_ms)
         _validate_backtest_history(data, symbol)
         _validate_backtest_coverage(
-            data, symbol, args.days, time.time() * 1000,
+            data, symbol, args.days, backtest_now_ms,
             listing_time_ms=listing_time_ms,
         )
         runner = BacktestRunner(
