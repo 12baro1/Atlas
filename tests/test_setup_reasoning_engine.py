@@ -116,3 +116,49 @@ def test_optimizer_price_is_used_only_for_the_matching_poi():
         smt={}, optimization={"applied": True, "optimized_entry": 102},
     )
     assert result["selected"]["entry"] == 102
+
+
+
+def test_breaker_ifvg_and_unicorn_motors_can_supply_directional_poi_candidates():
+    breaker = _run(
+        fvg=[], breaker=[
+            {"type": "BULLISH", "direction": "BULLISH", "low": 100, "high": 105, "breaker": True}
+        ],
+    )
+    assert breaker["selected"]["poi_source"] == "BREAKER"
+
+    ifvg = _run(
+        fvg=[], ifvg=[
+            {"type": "BEARISH", "from": 100, "to": 105, "inverted": True}
+        ],
+    )
+    assert ifvg["selected"]["poi_source"] == "IFVG"
+
+    unicorn = _run(
+        fvg=[], unicorn={
+            "active": True, "direction": "BULLISH",
+            "setups": [{"valid": True, "direction": "BULLISH", "zone": {"low": 100, "high": 105}}],
+        },
+    )
+    assert unicorn["selected"]["poi_source"] == "UNICORN"
+
+
+def test_context_motors_are_recorded_in_setup_reasoning():
+    result = _run(
+        fvg=[], breaker=[
+            {"type": "BULLISH", "direction": "BULLISH", "low": 100, "high": 105, "breaker": True}
+        ],
+        trendline_sweep={"active": True, "direction": "SELL_SIDE"},
+        eqh_eql={"active": True},
+        inducement={"active": True, "direction": "LONG"},
+        premium_discount={"valid": True, "discount": True, "premium": False},
+        internal_structure=[{"choch": True, "direction": "BULLISH"}],
+        market_phase={"phase": "Accumulation"},
+        trendline_liquidity=[{"type": "BUY_SIDE", "price": 125}],
+    )
+    selected = result["selected"]
+    assert any("Breaker block LONG" in item for item in selected["supporting_evidence"])
+    assert any("Trendline sweep LONG" in item for item in selected["supporting_evidence"])
+    assert any("Internal structure LONG" in item for item in selected["supporting_evidence"])
+    assert any("Premium/Discount zone favorable" in item for item in selected["supporting_evidence"])
+    assert any("Market phase: Accumulation" in item for item in selected["market_context"])
