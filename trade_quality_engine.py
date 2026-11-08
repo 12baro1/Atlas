@@ -265,8 +265,9 @@ class TradeQualityEngine:
                 too_far_by_atr = bool(atr and atr > 0 and distance > atr * max_limit_atr)
                 too_far_by_percent = distance_pct > max_limit_pct
                 if too_far_by_atr or too_far_by_percent:
-                    blockers.append(
-                        f"LIMIT entry exceeds configured distance ({max_limit_atr:g} ATR / {max_limit_pct * 100:g}%)"
+                    warnings.append(
+                        f"LIMIT entry is far ({max_limit_atr:g} ATR / {max_limit_pct * 100:g}% reference); "
+                        "keep it pending and expose its distance instead of rejecting the structural setup"
                     )
             if entry_type == "MARKET":
                 max_market_atr = max(0.0, float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_ATR", 0.35)))
