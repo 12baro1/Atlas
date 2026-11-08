@@ -105,6 +105,7 @@ def build_signal_card(result):
     pending_pullback = (
         str(entry.get("entry_type") or "").upper() == "LIMIT"
         and bool(entry.get("valid"))
+        and bool(risk)
         and risk.get("risk_setup_valid", True) is not False
         and str(decision.get("action") or "").upper() in ("EXECUTE", "EXECUTE_WITH_CAUTION")
     )
