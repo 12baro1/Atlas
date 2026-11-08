@@ -1370,7 +1370,7 @@ class AtlasEngine:
                 target_exclusion_price = current_price
             refreshed_targets = self._calculate_dynamic_tp(
                 entry=entry,
-                liquidity=list(liquidity or []) + list(trendline_liquidity or []),
+                liquidity=liquidity,
                 fvg=fvg,
                 orderblocks=orderblocks,
                 candles=candles,
@@ -2190,7 +2190,7 @@ class AtlasEngine:
                 direction=entry["direction"],
                 entry=entry["entry"],
                 stop_loss=stop_value,
-                liquidity=liquidity,
+                liquidity=list(liquidity or []) + list(trendline_liquidity or []),
                 fvg=fvg,
                 orderblocks=orderblocks,
                 structure=structure,
