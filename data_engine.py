@@ -78,6 +78,49 @@ def get_market_data(symbol, force_refresh=False):
     except Exception:
         data["recent_trades"] = None
 
+    # Derivatives context is optional: unsupported endpoints or exchange
+    # hiccups must not break OHLCV analysis.
+    data["open_interest"] = []
+    try:
+        fetch_oi = getattr(exchange, "fetch_open_interest_history", None)
+        if callable(fetch_oi):
+            records = fetch_oi(symbol, timeframe="1h", limit=100) or []
+            data["open_interest"] = [
+                float(item.get("openInterestValue") or item.get("openInterestAmount"))
+                for item in records
+                if isinstance(item, dict)
+                and (item.get("openInterestValue") is not None or item.get("openInterestAmount") is not None)
+            ]
+        if not data["open_interest"]:
+            fetch_oi_snapshot = getattr(exchange, "fetch_open_interest", None)
+            if callable(fetch_oi_snapshot):
+                snapshot = fetch_oi_snapshot(symbol) or {}
+                value = snapshot.get("openInterestValue") or snapshot.get("openInterestAmount")
+                if value is not None:
+                    data["open_interest"] = [float(value)]
+    except Exception:
+        data["open_interest"] = []
+
+    data["funding_rate"] = []
+    try:
+        fetch_funding_history = getattr(exchange, "fetch_funding_rate_history", None)
+        if callable(fetch_funding_history):
+            records = fetch_funding_history(symbol, limit=100) or []
+            data["funding_rate"] = [
+                float(item.get("fundingRate"))
+                for item in records
+                if isinstance(item, dict) and item.get("fundingRate") is not None
+            ]
+        if not data["funding_rate"]:
+            fetch_funding = getattr(exchange, "fetch_funding_rate", None)
+            if callable(fetch_funding):
+                snapshot = fetch_funding(symbol) or {}
+                value = snapshot.get("fundingRate")
+                if value is not None:
+                    data["funding_rate"] = [float(value)]
+    except Exception:
+        data["funding_rate"] = []
+
     for timeframe, c_limit in TIMEFRAMES.items():
         data[timeframe] = fetch_candles(symbol, timeframe, c_limit, force_refresh=force_refresh)
 
