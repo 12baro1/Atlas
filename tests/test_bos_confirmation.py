@@ -56,3 +56,18 @@ def test_order_block_uses_last_opposing_candle_before_break():
     assert len(blocks) == 1
     assert blocks[0]["index"] == 4
     assert blocks[0]["low"] == candles[4].low
+
+
+def test_bos_close_during_pivot_confirmation_window_is_detected():
+    pivots = [
+        {"index": 1, "price": 10.0, "type": "HIGH", "label": "LH", "confirmation_index": 2},
+        {"index": 2, "price": 8.0, "type": "LOW", "label": "LL", "confirmation_index": 3},
+        {"index": 4, "price": 12.0, "type": "HIGH", "label": "HH", "confirmation_index": 6},
+    ]
+    candles = _candles(
+        [9.0, 9.5, 9.0, 9.6, 9.8, 10.2, 10.5],
+        highs=[9.5, 10.0, 9.5, 10.0, 12.0, 11.0, 10.8],
+    )
+    result = BOSEngine().detect(pivots, candles=candles)
+    assert result[-1]["bos"] is True
+    assert result[-1]["break_index"] == 5
