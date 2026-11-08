@@ -86,3 +86,12 @@ def test_countertrend_candidate_can_use_raw_four_hour_order_block():
     )
     assert result["selected"]["direction"] == "LONG"
     assert result["selected"]["poi_source"] == "HTF_ORDER_BLOCK"
+
+
+
+def test_orderbook_bias_is_reinterpreted_for_countertrend_candidate():
+    result = _run(orderbook={"active": True, "supportive": True, "opposing": False})
+    selected = result["selected"]
+    assert selected["direction"] == "LONG"
+    assert any("Order flow counterpressure" in item for item in selected["opposing_evidence"])
+    assert selected["counterpressure_adjusted"] is True
