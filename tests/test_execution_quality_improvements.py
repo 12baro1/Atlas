@@ -84,7 +84,7 @@ def test_structural_stop_that_cannot_cover_execution_costs_is_still_rejected(mon
     assert risk["slippage_buffer"] > 0
 
 
-def test_limit_entry_uses_configured_three_atr_and_five_percent_cap(monkeypatch):
+def test_limit_entry_distance_caps_are_advisory_and_reported(monkeypatch):
     import utils.atr
 
     monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 1.0)
@@ -99,7 +99,7 @@ def test_limit_entry_uses_configured_three_atr_and_five_percent_cap(monkeypatch)
     assert any("configured distance" in item for item in too_far["blockers"])
 
 
-def test_limit_entry_respects_percent_cap_even_inside_atr_cap(monkeypatch):
+def test_limit_entry_percent_distance_is_advisory_even_inside_atr_cap(monkeypatch):
     import utils.atr
 
     monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 10.0)
