@@ -393,6 +393,26 @@ def build_analyze_fn(engine):
     return analyze
 
 
+def _metrics_for_trades(trades):
+    gross = [float(item.get("gross_rr", item.get("net_rr", 0.0)) or 0.0) for item in trades]
+    net = [float(item.get("net_rr", 0.0) or 0.0) for item in trades]
+    def pf(values):
+        profit = sum(value for value in values if value > 0)
+        loss = abs(sum(value for value in values if value < 0))
+        return round(profit / loss, 4) if loss else round(profit, 4)
+    count = len(trades)
+    return {
+        "total": count,
+        "gross_rr": round(sum(gross), 4),
+        "gross_expectancy": round(sum(gross) / count, 4) if count else 0.0,
+        "gross_profit_factor": pf(gross),
+        "net_rr": round(sum(net), 4),
+        "expectancy": round(sum(net) / count, 4) if count else 0.0,
+        "profit_factor": pf(net),
+        "execution_cost_rr": round(sum(float(item.get("execution_cost_rr", 0.0) or 0.0) for item in trades), 4),
+    }
+
+
 def _combine_stats(all_stats):
     """Aggregate realized trade metrics from gross R, not net symbol totals."""
     combined = {
@@ -405,6 +425,10 @@ def _combine_stats(all_stats):
         "net_rr": 0,
         "gross_profit_rr": 0,
         "gross_loss_rr": 0,
+        "gross_rr": 0,
+        "gross_expectancy": 0,
+        "gross_profit_factor": 0,
+        "total_execution_cost_rr": 0,
         "candidate_signals": 0,
         "analysis_calls": 0,
         "empty_results": 0,
@@ -459,6 +483,8 @@ def _combine_stats(all_stats):
         combined["net_rr"] += float(stats.get("net_rr", 0) or 0)
         combined["gross_profit_rr"] += float(stats.get("gross_profit_rr", 0) or 0)
         combined["gross_loss_rr"] += float(stats.get("gross_loss_rr", 0) or 0)
+        combined["gross_rr"] += float(stats.get("gross_rr", 0) or 0)
+        combined["total_execution_cost_rr"] += float(stats.get("total_execution_cost_rr", 0) or 0)
         combined["trade_history"].extend(stats.get("trade_history") or [])
 
     # Rebuild combined direction and MTF outcome groups from the actual closed
@@ -479,44 +505,28 @@ def _combine_stats(all_stats):
         combined["mtf_trade_breakdown"].setdefault(mtf_key, []).append(trade)
 
     for key, trades in grouped.items():
-        values = [float(item.get("net_rr", 0.0) or 0.0) for item in trades]
-        wins = [value for value in values if value > 0]
-        losses = [value for value in values if value < 0]
-        gross_profit, gross_loss = sum(wins), abs(sum(losses))
-        combined["direction_breakdown"][key] = {
-            "total": len(trades), "wins": len(wins), "losses": len(losses),
-            "winrate": round(len(wins) / len(trades) * 100.0, 2) if trades else 0.0,
-            "expectancy": round(sum(values) / len(values), 4) if values else 0.0,
-            "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else round(gross_profit, 4),
-        }
+        combined["direction_breakdown"][key] = _metrics_for_trades(trades)
     for key, trades in list(combined["mtf_trade_breakdown"].items()):
-        values = [float(item.get("net_rr", 0.0) or 0.0) for item in trades]
-        wins = [value for value in values if value > 0]
-        losses = [value for value in values if value < 0]
-        gross_profit, gross_loss = sum(wins), abs(sum(losses))
-        combined["mtf_trade_breakdown"][key] = {
-            "total": len(trades), "wins": len(wins), "losses": len(losses),
-            "winrate": round(len(wins) / len(trades) * 100.0, 2) if trades else 0.0,
-            "expectancy": round(sum(values) / len(values), 4) if values else 0.0,
-            "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else round(gross_profit, 4),
-        }
+        combined["mtf_trade_breakdown"][key] = _metrics_for_trades(trades)
 
     combined["losses"] = combined["total"] - combined["wins"]
     if combined["total"]:
         combined["winrate"] = round(combined["wins"] / combined["total"] * 100, 2)
         combined["expectancy"] = round(combined["net_rr"] / combined["total"], 4)
-    if combined["gross_loss_rr"] > 0:
-        combined["profit_factor"] = round(
-            combined["gross_profit_rr"] / combined["gross_loss_rr"], 2
-        )
-    elif combined["gross_profit_rr"] > 0:
-        combined["profit_factor"] = round(combined["gross_profit_rr"], 2)
+        combined["gross_expectancy"] = round(combined["gross_rr"] / combined["total"], 4)
+    combined["gross_profit_rr"] = round(sum(max(0.0, float(x.get("gross_rr", x.get("net_rr", 0.0)) or 0.0)) for x in combined["trade_history"]), 4)
+    combined["gross_loss_rr"] = round(abs(sum(min(0.0, float(x.get("gross_rr", x.get("net_rr", 0.0)) or 0.0)) for x in combined["trade_history"])), 4)
+    combined["gross_profit_factor"] = _metrics_for_trades(combined["trade_history"])["gross_profit_factor"]
+    combined["profit_factor"] = _metrics_for_trades(combined["trade_history"])["profit_factor"]
     return combined
 
 
 def _report(stats, name):
     print("=" * 52)
     print(f"SONUÇ | {name}")
+    print(f"  Maliyet varsayımları: fee={getattr(Config, 'ROUND_TRIP_COST_RATE', 0.002):.4%} | "
+          f"spread={getattr(Config, 'STOP_SPREAD_BUFFER_RATE', 0.0002):.4%} | "
+          f"slippage={getattr(Config, 'STOP_SLIPPAGE_BUFFER_RATE', 0.0003):.4%} (notional proxy)")
     print("=" * 52)
     print(f"  Analiz çağrısı : {stats.get('analysis_calls', 0)}")
     print(f"  Boş sonuç      : {stats.get('empty_results', 0)}")
@@ -571,9 +581,9 @@ def _report(stats, name):
     print(f"  Kayıp (LOSS)   : {stats['losses']}")
     print(f"  Winrate        : %{stats['winrate']}")
     print(f"  TP1/2/3        : {stats['tp1']}/{stats['tp2']}/{stats['tp3']}")
-    print(f"  Beklenti       : {stats['expectancy']} RR/işlem")
-    print(f"  Profit Factor  : {stats['profit_factor']}")
-    print(f"  Net RR         : {stats['net_rr']}")
+    print(f"  BRÜT sonuç     : {stats.get('gross_rr', 0)}R | beklenti {stats.get('gross_expectancy', 0)}R/işlem | PF {stats.get('gross_profit_factor', 0)}")
+    print(f"  MALİYET        : -{stats.get('total_execution_cost_rr', 0)}R")
+    print(f"  NET sonuç      : {stats['net_rr']}R | beklenti {stats['expectancy']}R/işlem | PF {stats['profit_factor']}")
     if "max_drawdown" in stats:
         print(f"  Max Drawdown   : {stats['max_drawdown']} R")
     mtf_breakdown = stats.get("mtf_trade_breakdown") or {}
