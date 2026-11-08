@@ -66,6 +66,23 @@ from volume_profile_engine import VolumeProfileEngine
 from utils.structure_labels import label_swings
 
 
+DYNAMIC_ANALYSIS_INPUT_KEYS = (
+    "orderbook",
+    "recent_trades",
+    "open_interest",
+    "funding_rate",
+    "economic_events",
+    "smt_universe",
+)
+
+
+def _has_dynamic_market_context(data):
+    """Return True when a candle-only incremental cache could hide fresh inputs."""
+    if not isinstance(data, dict):
+        return False
+    return any(bool(data.get(key)) for key in DYNAMIC_ANALYSIS_INPUT_KEYS)
+
+
 def _tp1_already_reached(direction, current_price, tp1):
     """Return True when price has already crossed TP1 before the proposed entry."""
     try:
@@ -182,8 +199,10 @@ class AtlasEngine:
 
         symbol = data.get("symbol", "UNKNOWN")
         candles = data["15m"]
-        # A live order-book snapshot changes independently of candle closes; do not reuse a candle-only cached decision.
-        if (not data.get("orderbook")) and bool(getattr(Config, "STATE_ENGINE_ENABLED", True)) and bool(getattr(Config, "INCREMENTAL_ANALYSIS_ENABLED", True)):
+        # Any fresh non-candle input can change the decision without a new 15m close.
+        # Do not restore a candle-only cache when order flow, derivatives, news or
+        # cross-market context is present, even if the order-book request failed.
+        if (not _has_dynamic_market_context(data)) and bool(getattr(Config, "STATE_ENGINE_ENABLED", True)) and bool(getattr(Config, "INCREMENTAL_ANALYSIS_ENABLED", True)):
             cached = self._restore_incremental_if_unchanged(symbol, candles)
             if cached is not None:
                 cached_analysis = cached.get("analysis") if isinstance(cached, dict) else None
