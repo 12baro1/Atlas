@@ -378,7 +378,14 @@ class EntryEngine:
             else:
                 result["entry"] = limit_entry
                 result["entry_type"] = "LIMIT" if limit_entry is not None else "NONE"
-                result["entry_type_reason"] = "Bullish POI limit level" if limit_entry is not None else "No valid bullish POI"
+                result["entry_type_reason"] = (
+                    "Bullish POI limit level" if limit_entry is not None
+                    else (
+                        "Bullish POI already crossed; wait for a fresh setup"
+                        if crossed_matching_fvg or crossed_matching_ob
+                        else "No valid bullish POI"
+                    )
+                )
 
         else:
 
