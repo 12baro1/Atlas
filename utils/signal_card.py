@@ -56,7 +56,8 @@ def _verdict(decision, signal, entry, risk=None):
             return ("BEKLE", pending_direction, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
         return ("ATLA", entry_dir, (decision or {}).get("reason") or risk.get("risk_setup_reason") or "LIMIT setup geçerli değil")
     if (
-        action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
+        entry_type == "MARKET"
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
         and signal_dir in ("LONG", "SHORT")
         and bool((entry or {}).get("valid"))
         and bool(risk)
