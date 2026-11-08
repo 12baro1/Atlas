@@ -1037,7 +1037,9 @@ class AtlasEngine:
                 "current_price": current_price,
             },
             "daily_orderblocks": daily_orderblocks,
-            "h4_orderblocks": h4_orderblocks,\n            "h4_fvg": h4_fvg,\n            "daily_fvg": daily_fvg,
+            "h4_orderblocks": h4_orderblocks,
+            "h4_fvg": h4_fvg,
+            "daily_fvg": daily_fvg,
             "breaker": breakers,
             "liquidity": liquidity,
         }
