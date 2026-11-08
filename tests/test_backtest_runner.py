@@ -737,3 +737,26 @@ def test_missed_limit_market_reassessment_rejected_when_net_rr_below_minimum():
     assert runner.market_fallback_fills == 0
     assert runner.market_fallback_rejected_rr == 1
     assert runner.stale_limits_cancelled == 1
+
+
+def test_backtest_does_not_count_overlapping_positions_as_independent_trades():
+    runner = BacktestRunner(
+        analyze_fn=lambda window: {
+            "decision": {"action": "EXECUTE"},
+            "signal": {"signal": "LONG"},
+            "risk": {
+                "entry": 100.0, "stop_loss": 99.0,
+                "tp1": 102.0, "tp2": 103.0, "tp3": 104.0,
+            },
+            "analysis": {"entry": {"entry_type": "MARKET"}},
+        },
+        fee_rate=0.0,
+        partial_exits=False,
+    )
+    candles = [_candle(i, 100.0, 103.0, 99.5, 102.0) for i in range(306)]
+    stats = runner.run({"symbol": "BTC/USDT:USDT", "15m": candles}, step=1)
+    assert stats["total"] >= 2
+    assert stats["overlapping_signals_skipped"] >= 1
+    entries = [trade["entry_index"] for trade in stats["trade_history"]]
+    exits = [trade["exit_index"] for trade in stats["trade_history"]]
+    assert all(entries[i + 1] > exits[i] for i in range(len(entries) - 1))
