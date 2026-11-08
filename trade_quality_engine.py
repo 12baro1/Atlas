@@ -55,7 +55,18 @@ class TradeQualityEngine:
             warnings.append("15m structure opposes the primary setup; retain as entry-placement evidence")
 
         expected_mtf = direction
-        if not mtf.get("valid") or str(mtf.get("entry", mtf.get("direction", ""))).upper() != expected_mtf:
+        mtf_direction = str(mtf.get("entry", mtf.get("direction", ""))).upper()
+        confirmed_countertrend_reversal = bool(
+            entry.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL"
+            and mtf.get("valid")
+            and sweep_active
+            and expected_sweep
+            and post.get("confirmed")
+            and str(post.get("direction", "")).upper() == expected_trend
+        )
+        if not mtf.get("valid") or (
+            mtf_direction != expected_mtf and not confirmed_countertrend_reversal
+        ):
             blockers.append("Multi-timeframe direction is not aligned")
 
         trend_direction = str(trend.get("trend", "NEUTRAL")).upper()
