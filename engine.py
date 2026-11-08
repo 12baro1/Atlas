@@ -1326,6 +1326,7 @@ class AtlasEngine:
             orderblocks=orderblocks,
             candles=candles,
             structure=entry_structure,
+            trendline_liquidity=trendline_liquidity,
         )
 
         # Require at least one real structural objective. Missing TP2/TP3
@@ -1371,11 +1372,12 @@ class AtlasEngine:
                 target_exclusion_price = current_price
             refreshed_targets = self._calculate_dynamic_tp(
                 entry=entry,
-                liquidity=liquidity,
+                liquidity=list(liquidity or []) + list(trendline_liquidity or []),
                 fvg=fvg,
                 orderblocks=orderblocks,
                 candles=candles,
                 structure=entry_structure,
+                trendline_liquidity=trendline_liquidity,
                 exclude_targets_through=target_exclusion_price,
             )
             if any(refreshed_targets.get(key) is not None for key in ("tp1", "tp2", "tp3")):
@@ -1412,6 +1414,7 @@ class AtlasEngine:
                     orderblocks=orderblocks,
                     candles=candles,
                     structure=entry_structure,
+                    trendline_liquidity=trendline_liquidity,
                     stop_price=expanded_stop,
                     exclude_targets_through=target_exclusion_price,
                 )
@@ -2177,7 +2180,7 @@ class AtlasEngine:
             "recent_structure": structure[-3:] if structure else [],
         }
 
-    def _calculate_dynamic_tp(self, entry, liquidity, fvg, orderblocks, candles=None, structure=None, stop_price=None, exclude_targets_through=None):
+    def _calculate_dynamic_tp(self, entry, liquidity, fvg, orderblocks, candles=None, structure=None, trendline_liquidity=None, stop_price=None, exclude_targets_through=None):
         """Entry yoksa boş TP şablonu, varsa dinamik hedefler döndürür."""
         if entry.get("entry") is None:
             return {"tp1": None, "tp2": None, "tp3": None}
