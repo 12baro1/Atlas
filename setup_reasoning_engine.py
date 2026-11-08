@@ -181,9 +181,6 @@ class SetupReasoningEngine:
             elif unfavorable:
                 opposing.append("Premium/Discount zone unfavorable")
 
-        if isinstance(eqh_eql, dict) and eqh_eql.get("active"):
-            supporting.append("EQH/EQL liquidity cluster active")
-
         if isinstance(internal_structure, list):
             internal_events = [
                 item for item in internal_structure
@@ -375,6 +372,8 @@ class SetupReasoningEngine:
                 market_context = []
                 if isinstance(market_phase, dict) and market_phase.get("phase"):
                     market_context.append(f"Market phase: {market_phase.get('phase')}")
+                if isinstance(eqh_eql, dict) and eqh_eql.get("active"):
+                    market_context.append("EQH/EQL liquidity cluster active")
                 if isinstance(premium_discount, dict) and premium_discount.get("valid"):
                     zone_name = "Discount" if premium_discount.get("discount") else "Premium" if premium_discount.get("premium") else "Equilibrium"
                     market_context.append(f"Premium/Discount: {zone_name}")
