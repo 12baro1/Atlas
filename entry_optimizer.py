@@ -33,7 +33,7 @@ class EntryOptimizer:
         self, entry, current_price=None, trend=None, liquidity_sweep=None,
         ote=None, market_phase=None, market_regime=None, htf_orderblock=None,
         htf_fvg=None, smt=None, unicorn=None, cisd=None, volume_profile=None,
-        institutional=None, orderbook=None,
+        institutional=None, orderbook=None, correlation=None,
     ):
         entry = entry if isinstance(entry, dict) else {}
         direction = str(entry.get("direction", "NONE")).upper()
