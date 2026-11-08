@@ -49,3 +49,13 @@ suite is not evidence of a profitable strategy.
 
 Atlas remains analysis-only. Do not enable exchange order placement through
 environment variables, legacy credentials, or compatibility modules.
+
+
+## Additional regression coverage added in this integration branch
+
+- Live OHLCV ingestion now removes the still-forming final candle and rejects
+  non-finite, malformed, duplicate, out-of-order, or impossible OHLC rows.
+- Backtest tests now assert the configured round-trip fee is deducted once for
+  both partial and non-partial exit paths.
+- Trade-journal close transitions are idempotent: a duplicate close event is
+  ignored and cannot overwrite the first exit or double-count performance.
