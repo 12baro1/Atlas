@@ -246,6 +246,7 @@ class BacktestRunner:
         self.stale_limit_target_before_fill = 0
         self.market_fallback_fills = 0
         self.market_fallback_rejected_rr = 0
+        self.overlapping_signals_skipped = 0
         self.open_trades = 0
         self.invalid_candidates = 0
         self.no_followup_data = 0
@@ -299,6 +300,7 @@ class BacktestRunner:
 
         total = len(candles)
         warmup = 300
+        busy_until_index = -1
         for idx in range(warmup, total, max(1, step)):
             # Signal decision is made at the close of the current 15m candle.
             decision_time_ms = candles[idx].time + 15 * 60 * 1000
@@ -418,10 +420,28 @@ class BacktestRunner:
                 self.raw_short_signals += 1
             else:
                 self.non_directional_results += 1
-            trade = self._to_trade(result, candles, idx + 1, lenient=lenient, signal_index=idx)
-            if trade is None:
+            # One symbol can have only one active position or pending LIMIT
+            # at a time. Keep analyzing candles for diagnostics, but do not
+            # count overlapping entries as independent portfolio trades.
+            if idx <= busy_until_index:
+                self.overlapping_signals_skipped += 1
                 continue
-            self._record(trade)
+
+            open_before = self.open_trades
+            unfilled_before = self.unfilled_limits
+            trade = self._to_trade(result, candles, idx + 1, lenient=lenient, signal_index=idx)
+            if trade is not None:
+                self._record(trade)
+                exit_index = trade.get("exit_index")
+                if exit_index is not None:
+                    busy_until_index = max(busy_until_index, int(exit_index))
+            elif self.open_trades > open_before:
+                # An unresolved trade remains open through the end of this
+                # historical window; no second position may overlap it.
+                busy_until_index = total - 1
+            elif self.unfilled_limits > unfilled_before:
+                # The pending order occupied this symbol until its expiry.
+                busy_until_index = min(total - 1, idx + self.limit_expiry_bars - 1)
 
         return self.statistics()
 
@@ -468,6 +488,7 @@ class BacktestRunner:
         fill_index = None
         entry_price = None
         limit_intrabar_fill = False
+        market_fallback_used = False
         if entry_type == "MARKET":
             fill_index = entry_index
             entry_price = _num(candles[fill_index].open)
@@ -543,7 +564,7 @@ class BacktestRunner:
                         fill_index = candidate_index
                         entry_type = "MARKET_FALLBACK"
                         limit_intrabar_fill = False
-                        self.market_fallback_fills += 1
+                        market_fallback_used = True
                         break
                     self.stale_limits_cancelled += 1
                     self.stale_limit_target_before_fill += 1
@@ -591,6 +612,9 @@ class BacktestRunner:
             if valid_tps != sorted(valid_tps, reverse=True):
                 self.invalid_candidates += 1
                 return None
+
+        if market_fallback_used:
+            self.market_fallback_fills += 1
 
         use_partial = bool(getattr(self, "partial_exits", True))
         if limit_intrabar_fill:
@@ -798,6 +822,7 @@ class BacktestRunner:
                 "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
                 "market_fallback_fills": self.market_fallback_fills,
                 "market_fallback_rejected_rr": self.market_fallback_rejected_rr,
+                "overlapping_signals_skipped": self.overlapping_signals_skipped,
                 "trade_history": list(self.history),
                 "open_trades": self.open_trades,
                 "invalid_candidates": self.invalid_candidates,
