@@ -57,8 +57,10 @@ def fetch_candles(symbol, timeframe, limit, force_refresh=False):
 
 
 def invalidate_all():
-    """Zorunlu tazeleme için en düşük seviyeli önbelleği boşaltır."""
+    """Zorunlu tazeleme için tüm piyasa veri önbelleklerini boşaltır."""
     _cache.clear()
+    if "_smt_cache" in globals():
+        _smt_cache.clear()
 
 
 def get_market_data(symbol, force_refresh=False):
@@ -129,7 +131,7 @@ def get_smt_universe(force_refresh=False):
                 frames[timeframe] = cached[0]
                 continue
             try:
-                candles = _fetch(symbol, timeframe, TIMEFRAMES[timeframe])
+                candles = fetch_candles(symbol, timeframe, TIMEFRAMES[timeframe], force_refresh=force_refresh)
                 _smt_cache[key] = (candles, now)
                 frames[timeframe] = candles
             except Exception:
