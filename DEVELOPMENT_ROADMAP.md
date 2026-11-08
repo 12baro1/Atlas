@@ -51,3 +51,13 @@ See `ENGINE_INTEGRATION_AUDIT.md` for explicit invariants and the remaining
 validation work. The unchecked items above remain open until a reproducible
 test/report demonstrates completion; they are not marked complete by code
 inspection alone.
+
+
+## Verified in integration branch
+
+- [x] Live OHLCV ingestion rejects malformed/non-finite/out-of-order rows and excludes the forming candle; see `tests/test_data_engine.py`.
+- [x] Backtest regression tests cover one round-trip fee deduction for partial and non-partial exit paths; see `tests/test_backtest_runner.py`.
+- [x] Duplicate trade close events are idempotent and do not double-count; see `tests/test_trade_journal.py`.
+
+These are narrowly scoped checks. The broader release-blocker items above remain
+open until their complete end-to-end conditions are tested.
