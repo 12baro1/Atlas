@@ -41,3 +41,13 @@ A living backlog, ordered by risk and user value. Do not mark an item complete w
 - Do not merge when required CI is missing, failing, or still running.
 - Prefer changes that can be verified offline on Android/Linux.
 - A green test suite proves only tested behavior; it does not prove trading profitability.
+
+
+## Integrated audit status (2026-11)
+
+The current integration PR adds regression coverage for correlation as soft
+entry evidence and preserves macro-news/cooldown as hard operational gates.
+See `ENGINE_INTEGRATION_AUDIT.md` for explicit invariants and the remaining
+validation work. The unchecked items above remain open until a reproducible
+test/report demonstrates completion; they are not marked complete by code
+inspection alone.
