@@ -17,6 +17,7 @@ import time
 import os
 import ccxt
 import sys
+import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -641,6 +642,21 @@ def _configured_partial_tp_weights():
     return weights
 
 
+def _git_revision():
+    """Return the exact source revision used for this historical run."""
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return completed.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Atlas sinyal backtest")
     parser.add_argument("--symbol", default="BTC/USDT:USDT", help="Tek sembol (Bybit swap)")
@@ -679,6 +695,18 @@ def main():
     # Semboller arası signal durumunu izole et: runner tek örnekte yok, engine'deki
     # cooldown 0 olduğu için ardışık tarama bir sonraki sembolü etkilemez.
     print(f"VERİ SAĞLAYICISI | {_history_provider_name}")
+    print(f"KOD SÜRÜMÜ | {_git_revision()}")
+    print(
+        "BACKTEST AYARLARI | "
+        f"fee={getattr(Config, 'ROUND_TRIP_COST_RATE', 0.002)} | "
+        f"partial_tp_weights={_configured_partial_tp_weights()} | "
+        f"limit_expiry_bars={args.limit_expiry_bars} | "
+        f"minimum_rr={getattr(Config, 'MINIMUM_RR', 'unknown')} | "
+        f"min_stop_atr={getattr(Config, 'MIN_STOP_ATR_MULTIPLIER', 'unknown')} | "
+        f"auto_expand_stop={getattr(Config, 'AUTO_EXPAND_TIGHT_STOPS', 'unknown')} | "
+        f"reject_tight_stops={getattr(Config, 'REJECT_TIGHT_STOPS', 'unknown')} | "
+        f"step=5 | lenient={args.lenient}"
+    )
     all_stats = []
     backtest_now_ms = time.time() * 1000
     for symbol in symbols:
