@@ -102,7 +102,9 @@ class TradeJournal:
     def close_trade(self, trade_id, exit_price, result=None, timestamp=None, reason=None, exit_metadata=None):
         """Açık trade'i kapatır ve sonuç metriklerini hesaplar."""
         trade = self._find_trade(trade_id)
-        if trade is None:
+        # Closing is an idempotent lifecycle transition. Repeated terminal
+        # events must not overwrite the first fill/exit or increment metrics twice.
+        if trade is None or trade.get("status") != "OPEN":
             return None
 
         closed_at = int(timestamp or time.time() * 1000)
