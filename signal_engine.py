@@ -26,6 +26,7 @@ class SignalEngine:
         institutional = analysis.get("institutional", {})
         setup_quality = analysis.get("setup_quality", {})
         trade_quality = analysis.get("trade_quality", {})
+        setup_consensus = analysis.get("setup_consensus", {})
         quality_gate_active = isinstance(trade_quality, dict) and "allowed" in trade_quality
 
         market_phase = analysis.get("market_phase", {})
@@ -70,6 +71,14 @@ class SignalEngine:
             volume_profile=volume_profile,
             institutional=institutional,
         )
+
+        # Central consensus is a bounded confidence adjustment, never a new
+        # execution gate. Structural validity and risk checks remain elsewhere.
+        consensus_delta = 0.0
+        if isinstance(setup_consensus, dict) and setup_consensus.get("structural_valid") and direction in {"LONG", "SHORT"}:
+            consensus_score = self._safe_number(setup_consensus.get("score"), 50.0)
+            consensus_delta = max(-6.0, min(6.0, (consensus_score - 50.0) * 0.12))
+            confidence_adjusted += consensus_delta
 
         confidence_adjusted = clamp(confidence_adjusted)
 
@@ -130,6 +139,8 @@ class SignalEngine:
             "institutional_direction": institutional.get("direction", "NONE"),
             "alignment_conflicts": self._alignment_conflicts(direction, liquidity_sweep, smt, unicorn, cisd, volume_profile),
             "setup_quality_score": setup_quality.get("score"),
+            "setup_consensus": setup_consensus,
+            "setup_consensus_delta": round(consensus_delta, 3),
             "module_scores": setup_quality.get("module_scores", {}),
             "analysis_report": setup_quality.get("reasons", []),
             "learning": setup_quality.get("learning") or {},
