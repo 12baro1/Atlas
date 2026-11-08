@@ -28,10 +28,11 @@ def test_bullish_btc_does_not_block_long():
     assert r["trade_allowed"] is True
 
 
-def test_strong_bearish_btc_blocks_long():
+def test_strong_bearish_btc_is_entry_counterpressure_not_a_veto():
     r = CorrelationEngine().evaluate("SOL/USDT:USDT", "LONG", {"correlation_universe": {"BTC": _downtrend()}})
-    assert r["trade_allowed"] is False
-    assert "LONG" in r["reason"]
+    assert r["trade_allowed"] is True
+    assert r["counterpressure"] is True
+    assert r["opposing_markets"] == ["BTC"]
 
 
 def test_btc_trades_not_guarded():
@@ -44,3 +45,8 @@ def test_weak_noise_downtrend_does_not_block_long():
     r = CorrelationEngine().evaluate("SOL/USDT:USDT", "LONG", {"correlation_universe": {"BTC": noise}})
     # Zayof trend SACIDAM gelmezse ATR normalize guc kucuk -> LONG engellenmez.
     assert r["trade_allowed"] is True
+def test_strong_bullish_btc_is_counterpressure_for_short_without_blocking():
+    r = CorrelationEngine().evaluate("SOL/USDT:USDT", "SHORT", {"correlation_universe": {"BTC": _uptrend()}})
+    assert r["trade_allowed"] is True
+    assert r["counterpressure"] is True
+    assert r["opposing_markets"] == ["BTC"]
