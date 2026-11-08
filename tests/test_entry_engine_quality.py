@@ -242,7 +242,7 @@ def test_long_stop_places_atr_buffer_beyond_structural_invalidation(monkeypatch)
         structure=[{"label": "HL", "kind": "LOW", "price": 98.9}],
         fvg=[{"type": "BULLISH", "from": 99.2, "to": 100.0, "filled": False}],
         orderblocks=[{"type": "BULLISH", "low": 99.4, "high": 100.1, "mitigated": False}],
-        current_price=100.05,
+        current_price=101.0,
         candles=[object()],
     )
     assert abs(result["stop_loss"] - 98.8) < 1e-9
@@ -258,7 +258,7 @@ def test_short_stop_places_atr_buffer_beyond_structural_invalidation(monkeypatch
         structure=[{"label": "LH", "kind": "HIGH", "price": 101.2}],
         fvg=[{"type": "BEARISH", "from": 100.0, "to": 101.0, "filled": False}],
         orderblocks=[{"type": "BEARISH", "low": 99.9, "high": 100.8, "mitigated": False}],
-        current_price=99.95,
+        current_price=99.0,
         candles=[object()],
     )
     assert abs(result["stop_loss"] - 101.4) < 1e-9
