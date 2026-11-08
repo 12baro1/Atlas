@@ -132,14 +132,20 @@ class MTFEngine:
             # 15m can establish direction only when 4H is neutral. It still
             # requires a real liquidity sweep, post-sweep reclaim and CHoCH.
             reversal = self._confirmed_ltf_reversal(entry, liquidity_sweep)
-            if reversal == "LONG" and weekly_trend != "BEARISH":
+            if reversal == "LONG":
                 entry_signal = reversal
                 entry_source = "CONFIRMED_15M_REVERSAL"
-                direction_reason = "confirmed_15m_reversal"
-            elif reversal == "SHORT" and weekly_trend != "BULLISH":
+                direction_reason = (
+                    "confirmed_15m_reversal_weekly_countertrend"
+                    if weekly_trend == "BEARISH" else "confirmed_15m_reversal"
+                )
+            elif reversal == "SHORT":
                 entry_signal = reversal
                 entry_source = "CONFIRMED_15M_REVERSAL"
-                direction_reason = "confirmed_15m_reversal"
+                direction_reason = (
+                    "confirmed_15m_reversal_weekly_countertrend"
+                    if weekly_trend == "BULLISH" else "confirmed_15m_reversal"
+                )
 
         return {
             "trend": weekly_trend,
