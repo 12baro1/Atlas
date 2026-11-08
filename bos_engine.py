@@ -49,7 +49,10 @@ class BOSEngine:
                     if candles is None:
                         break_index = pivot_index
                     else:
-                        available_from = int(last_high.get("confirmation_index", last_high["index"])) + 1
+                        previous_confirmation = last_high.get("confirmation_index")
+                        if previous_confirmation is None:
+                            previous_confirmation = last_high["index"]
+                        available_from = int(previous_confirmation) + 1
                         break_index = self._close_break_index(
                             candles, available_from, pivot_index + 1,
                             float(last_high["price"]), "BULLISH",
@@ -64,7 +67,10 @@ class BOSEngine:
                     if candles is None:
                         break_index = pivot_index
                     else:
-                        available_from = int(last_low.get("confirmation_index", last_low["index"])) + 1
+                        previous_confirmation = last_low.get("confirmation_index")
+                        if previous_confirmation is None:
+                            previous_confirmation = last_low["index"]
+                        available_from = int(previous_confirmation) + 1
                         break_index = self._close_break_index(
                             candles, available_from, pivot_index + 1,
                             float(last_low["price"]), "BEARISH",
