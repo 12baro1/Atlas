@@ -38,46 +38,35 @@ class EntryEngine:
         return entry, stop_loss
 
     def _select_structural_stop(self, direction, structure, selected_fvg, selected_ob, atr_buffer=0.0):
-        """Choose the outermost relevant swing/POI invalidation level."""
-        candidates = []
+        """Anchor SL to the invalidation edge of the exact POI used for entry.
+
+        The latest swing can belong to an older, unrelated structure. Taking
+        the outermost of that swing and the active POI creates oversized stops
+        and distorts RR. The selected POI is the source of truth here; the
+        volatility buffer is added beyond its invalidation edge.
+        """
         if direction == "LONG":
             if selected_ob:
                 value = self._safe_price(selected_ob.get("low"))
-                if value is not None:
-                    candidates.append(("order_block", value))
-            if selected_fvg:
+                source = "order_block"
+            elif selected_fvg:
                 value = self._safe_price(selected_fvg.get("from"))
-                if value is not None:
-                    candidates.append(("fvg", value))
-            for item in reversed(structure or []):
-                kind = str(item.get("kind", "")).upper()
-                label = str(item.get("label", "")).upper()
-                if kind == "LOW" or label in {"HL", "LL"}:
-                    value = self._safe_price(item.get("price", item.get("low")))
-                    if value is not None:
-                        candidates.append(("swing_low", value))
-                        break
-            selected = min(candidates, key=lambda item: item[1]) if candidates else None
-            return (selected[1] - max(0.0, atr_buffer), selected[0]) if selected else (None, None)
+                source = "fvg"
+            else:
+                value = None
+                source = None
+            return (value - max(0.0, atr_buffer), source) if value is not None else (None, None)
 
         if selected_ob:
             value = self._safe_price(selected_ob.get("high"))
-            if value is not None:
-                candidates.append(("order_block", value))
-        if selected_fvg:
+            source = "order_block"
+        elif selected_fvg:
             value = self._safe_price(selected_fvg.get("to"))
-            if value is not None:
-                candidates.append(("fvg", value))
-        for item in reversed(structure or []):
-            kind = str(item.get("kind", "")).upper()
-            label = str(item.get("label", "")).upper()
-            if kind == "HIGH" or label in {"LH", "HH"}:
-                value = self._safe_price(item.get("price", item.get("high")))
-                if value is not None:
-                    candidates.append(("swing_high", value))
-                    break
-        selected = max(candidates, key=lambda item: item[1]) if candidates else None
-        return (selected[1] + max(0.0, atr_buffer), selected[0]) if selected else (None, None)
+            source = "fvg"
+        else:
+            value = None
+            source = None
+        return (value + max(0.0, atr_buffer), source) if value is not None else (None, None)
 
     def _safe_price(self, value):
         try:
@@ -389,7 +378,14 @@ class EntryEngine:
             else:
                 result["entry"] = limit_entry
                 result["entry_type"] = "LIMIT" if limit_entry is not None else "NONE"
-                result["entry_type_reason"] = "Bullish POI limit level" if limit_entry is not None else "No valid bullish POI"
+                result["entry_type_reason"] = (
+                    "Bullish POI limit level" if limit_entry is not None
+                    else (
+                        "Bullish POI already crossed; wait for a fresh setup"
+                        if crossed_matching_fvg or crossed_matching_ob
+                        else "No valid bullish POI"
+                    )
+                )
 
         else:
 

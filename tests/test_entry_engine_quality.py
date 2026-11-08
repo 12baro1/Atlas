@@ -109,7 +109,7 @@ def test_entry_engine_blocks_far_price_after_bearish_poi_was_crossed():
     assert "already crossed" in result["entry_type_reason"]
 
 
-def test_entry_engine_long_stop_uses_outer_swing_and_poi_invalidation():
+def test_entry_engine_long_stop_uses_selected_poi_invalidation():
     result = EntryEngine().generate(
         mtf={"entry": "LONG"},
         structure=[{"label": "HL", "kind": "LOW", "price": 98.9}],
@@ -117,11 +117,11 @@ def test_entry_engine_long_stop_uses_outer_swing_and_poi_invalidation():
         orderblocks=[{"type": "BULLISH", "low": 99.4, "high": 100.1, "mitigated": False}],
         current_price=100.05,
     )
-    assert result["stop_loss"] == 98.9
-    assert result["stop_source"] == "swing_low"
+    assert result["stop_loss"] == 99.4
+    assert result["stop_source"] == "order_block"
 
 
-def test_entry_engine_short_stop_uses_outer_swing_and_poi_invalidation():
+def test_entry_engine_short_stop_uses_selected_poi_invalidation():
     result = EntryEngine().generate(
         mtf={"entry": "SHORT"},
         structure=[{"label": "LH", "kind": "HIGH", "price": 101.2}],
@@ -129,8 +129,8 @@ def test_entry_engine_short_stop_uses_outer_swing_and_poi_invalidation():
         orderblocks=[{"type": "BEARISH", "low": 99.9, "high": 100.8, "mitigated": False}],
         current_price=99.95,
     )
-    assert result["stop_loss"] == 101.2
-    assert result["stop_source"] == "swing_high"
+    assert result["stop_loss"] == 100.8
+    assert result["stop_source"] == "order_block"
 
 
 
@@ -245,7 +245,7 @@ def test_long_stop_places_atr_buffer_beyond_structural_invalidation(monkeypatch)
         current_price=100.05,
         candles=[object()],
     )
-    assert result["stop_loss"] == 98.7
+    assert result["stop_loss"] == 99.2
     assert result["stop_buffer"] == 0.2
 
 
@@ -260,7 +260,7 @@ def test_short_stop_places_atr_buffer_beyond_structural_invalidation(monkeypatch
         current_price=99.95,
         candles=[object()],
     )
-    assert result["stop_loss"] == 101.4
+    assert result["stop_loss"] == 101.0
     assert result["stop_buffer"] == 0.2
 
 
