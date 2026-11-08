@@ -75,20 +75,46 @@ class SetupReasoningEngine:
                         directions.append((reversal, "CONFIRMED_SWEEP_REVERSAL"))
         return directions
 
-    def _targets(self, direction, entry, liquidity, external_structure):
+    def _targets(self, direction, entry, liquidity, external_structure,
+                 fvg=None, orderblocks=None, structure=None):
         levels = []
-        for collection in (liquidity, external_structure):
-            if not isinstance(collection, (list, tuple)):
+        expected_liquidity = "BUY_SIDE" if direction == "LONG" else "SELL_SIDE"
+        for item in liquidity or []:
+            if not isinstance(item, dict) or str(item.get("type", "")).upper() != expected_liquidity:
                 continue
-            for item in collection:
+            price = self._number(item.get("price"))
+            if price is not None and ((direction == "LONG" and price > entry) or (direction == "SHORT" and price < entry)):
+                levels.append(price)
+
+        expected_fvg = "BEARISH" if direction == "LONG" else "BULLISH"
+        for item in fvg or []:
+            if not isinstance(item, dict) or str(item.get("type", "")).upper() != expected_fvg or item.get("filled"):
+                continue
+            key = "from" if direction == "LONG" else "to"
+            price = self._number(item.get(key))
+            if price is not None and ((direction == "LONG" and price > entry) or (direction == "SHORT" and price < entry)):
+                levels.append(price)
+
+        expected_ob = "BEARISH" if direction == "LONG" else "BULLISH"
+        for item in orderblocks or []:
+            if not isinstance(item, dict) or str(item.get("type", "")).upper() != expected_ob or item.get("mitigated"):
+                continue
+            key = "low" if direction == "LONG" else "high"
+            price = self._number(item.get(key))
+            if price is not None and ((direction == "LONG" and price > entry) or (direction == "SHORT" and price < entry)):
+                levels.append(price)
+
+        for collection in (structure, external_structure):
+            for item in collection or []:
                 if not isinstance(item, dict):
                     continue
-                price = self._number(item.get("price", item.get("level", item.get("value"))))
+                label = str(item.get("label", "")).upper()
+                price = self._number(item.get("price"))
                 if price is None:
                     continue
-                if direction == "LONG" and price > entry:
+                if direction == "LONG" and label in {"HH", "LH"} and price > entry:
                     levels.append(price)
-                elif direction == "SHORT" and price < entry:
+                elif direction == "SHORT" and label in {"LL", "HL"} and price < entry:
                     levels.append(price)
         return sorted(set(levels), reverse=(direction == "SHORT"))
 
@@ -237,7 +263,7 @@ class SetupReasoningEngine:
                     direction == "SHORT" and stop <= entry_price
                 ):
                     continue
-                targets = self._targets(direction, entry_price, liquidity, external_structure)
+                target_fvg = list(fvg) + list(higher_timeframe_fvg or [])\n                target_obs = list(orderblocks) + list(higher_timeframe_orderblocks or [])\n                targets = self._targets(\n                    direction, entry_price, liquidity, external_structure,\n                    fvg=target_fvg, orderblocks=target_obs, structure=structure,\n                )
                 projected_rr = abs(targets[-1] - entry_price) / risk if targets else None
                 support, opposition = self._evidence(
                     direction, mtf, sweep, structure, ote, htf_orderblock, htf_fvg,
