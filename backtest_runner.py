@@ -742,17 +742,9 @@ class BacktestRunner:
         fee_rr = fee_cost / risk_distance if risk_distance > 0 else self.fee_rate
         spread_slippage_rr = (spread_cost + slippage_cost) / risk_distance if risk_distance > 0 else 0.0
         execution_cost_rr = fee_rr + spread_slippage_rr
-        base_rr = outcome.get("net_rr", 0.0)
-        if not use_partial:
-            if outcome.get("result") == "WIN":
-                base_rr = max(0.0, base_rr - execution_cost_rr)
-            else:
-                base_rr = -(1.0 + execution_cost_rr)
-        else:
-            # Partial exits are aggregated to one position-level realized R;
-            # apply the same modeled round-trip execution cost once.
-            base_rr = round(base_rr - execution_cost_rr, 4)
-        net_rr = base_rr
+        # Preserve actual price-path R (including stop gaps) and subtract costs once.
+        gross_rr = float(outcome.get("net_rr", 0.0) or 0.0)
+        net_rr = round(gross_rr - execution_cost_rr, 4)
 
         signal_index = max(0, int(signal_index if signal_index is not None else entry_index - 1))
         exit_offset = outcome.get("exit_offset")
@@ -788,7 +780,7 @@ class BacktestRunner:
             # Keep price-path performance separate from modeled execution costs.
             # A normal stop is approximately -1 gross R; net R can be lower
             # when fees/spread/slippage are large relative to the stop distance.
-            "gross_rr": round(float(outcome.get("net_rr", 0.0) or 0.0), 4),
+            "gross_rr": round(gross_rr, 4),
             "net_rr": round(max(net_rr, -99.0), 4),
             "fee_rr": round(fee_rr, 4),
             "spread_slippage_rr": round(spread_slippage_rr, 4),
@@ -818,9 +810,9 @@ class BacktestRunner:
                          maximum_drawdown_pct=10.0, risk_percent=1.0):
         """Historical-runner gate based only on closed, realized net-R trades."""
         trades = self.history
-        gross_profit = sum(max(0.0, float(item.get("net_rr", 0.0) or 0.0)) for item in trades)
-        gross_loss = abs(sum(min(0.0, float(item.get("net_rr", 0.0) or 0.0)) for item in trades))
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
+        net_profit = sum(max(0.0, float(item.get("net_rr", 0.0) or 0.0)) for item in trades)
+        net_loss = abs(sum(min(0.0, float(item.get("net_rr", 0.0) or 0.0)) for item in trades))
+        profit_factor = net_profit / net_loss if net_loss > 0 else (net_profit if net_profit > 0 else 0.0)
         equity = peak = 100.0
         max_drawdown_pct = 0.0
         risk_fraction = max(0.0, float(risk_percent)) / 100.0
@@ -846,24 +838,34 @@ class BacktestRunner:
             "checks": {"sample": sample_ok, "profit_factor": pf_ok, "drawdown": dd_ok},
         }
 
+    @staticmethod
+    def _trade_metrics(trades):
+        """Comparable gross price-path and net-after-cost metrics."""
+        gross = [float(item.get("gross_rr", item.get("net_rr", 0.0)) or 0.0) for item in trades]
+        net = [float(item.get("net_rr", 0.0) or 0.0) for item in trades]
+        def pf(values):
+            profit = sum(value for value in values if value > 0)
+            loss = abs(sum(value for value in values if value < 0))
+            return round(profit / loss, 4) if loss else round(profit, 4)
+        count = len(trades)
+        return {
+            "total": count,
+            "gross_rr": round(sum(gross), 4),
+            "gross_expectancy": round(sum(gross) / count, 4) if count else 0.0,
+            "gross_profit_factor": pf(gross),
+            "net_rr": round(sum(net), 4),
+            "expectancy": round(sum(net) / count, 4) if count else 0.0,
+            "profit_factor": pf(net),
+            "execution_cost_rr": round(sum(float(item.get("execution_cost_rr", 0.0) or 0.0) for item in trades), 4),
+        }
+
     def direction_breakdown(self):
-        """Separate realized metrics for LONG and SHORT samples."""
-        output = {}
-        for side in ("LONG", "SHORT"):
-            trades = [item for item in self.history if str(item.get("direction", "")).upper() == side]
-            wins = [item for item in trades if float(item.get("net_rr", 0.0) or 0.0) > 0]
-            losses = [item for item in trades if float(item.get("net_rr", 0.0) or 0.0) < 0]
-            gross_profit = sum(float(item.get("net_rr", 0.0) or 0.0) for item in wins)
-            gross_loss = abs(sum(float(item.get("net_rr", 0.0) or 0.0) for item in losses))
-            output[side] = {
-                "total": len(trades),
-                "wins": len(wins),
-                "losses": len(losses),
-                "winrate": round(len(wins) / len(trades) * 100.0, 2) if trades else 0.0,
-                "expectancy": round(sum(float(item.get("net_rr", 0.0) or 0.0) for item in trades) / len(trades), 4) if trades else 0.0,
-                "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else (round(gross_profit, 2) if gross_profit else 0.0),
-            }
-        return output
+        """Separate gross and net metrics for LONG and SHORT samples."""
+        return {
+            side: self._trade_metrics([item for item in self.history
+                if str(item.get("direction", "")).upper() == side])
+            for side in ("LONG", "SHORT")
+        }
 
     def mtf_trade_breakdown(self):
         """Closed-trade outcomes grouped by direction and the MTF context at entry."""
@@ -878,23 +880,10 @@ class BacktestRunner:
             )
             groups.setdefault(key, []).append(trade)
 
-        output = {}
-        for key, trades in sorted(groups.items()):
-            values = [float(item.get("net_rr", 0.0) or 0.0) for item in trades]
-            wins = [value for value in values if value > 0]
-            losses = [value for value in values if value < 0]
-            gross_profit = sum(wins)
-            gross_loss = abs(sum(losses))
-            output[key] = {
-                "total": len(trades),
-                "wins": len(wins),
-                "losses": len(losses),
-                "winrate": round(len(wins) / len(trades) * 100.0, 2) if trades else 0.0,
-                "expectancy": round(sum(values) / len(values), 4) if values else 0.0,
-                "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else round(gross_profit, 4),
-            }
-        return output
-
+        return {
+            key: self._trade_metrics(trades)
+            for key, trades in sorted(groups.items())
+        }
     def statistics(self):
         if not self.total:
             return {
@@ -938,6 +927,8 @@ class BacktestRunner:
                 "expectancy": 0, "avg_r": 0, "max_drawdown": 0,
                 "profit_factor": 0, "net_rr": 0,
                 "gross_profit_rr": 0, "gross_loss_rr": 0,
+                "gross_rr": 0, "gross_expectancy": 0, "gross_profit_factor": 0,
+                "total_execution_cost_rr": 0,
                 "tp1": 0, "tp2": 0, "tp3": 0,
                 "sample_base": "realized_closed_trades",
                 "performance_gate": self.performance_gate(),
@@ -947,9 +938,16 @@ class BacktestRunner:
         wins = self.wins
         losses = self.total - wins
         winrate = wins / self.total * 100
-        gross_win = sum(h.get("net_rr", 0.0) for h in self.history if h.get("_w"))
-        gross_loss = abs(sum(h.get("net_rr", 0.0) for h in self.history if not h.get("_w")))
-        pf = gross_win / gross_loss if gross_loss > 0 else (gross_win if gross_win else 0.0)
+        gross_values = [float(h.get("gross_rr", h.get("net_rr", 0.0)) or 0.0) for h in self.history]
+        net_values = [float(h.get("net_rr", 0.0) or 0.0) for h in self.history]
+        gross_win = sum(value for value in gross_values if value > 0)
+        gross_loss = abs(sum(value for value in gross_values if value < 0))
+        net_win = sum(value for value in net_values if value > 0)
+        net_loss = abs(sum(value for value in net_values if value < 0))
+        gross_pf = gross_win / gross_loss if gross_loss > 0 else (gross_win if gross_win else 0.0)
+        pf = net_win / net_loss if net_loss > 0 else (net_win if net_win else 0.0)
+        gross_total_rr = sum(gross_values)
+        total_execution_cost_rr = sum(float(h.get("execution_cost_rr", 0.0) or 0.0) for h in self.history)
 
         # Max drawdown: birikimli net R eğrisinin tepe-taban farkı.
         equity = 0.0
@@ -1008,10 +1006,14 @@ class BacktestRunner:
             "expectancy": round(self.net_rr / self.total, 4) if self.total else 0,
             "avg_r": round(avg_r, 4),
             "max_drawdown": round(max_dd, 4),
-            "profit_factor": round(pf, 2),
+            "profit_factor": round(pf, 4),
             "gross_profit_rr": round(gross_win, 4),
             "gross_loss_rr": round(gross_loss, 4),
-            "net_rr": round(self.net_rr, 2),
+            "gross_rr": round(gross_total_rr, 4),
+            "gross_expectancy": round(gross_total_rr / self.total, 4),
+            "gross_profit_factor": round(gross_pf, 4),
+            "total_execution_cost_rr": round(total_execution_cost_rr, 4),
+            "net_rr": round(self.net_rr, 4),
             "tp1": self.tp1,
             "tp2": self.tp2,
             "tp3": self.tp3,
