@@ -422,7 +422,11 @@ class EntryEngine:
                     and post.get("direction") == "BEARISH"
                     and 0 <= confirmation_age <= max_confirmation_age
                 )
-                inside_poi = zone_low is not None and zone_high is not None and zone_low <= current_price <= zone_high
+                inside_poi = (
+                    zone_low is not None and zone_high is not None
+                    and zone_low <= current_price <= zone_high
+                    and (not use_ote_filter or ote_low <= current_price <= ote_high)
+                )
                 if inside_poi and sweep_confirmed and current_price < result["stop_loss"]:
                     result["entry"] = current_price
                     result["entry_type"] = "MARKET"
