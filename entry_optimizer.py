@@ -266,6 +266,7 @@ class EntryOptimizer:
             "aligned_weight": round(aligned_weight, 3),
             "opposing_weight": round(opposing_weight, 3),
             "evidence_balance": round(aligned_weight - opposing_weight, 3),
+            "counterpressure_reasons": sorted(set(stronger_confirmation_reasons)),
         }
         entry["entry_optimizer"] = {
             "applied": True,
