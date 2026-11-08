@@ -55,7 +55,6 @@ from scanner_engine import ScannerEngine
 from session_filter import SessionFilter
 from signal_engine import SignalEngine
 from setup_quality_engine import SetupQualityEngine
-from setup_aggregator import SetupAggregator
 from setup_reasoning_engine import SetupReasoningEngine
 from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
