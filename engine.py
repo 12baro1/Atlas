@@ -360,6 +360,7 @@ class AtlasEngine:
             ifvg=structure_state.get("ifvg"),
             eqh_eql=structure_state.get("eqh_eql"),
             internal_structure=structure_state.get("internal_structure"),
+            external_structure=structure_state.get("external_structure"),
             market_regime=market_regime_state,
             orderbook=orderbook_state,
         )
@@ -858,6 +859,7 @@ class AtlasEngine:
                     "label": item.get("label"),
                     "bos": item.get("bos", False),
                     "choch": item.get("choch", False),
+                    "direction": item.get("direction"),
                 }
             )
 
@@ -1022,6 +1024,7 @@ class AtlasEngine:
         ifvg=None,
         eqh_eql=None,
         internal_structure=None,
+        external_structure=None,
         market_regime=None,
         orderbook=None,
     ):
@@ -1055,6 +1058,13 @@ class AtlasEngine:
             institutional=institutional,
             orderbook=orderbook,
             correlation=correlation,
+            breaker=breaker,
+            trendline_sweep=trendline_sweep,
+            ifvg=ifvg,
+            eqh_eql=eqh_eql,
+            internal_structure=internal_structure,
+            external_structure=external_structure,
+            current_index=len(candles) - 1 if candles else None,
         )
         confirmation = self.entry_confirmation.confirm(
             mtf, entry_structure, fvg, entry,
