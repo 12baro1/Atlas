@@ -360,6 +360,7 @@ class AtlasEngine:
             ifvg=structure_state.get("ifvg"),
             eqh_eql=structure_state.get("eqh_eql"),
             internal_structure=structure_state.get("internal_structure"),
+            external_structure=structure_state.get("external_structure"),
             market_regime=market_regime_state,
             orderbook=orderbook_state,
         )
@@ -756,7 +757,7 @@ class AtlasEngine:
         engine.filter_noise()
 
         pivots = engine.validate_sequence()
-        structure = self.choch.detect(self.bos.detect(label_swings(pivots)))
+        structure = self.choch.detect(self.bos.detect(label_swings(pivots), candles=candles))
 
         return {
             "pivots": pivots,
@@ -858,6 +859,7 @@ class AtlasEngine:
                     "label": item.get("label"),
                     "bos": item.get("bos", False),
                     "choch": item.get("choch", False),
+                    "direction": item.get("direction"),
                 }
             )
 
@@ -934,8 +936,8 @@ class AtlasEngine:
         )
         trend = self.trend.calculate(mtf)
 
-        daily_orderblocks = self.orderblocks.detect(daily, daily_structure)
-        h4_orderblocks = self.orderblocks.detect(h4, h4_structure)
+        daily_orderblocks = self.mitigation.detect(daily, self.orderblocks.detect(daily, daily_structure))
+        h4_orderblocks = self.mitigation.detect(h4, self.orderblocks.detect(h4, h4_structure))
 
         # OTE, 15m verisinin tüm tarihsel tepe/diplerinden değil,
         # son onaylı 4H impuls bacağından hesaplanır.
@@ -951,8 +953,14 @@ class AtlasEngine:
             current_price,
             daily_orderblocks,
             h4_orderblocks,
+            direction=mtf.get("entry", "NONE"),
         )
-        htf_fvg = self.htf_fvg.detect(self.fvg.detect(h4), self.fvg.detect(daily))
+        htf_fvg = self.htf_fvg.detect(
+            self.fvg.detect(h4),
+            self.fvg.detect(daily),
+            current_price=current_price,
+            direction=mtf.get("entry", "NONE"),
+        )
 
         market_phase = self.market_phase.detect(
             structure=entry_structure,
@@ -1016,6 +1024,7 @@ class AtlasEngine:
         ifvg=None,
         eqh_eql=None,
         internal_structure=None,
+        external_structure=None,
         market_regime=None,
         orderbook=None,
     ):
@@ -1048,6 +1057,14 @@ class AtlasEngine:
             volume_profile=volume_profile,
             institutional=institutional,
             orderbook=orderbook,
+            correlation=correlation,
+            breaker=breaker,
+            trendline_sweep=trendline_sweep,
+            ifvg=ifvg,
+            eqh_eql=eqh_eql,
+            internal_structure=internal_structure,
+            external_structure=external_structure,
+            current_index=len(candles) - 1 if candles else None,
         )
         confirmation = self.entry_confirmation.confirm(
             mtf, entry_structure, fvg, entry,
@@ -1164,6 +1181,7 @@ class AtlasEngine:
             ifvg=ifvg,
             eqh_eql=eqh_eql,
             internal_structure=internal_structure,
+            current_index=len(candles) - 1 if candles else None,
         )
 
         dynamic_tp = self._calculate_dynamic_tp(
@@ -1444,6 +1462,25 @@ class AtlasEngine:
         payload["cisd"] = cisd_state or {}
         payload["liquidity_sweep"] = structure_state.get("liquidity_sweep", {})
 
+        # Build peer-asset context from the same timestamp-aligned SMT universe.
+        # In backtests, future peer candles are trimmed before they reach the
+        # institutional multi-asset confirmation motor.
+        smt_universe = data.get("smt_universe") or {}
+        primary = data.get("symbol", "UNKNOWN")
+        primary_15m = data.get("15m") or []
+        if primary_15m:
+            from timing import closed_htf_candles
+            reference_ms = int(primary_15m[-1].time) + 15 * 60 * 1000
+            peers = {}
+            for peer_symbol, frames in smt_universe.items():
+                if peer_symbol == primary or not isinstance(frames, dict):
+                    continue
+                peer_candles = closed_htf_candles(frames.get("4h") or [], reference_ms, "4h")
+                if peer_candles:
+                    peers[peer_symbol] = {"candles": peer_candles}
+            if peers:
+                payload["peer_assets"] = peers
+
         return self.institutional.analyze(payload)
 
     def _build_volume_profile_state(self, data):
@@ -1575,9 +1612,25 @@ class AtlasEngine:
         smt_universe = data.get("smt_universe") or {}
         selected_altcoins = data.get("selected_altcoins") or []
 
-        if primary_symbol not in smt_universe:
-            smt_universe = dict(smt_universe)
-            smt_universe[primary_symbol] = primary_timeframes
+        # Align every comparison series to the last fully closed primary 15m
+        # candle. This is essential in historical replay: comparison candles
+        # from the future must never leak into an earlier SMT decision.
+        smt_universe = dict(smt_universe)
+        smt_universe[primary_symbol] = primary_timeframes
+        reference_ms = None
+        primary_15m = primary_timeframes.get("15m") or []
+        if primary_15m:
+            reference_ms = int(primary_15m[-1].time) + 15 * 60 * 1000
+        if reference_ms is not None:
+            from timing import closed_htf_candles
+            aligned_universe = {}
+            for comparison_symbol, frames in smt_universe.items():
+                frames = frames if isinstance(frames, dict) else {}
+                aligned_universe[comparison_symbol] = {
+                    timeframe: closed_htf_candles(frames.get(timeframe) or [], reference_ms, timeframe)
+                    for timeframe in self.SMT_TIMEFRAMES
+                }
+            smt_universe = aligned_universe
 
         return self.smt.detect(
             primary_symbol=primary_symbol,

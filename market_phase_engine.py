@@ -43,6 +43,7 @@ class MarketPhaseEngine:
             candles=candles
         )
         
+        recent_structure = self._recent_structure(structure, candles)
         return {
             "phase": phase_info["phase"],
             "phase_confidence": phase_info["confidence"],
@@ -54,9 +55,9 @@ class MarketPhaseEngine:
             "mtf_alignment": self._calculate_mtf_alignment(mtf),
             "premium": premium_discount.get("premium", False),
             "discount": premium_discount.get("discount", False),
-            "structure_active": any(item.get("bos") or item.get("choch") for item in structure),
-            "structure_bos": any(item.get("bos") for item in structure),
-            "structure_choch": any(item.get("choch") for item in structure),
+            "structure_active": any(item.get("bos") or item.get("choch") for item in recent_structure),
+            "structure_bos": any(item.get("bos") for item in recent_structure),
+            "structure_choch": any(item.get("choch") for item in recent_structure),
             "liquidity_active": liquidity_sweep.get("buy_side") or liquidity_sweep.get("sell_side"),
             "fvg_count": len(fvg),
             "orderblock_count": len(orderblocks),
@@ -81,9 +82,11 @@ class MarketPhaseEngine:
         trend_strength = trend.get("strength", 0)
         mtf_valid = mtf.get("valid", False)
         
-        # Structure signals
-        bos_active = any(item.get("bos") for item in structure)
-        choch_active = any(item.get("choch") for item in structure)
+        # Only recent, already-confirmed structure events describe the current
+        # phase. Old BOS/CHoCH events must not remain active indefinitely.
+        recent_structure = self._recent_structure(structure, candles)
+        bos_active = any(item.get("bos") for item in recent_structure)
+        choch_active = any(item.get("choch") for item in recent_structure)
         
         # Liquidity signals
         buy_sweep = liquidity_sweep.get("buy_side", False)
@@ -178,26 +181,42 @@ class MarketPhaseEngine:
             "indicators": indicators,
         }
 
+    def _recent_structure(self, structure, candles=None, lookback_bars=32):
+        if not isinstance(structure, list):
+            return []
+        if not candles:
+            return structure
+        last_index = len(candles) - 1
+        first_index = max(0, last_index - max(1, int(lookback_bars)))
+        recent = []
+        for item in structure:
+            if not isinstance(item, dict):
+                continue
+            try:
+                index = int(item.get("index", -1))
+                confirmation_index = int(item.get("confirmation_index", index))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if first_index <= index <= last_index and confirmation_index <= last_index:
+                recent.append(item)
+        return recent
+
     def _calculate_mtf_alignment(self, mtf):
-        """Calculate multi-timeframe alignment score."""
-        if not mtf.get("valid"):
+        """Score alignment with 4H as the primary directional timeframe."""
+        h4 = str(mtf.get("h4", "NEUTRAL")).upper()
+        weekly = str(mtf.get("weekly", "NEUTRAL")).upper()
+        daily = str(mtf.get("daily", "NEUTRAL")).upper()
+        if h4 not in {"BULLISH", "BEARISH"}:
             return 0
-        
-        weekly = mtf.get("weekly", "RANGE")
-        daily = mtf.get("daily", "RANGE")
-        h4 = mtf.get("h4", "RANGE")
-        
-        alignment = 0
-        if weekly == daily == h4 and weekly != "RANGE":
-            alignment = 100
-        elif (weekly == daily) or (daily == h4):
-            alignment = 75
-        elif weekly == h4:
-            alignment = 50
-        else:
-            alignment = 25
-        
-        return alignment
+        if weekly == daily == h4:
+            return 100
+        if daily == h4:
+            return 75
+        if weekly == h4:
+            return 60
+        if weekly == daily == ("BEARISH" if h4 == "BULLISH" else "BULLISH"):
+            return 20
+        return 40
 
     def _calculate_phase_score(self, confidence, phase, mtf_valid, structure_active, liquidity_active):
         """Calculate overall phase score."""

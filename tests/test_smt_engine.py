@@ -86,3 +86,35 @@ def test_uses_only_confirmed_pivots_non_repaint():
 
     assert all(item["index"] <= last_allowed_index for item in pivots["highs"])
     assert all(item["index"] <= last_allowed_index for item in pivots["lows"])
+
+
+def test_pivot_alignment_uses_timestamp_not_different_array_offsets():
+    engine = SMTDivergenceEngine()
+    primary = {"index": 900, "time": 1_700_000_000_000, "price": 100.0}
+    comparison = {"index": 120, "time": 1_700_000_000_000 + 5 * 60_000, "price": 2.0}
+    assert engine._aligned(primary, comparison, 1, "15m") is True
+
+
+def test_smt_alignment_rejects_pivots_far_apart_in_time():
+    engine = SMTDivergenceEngine()
+    primary = {"index": 100, "time": 1_700_000_000_000, "price": 100.0}
+    comparison = {"index": 101, "time": 1_700_000_000_000 + 10 * 15 * 60_000, "price": 2.0}
+    assert engine._aligned(primary, comparison, 2, "15m") is False
+
+
+def test_smt_confidence_is_independent_of_price_scale():
+    engine = SMTDivergenceEngine()
+    args = {
+        "timeframe": "4h",
+        "primary_prev": {"index": 1, "price": 100.0},
+        "primary_last": {"index": 2, "price": 110.0},
+        "compare_prev": {"index": 1, "price": 2.0},
+        "compare_last": {"index": 2, "price": 2.1},
+        "bullish": False,
+    }
+    first = engine._confidence_score(**args)
+    args["primary_prev"] = {"index": 1, "price": 10_000.0}
+    args["primary_last"] = {"index": 2, "price": 11_000.0}
+    args["compare_prev"] = {"index": 1, "price": 200.0}
+    args["compare_last"] = {"index": 2, "price": 210.0}
+    assert engine._confidence_score(**args) == first

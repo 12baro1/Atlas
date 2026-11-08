@@ -57,11 +57,13 @@ def test_h4_bullish_is_enough_when_daily_is_bearish_but_weekly_is_neutral():
     assert result["weekly_h4_conflict"] is False
 
 
-def test_weekly_opposing_h4_blocks_direction():
+def test_weekly_opposing_h4_is_context_not_directional_veto():
     result = MTFEngine().detect(_bearish(), [], _bullish(), [])
-    assert result["entry"] == "NONE"
+    assert result["entry"] == "LONG"
+    assert result["entry_source"] == "H4_STRUCTURE"
     assert result["weekly_h4_conflict"] is True
-    assert result["valid"] is False
+    assert result["valid"] is True
+    assert result["direction_reason"] == "h4_bullish_weekly_countertrend"
 
 
 def test_weekly_and_h4_alignment_is_reported():
@@ -91,11 +93,13 @@ def test_ltf_reversal_without_sweep_confirmation_does_not_create_direction():
     assert result["valid"] is False
 
 
-def test_ltf_reversal_does_not_override_opposing_weekly_context():
+def test_confirmed_ltf_reversal_remains_available_against_weekly_context():
     structure, sweep = _confirmed_sweep("SELL_SIDE")
     result = MTFEngine().detect(_bearish(), [], [], structure, liquidity_sweep=sweep)
-    assert result["entry"] == "NONE"
-    assert result["valid"] is False
+    assert result["entry"] == "LONG"
+    assert result["entry_source"] == "CONFIRMED_15M_REVERSAL"
+    assert result["valid"] is True
+    assert result["direction_reason"] == "confirmed_15m_reversal_weekly_countertrend"
 
 
 def test_ltf_reversal_does_not_override_directional_h4_structure():
@@ -170,3 +174,4 @@ def test_latest_h4_opposing_break_overrides_an_older_complete_swing_pair():
     result = MTFEngine().detect([], [], h4, [])
     assert result["h4"] == "BEARISH"
     assert result["entry"] == "SHORT"
+

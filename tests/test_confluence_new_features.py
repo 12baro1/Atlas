@@ -32,9 +32,11 @@ def test_new_features_added_to_score():
 
     boosted = dict(kwargs)
     boosted["trendline_sweep"] = {"active": True, "direction": "SELL_SIDE"}
-    boosted["ifvg"] = [{"inverted": True}]
+    boosted["ifvg"] = [{"type": "BEARISH", "inverted": True, "index": 10}]
     boosted["eqh_eql"] = {"active": True, "eql": [{"price": 1}], "eqh": []}
-    boosted["internal_structure"] = [{"index": 1}, {"index": 2}]
+    boosted["internal_structure"] = [
+        {"index": 1, "label": "HH"}, {"index": 2, "label": "HL"}
+    ]
 
     result = engine.evaluate(**boosted)
 
@@ -50,3 +52,20 @@ def test_trendline_mismatch_direction_penalizes():
     kwargs["trendline_sweep"] = {"active": True, "direction": "BUY_SIDE"}  # SHORT bekler, LONG entry
     result = engine.evaluate(**kwargs)
     assert any("◐" in check and "Trendline" in check for check in result["checks"])
+
+def test_opposing_breaker_does_not_receive_directional_bonus():
+    engine = ConfluenceEngine()
+    kwargs = base_kwargs()
+    baseline = engine.evaluate(**kwargs)
+    kwargs["breaker"] = [{"breaker": True, "type": "BEARISH"}]
+    result = engine.evaluate(**kwargs)
+    assert result["score"] < baseline["score"]
+    assert any("opposing direction" in check for check in result["checks"])
+
+
+def test_opposing_inverse_fvg_is_not_counted_as_supportive():
+    engine = ConfluenceEngine()
+    kwargs = base_kwargs()
+    kwargs["ifvg"] = [{"type": "BULLISH", "inverted": True, "index": 10}]
+    result = engine.evaluate(**kwargs)
+    assert any("opposing direction" in check for check in result["checks"])

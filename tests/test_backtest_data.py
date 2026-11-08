@@ -257,3 +257,21 @@ def test_fetch_history_does_not_switch_provider_for_transient_errors(monkeypatch
 
     with pytest.raises(RuntimeError, match="4 deneme başarısız"):
         backtest._fetch_history("BTC/USDT:USDT", "15m", since_ms=0)
+
+
+def test_historical_smt_universe_uses_primary_series_and_loads_comparisons(monkeypatch):
+    now_ms = 1_700_000_000_000
+    primary = {"symbol": "BTC/USDT:USDT", "15m": ["primary15"], "1h": ["primary1h"], "4h": ["primary4h"], "1d": ["primary1d"]}
+    calls = []
+
+    def fake_history(symbol, timeframe, since_ms, limit=1000):
+        calls.append((symbol, timeframe, since_ms, limit))
+        return []
+
+    monkeypatch.setattr(backtest, "_fetch_history", fake_history)
+    backtest._SMT_HISTORY_CACHE.clear()
+    result = backtest.attach_historical_smt_universe(primary, 7, now_ms)
+    assert result["smt_universe"]["BTC/USDT:USDT"]["15m"] == ["primary15"]
+    assert result["smt_universe"]["ETH/USDT:USDT"]["15m"] == []
+    assert len(calls) == 4
+    assert all(call[0] == "ETH/USDT:USDT" for call in calls)

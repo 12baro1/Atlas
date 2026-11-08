@@ -1,15 +1,9 @@
-"""Market correlation guard for BTC/ETH dominance-aware altcoin signals.
+"""BTC/ETH cross-market context for altcoin entry optimization.
 
-Altcoin LONG sinyalleri yalnizca "gercekten" riskli bir ortamda engellenir:
-  - BTC guclu bir dusus trendinde degilse LONG engellenmez,
-  - USDT.D (risk-off) yukseliyor ve guc esigi asiliyorsa engellenir,
-  - veri yoksa (universe bos/eksik) sistem otomatik olarak LONG/SHORT'u
-    engellemez; noral kabul edilerek sinyalin normal karar surecinden
-    gecmesine izin verir.
-
-Trend gucu ATR-ile-normalize edilmis fiyat sapmasiyla olculur ve esikler
-Config'ten okunur. Eski davranis (universe bosken bile her Altcoin LONG'unu
-engelleme) duzeltildi: veri yokken ve trend zayifken engel yok.
+Correlation is evidence, not a directional veto. Strong opposing market
+pressure moves the shared POI entry deeper and is reported to execution;
+missing BTC/ETH data never blocks an otherwise valid structural setup.
+Trend strength is normalized by ATR so different price scales are comparable.
 """
 
 from utils.atr import atr as calculate_atr
@@ -20,75 +14,66 @@ _FALLBACK_RISK_OFF_MULT = 0.30
 
 
 class CorrelationEngine:
-    REQUIRED_MARKETS = ("BTC", "ETH", "BTC.D", "USDT.D", "TOTAL3")
+    REQUIRED_MARKETS = ("BTC", "ETH")
 
     def evaluate(self, symbol, direction, data):
+        """Return cross-market pressure as evidence; never veto a valid SMC setup."""
         universe = data.get("correlation_universe") or data.get("market_context") or {}
         scores = {}
-        available = 0
         for market in self.REQUIRED_MARKETS:
-            candles = universe.get(market) or universe.get(market.replace(".", "_")) or []
-            bias = self._market_bias(candles)
-            scores[market] = bias
-            if bias.get("direction") != "UNKNOWN":
-                available += 1
+            candles = universe.get(market) or []
+            scores[market] = self._market_bias(candles)
 
         is_alt = not str(symbol or "").upper().startswith(("BTC/", "ETH/"))
-        btc = scores.get("BTC", {})
-        risk_off = scores.get("USDT.D", {})
-        total3 = scores.get("TOTAL3", {})
-
-        direction = direction or "NONE"
-
-        if available == 0:
+        direction = str(direction or "NONE").upper()
+        available = [name for name, value in scores.items() if value.get("direction") != "UNKNOWN"]
+        if not available or not is_alt or direction not in {"LONG", "SHORT"}:
             return {
-                "active": False,
+                "active": bool(available),
                 "trade_allowed": True,
-                "confidence": 75,
-                "reason": "Correlation engine inactive (no market data provided)",
                 "direction": direction,
+                "confidence": 50 if not available else 65,
+                "counterpressure": False,
+                "counterpressure_score": 0.0,
+                "supportive": False,
                 "markets": scores,
+                "reason": "Correlation context unavailable or not applicable; no veto",
             }
 
-        blocker = False
-        reason = "Correlation context acceptable"
+        expected = "LONG" if direction == "LONG" else "SHORT"
+        opposing = "SHORT" if direction == "LONG" else "LONG"
+        supportive_markets = []
+        opposing_markets = []
+        for name in available:
+            item = scores[name]
+            side = item.get("direction")
+            strength = float(item.get("trend_strength", 0.0) or 0.0)
+            threshold = self._bear_mult() if side == "SHORT" else self._bull_mult()
+            if side == expected and strength >= threshold:
+                supportive_markets.append(name)
+            elif side == opposing and strength >= threshold:
+                opposing_markets.append(name)
 
-        if is_alt and direction == "LONG":
-            btc_strong_bear = (
-                btc.get("direction") == "SHORT"
-                and btc.get("trend_strength", 0.0) >= self._bear_mult()
-            )
-            usdt_risk_off = (
-                risk_off.get("direction") == "LONG"
-                and risk_off.get("trend_strength", 0.0) >= self._risk_off_mult()
-            )
-            if btc_strong_bear or usdt_risk_off:
-                blocker = True
-                reason = "Altcoin LONG blocked: strong BTC downtrend or USDT risk-off"
-
-        if is_alt and direction == "SHORT":
-            btc_strong_bull = (
-                btc.get("direction") == "LONG"
-                and btc.get("trend_strength", 0.0) >= self._bull_mult()
-            )
-            # "Broad market strength" = TOTAL3 yükselişte (LONG). Düşen total3
-            # ALT-SHORT'un kendisiyle hizalıdır, blok değil.
-            total3_bull = total3.get("direction") == "LONG"
-            if btc_strong_bull and total3_bull:
-                blocker = True
-                reason = "Altcoin SHORT blocked: broad market strength"
-
-        confidence = 75
-        if blocker:
-            confidence = 20
-        elif not is_alt or total3.get("direction") == direction:
-            confidence = 85
-
+        counterpressure_score = min(1.0, len(opposing_markets) / max(len(available), 1))
+        supportive = bool(supportive_markets)
+        counterpressure = bool(opposing_markets)
+        confidence = max(25, min(90, 60 + 10 * len(supportive_markets) - 10 * len(opposing_markets)))
+        reason = (
+            "Cross-market counterpressure; refine POI and prefer conservative LIMIT"
+            if counterpressure else
+            "Cross-market support" if supportive else
+            "Cross-market context is neutral"
+        )
         return {
             "active": True,
-            "trade_allowed": not blocker,
+            "trade_allowed": True,
             "direction": direction,
             "confidence": confidence,
+            "counterpressure": counterpressure,
+            "counterpressure_score": round(counterpressure_score, 3),
+            "supportive": supportive,
+            "supportive_markets": supportive_markets,
+            "opposing_markets": opposing_markets,
             "markets": scores,
             "reason": reason,
         }

@@ -10,7 +10,7 @@ import traceback
 import time
 from collections import deque
 from config import Config
-from data_engine import exchange, get_correlation_universe, get_market_data
+from data_engine import exchange, get_correlation_universe, get_market_data, get_smt_universe
 from engine import AtlasEngine
 from manual_trade_service import ManualTradeService
 
@@ -401,6 +401,12 @@ class AtlasRuntime:
                 data["15m"] = closed_15m
                 if universe:
                     data["correlation_universe"] = universe
+                try:
+                    smt_universe = get_smt_universe(force_refresh=force_refresh)
+                    if smt_universe:
+                        data["smt_universe"] = smt_universe
+                except Exception as exc:
+                    self._log(f"WARN SMT comparison universe unavailable: {exc}")
 
                 with self._journal_lock:
                     result = self.engine.analyze(data)

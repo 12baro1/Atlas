@@ -69,7 +69,7 @@ def test_confirmation_accepts_ob_ote_confluence_without_fvg():
     assert result["poi_confirmation"] == "ORDER_BLOCK_OTE"
 
 
-def test_ob_without_ote_confluence_does_not_replace_fvg_confirmation():
+def test_ob_without_ote_confluence_remains_valid_structural_poi():
     entry = {
         "valid": True,
         "direction": "LONG",
@@ -86,8 +86,9 @@ def test_ob_without_ote_confluence_does_not_replace_fvg_confirmation():
         current_price=115.0,
     )
 
-    assert result["confirmed"] is False
-    assert "OB+OTE" in result["reason"]
+    assert result["confirmed"] is True
+    assert result["poi_confirmation"] == "ORDER_BLOCK"
+    assert "selected structural POI" in result["reason"]
 
 
 def test_supportive_secondary_evidence_keeps_standard_confirmation():

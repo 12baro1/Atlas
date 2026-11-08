@@ -131,7 +131,7 @@ class SMTDivergenceEngine:
         p_prev, p_last = primary_highs[-2], primary_highs[-1]
         c_prev, c_last = compare_highs[-2], compare_highs[-1]
 
-        if not self._aligned(p_last, c_last, max_time_delta_bars):
+        if not self._aligned(p_last, c_last, max_time_delta_bars, timeframe):
             return None
 
         primary_hh = p_last["price"] > p_prev["price"]
@@ -291,9 +291,23 @@ class SMTDivergenceEngine:
         text = str(timeframe).lower()
         return "1h" if text == "1h" else text
 
-    def _aligned(self, primary_pivot, compare_pivot, max_time_delta_bars):
-        """Pivot zamanları birbirine makul yakınsa True döndürür."""
-        return abs(primary_pivot["index"] - compare_pivot["index"]) <= max_time_delta_bars
+    def _aligned(self, primary_pivot, compare_pivot, max_time_delta_bars, timeframe=None):
+        """Compare pivot timestamps, not array offsets from different listings."""
+        primary_time = primary_pivot.get("time")
+        compare_time = compare_pivot.get("time")
+        if primary_time is not None and compare_time is not None:
+            try:
+                period_ms = {
+                    "15m": 15 * 60 * 1000,
+                    "1h": 60 * 60 * 1000,
+                    "4h": 4 * 60 * 60 * 1000,
+                    "1d": 24 * 60 * 60 * 1000,
+                }.get(self._normalize_timeframe(timeframe), 60 * 60 * 1000)
+                return abs(int(primary_time) - int(compare_time)) <= max(0, int(max_time_delta_bars)) * period_ms
+            except (TypeError, ValueError, OverflowError):
+                pass
+        # Compatibility fallback for synthetic pivots without timestamps.
+        return abs(int(primary_pivot.get("index", 0)) - int(compare_pivot.get("index", 0))) <= max_time_delta_bars
 
     def _confidence_score(
         self,
@@ -312,17 +326,28 @@ class SMTDivergenceEngine:
             "1d": 20,
         }.get(timeframe, 0)
 
-        if bullish:
-            primary_delta = abs(primary_last["price"] - primary_prev["price"])
-            compare_delta = abs(compare_last["price"] - compare_prev["price"])
-        else:
-            primary_delta = abs(primary_last["price"] - primary_prev["price"])
-            compare_delta = abs(compare_last["price"] - compare_prev["price"])
-
+        # Compare percentage moves, not absolute price deltas: BTC at 60k and
+        # an altcoin at $2 must be measured on the same relative scale.
+        primary_base = max(abs(float(primary_prev["price"])), 1e-12)
+        compare_base = max(abs(float(compare_prev["price"])), 1e-12)
+        primary_delta = abs(float(primary_last["price"]) - float(primary_prev["price"])) / primary_base
+        compare_delta = abs(float(compare_last["price"]) - float(compare_prev["price"])) / compare_base
         max_delta = max(primary_delta, compare_delta, 1e-9)
         divergence_ratio = abs(primary_delta - compare_delta) / max_delta
 
-        recency_penalty = min(abs(primary_last["index"] - compare_last["index"]) * 2, 20)
+        primary_time = primary_last.get("time")
+        compare_time = compare_last.get("time")
+        if primary_time is not None and compare_time is not None:
+            period_ms = {
+                "15m": 15 * 60 * 1000,
+                "1h": 60 * 60 * 1000,
+                "4h": 4 * 60 * 60 * 1000,
+                "1d": 24 * 60 * 60 * 1000,
+            }.get(self._normalize_timeframe(timeframe), 60 * 60 * 1000)
+            delta_bars = abs(int(primary_time) - int(compare_time)) / period_ms
+        else:
+            delta_bars = abs(primary_last["index"] - compare_last["index"])
+        recency_penalty = min(int(delta_bars * 2), 20)
         confidence = 55 + timeframe_bonus + int(divergence_ratio * 25) - recency_penalty
 
         return max(0, min(100, confidence))

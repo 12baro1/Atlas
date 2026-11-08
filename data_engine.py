@@ -57,8 +57,10 @@ def fetch_candles(symbol, timeframe, limit, force_refresh=False):
 
 
 def invalidate_all():
-    """Zorunlu tazeleme için en düşük seviyeli önbelleği boşaltır."""
+    """Zorunlu tazeleme için tüm piyasa veri önbelleklerini boşaltır."""
     _cache.clear()
+    if "_smt_cache" in globals():
+        _smt_cache.clear()
 
 
 def get_market_data(symbol, force_refresh=False):
@@ -76,14 +78,65 @@ def get_market_data(symbol, force_refresh=False):
     except Exception:
         data["recent_trades"] = None
 
+    # Derivatives context is optional: unsupported endpoints or exchange
+    # hiccups must not break OHLCV analysis.
+    data["open_interest"] = []
+    fetch_oi = getattr(exchange, "fetch_open_interest_history", None)
+    if callable(fetch_oi):
+        try:
+            records = fetch_oi(symbol, timeframe="1h", limit=100) or []
+            records = sorted(records, key=lambda item: item.get("timestamp") or 0)
+            data["open_interest"] = [
+                float(item.get("openInterestValue") or item.get("openInterestAmount"))
+                for item in records
+                if isinstance(item, dict)
+                and (item.get("openInterestValue") is not None or item.get("openInterestAmount") is not None)
+            ]
+        except Exception:
+            data["open_interest"] = []
+    if not data["open_interest"]:
+        fetch_oi_snapshot = getattr(exchange, "fetch_open_interest", None)
+        if callable(fetch_oi_snapshot):
+            try:
+                snapshot = fetch_oi_snapshot(symbol) or {}
+                value = snapshot.get("openInterestValue") or snapshot.get("openInterestAmount")
+                if value is not None:
+                    data["open_interest"] = [float(value)]
+            except Exception:
+                pass
+
+    data["funding_rate"] = []
+    fetch_funding_history = getattr(exchange, "fetch_funding_rate_history", None)
+    if callable(fetch_funding_history):
+        try:
+            records = fetch_funding_history(symbol, limit=100) or []
+            records = sorted(records, key=lambda item: item.get("timestamp") or 0)
+            data["funding_rate"] = [
+                float(item.get("fundingRate"))
+                for item in records
+                if isinstance(item, dict) and item.get("fundingRate") is not None
+            ]
+        except Exception:
+            data["funding_rate"] = []
+    if not data["funding_rate"]:
+        fetch_funding = getattr(exchange, "fetch_funding_rate", None)
+        if callable(fetch_funding):
+            try:
+                snapshot = fetch_funding(symbol) or {}
+                value = snapshot.get("fundingRate")
+                if value is not None:
+                    data["funding_rate"] = [float(value)]
+            except Exception:
+                pass
+
     for timeframe, c_limit in TIMEFRAMES.items():
         data[timeframe] = fetch_candles(symbol, timeframe, c_limit, force_refresh=force_refresh)
 
     return data
 
 
-# Korrelasyon evreni: BTC/ETH (dominance endeksleri Bybit'te yok; oysalar UNKNOWN
-# kalir ve korrelasyon motoru yalnizca gercek veriye dayanarak engel karari verir).
+# Cross-market evidence universe: BTC/ETH 4H candles. Dominance indexes are
+# not fetched from this Bybit data provider and must not be fabricated.
 _CORRELATION_SYMBOLS = {
     "BTC": ("BTC/USDT:USDT", "4h", 200),
     "ETH": ("ETH/USDT:USDT", "4h", 200),
@@ -100,4 +153,41 @@ def get_correlation_universe(force_refresh=False, candle_factory=None):
             universe[key] = candles
         except Exception:
             universe[key] = []
+    return universe
+
+# SMT comparison data is shared across a scan and cached per timeframe.
+# 15m data gets a short TTL so scanning many symbols does not refetch BTC/ETH
+# for every altcoin; higher timeframes use progressively longer TTLs.
+_SMT_SYMBOLS = ("BTC/USDT:USDT", "ETH/USDT:USDT")
+_SMT_TIMEFRAMES = ("15m", "1h", "4h", "1d")
+_SMT_CACHE_TTL_SECONDS = {"15m": 45, "1h": 300, "4h": 900, "1d": 3600}
+_smt_cache = {}
+
+
+def get_smt_universe(force_refresh=False):
+    """Return cached BTC/ETH OHLCV comparison data for SMT on all supported TFs."""
+    now = time.time()
+    universe = {}
+    for symbol in _SMT_SYMBOLS:
+        frames = {}
+        for timeframe in _SMT_TIMEFRAMES:
+            key = (symbol, timeframe)
+            cached = _smt_cache.get(key)
+            ttl = _SMT_CACHE_TTL_SECONDS[timeframe]
+            if (
+                not force_refresh
+                and cached is not None
+                and now - cached[1] <= ttl
+            ):
+                frames[timeframe] = cached[0]
+                continue
+            try:
+                candles = fetch_candles(symbol, timeframe, TIMEFRAMES[timeframe], force_refresh=force_refresh)
+                _smt_cache[key] = (candles, now)
+                frames[timeframe] = candles
+            except Exception:
+                # A temporary exchange failure should not erase a previously
+                # fetched comparison series; the SMT engine can still use it.
+                frames[timeframe] = cached[0] if cached is not None else []
+        universe[symbol] = frames
     return universe

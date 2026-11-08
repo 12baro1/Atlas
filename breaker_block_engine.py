@@ -13,7 +13,7 @@ class BreakerBlockEngine:
 
             broken = False
 
-            for candle in candles[ob["index"] + 1:]:
+            for candle_index, candle in enumerate(candles[ob["index"] + 1:], start=ob["index"] + 1):
 
                 # Bullish OB kırıldı
                 if (
@@ -35,9 +35,15 @@ class BreakerBlockEngine:
 
                     breakers.append({
 
-                        "type": ob["type"],
+                        "type": "BEARISH" if ob["type"] == "BULLISH" else "BULLISH",
+
+                        "original_type": ob["type"],
+
+                        "direction": "BEARISH" if ob["type"] == "BULLISH" else "BULLISH",
 
                         "index": ob["index"],
+
+                        "break_index": candle_index,
 
                         "high": ob["high"],
 

@@ -37,7 +37,7 @@ def test_confluence_scores_unicorn_bonus():
         htf_fvg={"valid": True},
         killzone=True,
         session=True,
-        breaker=[{"breaker": True}],
+        breaker=[{"breaker": True, "type": "BULLISH"}],
         smt={"active": True, "direction": "BULLISH", "confidence": 80},
         orderblocks=[{"type": "BULLISH"}],
         fvg=[{"type": "BULLISH"}],

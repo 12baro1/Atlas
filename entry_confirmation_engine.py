@@ -54,10 +54,18 @@ class EntryConfirmationEngine:
             valid_zone = 0 < low < high
         except (TypeError, ValueError, OverflowError):
             valid_zone = False
-        ob_ote = bool(entry.get("poi_source") == "ORDER_BLOCK" and entry.get("ote_confluence") and valid_zone)
-        if not active_fvg and not ob_ote:
-            result["reason"] = "No valid directional FVG or selected OB+OTE POI"
+        # EntryEngine has already selected and validated the structural POI.
+        # Requiring a second fresh FVG or OB+OTE here duplicated the POI gate
+        # and silently made OTE mandatory for order-block entries.
+        if not valid_zone:
+            result["reason"] = "Selected structural POI is unavailable"
             return result
+        poi_source = str(entry.get("poi_source") or "STRUCTURAL_POI").upper()
+        poi_confirmation = (
+            "FVG" if active_fvg else
+            "ORDER_BLOCK_OTE" if poi_source == "ORDER_BLOCK" and entry.get("ote_confluence") else
+            poi_source
+        )
 
         breaks = [x for x in structure if isinstance(x, dict) and (x.get("bos") or x.get("choch"))]
         latest = breaks[-1] if breaks else None
@@ -68,14 +76,14 @@ class EntryConfirmationEngine:
         result.update({
             "confirmed": True,
             "confirmation_mode": mode,
-            "poi_confirmation": "FVG" if active_fvg else "ORDER_BLOCK_OTE",
+            "poi_confirmation": poi_confirmation,
             "reentry_triggered": False,
             "15m_conflict": conflict,
             "15m_latest_event": str((latest or {}).get("label", "NONE")),
             "reason": (
                 "Valid MTF + POI; opposing 15m evidence retained as execution input"
                 if conflict else
-                "Valid MTF + executable directional POI; 15m evidence used as entry refinement"
+                "Valid MTF + selected structural POI; 15m evidence used as entry refinement"
             ),
         })
         return result

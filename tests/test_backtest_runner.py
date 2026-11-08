@@ -694,3 +694,69 @@ def test_limit_is_cancelled_when_target_was_hit_on_signal_candle():
     assert runner._to_trade(result, candles, entry_index=1, signal_index=0) is None
     assert runner.statistics()["stale_limits_cancelled"] == 1
     assert runner.statistics()["candidate_signals"] == 1
+
+
+def test_missed_limit_reassesses_market_at_next_open_when_net_rr_is_valid():
+    runner = BacktestRunner(partial_exits=False, fee_rate=0.0)
+    candles = [
+        _candle(1, 100.0, 100.5, 99.5, 100.0),
+        # LIMIT=99 is not touched; TP1=102 is reached later in this candle.
+        # A MARKET entry at open=100 still has 2R to TP1 and is valid.
+        _candle(2, 100.0, 102.5, 99.5, 102.0),
+        _candle(3, 102.0, 103.5, 101.5, 103.0),
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 99.0, "stop_loss": 99.0, "tp1": 102.0, "tp2": 103.0, "tp3": 104.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    trade = runner._to_trade(result, candles, entry_index=1, signal_index=0)
+    assert trade is not None
+    assert trade["entry_type"] == "MARKET_FALLBACK"
+    assert trade["entry"] == 100.0
+    assert runner.market_fallback_fills == 1
+    assert runner.stale_limits_cancelled == 0
+
+
+def test_missed_limit_market_reassessment_rejected_when_net_rr_below_minimum():
+    runner = BacktestRunner(partial_exits=False, fee_rate=0.002)
+    candles = [
+        _candle(1, 100.0, 100.5, 99.5, 100.0),
+        # Open=101 leaves only 1R to TP1=102, below the 1.50R floor.
+        _candle(2, 101.0, 102.5, 100.5, 102.0),
+        _candle(3, 102.0, 103.0, 101.5, 102.5),
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 99.0, "stop_loss": 98.0, "tp1": 102.0, "tp2": 103.0, "tp3": 104.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=1, signal_index=0) is None
+    assert runner.market_fallback_fills == 0
+    assert runner.market_fallback_rejected_rr == 1
+    assert runner.stale_limits_cancelled == 1
+
+
+def test_backtest_does_not_count_overlapping_positions_as_independent_trades():
+    runner = BacktestRunner(
+        analyze_fn=lambda window: {
+            "decision": {"action": "EXECUTE"},
+            "signal": {"signal": "LONG"},
+            "risk": {
+                "entry": 100.0, "stop_loss": 99.0,
+                "tp1": 102.0, "tp2": 103.0, "tp3": 104.0,
+            },
+            "analysis": {"entry": {"entry_type": "MARKET"}},
+        },
+        fee_rate=0.0,
+        partial_exits=False,
+    )
+    candles = [_candle(i, 100.0, 103.0, 99.5, 102.0) for i in range(306)]
+    stats = runner.run({"symbol": "BTC/USDT:USDT", "15m": candles}, step=1)
+    assert stats["total"] >= 2
+    assert stats["overlapping_signals_skipped"] >= 1
+    entries = [trade["entry_index"] for trade in stats["trade_history"]]
+    exits = [trade["exit_index"] for trade in stats["trade_history"]]
+    assert all(entries[i + 1] > exits[i] for i in range(len(entries) - 1))

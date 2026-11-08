@@ -61,3 +61,32 @@ def test_market_phase_detection(market_phase_engine):
     assert result['phase_score'] == 96
     assert result['mtf_alignment'] == 100
     assert 'Liquidity Sweep' in result['phase_indicators']
+
+
+def test_neutral_mtf_does_not_receive_full_alignment_score(market_phase_engine):
+    assert market_phase_engine._calculate_mtf_alignment({
+        "valid": True, "weekly": "NEUTRAL", "daily": "NEUTRAL", "h4": "NEUTRAL"
+    }) == 0
+
+
+def test_h4_alignment_is_primary_when_weekly_conflicts(market_phase_engine):
+    assert market_phase_engine._calculate_mtf_alignment({
+        "valid": True, "weekly": "BEARISH", "daily": "BULLISH", "h4": "BULLISH"
+    }) == 75
+
+
+def test_old_structure_events_do_not_remain_active_in_current_phase(market_phase_engine):
+    candles = [type("Candle", (), {"high": 101, "low": 99, "close": 100})() for _ in range(100)]
+    structure = [{"index": 2, "confirmation_index": 5, "bos": True, "choch": False}]
+    result = market_phase_engine.detect(
+        structure=structure,
+        trend={"trend": "RANGE", "strength": 0},
+        liquidity_sweep={"buy_side": False, "sell_side": False},
+        fvg=[],
+        orderblocks=[],
+        premium_discount={"premium": False, "discount": False},
+        mtf={"valid": False, "weekly": "NEUTRAL", "daily": "NEUTRAL", "h4": "NEUTRAL"},
+        candles=candles,
+    )
+    assert result["structure_active"] is False
+    assert result["structure_bos"] is False

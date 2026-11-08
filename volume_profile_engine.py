@@ -76,6 +76,9 @@ class VolumeProfileEngine:
             "bias_strength": self._bias_strength(current_price, poc, vah, val),
             "value_area_position": self._value_area_position(current_price, vah, val),
             "total_volume": round(total_volume, 4),
+            "source": "ohlcv_range_proxy",
+            "is_proxy": True,
+            "method": "candle_range_volume_distribution",
         }
 
     def detect_multi(self, timeframe_payload, bins=36):
@@ -140,12 +143,13 @@ class VolumeProfileEngine:
         return right, left
 
     def _top_nodes(self, histogram, count=3):
-        indexed = list(enumerate(histogram))
+        indexed = [(index, value) for index, value in enumerate(histogram) if value > 0]
         indexed.sort(key=lambda item: item[1], reverse=True)
         return [item[0] for item in indexed[:count]]
 
     def _bottom_nodes(self, histogram, count=3):
-        indexed = list(enumerate(histogram))
+        # Empty bins are not low-volume nodes; exclude them from LVN ranking.
+        indexed = [(index, value) for index, value in enumerate(histogram) if value > 0]
         indexed.sort(key=lambda item: item[1])
         return [item[0] for item in indexed[:count]]
 
@@ -174,16 +178,23 @@ class VolumeProfileEngine:
 
         spread = max(vah - val, 1e-9)
         concentration = min(40, int((poc_share * 100)))
-        distribution_quality = min(30, int((1 / spread) * 2))
+        # Normalize value-area width by price so BTC and low-priced altcoins
+        # receive comparable scores.
+        relative_spread = spread / max(abs(current_price), 1e-9)
+        distribution_quality = min(30, int(0.02 / max(relative_spread, 1e-6)))
         proximity_bonus = max(0, int(15 - (abs(current_price - ((vah + val) / 2)) / spread) * 20))
 
         score = 28 + concentration + distribution_quality + value_bonus + proximity_bonus
         return int(clamp(score))
 
     def _direction_bias(self, state):
-        if state in ["DISCOUNT", "VALUE_LOW", "BELOW_POC", "POC_NEAR"]:
+        # POC proximity and inner value-area location are not directional
+        # signals by themselves. Only clear excursions beyond value are
+        # exposed as mean-reversion context; the optimizer treats them as
+        # weighted evidence, never as a setup direction.
+        if state == "DISCOUNT":
             return "BULLISH"
-        if state in ["PREMIUM", "VALUE_HIGH", "ABOVE_POC"]:
+        if state == "PREMIUM":
             return "BEARISH"
         return "NONE"
 
@@ -218,4 +229,7 @@ class VolumeProfileEngine:
             "bias_strength": 0,
             "value_area_position": "NONE",
             "total_volume": 0,
+            "source": "ohlcv_range_proxy",
+            "is_proxy": True,
+            "method": "candle_range_volume_distribution",
         }

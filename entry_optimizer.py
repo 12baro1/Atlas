@@ -33,7 +33,9 @@ class EntryOptimizer:
         self, entry, current_price=None, trend=None, liquidity_sweep=None,
         ote=None, market_phase=None, market_regime=None, htf_orderblock=None,
         htf_fvg=None, smt=None, unicorn=None, cisd=None, volume_profile=None,
-        institutional=None, orderbook=None,
+        institutional=None, orderbook=None, correlation=None, breaker=None,
+        trendline_sweep=None, ifvg=None, eqh_eql=None, internal_structure=None,
+        external_structure=None, current_index=None,
     ):
         entry = entry if isinstance(entry, dict) else {}
         direction = str(entry.get("direction", "NONE")).upper()
@@ -114,6 +116,21 @@ class EntryOptimizer:
         add_bias("cisd", cisd, 1.2)
         add_bias("institutional_flow", institutional, 1.0)
 
+        correlation_state = correlation if isinstance(correlation, dict) else {}
+        if correlation_state.get("active"):
+            try:
+                pressure = float(correlation_state.get("counterpressure_score", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                pressure = 0.0
+            if correlation_state.get("counterpressure"):
+                weight = 1.0 + max(0.0, min(1.0, pressure))
+                weighted_positions.append((0.16, weight, "correlation_counterpressure"))
+                evidence.append({"source": "correlation", "bias": "COUNTERPRESSURE", "weight": round(weight, 3)})
+                stronger_confirmation_reasons.append("correlation_counterpressure")
+            elif correlation_state.get("supportive"):
+                weighted_positions.append((0.60, 0.9, "correlation_support"))
+                evidence.append({"source": "correlation", "bias": "SUPPORTIVE", "weight": 0.9})
+
         phase_name = str((market_phase or {}).get("phase", "")).strip().lower()
         sweep_confirmed = bool(
             sweep.get("is_sweep")
@@ -136,8 +153,109 @@ class EntryOptimizer:
             weighted_positions.append((0.60 if regime_aligned else 0.18, 1.3, "market_regime"))
             evidence.append({"source": "market_regime", "bias": "ALIGNED" if regime_aligned else "OPPOSED", "weight": 1.3})
 
-        # Use actionable prices only when they lie inside the selected POI.
+        # All remaining structural motors contribute evidence and/or a price
+        # level inside the already selected POI. None of these motors vetoes it.
         weighted_levels = []
+
+        trendline = trendline_sweep if isinstance(trendline_sweep, dict) else {}
+        if trendline.get("active"):
+            sweep_side = str(trendline.get("direction", "")).upper()
+            sweep_direction = "LONG" if sweep_side == "SELL_SIDE" else "SHORT" if sweep_side == "BUY_SIDE" else "NONE"
+            if sweep_direction != "NONE":
+                aligned_sweep = sweep_direction == direction
+                weighted_positions.append((0.62 if aligned_sweep else 0.16, 1.4, "trendline_sweep"))
+                evidence.append({"source": "trendline_sweep", "bias": "ALIGNED" if aligned_sweep else "COUNTERPRESSURE", "weight": 1.4})
+
+        recent_ifvg = []
+        for gap in (ifvg or []):
+            if not isinstance(gap, dict) or not gap.get("inverted"):
+                continue
+            try:
+                index = int(gap.get("index", -1))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if current_index is not None and index < int(current_index) - 48:
+                continue
+            recent_ifvg.append(gap)
+        for gap in recent_ifvg[-4:]:
+            original_side = str(gap.get("type", "")).upper()
+            effective_side = "SHORT" if original_side == "BULLISH" else "LONG" if original_side == "BEARISH" else "NONE"
+            if effective_side == "NONE":
+                continue
+            aligned_gap = effective_side == direction
+            weighted_positions.append((0.62 if aligned_gap else 0.16, 1.2, "ifvg"))
+            evidence.append({"source": "ifvg", "bias": "ALIGNED" if aligned_gap else "COUNTERPRESSURE", "weight": 1.2})
+            try:
+                zone_low, zone_high = sorted((float(gap.get("from")), float(gap.get("to"))))
+                self._add_level(weighted_levels, (zone_low + zone_high) / 2, 1.2, "ifvg_zone", low, high)
+            except (TypeError, ValueError, OverflowError):
+                pass
+
+        equal_levels = eqh_eql if isinstance(eqh_eql, dict) else {}
+        equal_key = "eql" if direction == "LONG" else "eqh"
+        for level in (equal_levels.get(equal_key) or [])[:3]:
+            if not isinstance(level, dict):
+                continue
+            indices = level.get("indices") or []
+            if current_index is not None and indices and max(indices) < int(current_index) - 48:
+                continue
+            self._add_level(weighted_levels, level.get("price"), 1.0, f"equal_{equal_key}", low, high)
+            evidence.append({"source": f"equal_{equal_key}", "bias": "SUPPORTIVE", "weight": 1.0})
+
+        recent_internal = [
+            item for item in (internal_structure or [])
+            if isinstance(item, dict)
+            and (current_index is None or int(item.get("index", current_index)) >= int(current_index) - 48)
+        ][-8:]
+        internal_labels = [str(item.get("label", "")).upper() for item in recent_internal]
+        internal_bull = sum(label in {"HH", "HL"} for label in internal_labels)
+        internal_bear = sum(label in {"LH", "LL"} for label in internal_labels)
+        internal_side = "LONG" if internal_bull > internal_bear else "SHORT" if internal_bear > internal_bull else "NONE"
+        if internal_side != "NONE":
+            aligned_internal = internal_side == direction
+            weighted_positions.append((0.60 if aligned_internal else 0.18, 1.1, "internal_structure"))
+            evidence.append({"source": "internal_structure", "bias": "ALIGNED" if aligned_internal else "COUNTERPRESSURE", "weight": 1.1})
+
+        recent_external = [
+            item for item in (external_structure or [])
+            if isinstance(item, dict)
+            and (item.get("bos") or item.get("choch"))
+            and str(item.get("direction", "")).upper() in {"BULLISH", "BEARISH"}
+        ]
+        if current_index is not None:
+            recent_external = [
+                item for item in recent_external
+                if int(item.get("index", current_index)) >= int(current_index) - 64
+            ]
+        if recent_external:
+            event = recent_external[-1]
+            external_side = "LONG" if str(event["direction"]).upper() == "BULLISH" else "SHORT"
+            aligned_external = external_side == direction
+            weighted_positions.append((0.62 if aligned_external else 0.16, 1.4, "external_structure"))
+            evidence.append({"source": "external_structure", "bias": "ALIGNED" if aligned_external else "COUNTERPRESSURE", "weight": 1.4})
+
+        recent_breakers = []
+        for block in (breaker or []):
+            if not isinstance(block, dict) or not block.get("breaker"):
+                continue
+            try:
+                index = int(block.get("break_index", block.get("index", -1)))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if current_index is not None and index < int(current_index) - 48:
+                continue
+            recent_breakers.append(block)
+        for block in recent_breakers[-3:]:
+            block_side = "LONG" if str(block.get("type", "")).upper() == "BULLISH" else "SHORT"
+            aligned_breaker = block_side == direction
+            weighted_positions.append((0.62 if aligned_breaker else 0.16, 1.2, "breaker"))
+            evidence.append({"source": "breaker", "bias": "ALIGNED" if aligned_breaker else "COUNTERPRESSURE", "weight": 1.2})
+            try:
+                self._add_level(weighted_levels, (float(block.get("low")) + float(block.get("high"))) / 2, 1.2, "breaker_zone", low, high)
+            except (TypeError, ValueError, OverflowError):
+                pass
+
+        # Use actionable prices only when they lie inside the selected POI.
         if isinstance(ote, dict):
             self._add_level(weighted_levels, ote.get("fib62"), 1.3, "ote_62", low, high)
             self._add_level(weighted_levels, ote.get("fib79"), 1.0, "ote_79", low, high)
@@ -251,6 +369,7 @@ class EntryOptimizer:
             "aligned_weight": round(aligned_weight, 3),
             "opposing_weight": round(opposing_weight, 3),
             "evidence_balance": round(aligned_weight - opposing_weight, 3),
+            "counterpressure_reasons": sorted(set(stronger_confirmation_reasons)),
         }
         entry["entry_optimizer"] = {
             "applied": True,

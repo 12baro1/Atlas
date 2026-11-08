@@ -244,6 +244,9 @@ class BacktestRunner:
         self.stale_limits_cancelled = 0
         self.stale_limit_signal_candle_target = 0
         self.stale_limit_target_before_fill = 0
+        self.market_fallback_fills = 0
+        self.market_fallback_rejected_rr = 0
+        self.overlapping_signals_skipped = 0
         self.open_trades = 0
         self.invalid_candidates = 0
         self.no_followup_data = 0
@@ -297,6 +300,7 @@ class BacktestRunner:
 
         total = len(candles)
         warmup = 300
+        busy_until_index = -1
         for idx in range(warmup, total, max(1, step)):
             # Signal decision is made at the close of the current 15m candle.
             decision_time_ms = candles[idx].time + 15 * 60 * 1000
@@ -305,6 +309,10 @@ class BacktestRunner:
                 for tf in ("15m", "1h", "4h", "1d", "1w")
             }
             window["symbol"] = data.get("symbol", "SYMBOL")
+            # Preserve comparison universes so SMT and peer-flow motors can
+            # build timestamp-aligned context during historical replay.
+            if data.get("smt_universe"):
+                window["smt_universe"] = data["smt_universe"]
 
             self.analysis_calls += 1
             result = self.analyze_fn(window) if self.analyze_fn else on_signal(window)
@@ -416,10 +424,30 @@ class BacktestRunner:
                 self.raw_short_signals += 1
             else:
                 self.non_directional_results += 1
-            trade = self._to_trade(result, candles, idx + 1, lenient=lenient, signal_index=idx)
-            if trade is None:
+            # One symbol can have only one active position or pending LIMIT
+            # at a time. Keep analyzing candles for diagnostics, but do not
+            # count overlapping entries as independent portfolio trades.
+            if idx <= busy_until_index:
+                decision = result.get("decision") if isinstance(result, dict) else {}
+                if isinstance(decision, dict) and str(decision.get("action", "")).upper() == "EXECUTE":
+                    self.overlapping_signals_skipped += 1
                 continue
-            self._record(trade)
+
+            open_before = self.open_trades
+            unfilled_before = self.unfilled_limits
+            trade = self._to_trade(result, candles, idx + 1, lenient=lenient, signal_index=idx)
+            if trade is not None:
+                self._record(trade)
+                exit_index = trade.get("exit_index")
+                if exit_index is not None:
+                    busy_until_index = max(busy_until_index, int(exit_index))
+            elif self.open_trades > open_before:
+                # An unresolved trade remains open through the end of this
+                # historical window; no second position may overlap it.
+                busy_until_index = total - 1
+            elif self.unfilled_limits > unfilled_before:
+                # The pending order occupied this symbol until its expiry.
+                busy_until_index = min(total - 1, idx + self.limit_expiry_bars - 1)
 
         return self.statistics()
 
@@ -466,6 +494,7 @@ class BacktestRunner:
         fill_index = None
         entry_price = None
         limit_intrabar_fill = False
+        market_fallback_used = False
         if entry_type == "MARKET":
             fill_index = entry_index
             entry_price = _num(candles[fill_index].open)
@@ -512,8 +541,41 @@ class BacktestRunner:
                 # in one candle, OHLC cannot reveal the path: keep the fill but
                 # apply the conservative fill-candle handling below.
                 if target_already_hit and not touched:
+                    # The pending LIMIT missed, but the next candle may still
+                    # open before TP1. Reassess a MARKET entry at that candle's
+                    # open; never assume a fill after the target was reached.
+                    # Require the nearest remaining structural target to retain
+                    # at least 1.50R after round-trip costs.
+                    open_before_tp1 = (
+                        opened < _num(risk.get("tp1"))
+                        if is_long else opened > _num(risk.get("tp1"))
+                    )
+                    fallback_stop = _num(stop)
+                    fallback_tp1 = _num(risk.get("tp1"))
+                    fallback_risk = abs(opened - fallback_stop) if fallback_stop is not None else 0.0
+                    fallback_reward = (
+                        fallback_tp1 - opened if is_long else opened - fallback_tp1
+                    ) if fallback_tp1 is not None else 0.0
+                    fallback_net_rr = (
+                        (fallback_reward - abs(opened) * self.fee_rate) / fallback_risk
+                        if fallback_risk > 0 else 0.0
+                    )
+                    valid_fallback_geometry = (
+                        fallback_stop is not None
+                        and ((is_long and fallback_stop < opened) or (not is_long and fallback_stop > opened))
+                        and fallback_reward > 0
+                    )
+                    if open_before_tp1 and valid_fallback_geometry and fallback_net_rr >= 1.50:
+                        entry_price = opened
+                        fill_index = candidate_index
+                        entry_type = "MARKET_FALLBACK"
+                        limit_intrabar_fill = False
+                        market_fallback_used = True
+                        break
                     self.stale_limits_cancelled += 1
                     self.stale_limit_target_before_fill += 1
+                    if open_before_tp1 and fallback_net_rr < 1.50:
+                        self.market_fallback_rejected_rr += 1
                     return None
                 if not touched:
                     continue
@@ -556,6 +618,9 @@ class BacktestRunner:
             if valid_tps != sorted(valid_tps, reverse=True):
                 self.invalid_candidates += 1
                 return None
+
+        if market_fallback_used:
+            self.market_fallback_fills += 1
 
         use_partial = bool(getattr(self, "partial_exits", True))
         if limit_intrabar_fill:
@@ -761,6 +826,9 @@ class BacktestRunner:
                 "stale_limits_cancelled": self.stale_limits_cancelled,
                 "stale_limit_signal_candle_target": self.stale_limit_signal_candle_target,
                 "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
+                "market_fallback_fills": self.market_fallback_fills,
+                "market_fallback_rejected_rr": self.market_fallback_rejected_rr,
+                "overlapping_signals_skipped": self.overlapping_signals_skipped,
                 "trade_history": list(self.history),
                 "open_trades": self.open_trades,
                 "invalid_candidates": self.invalid_candidates,
@@ -825,6 +893,9 @@ class BacktestRunner:
             "stale_limits_cancelled": self.stale_limits_cancelled,
             "stale_limit_signal_candle_target": self.stale_limit_signal_candle_target,
             "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
+            "market_fallback_fills": self.market_fallback_fills,
+            "market_fallback_rejected_rr": self.market_fallback_rejected_rr,
+            "overlapping_signals_skipped": self.overlapping_signals_skipped,
             "trade_history": list(self.history),
             "open_trades": self.open_trades,
             "invalid_candidates": self.invalid_candidates,
