@@ -782,3 +782,34 @@ def test_tp_hit_with_negative_net_r_is_not_learned_as_a_win(monkeypatch, tmp_pat
     assert len(records) == 1
     assert records[0]["r"] == pytest.approx(-0.1, abs=1e-4)
     assert records[0]["win"] is False
+
+
+def test_signal_outcome_applies_captured_spread_and_slippage_costs(tmp_path, monkeypatch):
+    monkeypatch.setattr(Config, "ROUND_TRIP_COST_RATE", 0.002)
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        opened_at=1_700_000_000_000,
+        payload={
+            "execution_costs": {
+                "round_trip_cost_rate": 0.002,
+                "spread_buffer": 0.02,
+                "slippage_buffer": 0.03,
+                "model": "round_trip_fee_plus_spread_slippage",
+            }
+        },
+    )
+    candle = _precise_candle(1, high=101.2, low=100.1, close=101.1)
+
+    resolved = journal.resolve_signal_outcome(outcome, [candle])
+
+    assert resolved is not None
+    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
+    assert resolved["fee_rr"] == pytest.approx(0.2, abs=1e-4)
+    assert resolved["spread_slippage_rr"] == pytest.approx(0.05, abs=1e-4)
+    assert resolved["execution_cost_rr"] == pytest.approx(0.25, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(0.25, abs=1e-4)
