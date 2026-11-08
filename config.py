@@ -97,7 +97,8 @@ class Config:
     ATR_PERIOD = 14
     # Structural invalidation remains primary; ATR is a volatility floor, not a demand to force every stop to 0.75 ATR.
     MIN_STOP_ATR_MULTIPLIER = 0.25
-    STOP_STRUCTURE_BUFFER_ATR = 0.10
+    # Keep the selected POI invalidation edge primary while ensuring the stop buffer clears the 0.25 ATR risk floor.
+    STOP_STRUCTURE_BUFFER_ATR = 0.30
     # Sweep-triggered MARKET entry expires shortly after the confirmed close break.
     SWEEP_MARKET_ENTRY_MAX_AGE_BARS = int(os.getenv("ATLAS_SWEEP_MARKET_ENTRY_MAX_AGE_BARS", "2"))
     # Maximum distance for pending LIMIT entries from the current market.
