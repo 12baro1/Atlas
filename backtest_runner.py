@@ -785,6 +785,10 @@ class BacktestRunner:
             "exit_time": exit_time,
             "result": outcome.get("result"),
             "tp": outcome.get("tp", 0),
+            # Keep price-path performance separate from modeled execution costs.
+            # A normal stop is approximately -1 gross R; net R can be lower
+            # when fees/spread/slippage are large relative to the stop distance.
+            "gross_rr": round(float(outcome.get("net_rr", 0.0) or 0.0), 4),
             "net_rr": round(max(net_rr, -99.0), 4),
             "fee_rr": round(fee_rr, 4),
             "spread_slippage_rr": round(spread_slippage_rr, 4),
