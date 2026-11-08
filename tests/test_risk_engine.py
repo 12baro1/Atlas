@@ -433,3 +433,8 @@ def test_risk_engine_normalizes_weights_only_over_valid_targets(monkeypatch):
 
     assert risk["partial_exit_weights"] == pytest.approx({"tp1": 0.5, "tp3": 0.5})
     assert risk["weighted_rr"] == pytest.approx(2.0)
+
+
+
+def test_default_minimum_stop_atr_floor_is_not_micro_tight():
+    assert Config.MIN_STOP_ATR_MULTIPLIER >= 0.25
