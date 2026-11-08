@@ -262,7 +262,12 @@ class SetupReasoningEngine:
                 ]
                 latest_structure = structure_events[-1] if structure_events else {}
                 structure_aligned = self._direction(latest_structure.get("direction")) == direction
-                orderflow_supportive = bool(\n                    isinstance(orderbook, dict) and (\n                        orderbook.get("supportive") if self._direction(mtf.get("entry")) == direction\n                        else orderbook.get("opposing")\n                    )\n                )
+                orderflow_supportive = bool(
+                    isinstance(orderbook, dict) and (
+                        orderbook.get("supportive") if self._direction(mtf.get("entry")) == direction
+                        else orderbook.get("opposing")
+                    )
+                )
                 candidate_distance = abs(entry_price - current)
                 atr_distance = candidate_distance / atr_value if atr_value and atr_value > 0 else None
                 distance_pct = candidate_distance / current if current > 0 else None
