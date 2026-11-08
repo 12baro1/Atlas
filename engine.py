@@ -1451,6 +1451,25 @@ class AtlasEngine:
         payload["cisd"] = cisd_state or {}
         payload["liquidity_sweep"] = structure_state.get("liquidity_sweep", {})
 
+        # Build peer-asset context from the same timestamp-aligned SMT universe.
+        # In backtests, future peer candles are trimmed before they reach the
+        # institutional multi-asset confirmation motor.
+        smt_universe = data.get("smt_universe") or {}
+        primary = data.get("symbol", "UNKNOWN")
+        primary_15m = data.get("15m") or []
+        if primary_15m:
+            from timing import closed_htf_candles
+            reference_ms = int(primary_15m[-1].time) + 15 * 60 * 1000
+            peers = {}
+            for peer_symbol, frames in smt_universe.items():
+                if peer_symbol == primary or not isinstance(frames, dict):
+                    continue
+                peer_candles = closed_htf_candles(frames.get("4h") or [], reference_ms, "4h")
+                if peer_candles:
+                    peers[peer_symbol] = {"candles": peer_candles}
+            if peers:
+                payload["peer_assets"] = peers
+
         return self.institutional.analyze(payload)
 
     def _build_volume_profile_state(self, data):
