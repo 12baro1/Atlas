@@ -14,6 +14,14 @@ class SignalEngine:
     def __init__(self):
         self.logger = logging.getLogger("atlas.signal")
 
+    @staticmethod
+    def _safe_number(value, default=0.0):
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
+        return number if number == number and abs(number) != float("inf") else default
+
     def generate(self, analysis):
         confluence = analysis["confluence"]
         base_confidence = self._normalize_confluence_score(confluence.get("score", 0))
