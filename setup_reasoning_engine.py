@@ -61,7 +61,12 @@ class SetupReasoningEngine:
         directions = []
         primary = self._direction((mtf or {}).get("entry"))
         if primary != "NONE":
-            directions.append((primary, "H4_STRUCTURE"))
+            primary_source = (
+                "CONFIRMED_SWEEP_REVERSAL"
+                if str((mtf or {}).get("entry_source", "")).upper() == "CONFIRMED_15M_REVERSAL"
+                else "H4_STRUCTURE"
+            )
+            directions.append((primary, primary_source))
         # A counter-trend scenario is admitted only after an actual one-sided
         # sweep and a causally confirmed post-sweep structure break.
         if isinstance(sweep, dict) and sweep.get("is_sweep") and not sweep.get("ambiguous_sweep"):
