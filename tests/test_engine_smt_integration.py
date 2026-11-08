@@ -109,6 +109,8 @@ def test_compose_analysis_includes_smt_key():
 
     assert "smt" in analysis
     assert analysis["smt"]["direction"] == "BULLISH"
+    assert "motor_diagnostics" in analysis
+    assert analysis["motor_diagnostics"]["motor_outputs"]["mtf"]["entry"] is None
 
 
 def test_smt_comparison_series_are_cut_off_at_primary_decision_time():
