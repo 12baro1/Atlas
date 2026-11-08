@@ -74,3 +74,15 @@ def test_invalid_or_non_finite_poi_levels_are_ignored():
         ],
     )
     assert len(result["candidates"]) == 1
+
+
+
+def test_countertrend_candidate_can_use_raw_four_hour_order_block():
+    result = _run(
+        fvg=[],
+        higher_timeframe_orderblocks=[
+            {"type": "BULLISH", "low": 100, "high": 105, "mitigated": False}
+        ],
+    )
+    assert result["selected"]["direction"] == "LONG"
+    assert result["selected"]["poi_source"] == "HTF_ORDER_BLOCK"
