@@ -41,9 +41,13 @@ class TrendEngine:
             strength = 3 if weekly == direction else 2
             return {
                 "trend": direction, "strength": strength, "score": strength * 25,
-                "source": source, "independent": source == "structure",
+                "source": "h4_structure" if source == "structure" else source,
+                "derived_from": "h4_structure" if source == "structure" else "mtf_entry",
+                "independent": False,
             }
         return {
             "trend": "RANGE", "strength": 0, "score": 0,
-            "source": source, "independent": source == "structure",
+            "source": "h4_structure" if source == "structure" else source,
+            "derived_from": "h4_structure" if source == "structure" else "mtf_entry",
+            "independent": False,
         }
