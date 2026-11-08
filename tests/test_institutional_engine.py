@@ -70,3 +70,30 @@ def test_institutional_engine_returns_full_analysis_bundle():
     assert result["adaptive_position_sizing"]["factor"] >= 0.7
     assert result["institutional_flow"]["direction"] in ["LONG", "SHORT", "NONE"]
 
+
+
+def test_recent_taker_trades_override_candle_color_cvd_proxy():
+    engine = InstitutionalAnalysisEngine()
+    trades = [
+        {"side": "buy", "amount": 2.0},
+        {"side": "buy", "amount": 1.5},
+        {"side": "sell", "amount": 0.5},
+        {"side": "buy", "amount": 1.0},
+        {"side": "sell", "amount": 0.25},
+        {"side": "buy", "amount": 0.75},
+    ]
+    flow = engine._trade_flow(trades)
+    assert flow is not None
+    assert flow["cvd"]["source"] == "bybit_recent_trades"
+    assert flow["cvd"]["is_proxy"] is False
+    assert flow["cvd"]["direction"] == "LONG"
+    assert flow["volume_delta"]["imbalance"] > 0
+
+
+def test_candle_cvd_is_explicitly_marked_as_proxy():
+    engine = InstitutionalAnalysisEngine()
+    cvd = engine._cumulative_volume_delta(_candles())
+    delta = engine._volume_delta(_candles())
+    assert cvd["source"] == "candle_direction_proxy"
+    assert cvd["is_proxy"] is True
+    assert delta["source"] == "candle_direction_proxy"
