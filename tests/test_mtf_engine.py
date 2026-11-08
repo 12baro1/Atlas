@@ -186,11 +186,12 @@ def test_trend_engine_reads_its_own_structure_instead_of_mtf_entry():
     ]
     result = TrendEngine().calculate({"entry": "SHORT", "weekly": "BEARISH"}, structure=structure)
     assert result["trend"] == "BULLISH"
-    assert result["source"] == "structure"
-    assert result["independent"] is True
+    assert result["source"] == "h4_structure"
+    assert result["derived_from"] == "h4_structure"
+    assert result["independent"] is False
 
 
 def test_trend_engine_with_empty_explicit_structure_does_not_copy_mtf_direction():
     result = TrendEngine().calculate({"entry": "LONG"}, structure=[])
     assert result["trend"] == "RANGE"
-    assert result["source"] == "structure"
+    assert result["source"] == "h4_structure"
