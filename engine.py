@@ -628,6 +628,12 @@ class AtlasEngine:
                         "learning": setup_quality.get("learning") or {},
                         "setup_quality": setup_quality,
                         "motor_diagnostics": (analysis.get("motor_diagnostics") or {}),
+                        "execution_costs": {
+                            "round_trip_cost_rate": risk.get("round_trip_cost_rate"),
+                            "spread_buffer": risk.get("spread_buffer"),
+                            "slippage_buffer": risk.get("slippage_buffer"),
+                            "model": risk.get("cost_model") or "round_trip_fee_plus_spread_slippage",
+                        },
                         "decision": result_payload.get("decision") or {},
                     },
                 )
