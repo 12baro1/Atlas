@@ -438,6 +438,7 @@ def _combine_stats(all_stats):
         "tp1": 0,
         "tp2": 0,
         "tp3": 0,
+        "trade_history": [],
     }
     for _, stats in all_stats:
         for key in (
@@ -457,6 +458,47 @@ def _combine_stats(all_stats):
         combined["net_rr"] += float(stats.get("net_rr", 0) or 0)
         combined["gross_profit_rr"] += float(stats.get("gross_profit_rr", 0) or 0)
         combined["gross_loss_rr"] += float(stats.get("gross_loss_rr", 0) or 0)
+        combined["trade_history"].extend(stats.get("trade_history") or [])
+
+    # Rebuild combined direction and MTF outcome groups from the actual closed
+    # trades; summing per-symbol percentages would distort the pooled sample.
+    combined["direction_breakdown"] = {}
+    combined["mtf_trade_breakdown"] = {}
+    grouped = {}
+    for trade in combined["trade_history"]:
+        context = trade.get("mtf_context") or {}
+        direction = str(trade.get("direction") or "UNKNOWN").upper()
+        side_key = direction
+        mtf_key = (
+            f"{direction}|weekly={str(context.get('weekly') or 'UNKNOWN').upper()}"
+            f"|daily={str(context.get('daily') or 'UNKNOWN').upper()}"
+            f"|h4={str(context.get('h4') or 'UNKNOWN').upper()}"
+        )
+        grouped.setdefault(side_key, []).append(trade)
+        combined["mtf_trade_breakdown"].setdefault(mtf_key, []).append(trade)
+
+    for key, trades in grouped.items():
+        values = [float(item.get("net_rr", 0.0) or 0.0) for item in trades]
+        wins = [value for value in values if value > 0]
+        losses = [value for value in values if value < 0]
+        gross_profit, gross_loss = sum(wins), abs(sum(losses))
+        combined["direction_breakdown"][key] = {
+            "total": len(trades), "wins": len(wins), "losses": len(losses),
+            "winrate": round(len(wins) / len(trades) * 100.0, 2) if trades else 0.0,
+            "expectancy": round(sum(values) / len(values), 4) if values else 0.0,
+            "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else round(gross_profit, 4),
+        }
+    for key, trades in list(combined["mtf_trade_breakdown"].items()):
+        values = [float(item.get("net_rr", 0.0) or 0.0) for item in trades]
+        wins = [value for value in values if value > 0]
+        losses = [value for value in values if value < 0]
+        gross_profit, gross_loss = sum(wins), abs(sum(losses))
+        combined["mtf_trade_breakdown"][key] = {
+            "total": len(trades), "wins": len(wins), "losses": len(losses),
+            "winrate": round(len(wins) / len(trades) * 100.0, 2) if trades else 0.0,
+            "expectancy": round(sum(values) / len(values), 4) if values else 0.0,
+            "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else round(gross_profit, 4),
+        }
 
     combined["losses"] = combined["total"] - combined["wins"]
     if combined["total"]:
