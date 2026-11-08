@@ -162,3 +162,12 @@ def test_context_motors_are_recorded_in_setup_reasoning():
     assert any("Internal structure LONG" in item for item in selected["supporting_evidence"])
     assert any("Premium/Discount zone favorable" in item for item in selected["supporting_evidence"])
     assert any("Market phase: Accumulation" in item for item in selected["market_context"])
+
+
+
+def test_trendline_liquidity_can_be_a_structural_candidate_target():
+    result = _run(
+        liquidity=[],
+        trendline_liquidity=[{"type": "BUY_SIDE", "price": 125}],
+    )
+    assert result["selected"]["projected_target"] == 125
