@@ -48,7 +48,7 @@ class SetupReasoningEngine:
         if not isinstance(module, dict):
             return "NONE"
         side = SetupReasoningEngine._direction(
-            module.get("direction") or module.get("bias")
+            module.get("direction") or module.get("bias") or module.get("directional_bias")
         )
         if side != "NONE":
             return side
