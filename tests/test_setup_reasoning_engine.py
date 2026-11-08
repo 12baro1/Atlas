@@ -21,7 +21,7 @@ def _run(**overrides):
         "smt": {"active": True, "direction": "BEARISH", "confidence": 80},
         "unicorn": {}, "cisd": {}, "volume_profile": {}, "institutional": {},
         "orderbook": {}, "correlation": {}, "market_phase": {"phase": "Reversal"},
-        "liquidity": [{"price": 120}],
+        "liquidity": [{"type": "BUY_SIDE", "price": 120}],
         "external_structure": [],
     }
     payload.update(overrides)
@@ -58,7 +58,7 @@ def test_candidate_selection_prefers_better_projected_rr_not_motor_vote_count():
             {"type": "BULLISH", "from": 106, "to": 108, "filled": False},
         ],
         current_price=112,
-        liquidity=[{"price": 120}, {"price": 150}],
+        liquidity=[{"type": "BUY_SIDE", "price": 120}, {"type": "BUY_SIDE", "price": 150}],
     )
     assert len(result["candidates"]) == 2
     assert result["selected"]["projected_rr"] == max(
@@ -95,3 +95,10 @@ def test_orderbook_bias_is_reinterpreted_for_countertrend_candidate():
     assert selected["direction"] == "LONG"
     assert any("Order flow counterpressure" in item for item in selected["opposing_evidence"])
     assert selected["counterpressure_adjusted"] is True
+
+
+
+def test_wrong_side_liquidity_is_not_used_as_projected_target():
+    result = _run(liquidity=[{"type": "SELL_SIDE", "price": 200}])
+    assert result["selected"]["projected_target"] is None
+    assert result["selected"]["projected_rr"] is None
