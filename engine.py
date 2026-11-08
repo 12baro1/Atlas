@@ -1639,7 +1639,7 @@ class AtlasEngine:
             inducement = self._detect_inducement(structure, liquidity_sweep, eqh_eql)
 
             local_direction = self._timeframe_structure_direction(structure)
-            local_mtf = self._timeframe_mtf_context(local_direction)
+            local_mtf = self._timeframe_mtf_context(local_direction, timeframe)
             local_trend = self.trend.calculate(local_mtf, structure=structure)
             swing_high, swing_low, current_price = self._price_context(candles)
             local_premium_discount = self.premium_discount.calculate(swing_high, swing_low, current_price)
