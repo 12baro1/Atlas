@@ -1084,7 +1084,6 @@ class AtlasEngine:
         h4_fvg=None,
         daily_fvg=None,
         inducement=None,
-        premium_discount=None,
         trendline_liquidity=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
