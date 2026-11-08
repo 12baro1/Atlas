@@ -760,3 +760,41 @@ def test_backtest_does_not_count_overlapping_positions_as_independent_trades():
     entries = [trade["entry_index"] for trade in stats["trade_history"]]
     exits = [trade["exit_index"] for trade in stats["trade_history"]]
     assert all(entries[i + 1] > exits[i] for i in range(len(entries) - 1))
+
+
+
+def test_full_exit_simulator_accounts_for_long_stop_gap_at_open():
+    candles = [_candle(1, 80.0, 82.0, 79.0, 81.0)]
+    out = simulate_trade(100.0, 90.0, [110.0, 120.0], candles, "LONG")
+    assert out["result"] == "LOSS"
+    assert out["exit_price"] == 80.0
+    assert out["stop_gap"] is True
+    assert out["stop_gap_distance"] == 10.0
+    assert out["stop_gap_r"] == 1.0
+    assert out["net_rr"] == -2.0
+
+
+def test_partial_simulator_accounts_for_short_stop_gap_at_open():
+    candles = [_candle(1, 108.0, 109.0, 107.0, 108.5)]
+    out = simulate_trade_partial(100.0, 101.0, [99.0, 98.0, 97.0], candles, "SHORT")
+    assert out["result"] == "LOSS"
+    assert out["exit_price"] == 108.0
+    assert out["stop_gap"] is True
+    assert out["stop_gap_distance"] == 7.0
+    assert out["stop_gap_r"] == 7.0
+    assert out["net_rr"] == -8.0
+
+
+def test_mtf_trade_breakdown_separates_direction_and_context():
+    runner = BacktestRunner()
+    runner._record({
+        "_w": False, "net_rr": -1.0, "_levels": [], "direction": "LONG",
+        "mtf_context": {"weekly": "BEARISH", "daily": "BEARISH", "h4": "BULLISH"},
+    })
+    runner._record({
+        "_w": True, "net_rr": 1.5, "_levels": [3], "direction": "SHORT",
+        "mtf_context": {"weekly": "BEARISH", "daily": "BEARISH", "h4": "BEARISH"},
+    })
+    stats = runner.statistics()
+    assert stats["mtf_trade_breakdown"]["LONG|weekly=BEARISH|daily=BEARISH|h4=BULLISH"]["losses"] == 1
+    assert stats["mtf_trade_breakdown"]["SHORT|weekly=BEARISH|daily=BEARISH|h4=BEARISH"]["wins"] == 1
