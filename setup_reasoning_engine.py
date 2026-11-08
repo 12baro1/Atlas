@@ -130,15 +130,24 @@ class SetupReasoningEngine:
                     (supporting if event_side == direction else opposing).append(
                         f"15m {events[-1].get('label', 'structure break')} {event_side}"
                     )
+        reference_side = self._direction((mtf or {}).get("entry"))
         if isinstance(orderbook, dict) and (orderbook.get("active") or orderbook.get("trade_flow_active")):
-            if orderbook.get("supportive"):
+            book_supportive = bool(orderbook.get("supportive"))
+            book_opposing = bool(orderbook.get("opposing"))
+            if reference_side != direction:
+                book_supportive, book_opposing = book_opposing, book_supportive
+            if book_supportive:
                 supporting.append("Order flow supports entry")
-            if orderbook.get("opposing"):
+            if book_opposing:
                 opposing.append("Order flow counterpressure")
         if isinstance(correlation, dict) and correlation.get("active"):
-            if correlation.get("supportive"):
+            corr_supportive = bool(correlation.get("supportive"))
+            corr_opposing = bool(correlation.get("counterpressure"))
+            if reference_side != direction:
+                corr_supportive, corr_opposing = corr_opposing, corr_supportive
+            if corr_supportive:
                 supporting.append("Cross-market correlation supports entry")
-            if correlation.get("counterpressure"):
+            if corr_opposing:
                 opposing.append("Cross-market counterpressure")
         phase = (market_phase or {}).get("phase") if isinstance(market_phase, dict) else None
         if phase:
@@ -253,7 +262,7 @@ class SetupReasoningEngine:
                 ]
                 latest_structure = structure_events[-1] if structure_events else {}
                 structure_aligned = self._direction(latest_structure.get("direction")) == direction
-                orderflow_supportive = bool(isinstance(orderbook, dict) and orderbook.get("supportive"))
+                orderflow_supportive = bool(\n                    isinstance(orderbook, dict) and (\n                        orderbook.get("supportive") if self._direction(mtf.get("entry")) == direction\n                        else orderbook.get("opposing")\n                    )\n                )
                 candidate_distance = abs(entry_price - current)
                 atr_distance = candidate_distance / atr_value if atr_value and atr_value > 0 else None
                 distance_pct = candidate_distance / current if current > 0 else None
