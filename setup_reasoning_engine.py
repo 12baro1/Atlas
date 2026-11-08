@@ -168,6 +168,7 @@ class SetupReasoningEngine:
                 ote_bounds = min(a, b), max(a, b)
         require_ote = str(regime.get("regime", "")).upper() in {"TRENDING_UP", "TRENDING_DOWN"}
         atr_buffer = 0.0
+        atr_value = None
         if candles:
             try:
                 from utils.atr import atr as calculate_atr
@@ -283,6 +284,7 @@ class SetupReasoningEngine:
                     "reasoning": (
                         f"{direction} {source}: POI {low:g}-{high:g}; "
                         + ("sweep reclaim confirmed" if inside and market_confirmed else "price can retrace to POI")
+                        + (f"; {entry_depth_reason}" if entry_depth_reason else "")
                     ),
                 }
                 candidates.append(candidate)
