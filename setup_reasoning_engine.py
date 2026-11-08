@@ -33,7 +33,7 @@ class SetupReasoningEngine:
     def _bounds(item, source):
         if not isinstance(item, dict):
             return None
-        if source in {"FVG", "HTF_FVG"}:
+        if source in {"FVG", "HTF_FVG", "IFVG"}:
             first, second = item.get("from"), item.get("to")
         else:
             first, second = item.get("low"), item.get("high")
@@ -127,7 +127,7 @@ class SetupReasoningEngine:
 
     def _evidence(self, direction, mtf, sweep, structure, ote, htf_orderblock,
                   htf_fvg, smt, unicorn, cisd, volume_profile, institutional,
-                  orderbook, correlation, market_phase, market_regime):
+                  orderbook, correlation, market_phase, market_regime, breaker=None,\n                  ifvg=None, trendline_sweep=None, eqh_eql=None, inducement=None,\n                  premium_discount=None, internal_structure=None):
         supporting, opposing = [], []
         expected = "BULLISH" if direction == "LONG" else "BEARISH"
         for label, module in (
@@ -145,6 +145,53 @@ class SetupReasoningEngine:
             (supporting if side == direction else opposing).append(
                 f"{label} {side}"
             )
+        for item in breaker or []:
+            if isinstance(item, dict) and item.get("breaker"):
+                side = self._direction(item.get("direction") or item.get("type"))
+                if side != "NONE":
+                    (supporting if side == direction else opposing).append(f"Breaker block {side}")
+
+        for item in ifvg or []:
+            if not isinstance(item, dict) or not item.get("inverted"):
+                continue
+            original_side = self._direction(item.get("type"))
+            side = "SHORT" if original_side == "LONG" else "LONG" if original_side == "SHORT" else "NONE"
+            if side != "NONE":
+                (supporting if side == direction else opposing).append(f"IFVG inversion {side}")
+
+        if isinstance(trendline_sweep, dict) and trendline_sweep.get("active"):
+            side = "LONG" if str(trendline_sweep.get("direction", "")).upper() == "SELL_SIDE" else (
+                "SHORT" if str(trendline_sweep.get("direction", "")).upper() == "BUY_SIDE" else "NONE"
+            )
+            if side != "NONE":
+                (supporting if side == direction else opposing).append(f"Trendline sweep {side}")
+
+        if isinstance(inducement, dict) and inducement.get("active"):
+            side = self._direction(inducement.get("direction"))
+            if side != "NONE":
+                (supporting if side == direction else opposing).append(f"Inducement {side}")
+
+        if isinstance(premium_discount, dict) and premium_discount.get("valid"):
+            favorable = bool(premium_discount.get("discount")) if direction == "LONG" else bool(premium_discount.get("premium"))
+            unfavorable = bool(premium_discount.get("premium")) if direction == "LONG" else bool(premium_discount.get("discount"))
+            if favorable:
+                supporting.append("Premium/Discount zone favorable")
+            elif unfavorable:
+                opposing.append("Premium/Discount zone unfavorable")
+
+        if isinstance(eqh_eql, dict) and eqh_eql.get("active"):
+            supporting.append("EQH/EQL liquidity cluster active")
+
+        if isinstance(internal_structure, list):
+            internal_events = [
+                item for item in internal_structure
+                if isinstance(item, dict) and (item.get("choch") or item.get("bos"))
+            ]
+            if internal_events:
+                side = self._direction(internal_events[-1].get("direction"))
+                if side != "NONE":
+                    (supporting if side == direction else opposing).append(f"Internal structure {side}")
+
         post = (sweep or {}).get("post_structure") or {}
         if (sweep or {}).get("is_sweep"):
             sweep_side = str((sweep or {}).get("sweep_side", "")).upper()
@@ -225,10 +272,35 @@ class SetupReasoningEngine:
         for direction, direction_source in self._candidate_directions(mtf, sweep):
             expected = "BULLISH" if direction == "LONG" else "BEARISH"
             poi_items = []
+            breaker_items = [item for item in (breaker or []) if isinstance(item, dict) and item.get("breaker")]
+            ifvg_items = []
+            for item in ifvg or []:
+                if not isinstance(item, dict) or not item.get("inverted"):
+                    continue
+                original = self._direction(item.get("type"))
+                effective = "BEARISH" if original == "LONG" else "BULLISH" if original == "SHORT" else "NONE"
+                if effective != "NONE":
+                    ifvg_items.append({**item, "type": effective})
+            unicorn_items = []
+            if isinstance(unicorn, dict):
+                for setup in unicorn.get("setups", []) or []:
+                    if not isinstance(setup, dict) or not setup.get("valid"):
+                        continue
+                    zone = setup.get("zone") or {}
+                    if isinstance(zone, dict):
+                        side = self._direction(setup.get("direction"))
+                        if side != "NONE":
+                            unicorn_items.append({
+                                "type": "BULLISH" if side == "LONG" else "BEARISH",
+                                "low": zone.get("low"), "high": zone.get("high"),
+                                "valid": True, "timeframe": setup.get("timeframe"),
+                            })
             poi_groups = (
                 ("ORDER_BLOCK", orderblocks), ("FVG", fvg),
                 ("HTF_ORDER_BLOCK", higher_timeframe_orderblocks or []),
                 ("HTF_FVG", higher_timeframe_fvg or []),
+                ("BREAKER", breaker_items), ("IFVG", ifvg_items),
+                ("UNICORN", unicorn_items),
             )
             for source, items in poi_groups:
                 for index, item in enumerate(items):
@@ -236,9 +308,9 @@ class SetupReasoningEngine:
                         continue
                     if str(item.get("type", "")).upper() != expected:
                         continue
-                    if item.get("mitigated") if source in {"ORDER_BLOCK", "HTF_ORDER_BLOCK"} else item.get("filled"):
+                    if item.get("mitigated") if source in {"ORDER_BLOCK", "HTF_ORDER_BLOCK"} else item.get("filled") if source in {"FVG", "HTF_FVG"} else False:
                         continue
-                    bounds = self._bounds(item, "FVG" if source in {"FVG", "HTF_FVG"} else "OB")
+                    bounds = self._bounds(item, "FVG" if source in {"FVG", "HTF_FVG", "IFVG"} else "OB")
                     if not bounds:
                         continue
                     low, high = bounds
@@ -292,7 +364,10 @@ class SetupReasoningEngine:
                 support, opposition = self._evidence(
                     direction, mtf, sweep, structure, ote, htf_orderblock, htf_fvg,
                     smt, unicorn, cisd, volume_profile, institutional, orderbook,
-                    correlation, market_phase, regime,
+                    correlation, market_phase, regime, breaker=breaker,
+                    ifvg=ifvg, trendline_sweep=trendline_sweep, eqh_eql=eqh_eql,
+                    inducement=inducement, premium_discount=premium_discount,
+                    internal_structure=internal_structure,
                 )
                 support.append(f"{source} POI supports {direction}")
                 # Counterpressure refines the fill location inside this same POI;
