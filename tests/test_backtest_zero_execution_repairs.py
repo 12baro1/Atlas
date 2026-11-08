@@ -68,6 +68,7 @@ def test_limit_percent_distance_is_advisory_when_atr_is_unavailable():
     payload = _quality_payload()
     payload["entry"]["entry"] = 106.0
     payload["current_price"] = 100.0
+    payload["dynamic_tp"].update({"tp1": 114.8, "tp2": 122.8, "tp3": 131.6})
     result = TradeQualityEngine().evaluate(**payload)
     assert result["allowed"] is True
     assert any("LIMIT entry is far" in item for item in result["warnings"])
