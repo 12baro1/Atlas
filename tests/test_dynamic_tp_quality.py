@@ -169,3 +169,72 @@ def test_no_structural_target_still_fails_in_strict_mode():
     assert result["tp2"] is None
     assert result["tp3"] is None
     assert result["reason"] == "no_valid_structural_targets"
+
+
+def test_long_limit_repricing_excludes_targets_touched_by_signal_candle():
+    result = DynamicTPEngine().calculate(
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        liquidity=[
+            {"type": "BUY_SIDE", "price": 102.0},
+            {"type": "BUY_SIDE", "price": 105.0},
+            {"type": "BUY_SIDE", "price": 110.0},
+        ],
+        fvg=[],
+        orderblocks=[],
+        structure=[],
+        allow_rr_fallback=False,
+        exclude_targets_through=103.0,
+    )
+
+    assert result["excluded_passed_targets"] == [102.0]
+    assert result["target_exclusion_price"] == 103.0
+    assert result["candidate_targets"] == [105.0, 110.0]
+    assert result["tp1"] == 105.0
+    assert result["tp2"] == 110.0
+    assert result["synthetic_targets"] is False
+
+
+def test_short_limit_repricing_excludes_targets_touched_by_signal_candle():
+    result = DynamicTPEngine().calculate(
+        direction="SHORT",
+        entry=100.0,
+        stop_loss=101.0,
+        liquidity=[
+            {"type": "SELL_SIDE", "price": 98.0},
+            {"type": "SELL_SIDE", "price": 95.0},
+            {"type": "SELL_SIDE", "price": 90.0},
+        ],
+        fvg=[],
+        orderblocks=[],
+        structure=[],
+        allow_rr_fallback=False,
+        exclude_targets_through=97.0,
+    )
+
+    assert result["excluded_passed_targets"] == [98.0]
+    assert result["candidate_targets"] == [95.0, 90.0]
+    assert result["tp1"] == 95.0
+    assert result["tp2"] == 90.0
+    assert result["synthetic_targets"] is False
+
+
+def test_limit_repricing_does_not_fabricate_a_target_when_all_structure_is_passed():
+    result = DynamicTPEngine().calculate(
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        liquidity=[{"type": "BUY_SIDE", "price": 102.0}],
+        fvg=[],
+        orderblocks=[],
+        structure=[],
+        allow_rr_fallback=False,
+        exclude_targets_through=103.0,
+    )
+
+    assert result["tp1"] is None
+    assert result["tp2"] is None
+    assert result["tp3"] is None
+    assert result["excluded_passed_targets"] == [102.0]
+    assert result["reason"] == "no_valid_structural_targets"
