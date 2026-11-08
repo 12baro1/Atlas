@@ -92,7 +92,11 @@ def test_proxy_evidence_has_less_entry_weight_than_live_evidence():
     live_weight = next(x["weight"] for x in live["evidence"] if x["source"] == "institutional_flow")
     proxy_weight = next(x["weight"] for x in proxy["evidence"] if x["source"] == "institutional_flow")
     assert live_weight > proxy_weight
-    assert next(x for x in proxy["evidence"] if x["source"] == "institutional_flow")["data_quality"] == "PROXY"
+    live_evidence = next(x for x in live["evidence"] if x["source"] == "institutional_flow")
+    proxy_evidence = next(x for x in proxy["evidence"] if x["source"] == "institutional_flow")
+    assert live_evidence["quality_factor"] == 0.50
+    assert live_evidence["data_quality"] == "UNVERIFIED_OR_OHLCV"
+    assert proxy_evidence["data_quality"] == "PROXY"
 
 
 
@@ -104,3 +108,17 @@ def test_optimizer_does_not_double_count_derived_trend_as_entry_evidence():
     assert a["applied"] is True and b["applied"] is True
     assert with_trend["entry"] == without_trend["entry"]
     assert not any(item["source"] == "trend" for item in a["evidence"])
+
+
+
+def test_timestamp_validated_trade_flow_is_mixed_not_fully_native():
+    entry = _entry()
+    result = EntryOptimizer().optimize(
+        entry, current_price=120.0,
+        institutional={"active": True, "direction": "BULLISH", "confidence": 90,
+                       "cvd": {"source": "bybit_recent_trades", "is_proxy": False,
+                               "timestamp_validated": True}},
+    )
+    evidence = next(x for x in result["evidence"] if x["source"] == "institutional_flow")
+    assert evidence["quality_factor"] == 0.75
+    assert evidence["data_quality"] == "MIXED_LIVE_AND_OHLCV"
