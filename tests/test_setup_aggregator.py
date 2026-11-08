@@ -84,3 +84,32 @@ def test_signal_engine_does_not_apply_consensus_without_structural_setup():
         "structural_valid": False, "direction": "NONE", "score": 100,
     }))
     assert result["setup_consensus_delta"] == 0.0
+
+
+def test_orderbook_and_correlation_counterpressure_are_soft_evidence():
+    result = SetupAggregator().aggregate(
+        entry={"valid": True, "direction": "LONG", "entry": 100, "entry_type": "LIMIT"},
+        mtf={"entry": "LONG"},
+        orderbook={"active": True, "opposing": True, "supportive": False},
+        correlation={"active": True, "counterpressure": True, "counterpressure_score": 0.8},
+        trade_quality={"allowed": True},
+    )
+    motors = {item["motor"] for item in result["counterpressure"]}
+    assert "orderbook_counterpressure" in motors
+    assert "correlation_counterpressure" in motors
+    assert result["structural_valid"] is True
+    assert result["trade_quality_allowed"] is True
+
+
+def test_optimizer_duplicate_motor_evidence_is_not_counted_twice():
+    result = SetupAggregator().aggregate(
+        entry={"valid": True, "direction": "LONG", "entry": 100, "entry_type": "LIMIT"},
+        mtf={"entry": "LONG"},
+        smt={"active": True, "direction": "BULLISH", "confidence": 70},
+        optimization={"evidence": [
+            {"source": "smt", "bias": "ALIGNED", "weight": 9.0},
+            {"source": "ifvg_zone", "bias": "SUPPORTIVE", "weight": 1.0},
+        ]},
+    )
+    assert sum(item["motor"] == "smt" for item in result["evidence"]) == 1
+    assert any(item["motor"] == "ifvg_zone" for item in result["evidence"])
