@@ -207,9 +207,12 @@ class SetupReasoningEngine:
         if candles:
             try:
                 from utils.atr import atr as calculate_atr
-                atr_value = self._number(calculate_atr(candles, period=14))
-                if atr_value and atr_value > 0:
-                    atr_buffer = atr_value * 0.10
+                atr_value = self._number(
+                    calculate_atr(candles, period=int(getattr(Config, "ATR_PERIOD", 14)))
+                )
+                buffer_multiplier = float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10))
+                if atr_value and atr_value > 0 and math.isfinite(buffer_multiplier):
+                    atr_buffer = atr_value * max(0.0, buffer_multiplier)
             except (TypeError, ValueError, OverflowError, ZeroDivisionError):
                 pass
 
