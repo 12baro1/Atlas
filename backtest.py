@@ -519,10 +519,33 @@ def _combine_stats(all_stats):
         combined["winrate"] = round(combined["wins"] / combined["total"] * 100, 2)
         combined["expectancy"] = round(combined["net_rr"] / combined["total"], 4)
         combined["gross_expectancy"] = round(combined["gross_rr"] / combined["total"], 4)
-    combined["gross_profit_rr"] = round(sum(max(0.0, float(x.get("gross_rr", x.get("net_rr", 0.0)) or 0.0)) for x in combined["trade_history"]), 4)
-    combined["gross_loss_rr"] = round(abs(sum(min(0.0, float(x.get("gross_rr", x.get("net_rr", 0.0)) or 0.0)) for x in combined["trade_history"])), 4)
-    combined["gross_profit_factor"] = _metrics_for_trades(combined["trade_history"])["gross_profit_factor"]
-    combined["profit_factor"] = _metrics_for_trades(combined["trade_history"])["profit_factor"]
+    if combined["trade_history"]:
+        combined["gross_profit_rr"] = round(sum(
+            max(0.0, float(x.get("gross_rr", x.get("net_rr", 0.0)) or 0.0))
+            for x in combined["trade_history"]
+        ), 4)
+        combined["gross_loss_rr"] = round(abs(sum(
+            min(0.0, float(x.get("gross_rr", x.get("net_rr", 0.0)) or 0.0))
+            for x in combined["trade_history"]
+        )), 4)
+        trade_metrics = _metrics_for_trades(combined["trade_history"])
+        combined["gross_profit_factor"] = trade_metrics["gross_profit_factor"]
+        combined["profit_factor"] = trade_metrics["profit_factor"]
+    else:
+        # Compatibility for callers/tests that provide aggregated per-symbol
+        # statistics without the underlying trade ledger.
+        combined["gross_rr"] = round(
+            combined["gross_profit_rr"] - combined["gross_loss_rr"], 4
+        )
+        if combined["total"]:
+            combined["gross_expectancy"] = round(
+                combined["gross_rr"] / combined["total"], 4
+            )
+        combined["gross_profit_factor"] = (
+            round(combined["gross_profit_rr"] / combined["gross_loss_rr"], 4)
+            if combined["gross_loss_rr"] > 0 else 0.0
+        )
+        combined["profit_factor"] = combined["gross_profit_factor"]
     return combined
 
 
