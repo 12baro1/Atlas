@@ -56,6 +56,7 @@ from session_filter import SessionFilter
 from signal_engine import SignalEngine
 from setup_quality_engine import SetupQualityEngine
 from setup_aggregator import SetupAggregator
+from setup_reasoning_engine import SetupReasoningEngine
 from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
 from trade_manager import TradeManager
@@ -157,7 +158,7 @@ class AtlasEngine:
         self.institutional = InstitutionalAnalysisEngine()
         self.decision = DecisionEngine()
         self.setup_quality = SetupQualityEngine()
-        self.setup_aggregator = SetupAggregator()
+        self.setup_reasoner = SetupReasoningEngine()
         self.state_engine = StateEngine(getattr(Config, "STATE_ENGINE_FILE", "atlas_state.json"))
         self.news_filter = EconomicNewsFilter()
         self.correlation = CorrelationEngine()
@@ -1107,6 +1108,55 @@ class AtlasEngine:
             external_structure=external_structure,
             current_index=len(candles) - 1 if candles else None,
         )
+        # Build independent LONG/SHORT POI scenarios from the full motor context.
+        # Secondary evidence shapes the scenario; it is not a score-based veto.
+        reasoning = self.setup_reasoner.generate(
+            base_entry=entry,
+            mtf=mtf,
+            structure=entry_structure,
+            fvg=fvg,
+            orderblocks=orderblocks,
+            current_price=candles[-1].close if candles else None,
+            candles=candles,
+            liquidity_sweep=liquidity_sweep,
+            ote=ote,
+            market_regime=market_regime,
+            htf_orderblock=htf_orderblock,
+            htf_fvg=htf_fvg,
+            smt=smt,
+            unicorn=unicorn,
+            cisd=cisd,
+            volume_profile=volume_profile,
+            institutional=institutional,
+            orderbook=orderbook,
+            correlation=correlation,
+            market_phase=market_phase,
+            liquidity=liquidity,
+            external_structure=external_structure,
+        )
+        setup_candidates = reasoning.get("candidates", [])
+        selected_candidate = reasoning.get("selected")
+        if isinstance(selected_candidate, dict) and selected_candidate.get("valid"):
+            selected_candidate["optimization"] = optimization
+            selected_candidate["setup_reasoning"] = {
+                "selected_id": selected_candidate.get("setup_candidate_id"),
+                "candidate_count": len(setup_candidates),
+                "reason": reasoning.get("reason"),
+                "thesis": selected_candidate.get("reasoning"),
+                "supporting_evidence": selected_candidate.get("supporting_evidence", []),
+                "opposing_evidence": selected_candidate.get("opposing_evidence", []),
+            }
+            entry = selected_candidate
+        else:
+            entry["setup_reasoning"] = {
+                "selected_id": None,
+                "candidate_count": 0,
+                "reason": reasoning.get("reason"),
+                "thesis": "Existing EntryEngine result retained; no additional candidate passed structural checks.",
+                "supporting_evidence": [],
+                "opposing_evidence": [],
+            }
+
         confirmation = self.entry_confirmation.confirm(
             mtf, entry_structure, fvg, entry,
             current_price=candles[-1].close if candles else None,
@@ -1368,18 +1418,8 @@ class AtlasEngine:
             setup_quality=setup_quality,
         )
 
-        setup_consensus = self.setup_aggregator.aggregate(
-            entry=entry, mtf=mtf, confirmation=confirmation,
-            liquidity_sweep=liquidity_sweep, ote=ote,
-            htf_orderblock=htf_orderblock, htf_fvg=htf_fvg,
-            smt=smt, unicorn=unicorn, cisd=cisd,
-            volume_profile=volume_profile, institutional=institutional,
-            orderbook=orderbook, correlation=correlation,
-            market_phase=market_phase, market_regime=market_regime,
-            breaker=breaker, trendline_sweep=trendline_sweep,
-            optimization=optimization, confluence=confluence,
-            setup_quality=setup_quality, trade_quality=trade_quality,
-        )
+        # Candidate reasoning replaces vote/score aggregation.
+        setup_consensus = {}
 
         analysis_for_signal = {
             "entry": entry,
@@ -1421,6 +1461,7 @@ class AtlasEngine:
             "setup_quality": setup_quality,
             "trade_quality": trade_quality,
             "setup_consensus": setup_consensus,
+            "setup_candidates": setup_candidates,
             "orderbook": orderbook,
         }
 
@@ -1485,6 +1526,8 @@ class AtlasEngine:
             "market_regime": market_regime_state or context_state.get("market_regime", {}),
             "trade_quality": execution_state.get("trade_quality", {}),
             "setup_consensus": execution_state.get("setup_consensus", {}),
+            "setup_candidates": execution_state.get("setup_candidates", []),
+            "setup_reasoning": (execution_state.get("entry") or {}).get("setup_reasoning", {}),
             "smt": smt_state,
             "volume_profile": volume_profile_state or {
                 "active": False,
