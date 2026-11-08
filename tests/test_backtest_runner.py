@@ -882,3 +882,26 @@ def test_runner_applies_fee_spread_and_slippage_costs_once():
     assert trade["execution_cost_rr"] == 0.25
     assert trade["net_rr"] == 0.75
     assert trade["cost_model"] == "round_trip_fee_plus_spread_slippage_proxy"
+
+
+
+def test_runner_separates_gross_stop_r_from_execution_costs():
+    candles = [
+        _candle(1, 100.0, 100.2, 99.8, 100.0),
+        _candle(2, 100.0, 101.2, 99.9, 101.0),
+        _candle(3, 100.0, 100.2, 99.8, 100.0),
+    ]
+    runner = BacktestRunner(fee_rate=0.002, spread_rate=0.0002, slippage_rate=0.0003)
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "SHORT"},
+        "risk": {"entry": 100.0, "stop_loss": 100.5, "tp1": 99.0, "tp2": 98.0, "tp3": 97.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}, "mtf": {}},
+    }
+
+    trade = runner._to_trade(result, candles, 1, signal_index=0)
+
+    assert trade is not None
+    assert trade["gross_rr"] == -1.0
+    assert trade["execution_cost_rr"] == 0.5
+    assert trade["net_rr"] == -1.5
