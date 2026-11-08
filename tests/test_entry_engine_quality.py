@@ -245,7 +245,7 @@ def test_long_stop_places_atr_buffer_beyond_structural_invalidation(monkeypatch)
         current_price=100.05,
         candles=[object()],
     )
-    assert result["stop_loss"] == 98.8
+    assert abs(result["stop_loss"] - 98.8) < 1e-9
     assert result["stop_buffer"] == 0.6
     assert result["entry"] - result["stop_loss"] >= 0.30 * 2.0
 
@@ -261,7 +261,7 @@ def test_short_stop_places_atr_buffer_beyond_structural_invalidation(monkeypatch
         current_price=99.95,
         candles=[object()],
     )
-    assert result["stop_loss"] == 101.4
+    assert abs(result["stop_loss"] - 101.4) < 1e-9
     assert result["stop_buffer"] == 0.6
     assert result["stop_loss"] - result["entry"] >= 0.30 * 2.0
 
