@@ -26,17 +26,18 @@ class OrderBlockEngine:
             # The OB is the last opposing candle before the confirmed close
             # through structure, not blindly the candle before the swing pivot.
             prev = None
+            ob_index = None
             search_start = max(0, break_index - 12)
-            for candidate in reversed(candles[search_start:break_index]):
+            for candidate_index in range(break_index - 1, search_start - 1, -1):
+                candidate = candles[candidate_index]
                 if item.get("direction") == "BULLISH" and candidate.close < candidate.open:
-                    prev = candidate
+                    prev, ob_index = candidate, candidate_index
                     break
                 if item.get("direction") == "BEARISH" and candidate.close > candidate.open:
-                    prev = candidate
+                    prev, ob_index = candidate, candidate_index
                     break
             if prev is None:
                 continue
-            ob_index = candles.index(prev)
 
             # -------------------------
             # Bullish Order Block
