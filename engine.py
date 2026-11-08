@@ -385,6 +385,10 @@ class AtlasEngine:
             external_structure=structure_state.get("external_structure"),
             market_regime=market_regime_state,
             orderbook=orderbook_state,
+            h4_orderblocks=context_state.get("h4_orderblocks", []),
+            daily_orderblocks=context_state.get("daily_orderblocks", []),
+            h4_fvg=context_state.get("h4_fvg", []),
+            daily_fvg=context_state.get("daily_fvg", []),
         )
 
         decision_state = self.decision.decide(
@@ -997,9 +1001,11 @@ class AtlasEngine:
             h4_orderblocks,
             direction=mtf.get("entry", "NONE"),
         )
+        h4_fvg = self.fvg.detect(h4)
+        daily_fvg = self.fvg.detect(daily)
         htf_fvg = self.htf_fvg.detect(
-            self.fvg.detect(h4),
-            self.fvg.detect(daily),
+            h4_fvg,
+            daily_fvg,
             current_price=current_price,
             direction=mtf.get("entry", "NONE"),
         )
@@ -1031,7 +1037,7 @@ class AtlasEngine:
                 "current_price": current_price,
             },
             "daily_orderblocks": daily_orderblocks,
-            "h4_orderblocks": h4_orderblocks,
+            "h4_orderblocks": h4_orderblocks,\n            "h4_fvg": h4_fvg,\n            "daily_fvg": daily_fvg,
             "breaker": breakers,
             "liquidity": liquidity,
         }
@@ -1069,6 +1075,10 @@ class AtlasEngine:
         external_structure=None,
         market_regime=None,
         orderbook=None,
+        h4_orderblocks=None,
+        daily_orderblocks=None,
+        h4_fvg=None,
+        daily_fvg=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(
@@ -1133,6 +1143,8 @@ class AtlasEngine:
             market_phase=market_phase,
             liquidity=liquidity,
             external_structure=external_structure,
+            higher_timeframe_orderblocks=list(h4_orderblocks or []) + list(daily_orderblocks or []),
+            higher_timeframe_fvg=list(h4_fvg or []) + list(daily_fvg or []),
         )
         setup_candidates = reasoning.get("candidates", [])
         selected_candidate = reasoning.get("selected")
