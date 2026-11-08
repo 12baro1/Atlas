@@ -216,7 +216,9 @@ class InstitutionalAnalysisEngine:
             if amount <= 0:
                 continue
             timestamp = trade.get("timestamp") or info.get("timestamp") or info.get("time")
-            if now_ms is not None and timestamp is not None:
+            if now_ms is not None:
+                if timestamp is None:
+                    continue
                 try:
                     age_ms = float(now_ms) - float(timestamp)
                 except (TypeError, ValueError, OverflowError):
