@@ -37,3 +37,50 @@ def test_aggregator_preserves_optimizer_evidence_and_entry_plan():
     assert result["optimizer_applied"] is True
     assert result["entry_price"] == 99
     assert any(item["motor"] == "ifvg" for item in result["evidence"])
+
+
+def _signal_input(consensus=None):
+    payload = {
+        "confluence": {"score": 80, "checks": []},
+        "entry": {"valid": True, "direction": "LONG"},
+        "confirmation": {"confirmed": True},
+        "market_phase": {"phase": "Expansion", "phase_score": 50, "mtf_alignment": 50},
+        "liquidity_sweep": {},
+        "smt": {},
+        "unicorn": {},
+        "cisd": {},
+        "volume_profile": {},
+        "institutional": {},
+        "setup_quality": {},
+        "trade_quality": {},
+    }
+    if consensus is not None:
+        payload["setup_consensus"] = consensus
+    return payload
+
+
+def test_signal_engine_uses_consensus_as_bounded_soft_adjustment():
+    from signal_engine import SignalEngine
+
+    engine = SignalEngine()
+    baseline = engine.generate(_signal_input())
+    aligned = engine.generate(_signal_input({
+        "structural_valid": True, "direction": "LONG", "score": 100,
+    }))
+    opposed = engine.generate(_signal_input({
+        "structural_valid": True, "direction": "LONG", "score": 0,
+    }))
+
+    assert aligned["setup_consensus_delta"] == 6.0
+    assert opposed["setup_consensus_delta"] == -6.0
+    assert aligned["confidence"] - baseline["confidence"] == 6
+    assert baseline["signal"] == aligned["signal"] == opposed["signal"] == "LONG"
+
+
+def test_signal_engine_does_not_apply_consensus_without_structural_setup():
+    from signal_engine import SignalEngine
+
+    result = SignalEngine().generate(_signal_input({
+        "structural_valid": False, "direction": "NONE", "score": 100,
+    }))
+    assert result["setup_consensus_delta"] == 0.0
