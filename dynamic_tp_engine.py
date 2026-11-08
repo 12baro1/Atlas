@@ -21,6 +21,7 @@ class DynamicTPEngine:
         candles=None,
         atr_value=None,
         allow_rr_fallback=True,
+        exclude_targets_through=None,
     ):
 
         if direction not in {"LONG", "SHORT"}:
@@ -32,6 +33,15 @@ class DynamicTPEngine:
 
         atr_snapshot = self._resolve_atr(atr_value=atr_value, candles=candles)
         targets = self._collect_targets(direction, entry, liquidity, fvg, orderblocks, structure)
+        excluded_passed_targets = []
+        cutoff = self._safe_float(exclude_targets_through)
+        if cutoff is not None and cutoff > 0:
+            if direction == "LONG":
+                excluded_passed_targets = [price for price in targets if price <= cutoff]
+                targets = [price for price in targets if price > cutoff]
+            else:
+                excluded_passed_targets = [price for price in targets if price >= cutoff]
+                targets = [price for price in targets if price < cutoff]
 
         selected_targets = []
         selected_sources = []
@@ -77,6 +87,8 @@ class DynamicTPEngine:
                     "atr": round(atr_snapshot, 8),
                     "candidate_count": len(targets),
                     "candidate_targets": [round(float(price), 8) for price in targets],
+            "excluded_passed_targets": [round(float(price), 8) for price in excluded_passed_targets],
+            "target_exclusion_price": round(cutoff, 8) if cutoff is not None and cutoff > 0 else None,
                     "missing_rr_level": rr_multiple,
                     "best_candidate_rr": max(candidate_rr) if candidate_rr else None,
                 }
