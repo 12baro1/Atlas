@@ -389,6 +389,8 @@ def _combine_stats(all_stats):
         "stale_limits_cancelled": 0,
         "stale_limit_signal_candle_target": 0,
         "stale_limit_target_before_fill": 0,
+        "market_fallback_fills": 0,
+        "market_fallback_rejected_rr": 0,
         "open_trades": 0,
         "invalid_candidates": 0,
         "no_followup_data": 0,
@@ -402,7 +404,8 @@ def _combine_stats(all_stats):
             "candidate_signals", "analysis_calls", "empty_results",
             "raw_long_signals", "raw_short_signals", "non_directional_results",
             "unfilled_limits", "expired_limits", "stale_limits_cancelled",
-            "stale_limit_signal_candle_target", "stale_limit_target_before_fill", "open_trades",
+            "stale_limit_signal_candle_target", "stale_limit_target_before_fill",
+            "market_fallback_fills", "market_fallback_rejected_rr", "open_trades",
             "invalid_candidates", "no_followup_data",
         ):
             combined[key] += int(stats.get(key, 0) or 0)
