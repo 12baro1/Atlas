@@ -102,3 +102,17 @@ def test_wrong_side_liquidity_is_not_used_as_projected_target():
     result = _run(liquidity=[{"type": "SELL_SIDE", "price": 200}])
     assert result["selected"]["projected_target"] is None
     assert result["selected"]["projected_rr"] is None
+
+
+
+def test_optimizer_price_is_used_only_for_the_matching_poi():
+    base = {
+        "valid": False, "direction": "LONG", "poi_source": "FVG",
+        "poi_zone": {"low": 100, "high": 105}, "score": 50, "checks": [],
+    }
+    result = _run(
+        base_entry=base,
+        mtf={"entry": "SHORT", "weekly": "NEUTRAL", "daily": "NEUTRAL", "h4": "NEUTRAL"},
+        smt={}, optimization={"applied": True, "optimized_entry": 102},
+    )
+    assert result["selected"]["entry"] == 102
