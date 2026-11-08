@@ -793,6 +793,8 @@ def test_signal_outcome_applies_captured_spread_and_slippage_costs(tmp_path, mon
         entry=100.0,
         stop_loss=99.0,
         tp1=101.0,
+        tp2=102.0,
+        tp3=103.0,
         opened_at=1_700_000_000_000,
         payload={
             "execution_costs": {
@@ -803,9 +805,12 @@ def test_signal_outcome_applies_captured_spread_and_slippage_costs(tmp_path, mon
             }
         },
     )
-    candle = _precise_candle(1, high=101.2, low=100.1, close=101.1)
+    candles = [
+        _precise_candle(1, high=101.2, low=100.1, close=101.1),
+        _precise_candle(2, high=100.5, low=99.9, close=100.0),
+    ]
 
-    resolved = journal.resolve_signal_outcome(outcome, [candle])
+    resolved = journal.resolve_signal_outcome(outcome, candles)
 
     assert resolved is not None
     assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
