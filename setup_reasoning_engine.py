@@ -234,6 +234,34 @@ class SetupReasoningEngine:
                     smt, unicorn, cisd, volume_profile, institutional, orderbook,
                     correlation, market_phase, regime,
                 )
+                # Counterpressure changes the requested fill location, not the
+                # existence of a structurally valid setup. Move deeper into
+                # the same POI instead of discarding it.
+                pressure_present = bool(opposition)
+                entry_depth_reason = None
+                if pressure_present and not (inside and market_confirmed):
+                    deeper = low + (high - low) * 0.38 if direction == "LONG" else high - (high - low) * 0.38
+                    if (direction == "LONG" and current > deeper) or (direction == "SHORT" and current < deeper):
+                        entry_price = deeper
+                        risk = abs(entry_price - stop)
+                        projected_rr = abs(targets[-1] - entry_price) / risk if targets and risk > 0 else None
+                        entry_depth_reason = "Counterpressure moved the limit deeper inside the same POI"
+                structure_events = [
+                    event for event in (structure or [])
+                    if isinstance(event, dict) and (event.get("choch") or event.get("bos"))
+                ]
+                latest_structure = structure_events[-1] if structure_events else {}
+                structure_aligned = self._direction(latest_structure.get("direction")) == direction
+                orderflow_supportive = bool(isinstance(orderbook, dict) and orderbook.get("supportive"))
+                candidate_distance = abs(entry_price - current)
+                atr_distance = candidate_distance / atr_value if atr_value and atr_value > 0 else None
+                distance_pct = candidate_distance / current if current > 0 else None
+                distance_label = (
+                    "YAKIN GİRİŞ"
+                    if distance_pct is not None and distance_pct <= 0.02
+                    and (atr_distance is None or atr_distance <= 2.0)
+                    else "UZAK GİRİŞ"
+                )
                 candidate = {
                     "valid": True, "direction": direction, "entry": entry_price,
                     "stop_loss": stop, "stop_source": source.lower(),
@@ -271,8 +299,10 @@ class SetupReasoningEngine:
             return (
                 candidate.get("projected_target") is not None,
                 rr if rr is not None else -1.0,
+                candidate.get("structure_aligned", False),
                 candidate.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL",
                 candidate.get("ote_confluence", False),
+                candidate.get("orderflow_supportive", False),
                 distance * -1.0,
                 candidate.get("poi_source") in {"ORDER_BLOCK", "HTF_ORDER_BLOCK"},
             )
