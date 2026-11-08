@@ -72,3 +72,23 @@ def test_bos_close_during_pivot_confirmation_window_is_detected():
     result = BOSEngine().detect(pivots, candles=candles)
     assert result[-1]["bos"] is True
     assert result[-1]["break_index"] == 5
+
+
+def test_order_block_mitigation_starts_after_break_candle():
+    from mitigation_engine import MitigationEngine
+
+    candles = [
+        Candle(time=0, open=10, high=11, low=9, close=10, volume=10),
+        Candle(time=1, open=10, high=11, low=9, close=10, volume=10),
+        Candle(time=2, open=9.5, high=10.5, low=9.2, close=10.2, volume=10),
+        Candle(time=3, open=9.8, high=10.8, low=9.4, close=10.5, volume=10),
+        Candle(time=4, open=10.5, high=12, low=9.8, close=11.5, volume=10),
+        Candle(time=5, open=11.5, high=12.5, low=11.0, close=12.0, volume=10),
+    ]
+    block = {"index": 1, "break_index": 4, "low": 9.0, "high": 10.0}
+    result = MitigationEngine().detect(candles, [block])
+    assert result[0]["mitigated"] is False
+
+    candles.append(Candle(time=6, open=11.0, high=11.5, low=9.5, close=10.2, volume=10))
+    result = MitigationEngine().detect(candles, [block])
+    assert result[0]["mitigated"] is True
