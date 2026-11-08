@@ -730,21 +730,33 @@ class AtlasEngine:
         return trimmed
 
     def _apply_external_risk_filters(self, decision, news_filter, correlation, cooldown):
-        """Gate new entries around macro news, market correlation conflicts and duplicate trades."""
+        """Apply true safety/duplicate-entry gates; keep correlation as entry evidence.
+
+        Correlation is a contextual motor, not proof that the proposed setup is
+        structurally invalid. Its conflict is exposed as a warning so the entry
+        optimizer can price the pressure instead of silently deleting the trade.
+        Macro-news protection and same-symbol/direction cooldown remain hard gates.
+        """
         blockers = []
-        for name, payload in (("news_filter", news_filter), ("correlation", correlation), ("cooldown", cooldown)):
-            # Correlation motoru veri yokken active=False döner; o durumda engelleme yapma.
+        warnings = []
+        for name, payload in (("news_filter", news_filter), ("cooldown", cooldown)):
             if payload and not bool(payload.get("active", True)):
                 continue
             if payload and not payload.get("trade_allowed", True):
                 blockers.append(f"{name}: {payload.get('reason', 'blocked')}")
-        if not blockers:
-            return decision
+
+        if correlation and bool(correlation.get("active", True)) and not correlation.get("trade_allowed", True):
+            warnings.append(f"correlation: {correlation.get('reason', 'counterpressure; entry optimized conservatively')}")
+
         enriched = dict(decision or {})
+        if warnings:
+            enriched["external_warnings"] = list(enriched.get("external_warnings") or []) + warnings
+        if not blockers:
+            return enriched
         enriched["action"] = "SKIP"
         enriched["external_blockers"] = blockers
         existing = enriched.get("critical_blockers") or []
-        enriched["critical_blockers"] = existing + blockers
+        enriched["critical_blockers"] = list(existing) + blockers
         enriched["reason"] = "; ".join(blockers)
         return enriched
 
@@ -1151,10 +1163,25 @@ class AtlasEngine:
             "cooldown": cooldown or {},
             "orderbook": orderbook,
         }
-        if any(not (flt or {}).get("trade_allowed", True) for flt in setup_quality["external_risk_filters"].values()):
+        # Only macro-news protection and duplicate-position cooldown are
+        # hard external gates. Correlation and order-book pressure remain
+        # optimizer evidence/warnings; they must not veto an otherwise valid POI.
+        hard_external_filters = {
+            "news_filter": setup_quality["external_risk_filters"]["news_filter"],
+            "cooldown": setup_quality["external_risk_filters"]["cooldown"],
+        }
+        if any(not (flt or {}).get("trade_allowed", True) for flt in hard_external_filters.values()):
             setup_quality["trade_allowed"] = False
             setup_quality.setdefault("blockers", []).extend(
-                name for name, flt in setup_quality["external_risk_filters"].items() if not (flt or {}).get("trade_allowed", True)
+                name for name, flt in hard_external_filters.items() if not (flt or {}).get("trade_allowed", True)
+            )
+        soft_external_warnings = [
+            name for name in ("correlation", "orderbook")
+            if not (setup_quality["external_risk_filters"].get(name) or {}).get("trade_allowed", True)
+        ]
+        if soft_external_warnings:
+            setup_quality.setdefault("warnings", []).extend(
+                f"{name}: counterpressure retained as entry evidence" for name in soft_external_warnings
             )
 
         confluence = self.confluence.evaluate(
