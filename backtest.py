@@ -533,6 +533,9 @@ def _report(stats, name):
     print(f"  Net RR         : {stats['net_rr']}")
     if "max_drawdown" in stats:
         print(f"  Max Drawdown   : {stats['max_drawdown']} R")
+    mtf_breakdown = stats.get("mtf_trade_breakdown") or {}
+    if mtf_breakdown:
+        print(f"  Kapanan işlem MTF dağılımı: {mtf_breakdown}")
     breakdown = stats.get("direction_breakdown") or {}
     for direction in ("LONG", "SHORT"):
         side = breakdown.get(direction)
@@ -553,7 +556,10 @@ def _report(stats, name):
             f"delay={trade.get('fill_delay_bars')} bar | "
             f"plan={trade.get('planned_entry')} fill={trade.get('entry')} "
             f"SL={trade.get('stop_loss')} TP={tps} | "
-            f"{trade.get('exit_reason')} {trade.get('net_rr')}R"
+            f"exit={trade.get('exit_price')} "
+            f"{'STOP_GAP=' + str(trade.get('stop_gap_r')) + 'R ' if trade.get('stop_gap') else ''}"
+            f"{trade.get('exit_reason')} {trade.get('net_rr')}R | "
+            f"MTF={trade.get('mtf_context')}"
         )
 
     if stats["total"] >= 20 and stats["expectancy"] > 0 and stats["profit_factor"] >= 1.3:
