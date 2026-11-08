@@ -32,6 +32,7 @@ class ConfluenceEngine:
         ifvg=None,
         eqh_eql=None,
         internal_structure=None,
+        current_index=None,
     ):
 
         score = 0
@@ -108,10 +109,18 @@ class ConfluenceEngine:
         else:
             checks.append("✘ OTE + POI")
 
-        # Breaker
-        if breaker is not None and len(breaker) > 0:
+        # A breaker is the inverse of the failed OB; only its new direction
+        # should support confluence.
+        expected_poi = "BULLISH" if entry_direction == "LONG" else "BEARISH"
+        breaker_items = [item for item in (breaker or []) if isinstance(item, dict) and item.get("breaker")]
+        matching_breaker = any(str(item.get("type", "")).upper() == expected_poi for item in breaker_items)
+        opposing_breaker = any(str(item.get("type", "")).upper() != expected_poi for item in breaker_items)
+        if matching_breaker:
             score += 5
-            checks.append("✔ Breaker Block")
+            checks.append("✔ Directional Breaker Block")
+        elif opposing_breaker:
+            score -= 2
+            checks.append("◐ Breaker Block (opposing direction)")
         else:
             checks.append("✘ Breaker Block")
 
@@ -280,25 +289,62 @@ class ConfluenceEngine:
         else:
             checks.append("✘ Equal HL")
 
-        # Inverse FVG
-        if ifvg:
-            inverted_any = False
-            for zone in ifvg:
-                if zone.get("inverted"):
-                    inverted_any = True
-                    break
-            if inverted_any:
-                score += 6
-                checks.append("✔ Inverse FVG")
-            else:
-                checks.append("✘ Inverse FVG")
+        # Inverse FVG: the original gap direction flips after inversion.
+        recent_ifvg = []
+        for zone in (ifvg or []):
+            if not isinstance(zone, dict) or not zone.get("inverted"):
+                continue
+            try:
+                index = int(zone.get("index", current_index if current_index is not None else 0))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if current_index is not None and index < int(current_index) - 48:
+                continue
+            recent_ifvg.append(zone)
+        aligned_ifvg = any(
+            ("SHORT" if str(zone.get("type", "")).upper() == "BULLISH" else "LONG")
+            == entry_direction
+            for zone in recent_ifvg
+            if str(zone.get("type", "")).upper() in {"BULLISH", "BEARISH"}
+        )
+        opposing_ifvg = any(
+            ("SHORT" if str(zone.get("type", "")).upper() == "BULLISH" else "LONG")
+            != entry_direction
+            for zone in recent_ifvg
+            if str(zone.get("type", "")).upper() in {"BULLISH", "BEARISH"}
+        )
+        if aligned_ifvg:
+            score += 6
+            checks.append("✔ Directional Inverse FVG")
+        elif opposing_ifvg:
+            score -= 2
+            checks.append("◐ Inverse FVG (opposing direction)")
         else:
             checks.append("✘ Inverse FVG")
 
-        # Internal Structure (minor move yapı derinliği)
-        if internal_structure:
+        # Internal Structure is directional evidence, not a presence-only bonus.
+        recent_internal = []
+        for item in (internal_structure or []):
+            if not isinstance(item, dict):
+                continue
+            try:
+                index = int(item.get("index", current_index if current_index is not None else 0))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if current_index is None or index >= int(current_index) - 48:
+                recent_internal.append(item)
+        labels = [str(item.get("label", "")).upper() for item in recent_internal[-8:]]
+        internal_bull = sum(label in {"HH", "HL"} for label in labels)
+        internal_bear = sum(label in {"LH", "LL"} for label in labels)
+        if entry_direction == "LONG" and internal_bull > internal_bear:
             score += 2
-            checks.append(f"✔ Internal Structure ({len(internal_structure)} swing)")
+            checks.append(f"✔ Internal Structure bullish ({len(labels)} swing)")
+        elif entry_direction == "SHORT" and internal_bear > internal_bull:
+            score += 2
+            checks.append(f"✔ Internal Structure bearish ({len(labels)} swing)")
+        elif internal_bull or internal_bear:
+            score -= 1
+            checks.append("◐ Internal Structure opposing")
 
         return {
             "score": score,
