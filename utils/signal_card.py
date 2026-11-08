@@ -1,7 +1,7 @@
 """
 signal_card.py
 Atlas için tek yönlü, net ve okunabilir işlem önerisi (sinyal kartı) üretir.
-Manuel işlem kullanıcısına: YÖN, giriş/stop/TP, kalite puanı ve çelişkileri tek bakışta sunar.
+Manuel işlem kullanıcısına: yön, giriş/stop/TP ve setup gerekçesini tek bakışta sunar.
 """
 
 import math
@@ -32,7 +32,7 @@ def _price(value):
     return round(number, 12)
 
 
-def _verdict(decision, signal, entry):
+def _verdict(decision, signal, entry, risk=None):
     """Tek bir net karar döndürür: AL, SAT, BEKLE veya ATLA."""
     action = str((decision or {}).get("action", "WAIT") or "").upper()
     signal_dir = str((signal or {}).get("signal", "WAIT") or "").upper()
@@ -42,11 +42,32 @@ def _verdict(decision, signal, entry):
         entry_dir = None
 
     # LIMIT orders are conditional and must never be shown as immediate entry permission.
-    pending_limit = entry_type == "LIMIT"
-    if pending_limit:
-        pending_direction = signal_dir if signal_dir in ("LONG", "SHORT") else entry_dir
-        return ("BEKLE", pending_direction, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
-    if action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and signal_dir in ("LONG", "SHORT"):
+    risk = risk if isinstance(risk, dict) else {}
+    entry_is_valid = (
+        (entry or {}).get("valid") is not False
+        and (entry or {}).get("entry") is not None
+        and ((entry or {}).get("stop_loss") is not None or risk.get("stop_loss") is not None)
+    )
+    risk_has_target = any(risk.get(key) is not None for key in ("tp1", "tp2", "tp3"))
+    risk_is_valid = bool(risk) and risk_has_target and risk.get("risk_setup_valid", True) is not False
+    pending_limit = (
+        entry_type == "LIMIT"
+        and entry_is_valid
+        and risk_is_valid
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION", "WAIT")
+    )
+    if entry_type == "LIMIT":
+        if pending_limit:
+            pending_direction = signal_dir if signal_dir in ("LONG", "SHORT") else entry_dir
+            return ("BEKLE", pending_direction, (entry or {}).get("entry_type_reason") or "Fiyatın LIMIT giriş bölgesine dönmesi gerekiyor")
+        return ("ATLA", entry_dir, (decision or {}).get("reason") or risk.get("risk_setup_reason") or "LIMIT setup geçerli değil")
+    if (
+        entry_type == "MARKET"
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
+        and signal_dir in ("LONG", "SHORT")
+        and entry_is_valid
+        and risk_is_valid
+    ):
         return ("AL" if signal_dir == "LONG" else "SAT", signal_dir, None)
 
     # WAIT is not an actionable terminal decision; show it as no-entry.
@@ -83,10 +104,23 @@ def build_signal_card(result):
     confluence = analysis.get("confluence") or {}
     market_phase = analysis.get("market_phase") or {}
     entry = analysis.get("entry") or {}
+    setup_reasoning = entry.get("setup_reasoning") or {}
     symbol = result.get("symbol", "UNKNOWN")
 
-    verdict_label, direction, verdict_reason = _verdict(decision, signal, entry)
-    pending_pullback = str(entry.get("entry_type") or "").upper() == "LIMIT"
+    verdict_label, direction, verdict_reason = _verdict(decision, signal, entry, risk)
+    entry_is_valid = (
+        entry.get("valid") is not False
+        and entry.get("entry") is not None
+        and (entry.get("stop_loss") is not None or risk.get("stop_loss") is not None)
+    )
+    risk_has_target = any(risk.get(key) is not None for key in ("tp1", "tp2", "tp3"))
+    risk_is_valid = bool(risk) and risk_has_target and risk.get("risk_setup_valid", True) is not False
+    pending_pullback = (
+        str(entry.get("entry_type") or "").upper() == "LIMIT"
+        and entry_is_valid
+        and risk_is_valid
+        and str(decision.get("action") or "").upper() in ("EXECUTE", "EXECUTE_WITH_CAUTION", "WAIT")
+    )
 
     card = {
         "symbol": symbol,
@@ -103,11 +137,18 @@ def build_signal_card(result):
         "setup_allowed": bool(setup_quality.get("trade_allowed", False)),
         "entry": None,
         "entry_type": str(entry.get("entry_type") or "BELİRSİZ").upper(),
+        "entry_valid": (entry.get("valid") is not False and entry.get("entry") is not None and (entry.get("stop_loss") is not None or risk.get("stop_loss") is not None)),
+        "risk_setup_valid": bool(risk) and any(risk.get(key) is not None for key in ("tp1", "tp2", "tp3")) and risk.get("risk_setup_valid", True) is not False,
         "entry_type_reason": entry.get("entry_type_reason") or "",
         "entry_distance_label": entry.get("entry_distance_label") or "",
         "entry_distance_pct": _num(entry.get("entry_distance_pct"), 3),
         "entry_distance_atr": _num(entry.get("entry_distance_atr"), 2),
         "requires_pullback": str(entry.get("entry_type") or "").upper() == "LIMIT",
+        "setup_thesis": setup_reasoning.get("thesis") or "",
+        "supporting_evidence": list(setup_reasoning.get("supporting_evidence") or []),
+        "opposing_evidence": list(setup_reasoning.get("opposing_evidence") or []),
+        "market_context": list(setup_reasoning.get("market_context") or []),
+        "candidate_count": int(setup_reasoning.get("candidate_count", 0) or 0),
         "synthetic_tp_targets": bool(dynamic_tp.get("synthetic_targets", False)),
         "stop_loss": None,
         "tp_levels": [],
@@ -207,7 +248,6 @@ def _summarize(card):
     return (
         f"{card['verdict']} {card['symbol']} @ {entry} | SL {sl} | TP {tps} | "
         f"Ağırlıklı RR ~{card['rr']} | Net RR ~{card.get('net_rr')} | "
-        f"Kalite {card['setup_quality']}/100 | "
         f"{len(card['critical_blocks'])} kritik blok, {len(card['soft_adjustments'])} yumuşak düzeltme"
     )
 
@@ -219,11 +259,20 @@ def format_card_text(card):
     entry_type = str(card.get("entry_type") or "").upper()
     pending_limit = (
         entry_type == "LIMIT"
+        and card.get("entry_valid")
+        and card.get("risk_setup_valid")
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION", "WAIT")
         and card.get("direction") in ("LONG", "SHORT")
         and card.get("entry") is not None
         and card.get("stop_loss") is not None
     )
-    executable = action in ("EXECUTE", "EXECUTE_WITH_CAUTION") and card.get("direction") in ("LONG", "SHORT")
+    executable = (
+        entry_type == "MARKET"
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
+        and card.get("entry_valid")
+        and card.get("risk_setup_valid")
+        and card.get("direction") in ("LONG", "SHORT")
+    )
     no_trade = not pending_limit and not executable
 
     if pending_limit:
@@ -276,7 +325,13 @@ def format_card_text(card):
         lines.append(f"  Net RR       : {card['net_rr']}")
     if card.get("target_max_rr") is not None:
         lines.append(f"  TP max RR    : {card['target_max_rr']}")
-    if card.get("setup_quality") is not None:
-        lines.append(f"  Kalite    : {card['setup_quality']}/100")
+    if card.get("setup_thesis"):
+        lines.append(f"  Setup     : {card['setup_thesis']}")
+    if card.get("supporting_evidence"):
+        lines.append("  Destek    : " + " | ".join(card["supporting_evidence"][:5]))
+    if card.get("opposing_evidence"):
+        lines.append("  Karşı kanıt: " + " | ".join(card["opposing_evidence"][:5]))
+    if card.get("market_context"):
+        lines.append("  Bağlam    : " + " | ".join(card["market_context"][:5]))
     lines.append(line)
     return "\n".join(lines)

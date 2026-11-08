@@ -14,6 +14,14 @@ class SignalEngine:
     def __init__(self):
         self.logger = logging.getLogger("atlas.signal")
 
+    @staticmethod
+    def _safe_number(value, default=0.0):
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
+        return number if number == number and abs(number) != float("inf") else default
+
     def generate(self, analysis):
         confluence = analysis["confluence"]
         base_confidence = self._normalize_confluence_score(confluence.get("score", 0))
@@ -26,6 +34,7 @@ class SignalEngine:
         institutional = analysis.get("institutional", {})
         setup_quality = analysis.get("setup_quality", {})
         trade_quality = analysis.get("trade_quality", {})
+        setup_consensus = analysis.get("setup_consensus", {})
         quality_gate_active = isinstance(trade_quality, dict) and "allowed" in trade_quality
 
         market_phase = analysis.get("market_phase", {})
@@ -70,6 +79,9 @@ class SignalEngine:
             volume_profile=volume_profile,
             institutional=institutional,
         )
+
+        # Setup direction and entry are selected by SetupReasoningEngine.
+        # No evidence-vote score is added to signal confidence.
 
         confidence_adjusted = clamp(confidence_adjusted)
 
@@ -130,6 +142,8 @@ class SignalEngine:
             "institutional_direction": institutional.get("direction", "NONE"),
             "alignment_conflicts": self._alignment_conflicts(direction, liquidity_sweep, smt, unicorn, cisd, volume_profile),
             "setup_quality_score": setup_quality.get("score"),
+            "setup_consensus": setup_consensus,
+            "setup_consensus_delta": 0.0,
             "module_scores": setup_quality.get("module_scores", {}),
             "analysis_report": setup_quality.get("reasons", []),
             "learning": setup_quality.get("learning") or {},

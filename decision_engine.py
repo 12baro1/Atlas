@@ -40,6 +40,7 @@ class DecisionEngine:
         market_phase = context["market_phase"]
         market_regime = context["market_regime"]
         trade_quality = context["trade_quality"]
+        setup_consensus = context["setup_consensus"]
 
         signal_dir = self._normalize_direction(signal.get("signal", "WAIT"))
         signal_confidence = self._safe_number(signal.get("confidence"), 0.0)
@@ -212,6 +213,7 @@ class DecisionEngine:
             "market_phase": market_phase.get("phase", "Ranging"),
             "market_regime": market_regime,
             "trade_quality": trade_quality,
+            "setup_consensus": setup_consensus,
             "liquidity_sweep_strength": liquidity_sweep.get("strength_score", 0),
             "module_scores": {"decision_adjustments": adjustments},
         }
@@ -241,6 +243,7 @@ class DecisionEngine:
         market_phase = bundle.get("market_phase") or {}
         market_regime = bundle.get("market_regime") or {}
         trade_quality = bundle.get("trade_quality") or {}
+        setup_consensus = bundle.get("setup_consensus") or {}
 
         modules = bundle.get("modules") or self._discover_modules(bundle)
 
@@ -256,6 +259,7 @@ class DecisionEngine:
             "market_phase": market_phase,
             "market_regime": market_regime,
             "trade_quality": trade_quality,
+            "setup_consensus": setup_consensus,
             "cisd": cisd,
             "volume_profile": volume_profile,
             "institutional": institutional,
@@ -278,6 +282,7 @@ class DecisionEngine:
             "market_phase",
             "market_regime",
             "trade_quality",
+            "setup_consensus",
             "cisd",
             "volume_profile",
             "institutional",

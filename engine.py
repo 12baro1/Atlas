@@ -55,6 +55,7 @@ from scanner_engine import ScannerEngine
 from session_filter import SessionFilter
 from signal_engine import SignalEngine
 from setup_quality_engine import SetupQualityEngine
+from setup_reasoning_engine import SetupReasoningEngine
 from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
 from trade_manager import TradeManager
@@ -156,6 +157,7 @@ class AtlasEngine:
         self.institutional = InstitutionalAnalysisEngine()
         self.decision = DecisionEngine()
         self.setup_quality = SetupQualityEngine()
+        self.setup_reasoner = SetupReasoningEngine()
         self.state_engine = StateEngine(getattr(Config, "STATE_ENGINE_FILE", "atlas_state.json"))
         self.news_filter = EconomicNewsFilter()
         self.correlation = CorrelationEngine()
@@ -382,6 +384,12 @@ class AtlasEngine:
             external_structure=structure_state.get("external_structure"),
             market_regime=market_regime_state,
             orderbook=orderbook_state,
+            h4_orderblocks=context_state.get("h4_orderblocks", []),
+            daily_orderblocks=context_state.get("daily_orderblocks", []),
+            h4_fvg=context_state.get("h4_fvg", []),
+            daily_fvg=context_state.get("daily_fvg", []),
+            inducement=structure_state.get("inducement"),
+            trendline_liquidity=structure_state.get("trendline_liquidity", []),
         )
 
         decision_state = self.decision.decide(
@@ -396,6 +404,7 @@ class AtlasEngine:
             market_phase=context_state.get("market_phase"),
             market_regime=market_regime_state,
             trade_quality=execution_state.get("trade_quality"),
+            setup_consensus=execution_state.get("setup_consensus"),
             cisd=cisd_state,
             volume_profile=volume_profile_state,
             institutional=institutional_state,
@@ -993,9 +1002,11 @@ class AtlasEngine:
             h4_orderblocks,
             direction=mtf.get("entry", "NONE"),
         )
+        h4_fvg = self.fvg.detect(h4)
+        daily_fvg = self.fvg.detect(daily)
         htf_fvg = self.htf_fvg.detect(
-            self.fvg.detect(h4),
-            self.fvg.detect(daily),
+            h4_fvg,
+            daily_fvg,
             current_price=current_price,
             direction=mtf.get("entry", "NONE"),
         )
@@ -1028,6 +1039,8 @@ class AtlasEngine:
             },
             "daily_orderblocks": daily_orderblocks,
             "h4_orderblocks": h4_orderblocks,
+            "h4_fvg": h4_fvg,
+            "daily_fvg": daily_fvg,
             "breaker": breakers,
             "liquidity": liquidity,
         }
@@ -1065,6 +1078,12 @@ class AtlasEngine:
         external_structure=None,
         market_regime=None,
         orderbook=None,
+        h4_orderblocks=None,
+        daily_orderblocks=None,
+        h4_fvg=None,
+        daily_fvg=None,
+        inducement=None,
+        trendline_liquidity=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(
@@ -1104,6 +1123,67 @@ class AtlasEngine:
             external_structure=external_structure,
             current_index=len(candles) - 1 if candles else None,
         )
+        # Build independent LONG/SHORT POI scenarios from the full motor context.
+        # Secondary evidence shapes the scenario; it is not a score-based veto.
+        reasoning = self.setup_reasoner.generate(
+            base_entry=entry,
+            mtf=mtf,
+            structure=entry_structure,
+            fvg=fvg,
+            orderblocks=orderblocks,
+            current_price=candles[-1].close if candles else None,
+            candles=candles,
+            liquidity_sweep=liquidity_sweep,
+            ote=ote,
+            market_regime=market_regime,
+            htf_orderblock=htf_orderblock,
+            htf_fvg=htf_fvg,
+            smt=smt,
+            unicorn=unicorn,
+            cisd=cisd,
+            volume_profile=volume_profile,
+            institutional=institutional,
+            orderbook=orderbook,
+            correlation=correlation,
+            market_phase=market_phase,
+            liquidity=liquidity,
+            external_structure=external_structure,
+            higher_timeframe_orderblocks=list(h4_orderblocks or []) + list(daily_orderblocks or []),
+            higher_timeframe_fvg=list(h4_fvg or []) + list(daily_fvg or []),
+            optimization=optimization,
+            breaker=breaker,
+            ifvg=ifvg,
+            trendline_sweep=trendline_sweep,
+            eqh_eql=eqh_eql,
+            inducement=inducement,
+            premium_discount=premium_discount,
+            internal_structure=internal_structure,
+            trendline_liquidity=trendline_liquidity,
+        )
+        setup_candidates = reasoning.get("candidates", [])
+        selected_candidate = reasoning.get("selected")
+        if isinstance(selected_candidate, dict) and selected_candidate.get("valid"):
+            selected_candidate["optimization"] = optimization
+            selected_candidate["setup_reasoning"] = {
+                "selected_id": selected_candidate.get("setup_candidate_id"),
+                "candidate_count": len(setup_candidates),
+                "reason": reasoning.get("reason"),
+                "thesis": selected_candidate.get("reasoning"),
+                "supporting_evidence": selected_candidate.get("supporting_evidence", []),
+                "opposing_evidence": selected_candidate.get("opposing_evidence", []),
+                "market_context": selected_candidate.get("market_context", []),
+            }
+            entry = selected_candidate
+        else:
+            entry["setup_reasoning"] = {
+                "selected_id": None,
+                "candidate_count": 0,
+                "reason": reasoning.get("reason"),
+                "thesis": "Existing EntryEngine result retained; no additional candidate passed structural checks.",
+                "supporting_evidence": [],
+                "opposing_evidence": [],
+            }
+
         confirmation = self.entry_confirmation.confirm(
             mtf, entry_structure, fvg, entry,
             current_price=candles[-1].close if candles else None,
@@ -1244,6 +1324,7 @@ class AtlasEngine:
             orderblocks=orderblocks,
             candles=candles,
             structure=entry_structure,
+            trendline_liquidity=trendline_liquidity,
         )
 
         # Require at least one real structural objective. Missing TP2/TP3
@@ -1294,6 +1375,7 @@ class AtlasEngine:
                 orderblocks=orderblocks,
                 candles=candles,
                 structure=entry_structure,
+                trendline_liquidity=trendline_liquidity,
                 exclude_targets_through=target_exclusion_price,
             )
             if any(refreshed_targets.get(key) is not None for key in ("tp1", "tp2", "tp3")):
@@ -1330,6 +1412,7 @@ class AtlasEngine:
                     orderblocks=orderblocks,
                     candles=candles,
                     structure=entry_structure,
+                    trendline_liquidity=trendline_liquidity,
                     stop_price=expanded_stop,
                     exclude_targets_through=target_exclusion_price,
                 )
@@ -1365,8 +1448,12 @@ class AtlasEngine:
             setup_quality=setup_quality,
         )
 
+        # Candidate reasoning replaces vote/score aggregation.
+        setup_consensus = {}
+
         analysis_for_signal = {
             "entry": entry,
+            "setup_consensus": setup_consensus,
             "confirmation": confirmation,
             "confluence": confluence,
             "market_phase": market_phase,
@@ -1403,6 +1490,8 @@ class AtlasEngine:
             "signal": signal,
             "setup_quality": setup_quality,
             "trade_quality": trade_quality,
+            "setup_consensus": setup_consensus,
+            "setup_candidates": setup_candidates,
             "orderbook": orderbook,
         }
 
@@ -1466,6 +1555,9 @@ class AtlasEngine:
             "market_phase": context_state["market_phase"],
             "market_regime": market_regime_state or context_state.get("market_regime", {}),
             "trade_quality": execution_state.get("trade_quality", {}),
+            "setup_consensus": execution_state.get("setup_consensus", {}),
+            "setup_candidates": execution_state.get("setup_candidates", []),
+            "setup_reasoning": (execution_state.get("entry") or {}).get("setup_reasoning", {}),
             "smt": smt_state,
             "volume_profile": volume_profile_state or {
                 "active": False,
@@ -2086,7 +2178,7 @@ class AtlasEngine:
             "recent_structure": structure[-3:] if structure else [],
         }
 
-    def _calculate_dynamic_tp(self, entry, liquidity, fvg, orderblocks, candles=None, structure=None, stop_price=None, exclude_targets_through=None):
+    def _calculate_dynamic_tp(self, entry, liquidity, fvg, orderblocks, candles=None, structure=None, trendline_liquidity=None, stop_price=None, exclude_targets_through=None):
         """Entry yoksa boş TP şablonu, varsa dinamik hedefler döndürür."""
         if entry.get("entry") is None:
             return {"tp1": None, "tp2": None, "tp3": None}
@@ -2098,7 +2190,7 @@ class AtlasEngine:
                 direction=entry["direction"],
                 entry=entry["entry"],
                 stop_loss=stop_value,
-                liquidity=liquidity,
+                liquidity=list(liquidity or []) + list(trendline_liquidity or []),
                 fvg=fvg,
                 orderblocks=orderblocks,
                 structure=structure,

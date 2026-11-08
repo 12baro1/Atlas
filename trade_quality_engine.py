@@ -54,21 +54,32 @@ class TradeQualityEngine:
         if confirmation.get("15m_conflict"):
             warnings.append("15m structure opposes the primary setup; retain as entry-placement evidence")
 
-        expected_mtf = direction
-        if not mtf.get("valid") or str(mtf.get("entry", mtf.get("direction", ""))).upper() != expected_mtf:
-            blockers.append("Multi-timeframe direction is not aligned")
-
-        trend_direction = str(trend.get("trend", "NEUTRAL")).upper()
         expected_trend = "BULLISH" if direction == "LONG" else "BEARISH"
-        if direction in {"LONG", "SHORT"} and trend_direction not in {expected_trend, "NEUTRAL", "RANGE", "NONE"}:
-            warnings.append("Trend conflict: entry optimizer must demand a deeper POI price")
-
         sweep_active = bool(sweep.get("is_sweep"))
         buy_side = bool(sweep.get("buy_side"))
         sell_side = bool(sweep.get("sell_side"))
         post = sweep.get("post_structure") if isinstance(sweep.get("post_structure"), dict) else {}
         expected_sweep = sell_side if direction == "LONG" else buy_side
         opposing_sweep = buy_side if direction == "LONG" else sell_side
+
+        expected_mtf = direction
+        mtf_direction = str(mtf.get("entry", mtf.get("direction", ""))).upper()
+        confirmed_countertrend_reversal = bool(
+            entry.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL"
+            and mtf.get("valid")
+            and sweep_active
+            and expected_sweep
+            and post.get("confirmed")
+            and str(post.get("direction", "")).upper() == expected_trend
+        )
+        if not mtf.get("valid") or (
+            mtf_direction != expected_mtf and not confirmed_countertrend_reversal
+        ):
+            blockers.append("Multi-timeframe direction is not aligned")
+
+        trend_direction = str(trend.get("trend", "NEUTRAL")).upper()
+        if direction in {"LONG", "SHORT"} and trend_direction not in {expected_trend, "NEUTRAL", "RANGE", "NONE"}:
+            warnings.append("Trend conflict: entry optimizer must demand a deeper POI price")
         if sweep.get("ambiguous_sweep") or sweep.get("sweep_side") == "DUAL":
             warnings.append("Liquidity sweep is ambiguous; sweep evidence has reduced directional value")
         elif sweep_active and (opposing_sweep or not expected_sweep):
@@ -254,8 +265,9 @@ class TradeQualityEngine:
                 too_far_by_atr = bool(atr and atr > 0 and distance > atr * max_limit_atr)
                 too_far_by_percent = distance_pct > max_limit_pct
                 if too_far_by_atr or too_far_by_percent:
-                    blockers.append(
-                        f"LIMIT entry exceeds configured distance ({max_limit_atr:g} ATR / {max_limit_pct * 100:g}%)"
+                    warnings.append(
+                        f"LIMIT entry is far ({max_limit_atr:g} ATR / {max_limit_pct * 100:g}% reference); "
+                        "keep it pending and expose its distance instead of rejecting the structural setup"
                     )
             if entry_type == "MARKET":
                 max_market_atr = max(0.0, float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_ATR", 0.35)))
