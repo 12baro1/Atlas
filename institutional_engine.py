@@ -273,7 +273,10 @@ class InstitutionalAnalysisEngine:
         low = min(self._price(candle, "low") for candle in candles)
         high = max(self._price(candle, "high") for candle in candles)
         if high <= low:
-            return {"bins": [], "high_nodes": [], "low_nodes": []}
+            return {
+                "bins": [], "high_nodes": [], "low_nodes": [],
+                "source": "ohlcv_range_proxy", "is_proxy": True,
+            }
 
         step = (high - low) / bins
         heat = [0.0 for _ in range(bins)]
@@ -303,6 +306,8 @@ class InstitutionalAnalysisEngine:
             "bins": [{"price": round(low + (index + 0.5) * step, 8), "density": round(density, 8)} for index, density in ordered],
             "high_nodes": high_nodes,
             "low_nodes": low_nodes,
+            "source": "ohlcv_range_proxy",
+            "is_proxy": True,
         }
 
     def _liquidity_voids(self, heatmap):
@@ -455,9 +460,12 @@ class InstitutionalAnalysisEngine:
             return {"active": False, "value": None, "bias": "NONE", "confidence": 0}
 
         value = values[-1]
-        if value >= 0.01:
+        # Bybit funding is a decimal rate (0.0001 = 0.01%), not a percent
+        # number. The previous 0.01 threshold ignored ordinary extreme funding.
+        threshold = 0.0001
+        if value >= threshold:
             bias = "SHORT"
-        elif value <= -0.01:
+        elif value <= -threshold:
             bias = "LONG"
         else:
             bias = "NONE"
