@@ -17,6 +17,7 @@ import time
 import os
 import ccxt
 import sys
+import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -438,6 +439,7 @@ def _combine_stats(all_stats):
         "tp1": 0,
         "tp2": 0,
         "tp3": 0,
+        "trade_history": [],
     }
     for _, stats in all_stats:
         for key in (
@@ -457,6 +459,47 @@ def _combine_stats(all_stats):
         combined["net_rr"] += float(stats.get("net_rr", 0) or 0)
         combined["gross_profit_rr"] += float(stats.get("gross_profit_rr", 0) or 0)
         combined["gross_loss_rr"] += float(stats.get("gross_loss_rr", 0) or 0)
+        combined["trade_history"].extend(stats.get("trade_history") or [])
+
+    # Rebuild combined direction and MTF outcome groups from the actual closed
+    # trades; summing per-symbol percentages would distort the pooled sample.
+    combined["direction_breakdown"] = {}
+    combined["mtf_trade_breakdown"] = {}
+    grouped = {}
+    for trade in combined["trade_history"]:
+        context = trade.get("mtf_context") or {}
+        direction = str(trade.get("direction") or "UNKNOWN").upper()
+        side_key = direction
+        mtf_key = (
+            f"{direction}|weekly={str(context.get('weekly') or 'UNKNOWN').upper()}"
+            f"|daily={str(context.get('daily') or 'UNKNOWN').upper()}"
+            f"|h4={str(context.get('h4') or 'UNKNOWN').upper()}"
+        )
+        grouped.setdefault(side_key, []).append(trade)
+        combined["mtf_trade_breakdown"].setdefault(mtf_key, []).append(trade)
+
+    for key, trades in grouped.items():
+        values = [float(item.get("net_rr", 0.0) or 0.0) for item in trades]
+        wins = [value for value in values if value > 0]
+        losses = [value for value in values if value < 0]
+        gross_profit, gross_loss = sum(wins), abs(sum(losses))
+        combined["direction_breakdown"][key] = {
+            "total": len(trades), "wins": len(wins), "losses": len(losses),
+            "winrate": round(len(wins) / len(trades) * 100.0, 2) if trades else 0.0,
+            "expectancy": round(sum(values) / len(values), 4) if values else 0.0,
+            "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else round(gross_profit, 4),
+        }
+    for key, trades in list(combined["mtf_trade_breakdown"].items()):
+        values = [float(item.get("net_rr", 0.0) or 0.0) for item in trades]
+        wins = [value for value in values if value > 0]
+        losses = [value for value in values if value < 0]
+        gross_profit, gross_loss = sum(wins), abs(sum(losses))
+        combined["mtf_trade_breakdown"][key] = {
+            "total": len(trades), "wins": len(wins), "losses": len(losses),
+            "winrate": round(len(wins) / len(trades) * 100.0, 2) if trades else 0.0,
+            "expectancy": round(sum(values) / len(values), 4) if values else 0.0,
+            "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else round(gross_profit, 4),
+        }
 
     combined["losses"] = combined["total"] - combined["wins"]
     if combined["total"]:
@@ -533,6 +576,9 @@ def _report(stats, name):
     print(f"  Net RR         : {stats['net_rr']}")
     if "max_drawdown" in stats:
         print(f"  Max Drawdown   : {stats['max_drawdown']} R")
+    mtf_breakdown = stats.get("mtf_trade_breakdown") or {}
+    if mtf_breakdown:
+        print(f"  Kapanan işlem MTF dağılımı: {mtf_breakdown}")
     breakdown = stats.get("direction_breakdown") or {}
     for direction in ("LONG", "SHORT"):
         side = breakdown.get(direction)
@@ -553,7 +599,10 @@ def _report(stats, name):
             f"delay={trade.get('fill_delay_bars')} bar | "
             f"plan={trade.get('planned_entry')} fill={trade.get('entry')} "
             f"SL={trade.get('stop_loss')} TP={tps} | "
-            f"{trade.get('exit_reason')} {trade.get('net_rr')}R"
+            f"exit={trade.get('exit_price')} "
+            f"{'STOP_GAP=' + str(trade.get('stop_gap_r')) + 'R ' if trade.get('stop_gap') else ''}"
+            f"{trade.get('exit_reason')} {trade.get('net_rr')}R | "
+            f"MTF={trade.get('mtf_context')}"
         )
 
     if stats["total"] >= 20 and stats["expectancy"] > 0 and stats["profit_factor"] >= 1.3:
@@ -591,6 +640,21 @@ def _configured_partial_tp_weights():
     if sum(weights.values()) <= 0:
         return {"tp1": 1.0, "tp2": 1.0, "tp3": 1.0}
     return weights
+
+
+def _git_revision():
+    """Return the exact source revision used for this historical run."""
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return completed.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
 
 
 def main():
@@ -631,6 +695,18 @@ def main():
     # Semboller arası signal durumunu izole et: runner tek örnekte yok, engine'deki
     # cooldown 0 olduğu için ardışık tarama bir sonraki sembolü etkilemez.
     print(f"VERİ SAĞLAYICISI | {_history_provider_name}")
+    print(f"KOD SÜRÜMÜ | {_git_revision()}")
+    print(
+        "BACKTEST AYARLARI | "
+        f"fee={getattr(Config, 'ROUND_TRIP_COST_RATE', 0.002)} | "
+        f"partial_tp_weights={_configured_partial_tp_weights()} | "
+        f"limit_expiry_bars={args.limit_expiry_bars} | "
+        f"minimum_rr={getattr(Config, 'MINIMUM_RR', 'unknown')} | "
+        f"min_stop_atr={getattr(Config, 'MIN_STOP_ATR_MULTIPLIER', 'unknown')} | "
+        f"auto_expand_stop={getattr(Config, 'AUTO_EXPAND_TIGHT_STOPS', 'unknown')} | "
+        f"reject_tight_stops={getattr(Config, 'REJECT_TIGHT_STOPS', 'unknown')} | "
+        f"step=5 | lenient={args.lenient}"
+    )
     all_stats = []
     backtest_now_ms = time.time() * 1000
     for symbol in symbols:
