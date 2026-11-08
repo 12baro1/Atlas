@@ -601,7 +601,9 @@ def _report(stats, name):
             f"SL={trade.get('stop_loss')} TP={tps} | "
             f"exit={trade.get('exit_price')} "
             f"{'STOP_GAP=' + str(trade.get('stop_gap_r')) + 'R ' if trade.get('stop_gap') else ''}"
-            f"{trade.get('exit_reason')} {trade.get('net_rr')}R | "
+            f"{trade.get('exit_reason')} gross={trade.get('gross_rr', 'n/a')}R "
+            f"cost=-{trade.get('execution_cost_rr', 0)}R "
+            f"net={trade.get('net_rr')}R | "
             f"MTF={trade.get('mtf_context')}"
         )
 
