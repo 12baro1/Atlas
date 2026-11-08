@@ -370,6 +370,18 @@ class SetupReasoningEngine:
                     internal_structure=internal_structure,
                 )
                 support.append(f"{source} POI supports {direction}")
+                market_context = []
+                if isinstance(market_phase, dict) and market_phase.get("phase"):
+                    market_context.append(f"Market phase: {market_phase.get('phase')}")
+                if isinstance(premium_discount, dict) and premium_discount.get("valid"):
+                    zone_name = "Discount" if premium_discount.get("discount") else "Premium" if premium_discount.get("premium") else "Equilibrium"
+                    market_context.append(f"Premium/Discount: {zone_name}")
+                active_trendline_pools = [
+                    item for item in (trendline_liquidity or [])
+                    if isinstance(item, dict) and item.get("price") is not None
+                ]
+                if active_trendline_pools:
+                    market_context.append(f"Trendline liquidity pools: {len(active_trendline_pools)}")
                 # Counterpressure refines the fill location inside this same POI;
                 # it never removes an otherwise valid structural scenario.
                 entry_depth_reason = None
