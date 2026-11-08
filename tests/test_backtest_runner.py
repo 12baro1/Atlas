@@ -708,7 +708,7 @@ def test_missed_limit_reassesses_market_at_next_open_when_net_rr_is_valid():
     result = {
         "decision": {"action": "EXECUTE"},
         "signal": {"signal": "LONG"},
-        "risk": {"entry": 99.0, "stop_loss": 98.0, "tp1": 102.0, "tp2": 103.0, "tp3": 104.0},
+        "risk": {"entry": 99.0, "stop_loss": 99.0, "tp1": 102.0, "tp2": 103.0, "tp3": 104.0},
         "analysis": {"entry": {"entry_type": "LIMIT"}},
     }
     trade = runner._to_trade(result, candles, entry_index=1, signal_index=0)
