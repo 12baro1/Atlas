@@ -21,7 +21,7 @@ The dates below are the last commit dates observed on the audit baseline, not pr
 
 ## Active modules reviewed; no speculative rewrite
 
-- `unicorn_engine.py` (last change 2026-07-18): active MTF breaker/FVG evidence. Its proposed levels are inputs/evidence only; the main engine performs final setup geometry reconciliation. No change was made without a reproducible defect and regression expectation.
+- `unicorn_engine.py` (last change 2026-07-18): active MTF breaker/FVG evidence. Directional validation was corrected; its proposed levels remain evidence only and the main engine performs final setup geometry reconciliation.
 - `universe_engine.py` (last change 2026-07-18): active symbol filtering used by the terminal scanner and data selection. The USDT perpetual symbol suffix and exchange market metadata provide the current contract filter.
 - `killzone_engine.py` (last change 2026-08-07): active UTC kill-zone context, shares the current Config session windows.
 - `canonical_features.py` (last change 2026-08-08): active canonical feature vocabulary shared by journal learning and setup quality.
