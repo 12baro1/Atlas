@@ -648,27 +648,29 @@ class SetupReasoningEngine:
             "motor_evidence_sources": motor_evidence_sources,
             }
 
-        # Lexicographic scenario selection; execution costs are priced before
-        # raw reward so a wide-looking target cannot hide fee drag.
+        # Main authority ranks trade quality first. Market proximity is only
+        # a late tie-breaker; it must never beat a structurally and economically
+        # superior candidate merely because that candidate is closer to spot.
         def rank(candidate):
             net_rr = candidate.get("net_projected_rr")
             first_rr = candidate.get("net_first_target_rr")
             distance = abs(candidate["entry"] - current) / current
-            # Prefer the nearest still-valid POI first. Previously projected
-            # RR dominated this ordering, allowing a very distant POI with a
-            # huge theoretical target to beat a nearby, executable setup.
-            # Distance is a ranking preference, not a hard filter: if only a
-            # distant valid POI exists it remains visible and is labeled far.
+            evidence_balance = (
+                len(candidate.get("supporting_evidence") or [])
+                - len(candidate.get("opposing_evidence") or [])
+            )
             return (
                 candidate.get("projected_target") is not None,
-                distance * -1.0,
-                net_rr if net_rr is not None else -1.0,
+                candidate.get("execution_economics_valid", False),
                 first_rr if first_rr is not None else -1.0,
+                net_rr if net_rr is not None else -1.0,
                 candidate.get("structure_aligned", False),
                 candidate.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL",
                 candidate.get("ote_confluence", False),
+                evidence_balance,
                 candidate.get("orderflow_supportive", False),
                 candidate.get("poi_source") in {"ORDER_BLOCK", "HTF_ORDER_BLOCK"},
+                -distance,
             )
         selected = max(candidates, key=rank)
         selected = dict(selected)
