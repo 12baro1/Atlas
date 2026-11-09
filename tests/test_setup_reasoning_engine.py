@@ -171,3 +171,39 @@ def test_trendline_liquidity_can_be_a_structural_candidate_target():
         trendline_liquidity=[{"type": "BUY_SIDE", "price": 125}],
     )
     assert result["selected"]["projected_target"] == 125
+
+
+def test_valid_poi_inside_zone_creates_deeper_limit_without_sweep():
+    result = _run(
+        mtf={"entry": "LONG", "weekly": "NEUTRAL", "daily": "BULLISH", "h4": "BULLISH"},
+        current_price=103,
+        fvg=[{"type": "BULLISH", "from": 100, "to": 105, "filled": False}],
+        liquidity_sweep={"is_sweep": False, "sell_side": False, "buy_side": False},
+        liquidity=[{"type": "BUY_SIDE", "price": 120}],
+        structure=[],
+    )
+    selected = result["selected"]
+    assert selected["valid"] is True
+    assert selected["direction"] == "LONG"
+    assert selected["entry_type"] == "LIMIT"
+    assert selected["entry"] < 103
+    assert 100 <= selected["entry"] <= 105
+    assert selected["stop_loss"] < 100
+
+
+def test_valid_short_poi_inside_zone_creates_deeper_limit_without_sweep():
+    result = _run(
+        mtf={"entry": "SHORT", "weekly": "NEUTRAL", "daily": "BEARISH", "h4": "BEARISH"},
+        current_price=103,
+        fvg=[{"type": "BEARISH", "from": 100, "to": 105, "filled": False}],
+        liquidity_sweep={"is_sweep": False, "sell_side": False, "buy_side": False},
+        liquidity=[{"type": "SELL_SIDE", "price": 90}],
+        structure=[],
+    )
+    selected = result["selected"]
+    assert selected["valid"] is True
+    assert selected["direction"] == "SHORT"
+    assert selected["entry_type"] == "LIMIT"
+    assert selected["entry"] > 103
+    assert 100 <= selected["entry"] <= 105
+    assert selected["stop_loss"] > 105
