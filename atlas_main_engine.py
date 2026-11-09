@@ -176,6 +176,10 @@ class AtlasMainEngine:
         if action not in {"EXECUTE", "EXECUTE_WITH_CAUTION"}:
             return decision
         setup = entry if isinstance(entry, dict) else {}
+        if setup.get("valid") is False:
+            return {"action": "SKIP", "signal": str(setup.get("direction") or "WAIT").upper(),
+                    "reason": f"Final validation: setup marked invalid ({setup.get('reason') or 'unspecified'})",
+                    "critical_blockers": ["SETUP_INVALID"]}
         side = str(setup.get("direction") or (decision or {}).get("signal") or "").upper()
         if side not in {"LONG", "SHORT"}:
             return {"action": "SKIP", "signal": side or "WAIT",
