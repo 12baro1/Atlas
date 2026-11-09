@@ -461,6 +461,12 @@ def _combine_stats(all_stats):
         "stale_limit_target_before_fill": 0,
         "market_fallback_fills": 0,
         "market_fallback_rejected_rr": 0,
+        "market_fallback_rejected_distance": 0,
+        "candidate_direction_counts": {},
+        "filled_direction_counts": {},
+        "unfilled_limit_direction_counts": {},
+        "expired_limit_direction_counts": {},
+        "stale_limit_direction_counts": {},
         "overlapping_signals_skipped": 0,
         "open_trades": 0,
         "invalid_candidates": 0,
@@ -478,11 +484,19 @@ def _combine_stats(all_stats):
             "unfilled_limits", "expired_limits", "stale_limits_cancelled",
             "stale_limit_signal_candle_target", "stale_limit_target_before_fill",
             "market_fallback_fills", "market_fallback_rejected_rr",
+            "market_fallback_rejected_distance",
             "overlapping_signals_skipped", "open_trades",
             "invalid_candidates", "no_followup_data",
         ):
             combined[key] += int(stats.get(key, 0) or 0)
-        for key in ("action_counts", "wait_reason_counts", "signal_reason_counts", "mtf_alignment_counts", "entry_reason_counts", "entry_type_counts", "risk_reason_counts", "target_reason_counts", "target_missing_rr_counts", "stop_atr_buckets", "confirmation_outcome_counts", "confirmation_reason_counts", "confirmation_requirement_counts", "entry_type_reason_counts"):
+        for key in (
+            "action_counts", "wait_reason_counts", "signal_reason_counts", "mtf_alignment_counts",
+            "entry_reason_counts", "entry_type_counts", "risk_reason_counts", "target_reason_counts",
+            "target_missing_rr_counts", "stop_atr_buckets", "confirmation_outcome_counts",
+            "confirmation_reason_counts", "confirmation_requirement_counts", "entry_type_reason_counts",
+            "candidate_direction_counts", "filled_direction_counts", "unfilled_limit_direction_counts",
+            "expired_limit_direction_counts", "stale_limit_direction_counts",
+        ):
             for label, count in (stats.get(key) or {}).items():
                 combined[key][label] = combined[key].get(label, 0) + int(count or 0)
         combined["net_rr"] += float(stats.get("net_rr", 0) or 0)
