@@ -256,12 +256,23 @@ class AtlasMainEngine:
             return {"action": "SKIP", "signal": side, "reason": f"Final validation: {reason}",
                     "critical_blockers": ["INVALID_PRICE_GEOMETRY"]}
         distance_pct = abs(price - current) / current
-        max_distance = max_limit_distance_pct if order_type == "LIMIT" else max_market_distance_pct
-        if max_distance is not None and distance_pct > float(max_distance):
-            return {"action": "SKIP", "signal": side,
-                    "reason": f"Final validation: {order_type} entry too far from market ({distance_pct:.2%} > {float(max_distance):.2%})",
-                    "critical_blockers": ["ENTRY_TOO_FAR_FROM_MARKET"],
-                    "entry_distance_percent": distance_pct}
+        # A valid pending LIMIT is a setup even when price is far away.
+        # Distance is execution context, not a setup-validity veto. Keep the
+        # far entry visible and label it; only reject a stale/far MARKET order.
+        if order_type == "MARKET" and max_market_distance_pct is not None:
+            if distance_pct > float(max_market_distance_pct):
+                return {"action": "SKIP", "signal": side,
+                        "reason": f"Final validation: MARKET entry too far from market ({distance_pct:.2%} > {float(max_market_distance_pct):.2%})",
+                        "critical_blockers": ["MARKET_ENTRY_TOO_FAR"],
+                        "entry_distance_percent": distance_pct}
+        if order_type == "LIMIT":
+            decision = dict(decision or {})
+            decision["entry_distance_percent"] = distance_pct
+            decision["entry_distance_label"] = "UZAK GİRİŞ" if distance_pct > 0.02 else "YAKIN GİRİŞ"
+            decision["entry_execution_note"] = (
+                "LIMIT beklemede; fiyat giriş bölgesine gelirse tetiklenir"
+                if distance_pct > 0.02 else "LIMIT giriş bölgesi piyasaya yakın"
+            )
         target_values = []
         for key in ("tp1", "tp2", "tp3"):
             value = (targets or {}).get(key) if isinstance(targets, dict) else None
