@@ -56,6 +56,7 @@ from session_filter import SessionFilter
 from signal_engine import SignalEngine
 from setup_quality_engine import SetupQualityEngine
 from setup_reasoning_engine import SetupReasoningEngine
+from atlas_main_engine import AtlasMainEngine
 from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
 from trade_manager import TradeManager
@@ -194,6 +195,21 @@ class AtlasEngine:
         self.scanner = ScannerEngine()
         self.statistics = StatisticsEngine()
         self.backtest = BacktestEngine()
+        # All specialist engines are registered under one main authority.
+        # Existing attributes remain aliases for backward compatibility.
+        self.main_engine = AtlasMainEngine(
+            motors={
+                name: value for name, value in vars(self).items()
+                if name not in {
+                    "logger", "structure_engine_cls", "config", "position",
+                    "trade", "trade_journal", "manual_trade_service",
+                    "telegram", "_telegram_signal_cache", "_telegram_threads",
+                    "main_engine",
+                }
+            },
+            setup_reasoner=self.setup_reasoner,
+            decision_engine=self.decision,
+        )
 
     def analyze(self, data):
         """Çoklu zaman dilimi verisini analiz eder ve birleşik çıktı üretir."""
@@ -392,7 +408,7 @@ class AtlasEngine:
             trendline_liquidity=structure_state.get("trendline_liquidity", []),
         )
 
-        decision_state = self.decision.decide(
+        decision_state = self.main_engine.decide(
             signal=execution_state["signal"],
             confluence=execution_state["confluence"],
             entry=execution_state["entry"],
@@ -415,8 +431,8 @@ class AtlasEngine:
             cooldown=cooldown_state,
         )
 
-        decision_state = self._apply_external_risk_filters(
-            decision=decision_state,
+        decision_state = self.main_engine.apply_operational_gates(
+            decision_state,
             news_filter=news_state,
             correlation=correlation_state,
             cooldown=cooldown_state,
@@ -1132,7 +1148,7 @@ class AtlasEngine:
         )
         # Build independent LONG/SHORT POI scenarios from the full motor context.
         # Secondary evidence shapes the scenario; it is not a score-based veto.
-        reasoning = self.setup_reasoner.generate(
+        reasoning = self.main_engine.build_setup(
             base_entry=entry,
             mtf=mtf,
             structure=entry_structure,
