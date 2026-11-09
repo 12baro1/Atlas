@@ -237,3 +237,30 @@ def test_missing_structural_poi_remains_a_hard_confirmation_failure():
     result = EntryConfirmationEngine().confirm(_mtf(), [], [], entry, current_price=100.0)
     assert result["confirmed"] is False
     assert result["reason"] == "Selected structural POI is unavailable"
+
+
+def test_confirmed_sweep_reversal_is_not_vetoed_by_neutral_mtf():
+    entry = _entry("LONG")
+    entry.update({
+        "direction_source": "CONFIRMED_SWEEP_REVERSAL",
+        "confirmed_sweep_reversal": True,
+    })
+    result = EntryConfirmationEngine().confirm(
+        {"valid": False, "entry": "NONE"},
+        [],
+        [],
+        entry,
+        current_price=100.0,
+    )
+    assert result["confirmed"] is True
+    assert result["confirmation_mode"] == "CONFIRMED_SWEEP_REVERSAL"
+    assert result["direction_source"] == "CONFIRMED_SWEEP_REVERSAL"
+
+
+def test_neutral_mtf_without_confirmed_sweep_reversal_still_blocks():
+    entry = _entry("LONG")
+    result = EntryConfirmationEngine().confirm(
+        {"valid": False, "entry": "NONE"}, [], [], entry, current_price=100.0
+    )
+    assert result["confirmed"] is False
+    assert "no confirmed sweep reversal" in result["reason"]
