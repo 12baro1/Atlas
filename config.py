@@ -111,6 +111,9 @@ class Config:
     MAX_LIMIT_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_PERCENT", "0.05"))
     MAX_MARKET_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_MARKET_ENTRY_DISTANCE_ATR", "0.35"))
     MAX_MARKET_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_MARKET_ENTRY_DISTANCE_PERCENT", "0.003"))
+    # Main-engine candidate generation: do not turn remote POIs into actionable LIMIT setups.
+    MAX_SETUP_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_SETUP_ENTRY_DISTANCE_ATR", "2.0"))
+    MAX_SETUP_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_SETUP_ENTRY_DISTANCE_PERCENT", "0.05"))
     # Entry score is a diagnostic prefilter; the hard SMC/confirmation gate
     # remains authoritative for execution eligibility.
     ENTRY_MIN_SCORE = float(os.getenv("ATLAS_ENTRY_MIN_SCORE", "50"))
