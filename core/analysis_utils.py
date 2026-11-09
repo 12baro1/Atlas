@@ -67,7 +67,7 @@ def extract_direction(module: Mapping[str, Any] | None) -> str:
 
     state = module.get("state")
     if isinstance(state, str):
-        upper_state = state.upper()
+        upper_state = state.strip().upper()
         if upper_state in LONG_STATE_VALUES:
             return "LONG"
         if upper_state in SHORT_STATE_VALUES:
@@ -82,7 +82,7 @@ def extract_confidence(module: Mapping[str, Any] | None) -> float:
 
     for key in ("confidence", "score", "phase_score", "strength_score"):
         value = module.get(key)
-        if isinstance(value, (int, float)):
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
             return float(value)
 
     best = module.get("best")
@@ -123,7 +123,7 @@ def state_matches_direction(module: Mapping[str, Any] | None, expected_direction
     if not isinstance(state, str):
         return False
 
-    upper_state = state.upper()
+    upper_state = state.strip().upper()
     if normalize_direction(expected_direction, default="WAIT") == "LONG":
         return upper_state in LONG_STATE_VALUES
     if normalize_direction(expected_direction, default="WAIT") == "SHORT":
