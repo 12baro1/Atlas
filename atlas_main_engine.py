@@ -153,12 +153,49 @@ class AtlasMainEngine:
         }
         candidates = result.get("candidates")
         result["candidates"] = candidates if isinstance(candidates, list) else []
-        selected = result.get("selected")
-        if not isinstance(selected, dict):
-            result["selected"] = {
-                "valid": False, "direction": "WAIT",
-                "reason": result.get("reason") or "No coherent setup candidate",
-            }
+
+        # The reasoner proposes candidates; it does not own the final selection.
+        # AtlasMainEngine ranks every executable candidate using the same
+        # structural/economic evidence and only then publishes one setup.
+        eligible = [
+            item for item in result["candidates"]
+            if isinstance(item, dict)
+            and item.get("valid") is True
+            and item.get("execution_eligible", True) is True
+        ]
+        if eligible:
+            def candidate_rank(candidate):
+                first_rr = candidate.get("net_first_target_rr")
+                net_rr = candidate.get("net_projected_rr")
+                try:
+                    distance = float(candidate.get("entry_distance_pct"))
+                except (TypeError, ValueError, OverflowError):
+                    distance = float("inf")
+                support = len(candidate.get("supporting_evidence") or [])
+                opposition = len(candidate.get("opposing_evidence") or [])
+                return (
+                    candidate.get("projected_target") is not None,
+                    candidate.get("execution_economics_valid", False),
+                    float(first_rr) if first_rr is not None else -1.0,
+                    float(net_rr) if net_rr is not None else -1.0,
+                    bool(candidate.get("structure_aligned")),
+                    candidate.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL",
+                    bool(candidate.get("ote_confluence")),
+                    support - opposition,
+                    bool(candidate.get("orderflow_supportive")),
+                    candidate.get("poi_source") in {"ORDER_BLOCK", "HTF_ORDER_BLOCK"},
+                    -distance,
+                )
+            selected = dict(max(eligible, key=candidate_rank))
+            selected["selected_by"] = "ATLAS_MAIN_ENGINE"
+            result["selected"] = selected
+        else:
+            selected = result.get("selected")
+            if not isinstance(selected, dict):
+                result["selected"] = {
+                    "valid": False, "direction": "WAIT",
+                    "reason": result.get("reason") or "No coherent setup candidate",
+                }
         result["decision_authority"] = "ATLAS_MAIN_ENGINE"
         self.last_motor_report.update({
             "registered_motors": sorted(self.motors),
