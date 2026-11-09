@@ -219,7 +219,7 @@ class AtlasEngine:
             "volume_profile", "institutional", "entry", "entry_optimizer",
             "entry_confirmation", "confluence", "signal", "risk", "rr",
             "dynamic_tp", "setup_quality", "news_filter", "correlation",
-            "cooldown", "learning", "manual_quality_gate",
+            "cooldown", "learning",
         )
         self.main_engine = AtlasMainEngine(
             motors={name: getattr(self, name) for name in specialist_motor_names},
@@ -1483,6 +1483,13 @@ class AtlasEngine:
                     dynamic_tp.get("tp2"),
                     dynamic_tp.get("tp3"),
                 )
+        # The main authority reconciles the structural stop, final risk stop and
+        # selected structural TP ladder before any quality gate or signal consumes them.
+        final_geometry = self.main_engine.finalize_setup_geometry(entry, risk, dynamic_tp)
+        entry = final_geometry["entry"]
+        risk = final_geometry["risk"]
+        dynamic_tp = final_geometry["targets"]
+
         rr = self.rr.evaluate(risk) if risk is not None else None
 
         trade_quality = self.trade_quality.evaluate(

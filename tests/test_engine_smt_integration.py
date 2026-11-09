@@ -190,3 +190,25 @@ def test_timeframe_structure_motors_publish_evidence_to_main_engine():
     assert diagnostics["call_counts"]["choch"] == 1
     assert diagnostics["error_count"] == 0
     assert diagnostics["evidence_count"] == diagnostics["call_total"]
+
+
+def test_market_analysis_specialists_are_registered_through_main_engine_proxies():
+    from atlas_main_engine import MotorProxy
+
+    engine = AtlasEngine()
+    expected = {
+        "bos", "choch", "liquidity", "orderblocks", "orderbook", "mitigation",
+        "fvg", "liquidity_sweep", "breaker", "trendline", "trend",
+        "market_phase", "market_regime", "trade_quality", "mtf",
+        "premium_discount", "killzone", "session", "ote", "htf_orderblock",
+        "htf_fvg", "smt", "unicorn", "cisd", "volume_profile",
+        "institutional", "entry", "entry_optimizer", "entry_confirmation",
+        "confluence", "signal", "risk", "rr", "dynamic_tp", "setup_quality",
+        "news_filter", "correlation", "cooldown", "learning",
+    }
+    assert expected.issubset(set(engine.main_engine.motors))
+    assert all(isinstance(motor, MotorProxy) for motor in engine.main_engine.motors.values())
+    # ManualTradeQualityGate is invoked by the runtime for manual-entry review,
+    # not as a market-analysis specialist.
+    assert "manual_quality_gate" not in engine.main_engine.motors
+    assert engine.manual_quality_gate is not None

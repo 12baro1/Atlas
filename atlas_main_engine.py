@@ -153,12 +153,55 @@ class AtlasMainEngine:
         }
         candidates = result.get("candidates")
         result["candidates"] = candidates if isinstance(candidates, list) else []
-        selected = result.get("selected")
-        if not isinstance(selected, dict):
-            result["selected"] = {
-                "valid": False, "direction": "WAIT",
-                "reason": result.get("reason") or "No coherent setup candidate",
-            }
+
+        # The reasoner proposes candidates; it does not own the final selection.
+        # AtlasMainEngine ranks every executable candidate using the same
+        # structural/economic evidence and only then publishes one setup.
+        eligible = [
+            item for item in result["candidates"]
+            if isinstance(item, dict)
+            and item.get("valid") is True
+            and item.get("execution_eligible", True) is True
+        ]
+        if eligible:
+            def candidate_rank(candidate):
+                import math
+
+                def finite_number(value, default):
+                    try:
+                        number = float(value)
+                    except (TypeError, ValueError, OverflowError):
+                        return default
+                    return number if math.isfinite(number) else default
+
+                first_rr = finite_number(candidate.get("net_first_target_rr"), -1.0)
+                net_rr = finite_number(candidate.get("net_projected_rr"), -1.0)
+                distance = finite_number(candidate.get("entry_distance_pct"), float("inf"))
+                support = len(candidate.get("supporting_evidence") or [])
+                opposition = len(candidate.get("opposing_evidence") or [])
+                return (
+                    candidate.get("projected_target") is not None,
+                    candidate.get("execution_economics_valid", False),
+                    first_rr,
+                    net_rr,
+                    bool(candidate.get("structure_aligned")),
+                    candidate.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL",
+                    bool(candidate.get("ote_confluence")),
+                    support - opposition,
+                    bool(candidate.get("orderflow_supportive")),
+                    candidate.get("poi_source") in {"ORDER_BLOCK", "HTF_ORDER_BLOCK"},
+                    -distance,
+                )
+            selected = dict(max(eligible, key=candidate_rank))
+            selected["selected_by"] = "ATLAS_MAIN_ENGINE"
+            result["selected"] = selected
+        else:
+            selected = result.get("selected")
+            if not isinstance(selected, dict):
+                result["selected"] = {
+                    "valid": False, "direction": "WAIT",
+                    "reason": result.get("reason") or "No coherent setup candidate",
+                }
         result["decision_authority"] = "ATLAS_MAIN_ENGINE"
         self.last_motor_report.update({
             "registered_motors": sorted(self.motors),
@@ -241,6 +284,91 @@ class AtlasMainEngine:
                     "critical_blockers": ["INVALID_TARGET_GEOMETRY"],
                     "invalid_targets": invalid}
         return decision
+
+    @staticmethod
+    def finalize_setup_geometry(entry, risk, targets):
+        """Main authority publishes one reconciled entry/SL/TP geometry."""
+        import math
+
+        setup = dict(entry) if isinstance(entry, dict) else {}
+        risk_payload = dict(risk) if isinstance(risk, dict) else None
+        target_payload = dict(targets) if isinstance(targets, dict) else {}
+        if not setup.get("valid"):
+            return {"entry": setup, "risk": risk_payload, "targets": target_payload}
+
+        side = str(setup.get("direction") or "").upper()
+        try:
+            entry_price = float(setup.get("entry"))
+            requested_stop = float(setup.get("stop_loss"))
+            risk_stop = risk_payload.get("stop_loss") if isinstance(risk_payload, dict) else None
+            stop = float(risk_stop) if isinstance(risk_payload, dict) and risk_payload.get("risk_setup_valid") is True and risk_stop is not None else requested_stop
+        except (TypeError, ValueError, OverflowError):
+            setup.update({"valid": False, "reason": "Main authority: invalid entry/stop geometry",
+                          "entry_reason_code": "INVALID_FINAL_GEOMETRY"})
+            return {"entry": setup, "risk": risk_payload, "targets": target_payload}
+
+        if not all(math.isfinite(value) and value > 0 for value in (entry_price, stop)):
+            setup.update({"valid": False, "reason": "Main authority: non-finite/non-positive entry or stop",
+                          "entry_reason_code": "INVALID_FINAL_GEOMETRY"})
+            return {"entry": setup, "risk": risk_payload, "targets": target_payload}
+        risk_entry = risk_payload.get("entry") if isinstance(risk_payload, dict) else None
+        if risk_entry is not None:
+            try:
+                risk_entry = float(risk_entry)
+            except (TypeError, ValueError, OverflowError):
+                risk_entry = float("nan")
+            if not math.isfinite(risk_entry) or abs(risk_entry - entry_price) > max(entry_price * 1e-8, 1e-8):
+                setup.update({"valid": False, "reason": "Main authority: risk entry differs from selected setup entry",
+                              "entry_reason_code": "RISK_ENTRY_MISMATCH"})
+                return {"entry": setup, "risk": risk_payload, "targets": target_payload}
+        if (side == "LONG" and stop >= entry_price) or (side == "SHORT" and stop <= entry_price) or side not in {"LONG", "SHORT"}:
+            setup.update({"valid": False, "reason": "Main authority: stop is not beyond structural invalidation",
+                          "entry_reason_code": "INVALID_FINAL_STOP"})
+            return {"entry": setup, "risk": risk_payload, "targets": target_payload}
+
+        minimum_gap = 0.0
+        try:
+            minimum_gap = max(0.0, float(target_payload.get("minimum_target_separation") or 0.0))
+        except (TypeError, ValueError, OverflowError):
+            minimum_gap = 0.0
+        ordered = []
+        for key in ("tp1", "tp2", "tp3"):
+            raw = target_payload.get(key)
+            try:
+                value = float(raw)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not math.isfinite(value) or value <= 0:
+                continue
+            if (side == "LONG" and value <= entry_price) or (side == "SHORT" and value >= entry_price):
+                continue
+            ordered.append(value)
+
+        ordered = sorted(set(ordered), reverse=(side == "SHORT"))
+        distinct = []
+        for value in ordered:
+            if not distinct or abs(value - distinct[-1]) + max(entry_price * 1e-10, 1e-12) >= minimum_gap:
+                distinct.append(value)
+            if len(distinct) == 3:
+                break
+        if not distinct:
+            setup.update({"valid": False, "reason": "Main authority: no valid structural target remains",
+                          "entry_reason_code": "NO_VALID_STRUCTURAL_TARGETS"})
+            return {"entry": setup, "risk": risk_payload, "targets": target_payload}
+
+        final_targets = {f"tp{index}": value for index, value in enumerate(distinct, start=1)}
+        for index in range(len(distinct) + 1, 4):
+            final_targets[f"tp{index}"] = None
+        setup["stop_loss"] = stop
+        setup.update(final_targets)
+        setup["final_geometry_authority"] = "ATLAS_MAIN_ENGINE"
+        if isinstance(risk_payload, dict):
+            risk_payload["stop_loss"] = stop
+            risk_payload.update(final_targets)
+        target_payload.update(final_targets)
+        target_payload["selected_by"] = "ATLAS_MAIN_ENGINE"
+        target_payload["final_geometry_authority"] = "ATLAS_MAIN_ENGINE"
+        return {"entry": setup, "risk": risk_payload, "targets": target_payload}
 
     def decide(self, **motor_outputs):
         """Only final decision entry point."""

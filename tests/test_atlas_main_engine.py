@@ -311,3 +311,85 @@ def test_main_engine_final_authority_allows_coherent_nearby_limit():
         max_market_distance_pct=0.003,
     )
     assert result["action"] == "EXECUTE"
+
+
+def test_main_engine_selects_best_executable_candidate_not_reasoner_choice():
+    class _CompetingReasoner:
+        def generate(self, **kwargs):
+            return {
+                "candidates": [
+                    {
+                        "valid": True, "execution_eligible": True, "direction": "LONG",
+                        "setup_candidate_id": "lower-quality", "net_first_target_rr": 0.8,
+                        "net_projected_rr": 1.8, "entry_distance_pct": 0.5,
+                    },
+                    {
+                        "valid": True, "execution_eligible": True, "direction": "SHORT",
+                        "setup_candidate_id": "best-quality", "net_first_target_rr": 1.2,
+                        "net_projected_rr": 2.6, "entry_distance_pct": 1.0,
+                        "execution_economics_valid": True, "structure_aligned": True,
+                    },
+                ],
+                "selected": {"valid": False, "direction": "WAIT", "reason": "reasoner fallback"},
+            }
+
+    main = AtlasMainEngine(
+        motors={},
+        setup_reasoner=_CompetingReasoner(),
+        decision_engine=_Decision(),
+    )
+    result = main.build_setup(current_price=100.0)
+    assert result["selected"]["setup_candidate_id"] == "best-quality"
+    assert result["selected"]["selected_by"] == "ATLAS_MAIN_ENGINE"
+    assert main.last_motor_report["selected_candidate_valid"] is True
+
+
+def test_main_engine_finalizes_stop_and_structural_tp_ladder():
+    entry = {
+        "valid": True, "direction": "LONG", "entry": 100.0,
+        "stop_loss": 96.0, "tp1": 110.0, "tp2": 105.0, "tp3": 105.5,
+    }
+    risk = {"risk_setup_valid": True, "stop_loss": 95.0}
+    targets = {
+        "tp1": 110.0, "tp2": 105.0, "tp3": 105.5,
+        "minimum_target_separation": 2.0,
+    }
+    result = AtlasMainEngine.finalize_setup_geometry(entry, risk, targets)
+    assert result["entry"]["stop_loss"] == 95.0
+    assert result["entry"]["tp1"] == 105.0
+    assert result["entry"]["tp2"] == 110.0
+    assert result["entry"]["tp3"] is None
+    assert result["risk"]["stop_loss"] == 95.0
+    assert result["targets"]["selected_by"] == "ATLAS_MAIN_ENGINE"
+    assert result["entry"]["final_geometry_authority"] == "ATLAS_MAIN_ENGINE"
+
+
+def test_main_engine_rejects_final_geometry_with_stop_on_wrong_side():
+    result = AtlasMainEngine.finalize_setup_geometry(
+        {"valid": True, "direction": "LONG", "entry": 100.0, "stop_loss": 101.0},
+        {"risk_setup_valid": False},
+        {"tp1": 105.0},
+    )
+    assert result["entry"]["valid"] is False
+    assert result["entry"]["entry_reason_code"] == "INVALID_FINAL_STOP"
+
+
+def test_main_engine_rejects_risk_entry_mismatch_before_publishing_geometry():
+    result = AtlasMainEngine.finalize_setup_geometry(
+        {"valid": True, "direction": "LONG", "entry": 100.0, "stop_loss": 95.0},
+        {"risk_setup_valid": True, "entry": 101.0, "stop_loss": 95.0},
+        {"tp1": 105.0},
+    )
+    assert result["entry"]["valid"] is False
+    assert result["entry"]["entry_reason_code"] == "RISK_ENTRY_MISMATCH"
+
+
+def test_main_geometry_preserves_missing_risk_payload():
+    result = AtlasMainEngine.finalize_setup_geometry(
+        {"valid": True, "direction": "LONG", "entry": 100.0, "stop_loss": 95.0},
+        None,
+        {"tp1": 105.0},
+    )
+    assert result["risk"] is None
+    assert result["entry"]["valid"] is True
+    assert result["entry"]["tp1"] == 105.0

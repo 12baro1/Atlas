@@ -150,7 +150,13 @@ class EntryEngine:
         if candles:
             try:
                 atr_value = float(calculate_atr(candles, period=int(getattr(Config, "ATR_PERIOD", 14))))
-                buffer_multiplier = float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10))
+                buffer_multiplier = float(
+                    getattr(
+                        Config,
+                        "ENTRY_ENGINE_STOP_STRUCTURE_BUFFER_ATR",
+                        getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10),
+                    )
+                )
                 if math.isfinite(atr_value) and atr_value > 0 and math.isfinite(buffer_multiplier):
                     atr_buffer = atr_value * max(0.0, buffer_multiplier)
             except (TypeError, ValueError, OverflowError):
