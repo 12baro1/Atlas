@@ -12,9 +12,11 @@
 - Structure/context/POI motors populate the pool before setup construction. Setup-dependent confirmation, quality, target and risk motors then evaluate that one selected setup and append their outputs to the same pool; they cannot create a second setup.
 - The specialist registry is explicit. Data/state services, journal, scanner and reporting components are not mislabeled as analysis motors.
 - `market_structure` is registered dynamically for each timeframe analysis and its pivot/strength/merge/noise/sequence outputs are captured too.
-- `AtlasMainEngine.build_setup()` is the only setup-construction entry point. It passes the pre-setup evidence trace and the structured specialist outputs to `SetupReasoningEngine`.
-- The legacy `EntryEngine` and `EntryOptimizer` can contribute candidate/optimization evidence, but their result is not a second executable setup. If the main setup reasoner cannot select a valid POI, Atlas does not fall back to the legacy EntryEngine setup.
+- `AtlasMainEngine.build_setup()` is the only setup-construction entry point. `SetupReasoningEngine` proposes POI candidates; the main engine independently ranks all executable candidates and publishes exactly one selected setup. The subordinate reasoner's `selected` field cannot override the main engine's ranking.
+- The legacy `EntryEngine` and `EntryOptimizer` can contribute candidate/optimization evidence, but their result is not a second executable setup. If no candidate passes the structural and market-distance boundaries, Atlas keeps WAIT rather than forcing a trade.
+- After the risk and structural-target specialists calculate their proposals, `AtlasMainEngine.finalize_setup_geometry()` reconciles the final stop and TP1-TP3 ladder, checks direction/spacing, and stamps the final geometry. Downstream quality and signal engines consume this reconciled geometry.
 - `AtlasMainEngine.decide()` is the only final-decision entry point. It receives the typed outputs from the setup-dependent validators and attaches the full accumulated evidence lineage to the decision. The decision implementation is an internal subordinate component; its result is stamped with the main engine's authority.
+- `ManualTradeQualityGate` is a separate manual-entry review service called by the runtime after market analysis. It is intentionally not listed as a market-analysis specialist motor.
 - Macro news and duplicate-position cooldown remain operational hard gates. Correlation remains a warning/evidence input, not a directional veto.
 
 ## Motor audit output
