@@ -107,7 +107,7 @@ class AtlasMainEngine:
     def analyze(self, market_data, *, pipeline):
         """Main engine controls lifecycle; pipeline is the ordered expert-analysis adapter."""
         if not callable(pipeline):
-            raise TypeError("AtlasMainEngine requires a callable specialist-analysis adapter")
+            raise TypeError("AtlasMainEngine requires a callable motor pipeline")
         self.reset_evidence()
         result = pipeline(market_data)
         diagnostics = self.motor_diagnostics()
