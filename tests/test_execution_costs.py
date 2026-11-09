@@ -1,6 +1,8 @@
 import pytest
 
 from execution_costs import estimate_plan_cost, estimate_stop_cost, realized_trade_cost
+from config import Config
+from position_manager import PositionManager
 
 
 def test_limit_entry_and_target_exit_use_maker_fees_only():
@@ -77,3 +79,27 @@ def test_partial_tp_then_trailing_stop_charges_each_exit_type_once():
         + 100.0 * 0.5 * 0.0003
     )
     assert cost["total"] == pytest.approx(expected)
+
+
+def test_position_manager_breakeven_stop_uses_per_leg_costs():
+    manager = PositionManager()
+    position = manager.open("BTC/USDT:USDT", {
+        "side": "LONG",
+        "entry": 100.0,
+        "entry_type": "LIMIT",
+        "stop_loss": 99.0,
+        "tp1": 101.0,
+        "tp2": 102.0,
+        "tp3": 103.0,
+    })
+    manager.update("BTC/USDT:USDT", 101.0)
+    expected = estimate_stop_cost(
+        entry_price=100.0,
+        stop_price=100.0,
+        entry_type="LIMIT",
+        maker_fee_rate=Config.MAKER_FEE_RATE,
+        taker_fee_rate=Config.TAKER_FEE_RATE,
+        spread_rate=Config.STOP_SPREAD_BUFFER_RATE,
+        slippage_rate=Config.STOP_SLIPPAGE_BUFFER_RATE,
+    )["total"]
+    assert position["stop_loss"] == pytest.approx(100.0 + expected)
