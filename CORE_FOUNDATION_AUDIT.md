@@ -17,7 +17,7 @@ Audit target: `main` immediately after the Atlas main-decision-authority merge.
 
 ## Defects fixed in this audit branch
 
-1. **Pivot filtering could suppress almost every pivot.** The active pipeline called `filter_noise()` with a default minimum strength of 14, while the default 5-left/5-right context contains at most 10 non-pivot candles. The default threshold is now 3, and strength uses only the configured left window plus the closed right confirmation window.
+1. **Pivot filtering could suppress almost every pivot.** The active pipeline called `filter_noise()` with a default minimum strength of 14, while the default 5-left/5-right context contains at most 10 non-pivot candles. The default threshold is now 3, and strength uses only the configured left window plus the closed right confirmation window and counts only bars separated from the pivot by at least 0.1x the local average candle range. This keeps the threshold meaningful instead of counting every bar that was already required to qualify the pivot.
 2. **Pivot window arguments were inconsistent.** The old detector normalized the stored right window but iterated using the unnormalized argument. Both windows are now validated and normalized once; zero/negative values raise a clear `ValueError`.
 3. **Swing detector used future ATR.** A single ATR from the end of the entire candle series was used for every historical swing. It now calculates ATR as of each candle, using no later bars.
 4. **OHLCV conversion trusted malformed rows.** `core.candle.convert()` now normalizes numeric strings, skips malformed/non-finite rows, rejects impossible OHLC geometry and negative volume.
