@@ -18,8 +18,15 @@ class EntryConfirmationEngine:
         if not entry.get("valid"):
             result["reason"] = "Entry not valid"
             return result
-        if not mtf.get("valid"):
-            result["reason"] = "Primary MTF direction is not valid"
+        # SetupReasoningEngine admits a counter-trend candidate only after
+        # a one-sided liquidity sweep and a causally confirmed post-sweep break.
+        # Requiring MTF.valid again here would veto that already validated setup.
+        confirmed_sweep_reversal = bool(
+            entry.get("confirmed_sweep_reversal")
+            and str(entry.get("direction_source", "")).upper() == "CONFIRMED_SWEEP_REVERSAL"
+        )
+        if not mtf.get("valid") and not confirmed_sweep_reversal:
+            result["reason"] = "Primary MTF direction is not valid and no confirmed sweep reversal exists"
             return result
 
         direction = str(entry.get("direction", "")).upper()
@@ -75,7 +82,8 @@ class EntryConfirmationEngine:
         mode = "NO_15M_BREAK" if latest is None else ("COUNTER_DIRECTIONAL_EVIDENCE" if conflict else "DIRECTIONAL_EVIDENCE")
         result.update({
             "confirmed": True,
-            "confirmation_mode": mode,
+            "confirmation_mode": "CONFIRMED_SWEEP_REVERSAL" if confirmed_sweep_reversal else mode,
+            "direction_source": entry.get("direction_source") or "H4_STRUCTURE",
             "poi_confirmation": poi_confirmation,
             "reentry_triggered": False,
             "15m_conflict": conflict,
