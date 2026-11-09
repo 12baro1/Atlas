@@ -37,3 +37,22 @@ def test_swing_detection_is_deterministic_and_offline():
     ]
     assert all(0 <= item.index < len(candles) for item in first)
     assert all(item.kind in {"HIGH", "LOW"} for item in first)
+
+
+def test_completed_swings_do_not_change_when_future_candles_are_appended():
+    candles = _swing_candles()
+    prefix = 48
+    earlier = detect(candles[:prefix])
+    full = detect(candles)
+    # Leave a margin for a swing that had not yet reversed/confirmed at prefix.
+    earlier_confirmed = [
+        (item.index, item.price, item.kind)
+        for item in earlier
+        if item.index < prefix - 12
+    ]
+    full_confirmed = [
+        (item.index, item.price, item.kind)
+        for item in full
+        if item.index < prefix - 12
+    ]
+    assert full_confirmed[:len(earlier_confirmed)] == earlier_confirmed
