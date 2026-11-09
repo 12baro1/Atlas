@@ -493,6 +493,8 @@ class SetupReasoningEngine:
                     for index, price in enumerate(targets[:3], start=1)
                 }
                 cost_weights = getattr(Config, "PARTIAL_EXIT_WEIGHTS", None)
+                if not isinstance(cost_weights, dict):
+                    cost_weights = None
                 maker_fee = getattr(Config, "MAKER_FEE_RATE", 0.0002)
                 taker_fee = getattr(Config, "TAKER_FEE_RATE", 0.00055)
                 spread_rate = getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002)
