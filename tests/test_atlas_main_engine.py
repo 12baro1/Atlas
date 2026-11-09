@@ -239,3 +239,16 @@ def test_analysis_failure_keeps_motor_error_report():
 
     assert main.last_motor_report["pipeline"] == "FAILED"
     assert main.last_motor_report["motor_diagnostics"]["error_count"] == 1
+
+
+
+def test_final_action_report_reflects_operational_gate_override():
+    main, _ = _main()
+    main.decide(signal={"signal": "LONG"}, entry={"valid": True})
+    result = main.apply_operational_gates(
+        {"action": "EXECUTE", "signal": "LONG"},
+        news_filter={"active": True, "trade_allowed": False, "reason": "high impact"},
+    )
+    assert result["action"] == "SKIP"
+    assert main.last_motor_report["final_action"] == "SKIP"
+    assert main.last_motor_report["final_direction"] == "LONG"
