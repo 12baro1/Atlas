@@ -372,3 +372,13 @@ def test_main_engine_rejects_final_geometry_with_stop_on_wrong_side():
     )
     assert result["entry"]["valid"] is False
     assert result["entry"]["entry_reason_code"] == "INVALID_FINAL_STOP"
+
+
+def test_main_engine_rejects_risk_entry_mismatch_before_publishing_geometry():
+    result = AtlasMainEngine.finalize_setup_geometry(
+        {"valid": True, "direction": "LONG", "entry": 100.0, "stop_loss": 95.0},
+        {"risk_setup_valid": True, "entry": 101.0, "stop_loss": 95.0},
+        {"tp1": 105.0},
+    )
+    assert result["entry"]["valid"] is False
+    assert result["entry"]["entry_reason_code"] == "RISK_ENTRY_MISMATCH"
