@@ -51,7 +51,9 @@ class CISDEngine:
         current_state = self._delivery_state(candles[-6:])
         previous_state = self._delivery_state(candles[-12:-6])
 
-        if current_state == previous_state:
+        # A neutral delivery window is not a directional state change.
+        # Treating NEUTRAL as BEARISH fabricated false short CISD events.
+        if current_state not in {"BUY", "SELL"} or current_state == previous_state:
             return self._empty(timeframe)
 
         direction = "BULLISH" if current_state == "BUY" else "BEARISH"
