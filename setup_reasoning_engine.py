@@ -357,7 +357,11 @@ class SetupReasoningEngine:
                         entry_price = low + (high - low) * 0.38
                     else:
                         entry_price = high
-                    stop = low - atr_buffer
+                    # Stop must invalidate the full overlapping OTE/POI zone.
+                    # ATR is only a small optional clearance, never the stop anchor.
+                    stop_reference = min(low, ote_bounds[0]) if ote_overlap and ote_bounds else low
+                    stop = stop_reference - atr_buffer
+                    stop_source = "ote_invalidation" if stop_reference < low else f"{source.lower()}_invalidation"
                 else:
                     if inside and market_confirmed:
                         entry_price = current
@@ -365,7 +369,9 @@ class SetupReasoningEngine:
                         entry_price = high - (high - low) * 0.38
                     else:
                         entry_price = low
-                    stop = high + atr_buffer
+                    stop_reference = max(high, ote_bounds[1]) if ote_overlap and ote_bounds else high
+                    stop = stop_reference + atr_buffer
+                    stop_source = "ote_invalidation" if stop_reference > high else f"{source.lower()}_invalidation"
 
                 # Reuse EntryOptimizer's price only for the exact POI it analyzed.
                 optimized_price = self._number((optimization or {}).get("optimized_entry")) if isinstance(optimization, dict) else None
@@ -471,7 +477,7 @@ class SetupReasoningEngine:
                 )
                 candidate = {
                     "valid": True, "direction": direction, "entry": entry_price,
-                    "stop_loss": stop, "stop_source": source.lower(),
+                    "stop_loss": stop, "stop_source": stop_source,
                     "entry_type": "MARKET" if inside and market_confirmed else "LIMIT",
                     "entry_type_reason": entry_type_reason,
                     "requires_pullback": not (inside and market_confirmed),
