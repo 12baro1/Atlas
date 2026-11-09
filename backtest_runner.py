@@ -734,12 +734,14 @@ class BacktestRunner:
                     if target is not None
                 )
                 if target_hit_before_order:
+                    # Count the stale target event independently of whether
+                    # the remaining plan can be rebased or must be cancelled.
+                    self.stale_limit_signal_candle_target += 1
                     rebased, _ = self._rebase_remaining_targets(risk, signal_dir, signal_candle)
                     if rebased:
                         self.stale_limit_targets_rebased += 1
                     else:
                         self.stale_limits_cancelled += 1
-                        self.stale_limit_signal_candle_target += 1
                         self.stale_limit_direction_counts[signal_dir] = self.stale_limit_direction_counts.get(signal_dir, 0) + 1
                         return None
 
@@ -775,6 +777,9 @@ class BacktestRunner:
                     if target is not None
                 )
                 if target_already_hit and not touched:
+                    # Count target contact before fill even when the remaining
+                    # targets are valid and the LIMIT is allowed to stay active.
+                    self.stale_limit_target_before_fill += 1
                     # If the LIMIT remains pending after the candle, remove
                     # targets already traded through and keep viable targets ahead.
                     rebased, _ = self._rebase_remaining_targets(risk, signal_dir, candle)
@@ -783,7 +788,6 @@ class BacktestRunner:
                     else:
                         self.stale_limit_target_rebase_rejected += 1
                         self.stale_limits_cancelled += 1
-                        self.stale_limit_target_before_fill += 1
                         self.stale_limit_direction_counts[signal_dir] = self.stale_limit_direction_counts.get(signal_dir, 0) + 1
                         return None
                 # If entry and target are touched in one candle, event order is unknown.
