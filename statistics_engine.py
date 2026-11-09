@@ -114,5 +114,5 @@ class StatisticsEngine:
             "losses": summary.get("losses", 0),
             "winrate": summary.get("winrate", 0),
             "average_rr": summary.get("average_r", 0),
-            "average_confidence": confidence_quality.get("average_confidence", 0),
+            "average_confidence": confidence_quality.get("calibration_gap", 0),
         }
