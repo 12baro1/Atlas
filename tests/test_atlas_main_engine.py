@@ -270,3 +270,44 @@ def test_final_decision_contains_full_shared_evidence_lineage():
 
     assert result["motor_evidence_count"] == 1
     assert result["motor_evidence_sources"] == ["structure"]
+
+def test_main_engine_final_authority_blocks_impossible_far_limit_and_bad_geometry():
+    main, _ = _main()
+    result = main.decide(
+        signal={"signal": "SHORT"}, entry={
+            "valid": True, "direction": "SHORT", "entry": 113668.68,
+            "stop_loss": 113709.40, "entry_type": "LIMIT",
+        }, risk={"stop_loss": 113709.40},
+        targets={"tp1": 75150, "tp2": 74810, "tp3": 73400},
+        current_price=75100, max_limit_distance_pct=0.05,
+        max_market_distance_pct=0.003,
+    )
+    assert result["action"] == "SKIP"
+    assert "ENTRY_TOO_FAR_FROM_MARKET" in result["critical_blockers"]
+
+
+def test_main_engine_final_authority_blocks_target_on_wrong_side_of_entry():
+    main, _ = _main()
+    result = main.decide(
+        signal={"signal": "SHORT"}, entry={
+            "valid": True, "direction": "SHORT", "entry": 100,
+            "stop_loss": 105, "entry_type": "LIMIT",
+        }, risk={"stop_loss": 105}, targets={"tp1": 110},
+        current_price=99, max_limit_distance_pct=0.05,
+        max_market_distance_pct=0.003,
+    )
+    assert result["action"] == "SKIP"
+    assert "INVALID_TARGET_GEOMETRY" in result["critical_blockers"]
+
+
+def test_main_engine_final_authority_allows_coherent_nearby_limit():
+    main, _ = _main()
+    result = main.decide(
+        signal={"signal": "SHORT"}, entry={
+            "valid": True, "direction": "SHORT", "entry": 101,
+            "stop_loss": 103, "entry_type": "LIMIT",
+        }, risk={"stop_loss": 103}, targets={"tp1": 98, "tp2": 95},
+        current_price=100, max_limit_distance_pct=0.05,
+        max_market_distance_pct=0.003,
+    )
+    assert result["action"] == "EXECUTE"
