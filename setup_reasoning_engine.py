@@ -508,10 +508,31 @@ class SetupReasoningEngine:
                 target_fvg = list(fvg) + list(higher_timeframe_fvg or [])
                 target_obs = list(orderblocks) + list(higher_timeframe_orderblocks or [])
                 target_liquidity = list(liquidity or []) + list(trendline_liquidity or [])
-                targets = self._targets(
+                # First collect structurally valid targets relative to the planned
+                # entry. Then remove levels already crossed by spot before a LIMIT
+                # can fill. A pending LONG LIMIT needs targets between entry and
+                # current price; a pending SHORT LIMIT needs targets between
+                # current price and entry. MARKET setups need targets beyond spot.
+                potential_targets = self._targets(
                     direction, entry_price, target_liquidity, external_structure,
                     fvg=target_fvg, orderblocks=target_obs, structure=structure,
                 )
+                candidate_entry_type = "MARKET" if inside and market_confirmed else "LIMIT"
+                if candidate_entry_type == "LIMIT":
+                    if direction == "LONG":
+                        targets = [price for price in potential_targets if entry_price < price < current]
+                    else:
+                        targets = [price for price in potential_targets if current < price < entry_price]
+                else:
+                    targets = [
+                        price for price in potential_targets
+                        if (direction == "LONG" and price > current)
+                        or (direction == "SHORT" and price < current)
+                    ]
+                # If valid structural levels existed but all were already crossed,
+                # this is a stale setup: do not issue an executable signal.
+                if potential_targets and not targets:
+                    continue
                 projected_rr = abs(targets[-1] - entry_price) / risk if targets else None
                 target_map = {
                     f"tp{index}": price
@@ -524,7 +545,6 @@ class SetupReasoningEngine:
                 taker_fee = getattr(Config, "TAKER_FEE_RATE", 0.00055)
                 spread_rate = getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002)
                 slippage_rate = getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)
-                candidate_entry_type = "MARKET" if inside and market_confirmed else "LIMIT"
                 plan_cost = estimate_plan_cost(
                     entry_price=entry_price, targets=target_map,
                     weights=cost_weights, entry_type=candidate_entry_type,
