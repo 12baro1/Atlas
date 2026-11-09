@@ -24,3 +24,18 @@ def test_convert_and_candle_ohlc_properties():
     assert second.body == 1.0
     assert second.upper_wick == 4.0
     assert second.lower_wick == 1.0
+
+
+def test_convert_normalizes_numeric_strings_and_skips_invalid_rows():
+    candles = convert([
+        ["1000", "100", "105", "98", "103", "10"],
+        [2000, "100", "97", "98", "99", "10"],  # high below open
+        [3000, "nan", "105", "98", "103", "10"],
+        [4000, "100", "105", "98", "103", "-1"],
+        [5000, 100, 105, 98, 103, 10],
+    ])
+
+    assert len(candles) == 2
+    assert candles[0].time == 1000
+    assert candles[0].open == 100.0
+    assert candles[1].time == 5000
