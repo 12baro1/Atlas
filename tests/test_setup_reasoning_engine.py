@@ -51,7 +51,7 @@ def test_no_candidate_is_created_without_a_real_directional_poi():
     assert result["selected"]["valid"] is False
 
 
-def test_candidate_selection_prefers_better_projected_rr_not_motor_vote_count():
+def test_candidate_selection_prefers_nearest_valid_poi_before_projected_rr():
     result = _run(
         fvg=[
             {"type": "BULLISH", "from": 100, "to": 105, "filled": False},
@@ -61,8 +61,9 @@ def test_candidate_selection_prefers_better_projected_rr_not_motor_vote_count():
         liquidity=[{"type": "BUY_SIDE", "price": 120}, {"type": "BUY_SIDE", "price": 150}],
     )
     assert len(result["candidates"]) == 2
-    assert result["selected"]["net_projected_rr"] == max(
-        candidate["net_projected_rr"] for candidate in result["candidates"]
+    selected_distance = result["selected"]["entry_distance_pct"]
+    assert selected_distance == min(
+        candidate["entry_distance_pct"] for candidate in result["candidates"]
     )
 
 
