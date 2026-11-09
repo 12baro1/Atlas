@@ -1256,17 +1256,51 @@ class TradeJournal:
         risk_distance = abs(entry - stop_loss) if entry is not None and stop_loss is not None else 0.0
         payload = outcome.get("payload") if isinstance(outcome.get("payload"), dict) else {}
         execution_costs = payload.get("execution_costs") if isinstance(payload.get("execution_costs"), dict) else {}
-        fee_rate = self._num(execution_costs.get("round_trip_cost_rate"))
-        if fee_rate is None:
-            fee_rate = self._signal_round_trip_cost_rate()
-        fee_rate = max(0.0, fee_rate)
-        spread_buffer = self._num(execution_costs.get("spread_buffer"), 0.0) or 0.0
-        slippage_buffer = self._num(execution_costs.get("slippage_buffer"), 0.0) or 0.0
-        fee_cost = abs(entry) * fee_rate if entry is not None else 0.0
-        spread_slippage_cost = max(0.0, spread_buffer) + max(0.0, slippage_buffer)
-        fee_rr = fee_cost / risk_distance if entry is not None and risk_distance > 0 else 0.0
-        spread_slippage_rr = spread_slippage_cost / risk_distance if risk_distance > 0 else 0.0
-        execution_cost_rr = fee_rr + spread_slippage_rr
+        cost_model = str(execution_costs.get("model") or "")
+        if cost_model == "per_fill_maker_taker_with_market_friction":
+            from execution_costs import realized_trade_cost
+            targets = [outcome.get("tp1"), outcome.get("tp2"), outcome.get("tp3")]
+            reached_levels = list(outcome.get("tps_hit") or [])
+            hit_sl = bool(outcome.get("hit_sl"))
+            if hit_sl:
+                exit_reason = "TRAILING_STOP" if reached_levels else "STOP"
+                exit_price = self._num(outcome.get("trailing_stop"), stop_loss)
+            else:
+                highest_hit = max((int(level) for level in reached_levels), default=0)
+                exit_reason = f"TP{highest_hit}" if highest_hit else "STOP"
+                exit_price = self._num(outcome.get(f"tp{highest_hit}"), stop_loss)
+            costs = realized_trade_cost(
+                entry_price=entry,
+                exit_price=exit_price,
+                entry_type=execution_costs.get("entry_type", "LIMIT"),
+                exit_reason=exit_reason,
+                targets=targets,
+                reached_levels=reached_levels,
+                tp_weights=execution_costs.get("partial_exit_weights") or {},
+                partial_exits=True,
+                maker_fee_rate=execution_costs.get("maker_fee_rate", 0.0002),
+                taker_fee_rate=execution_costs.get("taker_fee_rate", 0.00055),
+                spread_rate=execution_costs.get("spread_rate", 0.0002),
+                slippage_rate=execution_costs.get("slippage_rate", 0.0003),
+            )
+            fee_cost = costs["entry_fee"] + costs["exit_fee"]
+            spread_slippage_cost = costs["spread"] + costs["slippage"]
+            fee_rr = fee_cost / risk_distance if risk_distance > 0 else 0.0
+            spread_slippage_rr = spread_slippage_cost / risk_distance if risk_distance > 0 else 0.0
+            execution_cost_rr = costs["total"] / risk_distance if risk_distance > 0 else 0.0
+        else:
+            # Legacy records keep their original cost assumptions for reproducibility.
+            fee_rate = self._num(execution_costs.get("round_trip_cost_rate"))
+            if fee_rate is None:
+                fee_rate = self._signal_round_trip_cost_rate()
+            fee_rate = max(0.0, fee_rate)
+            spread_buffer = self._num(execution_costs.get("spread_buffer"), 0.0) or 0.0
+            slippage_buffer = self._num(execution_costs.get("slippage_buffer"), 0.0) or 0.0
+            fee_cost = abs(entry) * fee_rate if entry is not None else 0.0
+            spread_slippage_cost = max(0.0, spread_buffer) + max(0.0, slippage_buffer)
+            fee_rr = fee_cost / risk_distance if entry is not None and risk_distance > 0 else 0.0
+            spread_slippage_rr = spread_slippage_cost / risk_distance if risk_distance > 0 else 0.0
+            execution_cost_rr = fee_rr + spread_slippage_rr
         outcome["gross_realized_r"] = round(gross_realized, 4)
         outcome["fee_rr"] = round(fee_rr, 4)
         outcome["spread_slippage_rr"] = round(spread_slippage_rr, 4)
