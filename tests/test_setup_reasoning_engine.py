@@ -34,6 +34,7 @@ def test_confirmed_sell_side_sweep_can_create_countertrend_long_candidate():
     assert selected["valid"] is True
     assert selected["direction"] == "LONG"
     assert selected["direction_source"] == "CONFIRMED_SWEEP_REVERSAL"
+    assert selected["confirmed_sweep_reversal"] is True
     assert selected["entry_type"] == "LIMIT"
     assert selected["stop_loss"] < selected["entry"]
 
