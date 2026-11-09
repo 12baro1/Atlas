@@ -168,10 +168,94 @@ class AtlasMainEngine:
         })
         return result
 
+    @staticmethod
+    def _validate_execution_geometry(decision, *, entry, risk, targets, current_price,
+                                     max_limit_distance_pct, max_market_distance_pct):
+        """Final authority guard: never execute an impossible or stale price plan."""
+        action = str((decision or {}).get("action") or "").upper()
+        if action not in {"EXECUTE", "EXECUTE_WITH_CAUTION"}:
+            return decision
+        setup = entry if isinstance(entry, dict) else {}
+        if setup.get("valid") is False:
+            return {"action": "SKIP", "signal": str(setup.get("direction") or "WAIT").upper(),
+                    "reason": f"Final validation: setup marked invalid ({setup.get('reason') or 'unspecified'})",
+                    "critical_blockers": ["SETUP_INVALID"]}
+        side = str(setup.get("direction") or (decision or {}).get("signal") or "").upper()
+        if side not in {"LONG", "SHORT"}:
+            return {"action": "SKIP", "signal": side or "WAIT",
+                    "reason": "Final validation: missing/invalid trade direction",
+                    "critical_blockers": ["INVALID_DIRECTION"]}
+        try:
+            current = float(current_price)
+            price = float(setup.get("entry"))
+            stop = float((risk or {}).get("stop_loss", setup.get("stop_loss")))
+        except (TypeError, ValueError, OverflowError):
+            return {"action": "SKIP", "signal": side,
+                    "reason": "Final validation: missing/non-numeric current, entry or stop",
+                    "critical_blockers": ["INVALID_PRICE_GEOMETRY"]}
+        import math
+        if not all(math.isfinite(v) and v > 0 for v in (current, price, stop)):
+            return {"action": "SKIP", "signal": side,
+                    "reason": "Final validation: non-finite/non-positive price",
+                    "critical_blockers": ["INVALID_PRICE_GEOMETRY"]}
+        order_type = str(setup.get("entry_type") or "MARKET").upper()
+        if side == "LONG" and not stop < price:
+            reason = "LONG stop must be below entry"
+        elif side == "SHORT" and not stop > price:
+            reason = "SHORT stop must be above entry"
+        elif order_type == "LIMIT" and side == "LONG" and not price < current:
+            reason = "LONG LIMIT must be below current price"
+        elif order_type == "LIMIT" and side == "SHORT" and not price > current:
+            reason = "SHORT LIMIT must be above current price"
+        else:
+            reason = None
+        if reason:
+            return {"action": "SKIP", "signal": side, "reason": f"Final validation: {reason}",
+                    "critical_blockers": ["INVALID_PRICE_GEOMETRY"]}
+        distance_pct = abs(price - current) / current
+        max_distance = max_limit_distance_pct if order_type == "LIMIT" else max_market_distance_pct
+        if max_distance is not None and distance_pct > float(max_distance):
+            return {"action": "SKIP", "signal": side,
+                    "reason": f"Final validation: {order_type} entry too far from market ({distance_pct:.2%} > {float(max_distance):.2%})",
+                    "critical_blockers": ["ENTRY_TOO_FAR_FROM_MARKET"],
+                    "entry_distance_percent": distance_pct}
+        target_values = []
+        for key in ("tp1", "tp2", "tp3"):
+            value = (targets or {}).get(key) if isinstance(targets, dict) else None
+            if value is not None:
+                try:
+                    value = float(value)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if math.isfinite(value) and value > 0:
+                    target_values.append((key, value))
+        if not target_values:
+            return {"action": "SKIP", "signal": side,
+                    "reason": "Final validation: no valid structural target",
+                    "critical_blockers": ["NO_VALID_TARGET"]}
+        invalid = [key for key, value in target_values
+                   if (side == "LONG" and value <= price) or (side == "SHORT" and value >= price)]
+        if invalid:
+            return {"action": "SKIP", "signal": side,
+                    "reason": "Final validation: target is not beyond entry in trade direction",
+                    "critical_blockers": ["INVALID_TARGET_GEOMETRY"],
+                    "invalid_targets": invalid}
+        return decision
+
     def decide(self, **motor_outputs):
         """Only final decision entry point."""
         decision = self.decision_engine.decide(**motor_outputs)
         decision = dict(decision or {})
+        if motor_outputs.get("current_price") is not None:
+            decision = self._validate_execution_geometry(
+                decision,
+                entry=motor_outputs.get("entry"),
+                risk=motor_outputs.get("risk"),
+                targets=motor_outputs.get("targets"),
+                current_price=motor_outputs.get("current_price"),
+                max_limit_distance_pct=motor_outputs.get("max_limit_distance_pct", 0.05),
+                max_market_distance_pct=motor_outputs.get("max_market_distance_pct", 0.003),
+            )
         decision["decision_authority"] = "ATLAS_MAIN_ENGINE"
         decision["motor_registry_size"] = len(self.motors)
         diagnostics = self.motor_diagnostics()
