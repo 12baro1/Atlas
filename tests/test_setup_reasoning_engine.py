@@ -61,9 +61,37 @@ def test_candidate_selection_prefers_better_projected_rr_not_motor_vote_count():
         liquidity=[{"type": "BUY_SIDE", "price": 120}, {"type": "BUY_SIDE", "price": 150}],
     )
     assert len(result["candidates"]) == 2
-    assert result["selected"]["projected_rr"] == max(
-        candidate["projected_rr"] for candidate in result["candidates"]
+    assert result["selected"]["net_projected_rr"] == max(
+        candidate["net_projected_rr"] for candidate in result["candidates"]
     )
+
+
+def test_candidate_entry_uses_evidence_balance_instead_of_fixed_deep_limit():
+    result = _run(
+        mtf={"entry": "LONG", "weekly": "BULLISH", "daily": "BULLISH", "h4": "BULLISH"},
+        optimization={
+            "applied": True,
+            "evidence": [
+                {"source": "volume_poc", "price": 104.5, "weight": 3.0},
+                {"source": "smt", "bias": "ALIGNED", "weight": 3.0},
+                {"source": "orderbook", "bias": "SUPPORTIVE", "weight": 2.0},
+            ],
+        },
+    )
+    selected = result["selected"]
+    assert selected["direction"] == "LONG"
+    assert 100.0 <= selected["entry"] <= 105.0
+    assert selected["entry"] > 102.0
+    assert "uzman motor kanıtları" in selected["entry_depth_reason"]
+
+
+def test_candidate_exposes_cost_adjusted_rr_and_stop_cost():
+    result = _run()
+    selected = result["selected"]
+    assert selected["estimated_execution_cost_rr"] >= 0
+    assert selected["estimated_stop_cost_rr"] >= 0
+    assert selected["net_projected_rr"] is not None
+    assert selected["net_first_target_rr"] is not None
 
 
 def test_invalid_or_non_finite_poi_levels_are_ignored():
