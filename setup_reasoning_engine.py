@@ -553,4 +553,5 @@ class SetupReasoningEngine:
             "selected": selected,
             "reason": "best_structural_candidate",
             "motor_evidence_count": len(evidence_records),
+            "motor_evidence_sources": motor_evidence_sources,
         }
