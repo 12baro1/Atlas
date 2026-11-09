@@ -119,7 +119,11 @@ class AtlasMainEngine:
         if isinstance(result, dict):
             analysis = result.get("analysis")
             if isinstance(analysis, dict):
-                analysis["motor_diagnostics"] = diagnostics
+                existing_diagnostics = analysis.get("motor_diagnostics")
+                if not isinstance(existing_diagnostics, dict):
+                    existing_diagnostics = {}
+                existing_diagnostics["execution_trace"] = diagnostics
+                analysis["motor_diagnostics"] = existing_diagnostics
             result["main_engine"] = {
                 **self.last_motor_report,
                 "evidence_pool_count": diagnostics["evidence_count"],
