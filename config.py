@@ -103,7 +103,7 @@ class Config:
     # Stops remain anchored beyond POI/OTE invalidation. A too-tight structure is rejected, never silently widened.
     MIN_STOP_ATR_MULTIPLIER = 0.35
     # Small clearance beyond the structural invalidation edge; ATR is not the stop anchor.
-    STOP_STRUCTURE_BUFFER_ATR = 0.10
+    STOP_STRUCTURE_BUFFER_ATR = 0.20
     # Target geometry: first objective must be meaningful; nearby levels in one liquidity cluster are merged.
     MIN_TP1_RR = float(_env_or_rc("ATLAS_MIN_TP1_RR", "0.80"))
     MIN_TP_TARGET_SEPARATION_R = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_R", "0.35"))
