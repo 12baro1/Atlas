@@ -604,6 +604,7 @@ class AtlasEngine:
             "confluence_score": (result_payload.get("analysis") or {}).get("confluence", {}).get("score"),
             "market_phase": (result_payload.get("analysis") or {}).get("market_phase", {}).get("phase"),
             "rr": result_payload.get("rr", {}).get("rr") if isinstance(result_payload.get("rr"), dict) else result_payload.get("rr"),
+            "entry_type": (analysis.get("entry") or {}).get("entry_type") or "LIMIT",
         }
         journal_trade = self.trade_journal.register_trade(
             trade, analysis=result_payload, symbol=symbol,
@@ -657,10 +658,16 @@ class AtlasEngine:
                         "setup_quality": setup_quality,
                         "motor_diagnostics": (analysis.get("motor_diagnostics") or {}),
                         "execution_costs": {
+                            "entry_type": (analysis.get("entry") or {}).get("entry_type") or "LIMIT",
+                            "maker_fee_rate": risk.get("maker_fee_rate"),
+                            "taker_fee_rate": risk.get("taker_fee_rate"),
+                            "spread_rate": risk.get("spread_rate"),
+                            "slippage_rate": risk.get("slippage_rate"),
+                            "partial_exit_weights": risk.get("partial_exit_weights"),
                             "round_trip_cost_rate": risk.get("round_trip_cost_rate"),
                             "spread_buffer": risk.get("spread_buffer"),
                             "slippage_buffer": risk.get("slippage_buffer"),
-                            "model": risk.get("cost_model") or "round_trip_fee_plus_spread_slippage",
+                            "model": risk.get("cost_model") or "per_fill_maker_taker_with_market_friction",
                         },
                         "decision": result_payload.get("decision") or {},
                     },
@@ -2224,6 +2231,7 @@ class AtlasEngine:
             volume_profile=volume_profile,
             institutional=institutional,
             candles=candles,
+            entry_type=entry.get("entry_type", "LIMIT"),
         )
 
         if isinstance(risk_payload, dict) and risk_payload.get("risk_setup_valid") is False:

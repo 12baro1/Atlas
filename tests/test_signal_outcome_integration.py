@@ -818,3 +818,40 @@ def test_signal_outcome_applies_captured_spread_and_slippage_costs(tmp_path, mon
     assert resolved["spread_slippage_rr"] == pytest.approx(0.05, abs=1e-4)
     assert resolved["execution_cost_rr"] == pytest.approx(0.25, abs=1e-4)
     assert resolved["realized_r"] == pytest.approx(0.25, abs=1e-4)
+
+
+def test_signal_outcome_uses_per_fill_costs_for_tp_then_trailing_stop(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=99.0,
+        tp1=101.0,
+        tp2=102.0,
+        tp3=103.0,
+        opened_at=1_700_000_000_000,
+        payload={
+            "execution_costs": {
+                "model": "per_fill_maker_taker_with_market_friction",
+                "entry_type": "LIMIT",
+                "maker_fee_rate": 0.0002,
+                "taker_fee_rate": 0.00055,
+                "spread_rate": 0.0002,
+                "slippage_rate": 0.0003,
+                "partial_exit_weights": {"tp1": 0.5, "tp2": 0.3, "tp3": 0.2},
+            }
+        },
+    )
+    candles = [
+        _precise_candle(1, high=101.2, low=100.1, close=101.1),
+        _precise_candle(2, high=100.5, low=99.9, close=100.0),
+    ]
+    resolved = journal.resolve_signal_outcome(outcome, candles)
+    expected_cost = 100.0 * 0.0002 + 101.0 * 0.5 * 0.0002 + 100.0 * 0.5 * (
+        0.00055 + 0.0002 + 0.0003
+    )
+    assert resolved is not None
+    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
+    assert resolved["execution_cost_rr"] == pytest.approx(expected_cost, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(0.5 - expected_cost, abs=1e-4)

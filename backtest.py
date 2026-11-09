@@ -461,6 +461,12 @@ def _combine_stats(all_stats):
         "stale_limit_target_before_fill": 0,
         "market_fallback_fills": 0,
         "market_fallback_rejected_rr": 0,
+        "market_fallback_rejected_distance": 0,
+        "candidate_direction_counts": {},
+        "filled_direction_counts": {},
+        "unfilled_limit_direction_counts": {},
+        "expired_limit_direction_counts": {},
+        "stale_limit_direction_counts": {},
         "overlapping_signals_skipped": 0,
         "open_trades": 0,
         "invalid_candidates": 0,
@@ -478,11 +484,19 @@ def _combine_stats(all_stats):
             "unfilled_limits", "expired_limits", "stale_limits_cancelled",
             "stale_limit_signal_candle_target", "stale_limit_target_before_fill",
             "market_fallback_fills", "market_fallback_rejected_rr",
+            "market_fallback_rejected_distance",
             "overlapping_signals_skipped", "open_trades",
             "invalid_candidates", "no_followup_data",
         ):
             combined[key] += int(stats.get(key, 0) or 0)
-        for key in ("action_counts", "wait_reason_counts", "signal_reason_counts", "mtf_alignment_counts", "entry_reason_counts", "entry_type_counts", "risk_reason_counts", "target_reason_counts", "target_missing_rr_counts", "stop_atr_buckets", "confirmation_outcome_counts", "confirmation_reason_counts", "confirmation_requirement_counts", "entry_type_reason_counts"):
+        for key in (
+            "action_counts", "wait_reason_counts", "signal_reason_counts", "mtf_alignment_counts",
+            "entry_reason_counts", "entry_type_counts", "risk_reason_counts", "target_reason_counts",
+            "target_missing_rr_counts", "stop_atr_buckets", "confirmation_outcome_counts",
+            "confirmation_reason_counts", "confirmation_requirement_counts", "entry_type_reason_counts",
+            "candidate_direction_counts", "filled_direction_counts", "unfilled_limit_direction_counts",
+            "expired_limit_direction_counts", "stale_limit_direction_counts",
+        ):
             for label, count in (stats.get(key) or {}).items():
                 combined[key][label] = combined[key].get(label, 0) + int(count or 0)
         combined["net_rr"] += float(stats.get("net_rr", 0) or 0)
@@ -552,9 +566,10 @@ def _combine_stats(all_stats):
 def _report(stats, name):
     print("=" * 52)
     print(f"SONUÇ | {name}")
-    print(f"  Maliyet varsayımları: fee={getattr(Config, 'ROUND_TRIP_COST_RATE', 0.002):.4%} | "
-          f"spread={getattr(Config, 'STOP_SPREAD_BUFFER_RATE', 0.0002):.4%} | "
-          f"slippage={getattr(Config, 'STOP_SLIPPAGE_BUFFER_RATE', 0.0003):.4%} (notional proxy)")
+    print(f"  Maliyet varsayımları: maker={getattr(Config, 'MAKER_FEE_RATE', 0.0002):.4%}/leg | "
+          f"taker={getattr(Config, 'TAKER_FEE_RATE', 0.00055):.4%}/leg | "
+          f"spread={getattr(Config, 'STOP_SPREAD_BUFFER_RATE', 0.0002):.4%}/market leg | "
+          f"slippage={getattr(Config, 'STOP_SLIPPAGE_BUFFER_RATE', 0.0003):.4%}/market leg")
     print("=" * 52)
     print(f"  Analiz çağrısı : {stats.get('analysis_calls', 0)}")
     print(f"  Boş sonuç      : {stats.get('empty_results', 0)}")
@@ -597,6 +612,12 @@ def _report(stats, name):
     print(f"  Dolmayan LIMIT : {stats.get('unfilled_limits', 0)}")
     print(f"  Süresi dolan LIMIT: {stats.get('expired_limits', 0)}")
     print(f"  Hedefe geç kalan LIMIT iptali: {stats.get('stale_limits_cancelled', 0)}")
+    print(f"  Aday yönleri   : {stats.get('candidate_direction_counts', {})}")
+    print(f"  Dolan yönler   : {stats.get('filled_direction_counts', {})}")
+    print(f"  Dolmayan yönler: {stats.get('unfilled_limit_direction_counts', {})}")
+    print(f"  Süresi dolan yönler: {stats.get('expired_limit_direction_counts', {})}")
+    print(f"  Hedef öncesi iptal yönleri: {stats.get('stale_limit_direction_counts', {})}")
+    print(f"  Market fallback reddi (RR/mesafe): {stats.get('market_fallback_rejected_rr', 0)}/{stats.get('market_fallback_rejected_distance', 0)}")
     print(f"    - Sinyal mumu hedefi önceden gördü: {stats.get('stale_limit_signal_candle_target', 0)}")
     print(f"    - Dolumdan önce sonraki mum hedefi gördü: {stats.get('stale_limit_target_before_fill', 0)}")
     print(f"  Geçersiz aday  : {stats.get('invalid_candidates', 0)}")
@@ -741,9 +762,10 @@ def main():
     print(f"KOD SÜRÜMÜ | {_git_revision()}")
     print(
         "BACKTEST AYARLARI | "
-        f"fee={getattr(Config, 'ROUND_TRIP_COST_RATE', 0.002)} | "
-        f"spread_proxy={getattr(Config, 'STOP_SPREAD_BUFFER_RATE', 0.0002)} | "
-        f"slippage_proxy={getattr(Config, 'STOP_SLIPPAGE_BUFFER_RATE', 0.0003)} | "
+        f"maker_fee={getattr(Config, 'MAKER_FEE_RATE', 0.0002)} | "
+        f"taker_fee={getattr(Config, 'TAKER_FEE_RATE', 0.00055)} | "
+        f"spread_per_market_leg={getattr(Config, 'STOP_SPREAD_BUFFER_RATE', 0.0002)} | "
+        f"slippage_per_market_leg={getattr(Config, 'STOP_SLIPPAGE_BUFFER_RATE', 0.0003)} | "
         f"partial_tp_weights={_configured_partial_tp_weights()} | "
         f"limit_expiry_bars={args.limit_expiry_bars} | "
         f"minimum_rr={getattr(Config, 'MINIMUM_RR', 'unknown')} | "
@@ -770,7 +792,8 @@ def main():
         )
         runner = BacktestRunner(
             analyze_fn=build_analyze_fn(engine),
-            fee_rate=float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.002)),
+            maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002)),
+            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055)),
             spread_rate=float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002)),
             slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)),
             tp_weights=_configured_partial_tp_weights(),

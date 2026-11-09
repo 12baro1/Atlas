@@ -10,6 +10,7 @@ from core.analysis_utils import clamp
 from rr_engine import RREngine
 from utils.atr import atr as calculate_atr
 from config import Config
+from execution_costs import estimate_plan_cost, estimate_stop_cost
 
 class RiskEngine:
 
@@ -66,6 +67,7 @@ class RiskEngine:
         spread=None,
         slippage=None,
         auto_expand_stop=None,
+        entry_type="LIMIT",
     ):
 
         if entry is None or stop_loss is None:
@@ -107,6 +109,8 @@ class RiskEngine:
         atr_floor_distance = max(atr_snapshot * min_stop_atr_multiplier, percent_floor_distance)
         spread_buffer = self._resolve_buffer(spread, entry, spread_rate, minimum_tick_distance)
         slippage_buffer = self._resolve_buffer(slippage, entry, slippage_rate, minimum_tick_distance)
+        execution_spread_rate = spread_buffer / abs(entry) if entry else 0.0
+        execution_slippage_rate = slippage_buffer / abs(entry) if entry else 0.0
         # Stop geometry is structural and volatility-based. Spread/slippage are
         # execution costs; adding them to the stop-distance floor can reject a
         # valid structural stop for the wrong reason. They remain included in
@@ -173,8 +177,11 @@ class RiskEngine:
 
         account_balance = float(getattr(Config, "INITIAL_BALANCE", 1000.0))
         base_risk_percent = float(getattr(Config, "RISK_PERCENT", 1.0))
-        round_trip_cost_rate = float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.0012))
+        maker_fee_rate = float(getattr(Config, "MAKER_FEE_RATE", 0.0002))
+        taker_fee_rate = float(getattr(Config, "TAKER_FEE_RATE", 0.00055))
         minimum_rr = float(getattr(Config, "MINIMUM_RR", 3.0))
+        minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
+        resolved_entry_type = str(entry_type or "LIMIT").upper()
 
         tp1 = None
         tp2 = None
@@ -186,6 +193,8 @@ class RiskEngine:
         partial_exit_weights = {}
         rr_breakdown = None
         rr_selection_rule = "max_rr"
+        plan_cost = None
+        fee_in_r = None
 
         if dynamic_tp is not None:
 
@@ -208,31 +217,42 @@ class RiskEngine:
                     rr_breakdown.get("rr_by_tp") or {}
                 )
                 if weighted_rr is not None:
-                    # Match the normalized partial-close weights used by the signal outcome tracker.
-                    # Net R includes round-trip fees plus the spread/slippage
-                    # execution buffers already estimated for this symbol.
-                    execution_cost = (
-                        abs(entry) * max(0.0, round_trip_cost_rate)
-                        + max(0.0, spread_buffer)
-                        + max(0.0, slippage_buffer)
+                    # Same per-fill model is used by the historical execution simulator:
+                    # LIMIT=maker, MARKET=taker; spread/slippage only on market legs.
+                    plan_cost = estimate_plan_cost(
+                        entry_price=entry,
+                        targets={"tp1": tp1, "tp2": tp2, "tp3": tp3},
+                        weights=partial_exit_weights,
+                        entry_type=resolved_entry_type,
+                        maker_fee_rate=maker_fee_rate,
+                        taker_fee_rate=taker_fee_rate,
+                        spread_rate=execution_spread_rate,
+                        slippage_rate=execution_slippage_rate,
                     )
-                    fee_in_r = execution_cost / risk
+                    fee_in_r = plan_cost["total"] / risk
                     weighted_net_rr = round(weighted_rr - fee_in_r, 4)
                     net_rr = weighted_net_rr
 
+        # Risk is scaled against the actual minimum NET-R requirement, not the
+        # unrelated max-target RR display threshold. Negative net edge => zero size.
         risk_reduction_factor = 1.0
-        if net_rr is not None and minimum_rr > 0 and net_rr < minimum_rr:
-            risk_reduction_factor = clamp(net_rr / minimum_rr, 0.35, 1.0)
+        if net_rr is not None and minimum_net_rr > 0 and net_rr < minimum_net_rr:
+            risk_reduction_factor = clamp(net_rr / minimum_net_rr, 0.0, 1.0)
 
         effective_risk_percent = max(0.0, base_risk_percent * risk_reduction_factor)
-
         target_capital_at_risk = account_balance * (effective_risk_percent / 100)
-        execution_cost_per_unit = abs(entry) * round_trip_cost_rate
-        # Stop AUTO_EXPAND ile genişletildiyse spread/slippage bufferları zaten
-        # minimum_stop_distance içine gömülüdür; effective risk'e ikinci kez
-        # eklemek pozisyon boyutunu yanlış küçültür.
-        buffer_drag = 0.0 if stop_adjusted else (spread_buffer + slippage_buffer)
-        effective_risk_per_unit = max(risk + buffer_drag + execution_cost_per_unit, minimum_tick_distance)
+
+        # Position sizing reserves the full worst-case stop execution cost.
+        stop_cost = estimate_stop_cost(
+            entry_price=entry,
+            stop_price=adjusted_stop_loss,
+            entry_type=resolved_entry_type,
+            maker_fee_rate=maker_fee_rate,
+            taker_fee_rate=taker_fee_rate,
+            spread_rate=execution_spread_rate,
+            slippage_rate=execution_slippage_rate,
+        )
+        effective_risk_per_unit = max(risk + stop_cost["total"], minimum_tick_distance)
         position_size_raw = target_capital_at_risk / effective_risk_per_unit
 
         raw_sizing_factor = vp_factor * institutional_factor
@@ -240,8 +260,8 @@ class RiskEngine:
         adjusted_position_size = position_size_raw * capped_sizing_factor
         capped_position_size = min(adjusted_position_size, max_position_size_limit)
         position_size_capped = capped_position_size < adjusted_position_size
-        effective_capital_at_risk = adjusted_position_size * risk
-        capped_capital_at_risk = capped_position_size * risk
+        effective_capital_at_risk = adjusted_position_size * effective_risk_per_unit
+        capped_capital_at_risk = capped_position_size * effective_risk_per_unit
 
         return {
 
@@ -338,13 +358,23 @@ class RiskEngine:
             "weighted_net_rr": weighted_net_rr,
             "execution_rr": weighted_net_rr if weighted_net_rr is not None else rr,
             "cost_drag_rr": round(fee_in_r, 4) if weighted_net_rr is not None else None,
-            "cost_model": "round_trip_fee_plus_spread_slippage",
+            "cost_model": "per_fill_maker_taker_with_market_friction",
+            "entry_type": resolved_entry_type,
+            "maker_fee_rate": maker_fee_rate,
+            "taker_fee_rate": taker_fee_rate,
+            "spread_rate": round(execution_spread_rate, 8),
+            "slippage_rate": round(execution_slippage_rate, 8),
+            "plan_cost_quote_per_unit": round(plan_cost["total"], 10) if plan_cost else None,
+            "stop_cost_quote_per_unit": round(stop_cost["total"], 10),
+            "stop_cost_breakdown": stop_cost,
             "partial_exit_weights": partial_exit_weights,
             "rr_basis": "max_target" if rr is not None else None,
 
-            "round_trip_cost_rate": round_trip_cost_rate,
-
+            "round_trip_cost_rate": round(
+                (maker_fee_rate + (taker_fee_rate if resolved_entry_type in {"MARKET", "MARKET_FALLBACK"} else maker_fee_rate)), 8
+            ),
             "minimum_rr": minimum_rr,
+            "minimum_net_rr": minimum_net_rr,
 
             "risk_reduction_factor": round(risk_reduction_factor, 4),
 

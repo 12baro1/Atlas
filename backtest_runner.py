@@ -15,6 +15,9 @@ Amacı: "Bu sinyal filtresi gerçekten edge (beklenti) üretiyor mu?" sorusunu y
 import logging
 import math
 
+from config import Config
+from execution_costs import estimate_plan_cost, realized_trade_cost
+
 logger = logging.getLogger("atlas.backtest_runner")
 
 
@@ -262,12 +265,33 @@ def simulate_trade_partial(
 class BacktestRunner:
     """Fiyat serisini ileri sararak engine sinyallerini tetikler ve sonuç toplar."""
 
-    def __init__(self, analyze_fn=None, fee_rate=0.0020, partial_exits=True, tp_weights=None,
-                 limit_expiry_bars=8, spread_rate=0.0, slippage_rate=0.0):
+    def __init__(self, analyze_fn=None, fee_rate=None, partial_exits=True, tp_weights=None,
+                 limit_expiry_bars=8, spread_rate=None, slippage_rate=None,
+                 maker_fee_rate=None, taker_fee_rate=None):
         self.analyze_fn = analyze_fn
-        self.fee_rate = self._safe_cost_rate(fee_rate)
-        self.spread_rate = self._safe_cost_rate(spread_rate)
-        self.slippage_rate = self._safe_cost_rate(slippage_rate)
+        # Explicit legacy fee_rate keeps older test/integration callers stable.
+        # Production backtests pass maker/taker rates and use per-fill accounting.
+        self.legacy_fee_rate = (
+            self._safe_cost_rate(fee_rate)
+            if fee_rate is not None and maker_fee_rate is None and taker_fee_rate is None
+            else None
+        )
+        self.fee_rate = self.legacy_fee_rate if self.legacy_fee_rate is not None else 0.0
+        self.maker_fee_rate = self._safe_cost_rate(
+            getattr(Config, "MAKER_FEE_RATE", 0.0002) if maker_fee_rate is None else maker_fee_rate
+        )
+        self.taker_fee_rate = self._safe_cost_rate(
+            getattr(Config, "TAKER_FEE_RATE", 0.00055) if taker_fee_rate is None else taker_fee_rate
+        )
+        legacy_mode = self.legacy_fee_rate is not None
+        self.spread_rate = self._safe_cost_rate(
+            (0.0 if legacy_mode else getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002))
+            if spread_rate is None else spread_rate
+        )
+        self.slippage_rate = self._safe_cost_rate(
+            (0.0 if legacy_mode else getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003))
+            if slippage_rate is None else slippage_rate
+        )
         self.partial_exits = bool(partial_exits)
         self.tp_weights = tp_weights
         self.limit_expiry_bars = max(1, int(limit_expiry_bars))
@@ -283,6 +307,12 @@ class BacktestRunner:
         self.stale_limit_target_before_fill = 0
         self.market_fallback_fills = 0
         self.market_fallback_rejected_rr = 0
+        self.market_fallback_rejected_distance = 0
+        self.candidate_direction_counts = {}
+        self.filled_direction_counts = {}
+        self.unfilled_limit_direction_counts = {}
+        self.expired_limit_direction_counts = {}
+        self.stale_limit_direction_counts = {}
         self.overlapping_signals_skipped = 0
         self.open_trades = 0
         self.invalid_candidates = 0
@@ -327,12 +357,14 @@ class BacktestRunner:
     def reset(self):
         self.__init__(
             analyze_fn=self.analyze_fn,
-            fee_rate=self.fee_rate,
+            fee_rate=self.legacy_fee_rate,
             partial_exits=self.partial_exits,
             tp_weights=self.tp_weights,
             limit_expiry_bars=self.limit_expiry_bars,
             spread_rate=self.spread_rate,
             slippage_rate=self.slippage_rate,
+            maker_fee_rate=None if self.legacy_fee_rate is not None else self.maker_fee_rate,
+            taker_fee_rate=None if self.legacy_fee_rate is not None else self.taker_fee_rate,
         )
 
     def run(self, data, on_signal=None, step=1, lenient=False):
@@ -498,6 +530,42 @@ class BacktestRunner:
 
         return self.statistics()
 
+    def _market_fallback_check(self, opened, planned_entry, stop, tp1, direction, risk):
+        """Check a next-open MARKET replacement for a missed LIMIT without chasing."""
+        is_long = direction == "LONG"
+        if opened is None or planned_entry is None or stop is None or tp1 is None:
+            return False, 0.0, "missing_levels"
+        if (is_long and not (stop < opened < tp1)) or (not is_long and not (tp1 < opened < stop)):
+            return False, 0.0, "invalid_geometry"
+        distance = abs(opened - planned_entry)
+        distance_pct = distance / opened if opened > 0 else float("inf")
+        atr = _num(risk.get("atr"))
+        distance_atr = distance / atr if atr and atr > 0 else None
+        max_pct = float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003))
+        max_atr = float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_ATR", 0.35))
+        if distance_pct > max_pct or (distance_atr is not None and distance_atr > max_atr):
+            return False, 0.0, "distance"
+        fallback_risk = abs(opened - stop)
+        fallback_reward = tp1 - opened if is_long else opened - tp1
+        if fallback_risk <= 0 or fallback_reward <= 0:
+            return False, 0.0, "invalid_geometry"
+        if self.legacy_fee_rate is not None:
+            cost = abs(opened) * self.legacy_fee_rate
+        else:
+            cost = estimate_plan_cost(
+                entry_price=opened,
+                targets={"tp1": tp1},
+                weights={"tp1": 1.0},
+                entry_type="MARKET",
+                maker_fee_rate=self.maker_fee_rate,
+                taker_fee_rate=self.taker_fee_rate,
+                spread_rate=self.spread_rate,
+                slippage_rate=self.slippage_rate,
+            )["total"]
+        net_rr = (fallback_reward - cost) / fallback_risk
+        minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
+        return net_rr >= minimum_net_rr, net_rr, "rr" if net_rr < minimum_net_rr else "ok"
+
     def _to_trade(self, result, candles, entry_index, lenient=False, signal_index=None):
         """analyze çıktısından trade üretir; geçersizse None."""
         decision = (result or {}).get("decision") or {}
@@ -512,6 +580,7 @@ class BacktestRunner:
         if not tradeable_dir:
             return None
         self.candidate_signals += 1
+        self.candidate_direction_counts[signal_dir] = self.candidate_direction_counts.get(signal_dir, 0) + 1
 
         risk = (result or {}).get("risk") or {}
         if isinstance(risk, dict) and risk.get("risk_setup_valid") is False:
@@ -568,6 +637,7 @@ class BacktestRunner:
                 if target_hit_before_order:
                     self.stale_limits_cancelled += 1
                     self.stale_limit_signal_candle_target += 1
+                    self.stale_limit_direction_counts[signal_dir] = self.stale_limit_direction_counts.get(signal_dir, 0) + 1
                     return None
 
             expiry_index = min(len(candles), entry_index + self.limit_expiry_bars)
@@ -587,44 +657,31 @@ class BacktestRunner:
                 # pending entry, cancel the stale order. If both are touched
                 # in one candle, OHLC cannot reveal the path: keep the fill but
                 # apply the conservative fill-candle handling below.
-                if target_already_hit and not touched:
-                    # The pending LIMIT missed, but the next candle may still
-                    # open before TP1. Reassess a MARKET entry at that candle's
-                    # open; never assume a fill after the target was reached.
-                    # Require the nearest remaining structural target to retain
-                    # at least 1.50R after round-trip costs.
-                    open_before_tp1 = (
-                        opened < _num(risk.get("tp1"))
-                        if is_long else opened > _num(risk.get("tp1"))
+                if not touched:
+                    # A missed LIMIT may be replaced at the next candle open,
+                    # but only while TP1 is still ahead, price remains near the
+                    # planned POI, and cost-adjusted reward is still >= minimum.
+                    fallback_ok, fallback_net_rr, fallback_reason = self._market_fallback_check(
+                        opened, limit_price, _num(stop), _num(risk.get("tp1")), signal_dir, risk
                     )
-                    fallback_stop = _num(stop)
-                    fallback_tp1 = _num(risk.get("tp1"))
-                    fallback_risk = abs(opened - fallback_stop) if fallback_stop is not None else 0.0
-                    fallback_reward = (
-                        fallback_tp1 - opened if is_long else opened - fallback_tp1
-                    ) if fallback_tp1 is not None else 0.0
-                    fallback_net_rr = (
-                        (fallback_reward - abs(opened) * self.fee_rate) / fallback_risk
-                        if fallback_risk > 0 else 0.0
-                    )
-                    valid_fallback_geometry = (
-                        fallback_stop is not None
-                        and ((is_long and fallback_stop < opened) or (not is_long and fallback_stop > opened))
-                        and fallback_reward > 0
-                    )
-                    if open_before_tp1 and valid_fallback_geometry and fallback_net_rr >= 1.50:
+                    if fallback_ok:
                         entry_price = opened
                         fill_index = candidate_index
                         entry_type = "MARKET_FALLBACK"
                         limit_intrabar_fill = False
                         market_fallback_used = True
                         break
-                    self.stale_limits_cancelled += 1
-                    self.stale_limit_target_before_fill += 1
-                    if open_before_tp1 and fallback_net_rr < 1.50:
+                    if fallback_reason == "distance":
+                        self.market_fallback_rejected_distance += 1
+                    elif fallback_reason == "rr":
                         self.market_fallback_rejected_rr += 1
-                    return None
-                if not touched:
+                    if target_already_hit:
+                        # No fill occurred before the target. Do not fabricate a
+                        # late LIMIT fill; cancel the stale order.
+                        self.stale_limits_cancelled += 1
+                        self.stale_limit_target_before_fill += 1
+                        self.stale_limit_direction_counts[signal_dir] = self.stale_limit_direction_counts.get(signal_dir, 0) + 1
+                        return None
                     continue
                 entry_price = min(limit_price, opened) if is_long else max(limit_price, opened)
                 # If price opens through the limit, fill is at the open and
@@ -642,7 +699,9 @@ class BacktestRunner:
                     self.no_followup_data += 1
                 else:
                     self.expired_limits += 1
+                    self.expired_limit_direction_counts[signal_dir] = self.expired_limit_direction_counts.get(signal_dir, 0) + 1
                 self.unfilled_limits += 1
+                self.unfilled_limit_direction_counts[signal_dir] = self.unfilled_limit_direction_counts.get(signal_dir, 0) + 1
                 return None
 
         stop = _num(stop)
@@ -668,6 +727,7 @@ class BacktestRunner:
 
         if market_fallback_used:
             self.market_fallback_fills += 1
+        self.filled_direction_counts[signal_dir] = self.filled_direction_counts.get(signal_dir, 0) + 1
 
         use_partial = bool(getattr(self, "partial_exits", True))
         if limit_intrabar_fill:
@@ -733,17 +793,36 @@ class BacktestRunner:
             return None
 
         risk_distance = abs(entry_price - stop)
-        # Match RiskEngine's modeled fee + spread + slippage cost components.
-        # Spread/slippage are percentage proxies here; exact exchange tick/market
-        # impact is unavailable in OHLCV-only historical replay.
-        fee_cost = abs(entry_price) * self.fee_rate
-        spread_cost = abs(entry_price) * self.spread_rate
-        slippage_cost = abs(entry_price) * self.slippage_rate
-        fee_rr = fee_cost / risk_distance if risk_distance > 0 else self.fee_rate
-        spread_slippage_rr = (spread_cost + slippage_cost) / risk_distance if risk_distance > 0 else 0.0
-        execution_cost_rr = fee_rr + spread_slippage_rr
-        # Preserve actual price-path R (including stop gaps) and subtract costs once.
+        # One shared fill-level cost model keeps backtest costs consistent with
+        # RiskEngine. OHLCV cannot reveal queue position or exact market impact.
         gross_rr = float(outcome.get("net_rr", 0.0) or 0.0)
+        if self.legacy_fee_rate is not None:
+            fee_cost = abs(entry_price) * self.legacy_fee_rate
+            spread_cost = abs(entry_price) * self.spread_rate
+            slippage_cost = abs(entry_price) * self.slippage_rate
+            fee_rr = fee_cost / risk_distance if risk_distance > 0 else 0.0
+            spread_slippage_rr = (spread_cost + slippage_cost) / risk_distance if risk_distance > 0 else 0.0
+            execution_cost_rr = fee_rr + spread_slippage_rr
+            cost_parts = {"entry_fee": fee_cost, "exit_fee": 0.0, "spread": spread_cost, "slippage": slippage_cost}
+        else:
+            cost_parts = realized_trade_cost(
+                entry_price=entry_price,
+                exit_price=_num(outcome.get("exit_price")) or entry_price,
+                entry_type=entry_type,
+                exit_reason=outcome.get("exit_reason"),
+                targets=tps,
+                reached_levels=outcome.get("levels") or ([outcome.get("tp")] if outcome.get("tp") else []),
+                tp_weights=self.tp_weights,
+                partial_exits=use_partial,
+                maker_fee_rate=self.maker_fee_rate,
+                taker_fee_rate=self.taker_fee_rate,
+                spread_rate=self.spread_rate,
+                slippage_rate=self.slippage_rate,
+            )
+            execution_cost_rr = cost_parts["total"] / risk_distance if risk_distance > 0 else 0.0
+            fee_rr = (cost_parts["entry_fee"] + cost_parts["exit_fee"]) / risk_distance if risk_distance > 0 else 0.0
+            spread_slippage_rr = (cost_parts["spread"] + cost_parts["slippage"]) / risk_distance if risk_distance > 0 else 0.0
+        # Preserve actual price-path R (including stop gaps) and subtract costs once.
         net_rr = round(gross_rr - execution_cost_rr, 4)
 
         signal_index = max(0, int(signal_index if signal_index is not None else entry_index - 1))
@@ -784,8 +863,12 @@ class BacktestRunner:
             "net_rr": round(max(net_rr, -99.0), 4),
             "fee_rr": round(fee_rr, 4),
             "spread_slippage_rr": round(spread_slippage_rr, 4),
+            "entry_fee_quote": round(cost_parts.get("entry_fee", 0.0), 10),
+            "exit_fee_quote": round(cost_parts.get("exit_fee", 0.0), 10),
+            "spread_cost_quote": round(cost_parts.get("spread", 0.0), 10),
+            "slippage_cost_quote": round(cost_parts.get("slippage", 0.0), 10),
             "execution_cost_rr": round(execution_cost_rr, 4),
-            "cost_model": "round_trip_fee_plus_spread_slippage_proxy",
+            "cost_model": "per_fill_maker_taker_market_friction" if self.legacy_fee_rate is None else "round_trip_fee_plus_spread_slippage_proxy",
             "_w": net_rr > 0.0,
             "_tp": outcome.get("tp", 0),
             "_levels": outcome.get("levels") or [],
@@ -924,6 +1007,12 @@ class BacktestRunner:
                 "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
                 "market_fallback_fills": self.market_fallback_fills,
                 "market_fallback_rejected_rr": self.market_fallback_rejected_rr,
+                "market_fallback_rejected_distance": self.market_fallback_rejected_distance,
+                "candidate_direction_counts": dict(self.candidate_direction_counts),
+                "filled_direction_counts": dict(self.filled_direction_counts),
+                "unfilled_limit_direction_counts": dict(self.unfilled_limit_direction_counts),
+                "expired_limit_direction_counts": dict(self.expired_limit_direction_counts),
+                "stale_limit_direction_counts": dict(self.stale_limit_direction_counts),
                 "overlapping_signals_skipped": self.overlapping_signals_skipped,
                 "trade_history": list(self.history),
                 "open_trades": self.open_trades,
@@ -1001,6 +1090,12 @@ class BacktestRunner:
             "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
             "market_fallback_fills": self.market_fallback_fills,
             "market_fallback_rejected_rr": self.market_fallback_rejected_rr,
+            "market_fallback_rejected_distance": self.market_fallback_rejected_distance,
+            "candidate_direction_counts": dict(self.candidate_direction_counts),
+            "filled_direction_counts": dict(self.filled_direction_counts),
+            "unfilled_limit_direction_counts": dict(self.unfilled_limit_direction_counts),
+            "expired_limit_direction_counts": dict(self.expired_limit_direction_counts),
+            "stale_limit_direction_counts": dict(self.stale_limit_direction_counts),
             "overlapping_signals_skipped": self.overlapping_signals_skipped,
             "trade_history": list(self.history),
             "open_trades": self.open_trades,

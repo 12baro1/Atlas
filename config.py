@@ -93,7 +93,12 @@ class Config:
     DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK = _env_or_rc("ATLAS_ALLOW_SYNTHETIC_TP_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
     # Require higher-timeframe direction by default; 15m-only direction is legacy opt-in.
     ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK = _env_or_rc("ATLAS_ENTRY_ALLOW_STRUCTURE_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
-    ROUND_TRIP_COST_RATE = 0.0020
+    # Bybit USDT perpetual VIP0 defaults; rates apply per filled order leg.
+    # Override with ATLAS_MAKER_FEE_RATE / ATLAS_TAKER_FEE_RATE for account-specific fees.
+    MAKER_FEE_RATE = float(os.getenv("ATLAS_MAKER_FEE_RATE", "0.0002"))
+    TAKER_FEE_RATE = float(os.getenv("ATLAS_TAKER_FEE_RATE", "0.00055"))
+    # Legacy single-rate proxy retained only for older integrations.
+    ROUND_TRIP_COST_RATE = float(os.getenv("ATLAS_ROUND_TRIP_COST_RATE", "0.0020"))
     ATR_PERIOD = 14
     # Structural invalidation remains primary; ATR is a volatility floor, not a demand to force every stop to 0.75 ATR.
     MIN_STOP_ATR_MULTIPLIER = 0.25
@@ -114,8 +119,9 @@ class Config:
     # Percentage floor complements ATR and execution-cost buffers; it must not dominate structural stops on high-priced markets.
     MIN_STOP_PERCENT = 0.0001
     MIN_TICK_DISTANCE_FALLBACK = 0.01
-    STOP_SPREAD_BUFFER_RATE = 0.0002
-    STOP_SLIPPAGE_BUFFER_RATE = 0.0003
+    # One-way execution friction, applied only to MARKET/STOP legs in backtests.
+    STOP_SPREAD_BUFFER_RATE = float(os.getenv("ATLAS_STOP_SPREAD_BUFFER_RATE", "0.0002"))
+    STOP_SLIPPAGE_BUFFER_RATE = float(os.getenv("ATLAS_STOP_SLIPPAGE_BUFFER_RATE", "0.0003"))
     AUTO_EXPAND_TIGHT_STOPS = False
     REJECT_TIGHT_STOPS = True
     MAX_POSITION_SIZE = 1000.0
@@ -363,6 +369,11 @@ class Config:
     def refresh_from_env(cls):
         """Runtime'da environment değişikliklerini Config sınıfına yeniden yükler."""
         cls.MIN_STOP_PERCENT = float(_env_or_rc("ATLAS_MIN_STOP_PERCENT", str(cls.MIN_STOP_PERCENT)))
+        cls.MAKER_FEE_RATE = float(_env_or_rc("ATLAS_MAKER_FEE_RATE", str(cls.MAKER_FEE_RATE)))
+        cls.TAKER_FEE_RATE = float(_env_or_rc("ATLAS_TAKER_FEE_RATE", str(cls.TAKER_FEE_RATE)))
+        cls.ROUND_TRIP_COST_RATE = float(_env_or_rc("ATLAS_ROUND_TRIP_COST_RATE", str(cls.ROUND_TRIP_COST_RATE)))
+        cls.STOP_SPREAD_BUFFER_RATE = float(_env_or_rc("ATLAS_STOP_SPREAD_BUFFER_RATE", str(cls.STOP_SPREAD_BUFFER_RATE)))
+        cls.STOP_SLIPPAGE_BUFFER_RATE = float(_env_or_rc("ATLAS_STOP_SLIPPAGE_BUFFER_RATE", str(cls.STOP_SLIPPAGE_BUFFER_RATE)))
         cls.REJECT_TIGHT_STOPS = _env_or_rc("ATLAS_REJECT_TIGHT_STOPS", "1").strip().lower() in {"1", "true", "yes"}
         # Analysis-only mode: never re-enable exchange order execution from environment.
         cls.AUTO_TRADING_ENABLED = False

@@ -126,6 +126,17 @@ python backtest.py --symbol BTC/USDT:USDT --days 90
 
 Backtest sonuçları kullanılan veri aralığına ve varsayımlara bağlıdır. Gerçek işlem öncesinde komisyon, kayma, örneklem büyüklüğü ve maksimum düşüş ayrıca değerlendirilmelidir.
 
+### Execution maliyetleri
+
+Backtest ve risk motoru aynı işlem-başı maliyet modelini kullanır:
+
+- Bekleyen LIMIT dolumu: maker komisyonu
+- MARKET giriş ve STOP/trailing-stop çıkışı: taker komisyonu
+- Spread ve slippage: yalnızca MARKET/STOP gerçekleşen bacaklarına tek yönlü uygulanır
+- Varsayılan maker/taker oranları sırasıyla 0.02% ve 0.055%'tir; bunlar Bybit standart (Non-VIP) türev oranlarıdır. Hesabın gerçek oranını Bybit Fee Rate ekranından kontrol et.
+- Oranlar `ATLAS_MAKER_FEE_RATE`, `ATLAS_TAKER_FEE_RATE`, `ATLAS_STOP_SPREAD_BUFFER_RATE` ve `ATLAS_STOP_SLIPPAGE_BUFFER_RATE` ortam değişkenleriyle değiştirilebilir.
+- Funding maliyeti ve OHLCV verisinden görülemeyen gerçek emir kuyruğu/market impact bu modelde yer almaz.
+
 ## Veri ve güvenlik
 
 - Piyasa verisi Bybit'in herkese açık piyasa verisi arayüzünden alınır.
