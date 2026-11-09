@@ -382,3 +382,14 @@ def test_main_engine_rejects_risk_entry_mismatch_before_publishing_geometry():
     )
     assert result["entry"]["valid"] is False
     assert result["entry"]["entry_reason_code"] == "RISK_ENTRY_MISMATCH"
+
+
+def test_main_geometry_preserves_missing_risk_payload():
+    result = AtlasMainEngine.finalize_setup_geometry(
+        {"valid": True, "direction": "LONG", "entry": 100.0, "stop_loss": 95.0},
+        None,
+        {"tp1": 105.0},
+    )
+    assert result["risk"] is None
+    assert result["entry"]["valid"] is True
+    assert result["entry"]["tp1"] == 105.0
