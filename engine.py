@@ -2224,6 +2224,7 @@ class AtlasEngine:
             volume_profile=volume_profile,
             institutional=institutional,
             candles=candles,
+            entry_type=entry.get("entry_type", "LIMIT"),
         )
 
         if isinstance(risk_payload, dict) and risk_payload.get("risk_setup_valid") is False:
