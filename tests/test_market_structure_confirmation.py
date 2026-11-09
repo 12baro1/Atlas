@@ -29,3 +29,18 @@ def test_pivot_strength_uses_no_candles_after_confirmation():
     candles[7].high = -100
     engine.calculate_strength(candles)
     assert pivot.strength == strength_before
+
+
+
+def test_low_pivot_confirmation_index_matches_actual_right_window():
+    candles = [
+        Candle(time=i, open=price, high=high, low=low, close=price, volume=100)
+        for i, (price, high, low) in enumerate([
+            (8, 9, 7), (9, 10, 8), (10, 11, 9), (6, 7, 5),
+            (10, 11, 9), (9, 10, 8), (8, 9, 7), (9, 10, 8),
+        ])
+    ]
+    engine = MarketStructureEngine()
+    pivots = engine.find_pivots(candles, left=1, right=2)
+    pivot = next(item for item in pivots if item.kind == "LOW" and item.index == 3)
+    assert pivot.confirmation_index == 5
