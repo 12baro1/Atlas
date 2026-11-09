@@ -455,6 +455,16 @@ class SetupReasoningEngine:
                             default_position=0.38 if inside else 0.50,
                         )
 
+                # An inside-POI LIMIT must remain on the retracement side
+                # of current price. Evidence weighting may otherwise place a
+                # SHORT entry below spot (or LONG above spot), invalidating it.
+                if inside and not market_confirmed:
+                    clearance = max((high - low) * 0.02, abs(current) * 1e-6)
+                    if direction == "SHORT":
+                        entry_price = max(entry_price, min(high, current + clearance))
+                    else:
+                        entry_price = min(entry_price, max(low, current - clearance))
+
                 executable = (
                     (inside and market_confirmed)
                     or (direction == "LONG" and current > entry_price)
