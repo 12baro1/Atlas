@@ -47,3 +47,32 @@ def test_scanner_does_not_mark_missing_targets_as_tradable():
     scanner.add("SOL/USDT", payload)
 
     assert scanner.summary()["executable"] == []
+
+
+def test_scanner_rejects_missing_entry_and_non_finite_levels():
+    scanner = ScannerEngine()
+    missing_entry = _payload("XRP/USDT", "EXECUTE", 99)
+    missing_entry["risk"]["entry"] = None
+    scanner.add("XRP/USDT", missing_entry)
+
+    non_finite = _payload("ADA/USDT", "EXECUTE", 99)
+    non_finite["risk"]["tp2"] = float("nan")
+    scanner.add("ADA/USDT", non_finite)
+
+    assert scanner.summary()["executable"] == []
+
+
+def test_scanner_rejects_targets_in_wrong_directional_order():
+    scanner = ScannerEngine()
+    payload = _payload("DOGE/USDT", "EXECUTE", 99)
+    payload["risk"]["tp2"] = 100.5
+    scanner.add("DOGE/USDT", payload)
+    assert scanner.summary()["executable"] == []
+
+
+def test_scanner_does_not_trust_missing_risk_validation_flag():
+    scanner = ScannerEngine()
+    payload = _payload("LINK/USDT", "EXECUTE", 99)
+    payload["risk"].pop("risk_setup_valid")
+    scanner.add("LINK/USDT", payload)
+    assert scanner.summary()["executable"] == []
