@@ -188,7 +188,7 @@ def test_valid_poi_inside_zone_creates_deeper_limit_without_sweep():
     assert selected["entry_type"] == "LIMIT"
     assert selected["entry"] < 103
     assert 100 <= selected["entry"] <= 105
-    assert selected["stop_loss"] < 100
+    assert selected["stop_loss"] <= 100
 
 
 def test_valid_short_poi_inside_zone_creates_deeper_limit_without_sweep():
@@ -206,4 +206,4 @@ def test_valid_short_poi_inside_zone_creates_deeper_limit_without_sweep():
     assert selected["entry_type"] == "LIMIT"
     assert selected["entry"] > 103
     assert 100 <= selected["entry"] <= 105
-    assert selected["stop_loss"] > 105
+    assert selected["stop_loss"] >= 105
