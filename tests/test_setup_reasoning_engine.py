@@ -8,7 +8,7 @@ def _run(**overrides):
         "structure": [{"choch": True, "direction": "BULLISH", "label": "HH"}],
         "fvg": [{"type": "BULLISH", "from": 100, "to": 105, "filled": False}],
         "orderblocks": [],
-        "current_price": 110,
+        "current_price": 106,
         "candles": [],
         "liquidity_sweep": {
             "is_sweep": True, "sell_side": True, "buy_side": False,
