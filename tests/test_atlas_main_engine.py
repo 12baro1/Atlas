@@ -311,3 +311,34 @@ def test_main_engine_final_authority_allows_coherent_nearby_limit():
         max_market_distance_pct=0.003,
     )
     assert result["action"] == "EXECUTE"
+
+
+def test_main_engine_selects_best_executable_candidate_not_reasoner_choice():
+    class _CompetingReasoner:
+        def generate(self, **kwargs):
+            return {
+                "candidates": [
+                    {
+                        "valid": True, "execution_eligible": True, "direction": "LONG",
+                        "setup_candidate_id": "lower-quality", "net_first_target_rr": 0.8,
+                        "net_projected_rr": 1.8, "entry_distance_pct": 0.5,
+                    },
+                    {
+                        "valid": True, "execution_eligible": True, "direction": "SHORT",
+                        "setup_candidate_id": "best-quality", "net_first_target_rr": 1.2,
+                        "net_projected_rr": 2.6, "entry_distance_pct": 1.0,
+                        "execution_economics_valid": True, "structure_aligned": True,
+                    },
+                ],
+                "selected": {"valid": False, "direction": "WAIT", "reason": "reasoner fallback"},
+            }
+
+    main = AtlasMainEngine(
+        motors={},
+        setup_reasoner=_CompetingReasoner(),
+        decision_engine=_Decision(),
+    )
+    result = main.build_setup(current_price=100.0)
+    assert result["selected"]["setup_candidate_id"] == "best-quality"
+    assert result["selected"]["selected_by"] == "ATLAS_MAIN_ENGINE"
+    assert main.last_motor_report["selected_candidate_valid"] is True
