@@ -242,6 +242,13 @@ class SetupReasoningEngine:
                  internal_structure=None, trendline_liquidity=None,
                  motor_evidence=None):
         base_entry = base_entry if isinstance(base_entry, dict) else {}
+        evidence_records = [
+            item for item in (motor_evidence or [])
+            if isinstance(item, dict) and item.get("status") == "COMPLETED"
+        ]
+        motor_evidence_sources = sorted({
+            str(item.get("motor")) for item in evidence_records if item.get("motor")
+        })
         current = self._number(current_price)
         if current is None or current <= 0:
             return {
@@ -253,7 +260,8 @@ class SetupReasoningEngine:
                     "entry_reason_code": "CURRENT_PRICE_UNAVAILABLE",
                 },
                 "reason": "current_price_unavailable",
-                "motor_evidence_count": len(motor_evidence or []),
+                "motor_evidence_count": len(evidence_records),
+                "motor_evidence_sources": motor_evidence_sources,
             }
         mtf = mtf if isinstance(mtf, dict) else {}
         fvg = fvg if isinstance(fvg, list) else []
@@ -486,6 +494,7 @@ class SetupReasoningEngine:
                     "entry_distance_label": distance_label,
                     "supporting_evidence": support,
                     "opposing_evidence": opposition,
+                    "motor_evidence_sources": motor_evidence_sources,
                     "market_context": market_context,
                     "reasoning": (
                         f"{direction} {source}: POI {low:g}-{high:g}; "
@@ -507,7 +516,8 @@ class SetupReasoningEngine:
                     "entry_reason_code": "NO_MAIN_ENGINE_SETUP",
                 },
                 "reason": "no_structurally_valid_poi",
-                "motor_evidence_count": len(motor_evidence or []),
+                "motor_evidence_count": len(evidence_records),
+            "motor_evidence_sources": motor_evidence_sources,
             }
 
         # Lexicographic scenario selection; no additive votes or confidence score.
