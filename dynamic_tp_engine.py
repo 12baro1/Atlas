@@ -143,7 +143,10 @@ class DynamicTPEngine:
 
     def minimum_target_separation(self, entry, risk, atr_snapshot=0.0):
         risk_floor = risk * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_R", 0.35)))
-        atr_floor = atr_snapshot * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_ATR", 0.20)))
+        atr_floor = min(
+            atr_snapshot * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_ATR", 0.20))),
+            risk * 0.75,
+        )
         percent_floor = entry * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_PERCENT", 0.0005)))
         return max(risk_floor, atr_floor, percent_floor, 1e-12)
 
