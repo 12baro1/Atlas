@@ -1370,13 +1370,19 @@ class AtlasEngine:
             current_index=len(candles) - 1 if candles else None,
         )
 
+        # The final target engine receives the same complete structural context
+        # used to construct the selected POI: LTF + HTF imbalances/blocks and
+        # internal + external structure. Trendline pools remain liquidity inputs.
+        tp_fvg = list(fvg or []) + list(h4_fvg or []) + list(daily_fvg or [])
+        tp_orderblocks = list(orderblocks or []) + list(h4_orderblocks or []) + list(daily_orderblocks or [])
+        tp_structure = list(entry_structure or []) + list(external_structure or [])
         dynamic_tp = self._calculate_dynamic_tp(
             entry=entry,
             liquidity=liquidity,
-            fvg=fvg,
-            orderblocks=orderblocks,
+            fvg=tp_fvg,
+            orderblocks=tp_orderblocks,
             candles=candles,
-            structure=entry_structure,
+            structure=tp_structure,
             trendline_liquidity=trendline_liquidity,
         )
 
@@ -1461,10 +1467,10 @@ class AtlasEngine:
                 dynamic_tp = self._calculate_dynamic_tp(
                     entry=entry,
                     liquidity=liquidity,
-                    fvg=fvg,
-                    orderblocks=orderblocks,
+                    fvg=tp_fvg,
+                    orderblocks=tp_orderblocks,
                     candles=candles,
-                    structure=entry_structure,
+                    structure=tp_structure,
                     trendline_liquidity=trendline_liquidity,
                     stop_price=expanded_stop,
                     exclude_targets_through=target_exclusion_price,
@@ -2278,6 +2284,7 @@ class AtlasEngine:
             institutional=institutional,
             candles=candles,
             entry_type=entry.get("entry_type", "LIMIT"),
+            direction=entry.get("direction"),
         )
 
         if isinstance(risk_payload, dict) and risk_payload.get("risk_setup_valid") is False:

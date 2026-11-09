@@ -24,7 +24,10 @@ def base_payload():
             "sources": ["market_structure", "market_structure", "market_structure"],
             "synthetic_targets": False,
         },
-        "risk": {"risk_setup_valid": True, "stop_loss": 98.0, "stop_adjusted": False},
+        "risk": {
+            "risk_setup_valid": True, "entry": 100.0, "stop_loss": 98.0,
+            "tp1": 102.0, "tp2": 104.0, "tp3": 106.0, "stop_adjusted": False,
+        },
         "current_price": 101.0,
         "candles": None,
     }
@@ -210,3 +213,35 @@ def test_unconfirmed_countertrend_candidate_remains_blocked_by_mtf_conflict():
     result = evaluate(payload)
     assert result["allowed"] is False
     assert "Multi-timeframe direction is not aligned" in result["blockers"]
+
+
+def test_tp_levels_in_same_liquidity_cluster_are_rejected():
+    payload = base_payload()
+    payload["dynamic_tp"]["tp1"] = 102.0
+    payload["dynamic_tp"]["tp2"] = 102.2
+    payload["dynamic_tp"]["tp3"] = 106.0
+    result = evaluate(payload)
+    assert result["allowed"] is False
+    assert any("same liquidity cluster" in item.lower() for item in result["blockers"])
+
+
+def test_tp_levels_with_separate_structural_spacing_pass():
+    payload = base_payload()
+    payload["dynamic_tp"]["tp1"] = 102.0
+    payload["dynamic_tp"]["tp2"] = 104.0
+    payload["dynamic_tp"]["tp3"] = 106.0
+    assert evaluate(payload)["allowed"] is True
+
+
+def test_risk_output_must_match_the_final_structural_stop_and_targets():
+    payload = base_payload()
+    payload["risk"]["stop_loss"] = 97.5
+    result = evaluate(payload)
+    assert result["allowed"] is False
+    assert any("risk engine stop differs" in item.lower() for item in result["blockers"])
+
+    payload = base_payload()
+    payload["risk"]["tp2"] = 104.5
+    result = evaluate(payload)
+    assert result["allowed"] is False
+    assert any("tp2 differs" in item.lower() for item in result["blockers"])

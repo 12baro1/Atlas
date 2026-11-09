@@ -238,3 +238,66 @@ def test_limit_repricing_does_not_fabricate_a_target_when_all_structure_is_passe
     assert result["tp3"] is None
     assert result["excluded_passed_targets"] == [102.0]
     assert result["reason"] == "no_valid_structural_targets"
+
+
+def test_nearest_meaningful_structural_target_becomes_tp1_and_nearby_levels_are_clustered():
+    result = DynamicTPEngine().calculate(
+        direction="LONG",
+        entry=100.0,
+        stop_loss=98.0,
+        liquidity=[
+            {"type": "BUY_SIDE", "price": 102.0},
+            {"type": "BUY_SIDE", "price": 102.3},
+            {"type": "BUY_SIDE", "price": 104.0},
+            {"type": "BUY_SIDE", "price": 107.0},
+        ],
+        fvg=[],
+        orderblocks=[],
+        structure=[],
+        atr_value=2.5,
+        allow_rr_fallback=False,
+    )
+    assert result["tp1"] == 102.0
+    assert result["tp2"] == 104.0
+    assert result["tp3"] == 107.0
+    assert result["clustered_targets"] == [102.0, 104.0, 107.0]
+
+
+def test_short_tp_targets_use_the_same_spacing_rules():
+    result = DynamicTPEngine().calculate(
+        direction="SHORT",
+        entry=100.0,
+        stop_loss=102.0,
+        liquidity=[
+            {"type": "SELL_SIDE", "price": 98.0},
+            {"type": "SELL_SIDE", "price": 97.7},
+            {"type": "SELL_SIDE", "price": 96.0},
+            {"type": "SELL_SIDE", "price": 93.0},
+        ],
+        fvg=[],
+        orderblocks=[],
+        structure=[],
+        atr_value=2.5,
+        allow_rr_fallback=False,
+    )
+    assert result["tp1"] == 98.0
+    assert result["tp2"] == 96.0
+    assert result["tp3"] == 93.0
+
+
+def test_too_close_structural_target_is_not_promoted_to_tp1():
+    result = DynamicTPEngine().calculate(
+        direction="LONG",
+        entry=100.0,
+        stop_loss=98.0,
+        liquidity=[
+            {"type": "BUY_SIDE", "price": 100.5},
+            {"type": "BUY_SIDE", "price": 102.0},
+        ],
+        fvg=[],
+        orderblocks=[],
+        structure=[],
+        allow_rr_fallback=False,
+    )
+    assert result["tp1"] == 102.0
+    assert result["tp2"] is None

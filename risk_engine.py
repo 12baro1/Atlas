@@ -68,6 +68,7 @@ class RiskEngine:
         slippage=None,
         auto_expand_stop=None,
         entry_type="LIMIT",
+        direction=None,
     ):
 
         if entry is None or stop_loss is None:
@@ -80,9 +81,17 @@ class RiskEngine:
         if not math.isfinite(entry) or not math.isfinite(stop_loss) or entry <= 0 or stop_loss <= 0:
             return None
 
-        side = "LONG" if entry > stop_loss else "SHORT"
+        requested_direction = str(direction or "").strip().upper()
+        if requested_direction not in {"LONG", "SHORT"}:
+            requested_direction = "LONG" if entry > stop_loss else "SHORT"
+        side = requested_direction
         if entry == stop_loss:
             return self._invalid_risk_setup(entry, stop_loss, side=side, reason="Stop Loss invalid")
+        if (side == "LONG" and stop_loss >= entry) or (side == "SHORT" and stop_loss <= entry):
+            return self._invalid_risk_setup(
+                entry, stop_loss, side=side,
+                reason="Stop Loss is on the wrong side of the selected direction",
+            )
 
         atr_period = int(getattr(Config, "ATR_PERIOD", 14))
         min_stop_atr_multiplier = float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.25))

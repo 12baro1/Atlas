@@ -7,6 +7,7 @@ structural validity, target geometry and execution quality.
 import math
 
 from config import Config
+from dynamic_tp_engine import DynamicTPEngine
 from execution_costs import estimate_plan_cost, estimate_stop_cost
 
 
@@ -527,6 +528,16 @@ class SetupReasoningEngine:
                 # this is a stale setup: do not issue an executable signal.
                 if potential_targets and not targets:
                     continue
+                # Use the same objective clustering as the final DynamicTPEngine:
+                # TP1 is the nearest meaningful opposing objective; TP2/TP3 must
+                # represent separate price clusters rather than adjacent ticks.
+                targets = DynamicTPEngine().select_structural_targets(
+                    direction=direction,
+                    entry=entry_price,
+                    risk=risk,
+                    targets=targets,
+                    atr_snapshot=atr_value or 0.0,
+                )
                 projected_rr = abs(targets[-1] - entry_price) / risk if targets else None
                 target_map = {
                     f"tp{index}": price
