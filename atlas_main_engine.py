@@ -17,6 +17,25 @@ class AtlasMainEngine:
         self.decision_engine = decision_engine
         self.last_motor_report = {}
 
+    def analyze(self, market_data, *, pipeline):
+        """Own the complete analysis lifecycle; pipeline executes registered motors."""
+        if not callable(pipeline):
+            raise TypeError("AtlasMainEngine requires a callable motor pipeline")
+        self.last_motor_report = {
+            "registered_motors": sorted(self.motors),
+            "pipeline": "RUNNING",
+        }
+        result = pipeline(market_data)
+        self.last_motor_report["pipeline"] = "COMPLETED"
+        if isinstance(result, dict):
+            decision = result.get("decision") or {}
+            result["main_engine"] = {
+                **self.last_motor_report,
+                "final_action": decision.get("action"),
+                "final_direction": decision.get("signal"),
+            }
+        return result
+
     def build_setup(self, **motor_outputs):
         """Run the setup-construction motor with the complete specialist evidence."""
         result = self.setup_reasoner.generate(**motor_outputs)
