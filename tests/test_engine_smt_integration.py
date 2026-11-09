@@ -172,3 +172,19 @@ def test_timeframe_structure_direction_uses_latest_confirmed_break():
         {"label": "LL", "choch": True, "direction": "BEARISH"},
     ]
     assert engine._timeframe_structure_direction(structure) == "BEARISH"
+
+
+
+def test_timeframe_structure_motors_publish_evidence_to_main_engine():
+    engine = AtlasEngine()
+    engine.main_engine.reset_evidence()
+
+    result = engine._analyze_timeframe([_candle(i) for i in range(20)])
+    diagnostics = engine.main_engine.motor_diagnostics()
+
+    assert "structure" in result
+    assert diagnostics["call_counts"]["market_structure"] == 5
+    assert diagnostics["call_counts"]["bos"] == 1
+    assert diagnostics["call_counts"]["choch"] == 1
+    assert diagnostics["error_count"] == 0
+    assert diagnostics["evidence_count"] == diagnostics["call_total"]
