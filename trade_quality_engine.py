@@ -218,12 +218,23 @@ class TradeQualityEngine:
         if direction in {"LONG", "SHORT"} and entry_price is not None and stop is not None:
             if (direction == "LONG" and stop >= entry_price) or (direction == "SHORT" and stop <= entry_price):
                 blockers.append("Stop-loss is on the wrong side of entry")
+            geometry_tolerance = max(abs(entry_price) * 1e-8, 1e-8)
             risk_entry = risk.get("entry")
             try:
-                if risk_entry is not None and abs(float(risk_entry) - entry_price) > max(abs(entry_price) * 1e-8, 1e-12):
+                if risk_entry is not None and abs(float(risk_entry) - entry_price) > geometry_tolerance:
                     blockers.append("Risk engine entry differs from the selected setup entry")
+                entry_stop = float(entry.get("stop_loss"))
+                if abs(stop - entry_stop) > geometry_tolerance:
+                    blockers.append("Risk engine stop differs from the selected structural stop")
+                for target_name in ("tp1", "tp2", "tp3"):
+                    setup_target = targets.get(target_name)
+                    risk_target = risk.get(target_name)
+                    if setup_target is None and risk_target is None:
+                        continue
+                    if setup_target is None or risk_target is None or abs(float(setup_target) - float(risk_target)) > geometry_tolerance:
+                        blockers.append(f"Risk engine {target_name.upper()} differs from the final structural target")
             except (TypeError, ValueError, OverflowError):
-                blockers.append("Risk engine entry is invalid")
+                blockers.append("Risk engine price geometry is invalid")
 
         if tp_prices and direction in {"LONG", "SHORT"}:
             ordered = all(
