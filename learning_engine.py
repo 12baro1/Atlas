@@ -17,6 +17,8 @@ Tasarım ilkeleri:
 
 import json
 import math
+import os
+import threading
 from pathlib import Path
 
 from canonical_features import (
@@ -32,6 +34,7 @@ class LearningEngine:
     def __init__(self, path="atlas_learning.json"):
         self.path = Path(path)
         self.stats = {"setups": {}, "index": {}, "meta": {}}
+        self._save_lock = threading.RLock()
         self.load()
 
     def load(self):
@@ -41,9 +44,22 @@ class LearningEngine:
             with self.path.open("r", encoding="utf-8") as handle:
                 payload = json.load(handle)
             if isinstance(payload, dict):
-                self.stats.update(payload)
-                self.stats.setdefault("setups", {})
-                self.stats.setdefault("index", {})
+                setups = payload.get("setups")
+                index = payload.get("index")
+                meta = payload.get("meta")
+                if isinstance(setups, dict):
+                    self.stats["setups"] = {
+                        str(key): value for key, value in setups.items()
+                        if isinstance(value, dict)
+                    }
+                if isinstance(index, dict):
+                    self.stats["index"] = {
+                        level: values
+                        for level, values in index.items()
+                        if isinstance(values, dict)
+                    }
+                if isinstance(meta, dict):
+                    self.stats["meta"] = meta
         except (OSError, json.JSONDecodeError):
             pass
         # Eski/üçüncü parti dosyalarda 'index' yoksa (legacy bucket-only format)
@@ -70,20 +86,22 @@ class LearningEngine:
             return self.stats
         index = {"exact": {}, "family": {}, "global": {}}
         for setup, bucket in self.stats["setups"].items():
+            if not isinstance(bucket, dict):
+                continue
             ctx = self._legacy_bucket_context(setup)
             if ctx is None:
                 continue
             raw = self._empty_raw()
-            total = int(bucket.get("total", 0))
-            wins = int(bucket.get("wins", 0))
-            mean_r = float(bucket.get("average_r") or bucket.get("edge") or 0)
+            total = max(0, self._safe_int(bucket.get("total"), 0))
+            wins = max(0, min(total, self._safe_int(bucket.get("wins"), 0)))
+            mean_r = self._safe_float(bucket.get("average_r") or bucket.get("edge") or 0, 0.0)
             raw["total"] = total
             raw["wins"] = wins
             raw["r_sum"] = mean_r * total
             raw["pos_sum"] = abs(raw["r_sum"]) if raw["r_sum"] >= 0 else 0.0
             raw["neg_sum"] = raw["r_sum"] if raw["r_sum"] < 0 else 0.0
-            raw["confidence_sum"] = float(bucket.get("average_confidence", 0) or 0) * total
-            raw["decay_sum"] = float(bucket.get("weight", 1.0) or 1.0) * total
+            raw["confidence_sum"] = self._safe_float(bucket.get("average_confidence", 0), 0.0) * total
+            raw["decay_sum"] = self._safe_float(bucket.get("weight", 1.0), 1.0) * total
             raw["decay_wins"] = wins
             metrics = self._compute_metrics(raw, counts=total)
             for level, key in self._candidate_keys(ctx):
@@ -124,10 +142,35 @@ class LearningEngine:
             "feature_key": "|".join(normalized) or "UNKNOWN",
         }
 
+    @staticmethod
+    def _safe_float(value, default=0.0):
+        if isinstance(value, bool):
+            return default
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
+        return number if math.isfinite(number) else default
+
+    @staticmethod
+    def _safe_int(value, default=0):
+        try:
+            return int(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
+
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("w", encoding="utf-8") as handle:
-            json.dump(self.stats, handle, ensure_ascii=False, indent=2)
+        with self._save_lock:
+            tmp_path = self.path.with_name(
+                f"{self.path.stem}.{os.getpid()}.{threading.get_ident()}.tmp"
+            )
+            try:
+                with tmp_path.open("w", encoding="utf-8") as handle:
+                    json.dump(self.stats, handle, ensure_ascii=False, indent=2, allow_nan=False)
+                os.replace(tmp_path, self.path)
+            finally:
+                tmp_path.unlink(missing_ok=True)
 
     # ------------------------------------------------------------------
     # Besleme (backward-compatible popülasyon)
@@ -143,7 +186,7 @@ class LearningEngine:
             bucket["wins"] += 1
         elif result in ("LOSS",):
             bucket["losses"] = bucket.get("losses", 0) + 1
-        bucket["confidence_sum"] += float(trade.get("confidence") or 0)
+        bucket["confidence_sum"] += self._safe_float(trade.get("confidence"), 0.0)
         grade = str(trade.get("grade") or "UNKNOWN")
         bucket.setdefault("grade_counts", {})
         bucket["grade_counts"][grade] = bucket["grade_counts"].get(grade, 0) + 1
@@ -177,13 +220,15 @@ class LearningEngine:
         }
 
         for record in records:
+            if not isinstance(record, dict):
+                continue
             direction = str(record.get("direction") or "UNKNOWN").upper()
             regime = str(record.get("regime") or "UNKNOWN").upper()
             timeframe = str(record.get("timeframe") or "UNKNOWN").upper()
             features = fingerprint_features(record)
             feature_key = "|".join(normalize_features(features)) or "UNKNOWN"
-            r_value = float(record.get("r") or 0.0)
-            confidence = float(record.get("confidence") or 0)
+            r_value = self._safe_float(record.get("r"), 0.0)
+            confidence = self._safe_float(record.get("confidence"), 0.0)
             win = bool(record.get("win"))
 
             weight = 1.0
