@@ -105,10 +105,10 @@ class Config:
     # Small clearance beyond the structural invalidation edge; ATR is not the stop anchor.
     STOP_STRUCTURE_BUFFER_ATR = 0.10
     # Target geometry: first objective must be meaningful; nearby levels in one liquidity cluster are merged.
-    MIN_TP1_RR = float(os.getenv("ATLAS_MIN_TP1_RR", "0.80"))
-    MIN_TP_TARGET_SEPARATION_R = float(os.getenv("ATLAS_MIN_TP_TARGET_SEPARATION_R", "0.35"))
-    MIN_TP_TARGET_SEPARATION_ATR = float(os.getenv("ATLAS_MIN_TP_TARGET_SEPARATION_ATR", "0.20"))
-    MIN_TP_TARGET_SEPARATION_PERCENT = float(os.getenv("ATLAS_MIN_TP_TARGET_SEPARATION_PERCENT", "0.0005"))
+    MIN_TP1_RR = float(_env_or_rc("ATLAS_MIN_TP1_RR", "0.80"))
+    MIN_TP_TARGET_SEPARATION_R = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_R", "0.35"))
+    MIN_TP_TARGET_SEPARATION_ATR = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_ATR", "0.20"))
+    MIN_TP_TARGET_SEPARATION_PERCENT = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_PERCENT", "0.0005"))
     # Sweep-triggered MARKET entry expires shortly after the confirmed close break.
     SWEEP_MARKET_ENTRY_MAX_AGE_BARS = int(os.getenv("ATLAS_SWEEP_MARKET_ENTRY_MAX_AGE_BARS", "2"))
     # Maximum distance for pending LIMIT entries from the current market.
@@ -377,6 +377,10 @@ class Config:
     def refresh_from_env(cls):
         """Runtime'da environment değişikliklerini Config sınıfına yeniden yükler."""
         cls.MIN_STOP_PERCENT = float(_env_or_rc("ATLAS_MIN_STOP_PERCENT", str(cls.MIN_STOP_PERCENT)))
+        cls.MIN_TP1_RR = float(_env_or_rc("ATLAS_MIN_TP1_RR", str(cls.MIN_TP1_RR)))
+        cls.MIN_TP_TARGET_SEPARATION_R = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_R", str(cls.MIN_TP_TARGET_SEPARATION_R)))
+        cls.MIN_TP_TARGET_SEPARATION_ATR = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_ATR", str(cls.MIN_TP_TARGET_SEPARATION_ATR)))
+        cls.MIN_TP_TARGET_SEPARATION_PERCENT = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_PERCENT", str(cls.MIN_TP_TARGET_SEPARATION_PERCENT)))
         cls.MAKER_FEE_RATE = float(_env_or_rc("ATLAS_MAKER_FEE_RATE", str(cls.MAKER_FEE_RATE)))
         cls.TAKER_FEE_RATE = float(_env_or_rc("ATLAS_TAKER_FEE_RATE", str(cls.TAKER_FEE_RATE)))
         cls.ROUND_TRIP_COST_RATE = float(_env_or_rc("ATLAS_ROUND_TRIP_COST_RATE", str(cls.ROUND_TRIP_COST_RATE)))
