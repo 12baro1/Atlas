@@ -1325,18 +1325,9 @@ class AtlasEngine:
             "cooldown": cooldown or {},
             "orderbook": orderbook,
         }
-        # Only macro-news protection and duplicate-position cooldown are
-        # hard external gates. Correlation and order-book pressure remain
-        # optimizer evidence/warnings; they must not veto an otherwise valid POI.
-        hard_external_filters = {
-            "news_filter": setup_quality["external_risk_filters"]["news_filter"],
-            "cooldown": setup_quality["external_risk_filters"]["cooldown"],
-        }
-        if any(not (flt or {}).get("trade_allowed", True) for flt in hard_external_filters.values()):
-            setup_quality["trade_allowed"] = False
-            setup_quality.setdefault("blockers", []).extend(
-                name for name, flt in hard_external_filters.items() if not (flt or {}).get("trade_allowed", True)
-            )
+        # News and duplicate-position cooldown are enforced once, by
+        # AtlasMainEngine after the single decision. They remain visible here
+        # as diagnostics, but do not create a second setup-quality veto.
         soft_external_warnings = [
             name for name in ("correlation", "orderbook")
             if not (setup_quality["external_risk_filters"].get(name) or {}).get("trade_allowed", True)
