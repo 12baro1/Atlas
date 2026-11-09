@@ -764,6 +764,31 @@ def test_runner_rebases_already_touched_tp_to_remaining_structural_target_before
     assert trade["result"] == "WIN"
 
 
+def test_runner_rebases_already_touched_tp_for_short_limit_before_fill():
+    runner = BacktestRunner(
+        partial_exits=False, fee_rate=0.0002, limit_expiry_bars=5
+    )
+    candles = [
+        _candle(1, 100.0, 100.5, 97.5, 97.8),  # TP1 touched before order exists
+        _candle(2, 97.8, 99.5, 97.0, 97.2),    # no fill; TP2 remains ahead
+        _candle(3, 97.2, 99.0, 95.5, 96.0),    # TP2 touched; TP3 remains
+        _candle(4, 96.0, 100.5, 95.0, 100.2),  # short LIMIT fills
+        _candle(5, 100.2, 100.5, 93.5, 94.0),  # remaining TP3
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "SHORT"},
+        "risk": {"entry": 100.0, "stop_loss": 101.0, "tp1": 98.0, "tp2": 96.0, "tp3": 94.0},
+        "analysis": {"entry": {"entry_type": "LIMIT", "poi_source": "FVG", "poi_zone": {"low": 99.5, "high": 100.5}}},
+    }
+    trade = runner._to_trade(result, candles, entry_index=1, signal_index=0)
+    assert trade is not None
+    assert trade["entry"] == 100.0
+    assert trade["tps"] == [94.0, None, None]
+    assert runner.stale_limit_targets_rebased >= 2
+    assert trade["result"] == "WIN"
+
+
 def test_runner_reports_long_short_fill_rates_separately():
     runner = BacktestRunner()
     runner.candidate_direction_counts = {"LONG": 4, "SHORT": 6}
