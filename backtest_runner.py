@@ -360,8 +360,8 @@ class BacktestRunner:
             limit_expiry_bars=self.limit_expiry_bars,
             spread_rate=self.spread_rate,
             slippage_rate=self.slippage_rate,
-            maker_fee_rate=self.maker_fee_rate,
-            taker_fee_rate=self.taker_fee_rate,
+            maker_fee_rate=None if self.legacy_fee_rate is not None else self.maker_fee_rate,
+            taker_fee_rate=None if self.legacy_fee_rate is not None else self.taker_fee_rate,
         )
 
     def run(self, data, on_signal=None, step=1, lenient=False):
