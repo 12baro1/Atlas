@@ -305,6 +305,16 @@ class AtlasMainEngine:
             setup.update({"valid": False, "reason": "Main authority: non-finite/non-positive entry or stop",
                           "entry_reason_code": "INVALID_FINAL_GEOMETRY"})
             return {"entry": setup, "risk": risk_payload, "targets": target_payload}
+        risk_entry = risk_payload.get("entry")
+        if risk_entry is not None:
+            try:
+                risk_entry = float(risk_entry)
+            except (TypeError, ValueError, OverflowError):
+                risk_entry = float("nan")
+            if not math.isfinite(risk_entry) or abs(risk_entry - entry_price) > max(entry_price * 1e-8, 1e-8):
+                setup.update({"valid": False, "reason": "Main authority: risk entry differs from selected setup entry",
+                              "entry_reason_code": "RISK_ENTRY_MISMATCH"})
+                return {"entry": setup, "risk": risk_payload, "targets": target_payload}
         if (side == "LONG" and stop >= entry_price) or (side == "SHORT" and stop <= entry_price) or side not in {"LONG", "SHORT"}:
             setup.update({"valid": False, "reason": "Main authority: stop is not beyond structural invalidation",
                           "entry_reason_code": "INVALID_FINAL_STOP"})
