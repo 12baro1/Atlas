@@ -562,15 +562,9 @@ class BacktestRunner:
             return (direction, candidate_id, source, low, high)
         if low is not None and high is not None:
             return (direction, source, low, high, stop)
-        entry_price = _num(risk.get("entry"), digits=8)
-        if entry_price is None or stop is None:
-            return None
-        return (
-            direction, source, entry_price, stop,
-            _num(risk.get("tp1"), digits=8),
-            _num(risk.get("tp2"), digits=8),
-            _num(risk.get("tp3"), digits=8),
-        )
+        # Without a stable POI identity there is no safe basis for deduplication.
+        # Do not collapse unrelated MARKET signals that happen to share levels.
+        return None
 
     def _rebase_remaining_targets(self, risk, direction, candle):
         """Remove targets already touched before LIMIT fill and validate the remaining plan."""
@@ -621,7 +615,8 @@ class BacktestRunner:
             spread_rate=self.spread_rate,
             slippage_rate=self.slippage_rate,
         )
-        first_reward = remaining[0] - entry if is_long else entry - remaining[0]
+        first_target = remaining[0][0]
+        first_reward = first_target - entry if is_long else entry - first_target
         net_first_rr = (first_reward - float(cost.get("total", 0.0))) / risk_distance
         minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
         if first_reward <= 0 or net_first_rr < minimum_net_rr:
@@ -761,25 +756,22 @@ class BacktestRunner:
                     for target in (_num(risk.get('tp1')), _num(risk.get('tp2')), _num(risk.get('tp3')))
                     if target is not None
                 )
-                if target_already_hit:
+                if target_already_hit and not touched:
+                    # Target was reached while the LIMIT was still pending.
+                    # Rebase only when the order did not fill on this candle.
                     rebased, _ = self._rebase_remaining_targets(risk, signal_dir, candle)
                     if rebased:
                         self.stale_limit_targets_rebased += 1
                         target_already_hit = False
                     else:
                         self.stale_limit_target_rebase_rejected += 1
-                        if not touched:
-                            self.stale_limits_cancelled += 1
-                            self.stale_limit_target_before_fill += 1
-                            self.stale_limit_direction_counts[signal_dir] = self.stale_limit_direction_counts.get(signal_dir, 0) + 1
-                            return None
-                        # Both the pending entry and old target were touched in
-                        # one OHLC candle. Without a remaining target this plan
-                        # is not executable; do not credit an ambiguous fill.
                         self.stale_limits_cancelled += 1
                         self.stale_limit_target_before_fill += 1
                         self.stale_limit_direction_counts[signal_dir] = self.stale_limit_direction_counts.get(signal_dir, 0) + 1
                         return None
+                # If entry and an old target are both touched in this candle,
+                # OHLC cannot establish event order. Keep the original targets;
+                # the intrabar-fill path excludes this candle from TP simulation.
                 if not touched:
                     # A missed LIMIT may be replaced at the next candle open,
                     # but only while TP1 is still ahead, price remains near the
