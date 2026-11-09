@@ -330,10 +330,11 @@ def test_short_limit_keeps_targets_still_ahead_of_current_price():
         smt={},
     )
     selected = result["selected"]
-    assert selected["valid"] is True
-    assert selected["entry_type"] == "LIMIT"
-    assert selected["projected_target"] == 70000
-    assert selected["projected_target"] < 75000
+    assert selected["valid"] is False
+    assert selected["entry_reason_code"] == "ENTRY_TOO_FAR"
+    assert len(result["candidates"]) == 1
+    assert result["candidates"][0]["entry_too_far"] is True
+    assert result["candidates"][0]["entry"] == 113000
 
 
 def test_long_limit_rejects_targets_already_crossed_before_entry():
