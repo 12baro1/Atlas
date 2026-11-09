@@ -56,7 +56,7 @@ from session_filter import SessionFilter
 from signal_engine import SignalEngine
 from setup_quality_engine import SetupQualityEngine
 from setup_reasoning_engine import SetupReasoningEngine
-from atlas_main_engine import AtlasMainEngine
+from atlas_main_engine import AtlasMainEngine, MotorProxy
 from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
 from trade_manager import TradeManager
@@ -113,6 +113,18 @@ def _tp1_touched_on_signal_candle(direction, candle, tp1):
 
 class AtlasEngine:
     """Atlas'ın tüm analiz motorlarını yöneten ana sınıf."""
+
+    def __setattr__(self, name, value):
+        # Test/extension replacements remain attached to the central evidence bus.
+        main_engine = self.__dict__.get("main_engine")
+        if (
+            main_engine is not None
+            and name in main_engine.motors
+            and value is not None
+            and not isinstance(value, MotorProxy)
+        ):
+            value = main_engine.attach_motor(name, value)
+        object.__setattr__(self, name, value)
 
     REQUIRED_TIMEFRAMES = ("1w", "1d", "4h", "15m")
     SWEEP_TIMEFRAMES = ("15m", "1h", "4h", "1d")
