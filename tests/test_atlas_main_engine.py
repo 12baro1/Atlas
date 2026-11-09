@@ -105,3 +105,93 @@ def test_main_engine_rejects_missing_pipeline():
         assert "callable motor pipeline" in str(exc)
     else:
         raise AssertionError("missing pipeline must fail explicitly")
+
+
+
+def test_specialist_calls_are_executed_once_and_recorded_in_shared_evidence_pool():
+    class _Motor:
+        def detect(self, value):
+            return {"level": value * 2}
+
+    main = AtlasMainEngine(
+        motors={"liquidity": _Motor(), "smt": object()},
+        setup_reasoner=_SetupReasoner(),
+        decision_engine=_Decision(),
+    )
+    result = main.motors["liquidity"].detect(7)
+    diagnostics = main.motor_diagnostics()
+
+    assert result == {"level": 14}
+    assert diagnostics["call_counts"] == {"liquidity": 1}
+    assert diagnostics["invoked_motors"] == ["liquidity"]
+    assert diagnostics["not_invoked"] == ["smt"]
+    assert main.evidence_snapshot()[0]["output"] == {"level": 14}
+
+
+def test_specialist_exception_is_recorded_and_not_silently_swallowed():
+    class _BrokenMotor:
+        def detect(self):
+            raise ValueError("bad motor output")
+
+    main = AtlasMainEngine(
+        motors={"broken": _BrokenMotor()},
+        setup_reasoner=_SetupReasoner(),
+        decision_engine=_Decision(),
+    )
+    try:
+        main.motors["broken"].detect()
+    except ValueError as exc:
+        assert "bad motor output" in str(exc)
+    else:
+        raise AssertionError("motor exception must propagate")
+
+    diagnostics = main.motor_diagnostics()
+    assert diagnostics["error_count"] == 1
+    assert diagnostics["errors"][0]["motor"] == "broken"
+    assert diagnostics["errors"][0]["status"] == "ERROR"
+
+
+def test_setup_builder_receives_shared_evidence_pool():
+    class _CaptureReasoner:
+        def __init__(self):
+            self.kwargs = None
+
+        def generate(self, **kwargs):
+            self.kwargs = kwargs
+            return {
+                "candidates": [{"valid": True, "direction": "LONG"}],
+                "selected": {"valid": True, "direction": "LONG"},
+            }
+
+    reasoner = _CaptureReasoner()
+    main = AtlasMainEngine(
+        motors={"structure": object()},
+        setup_reasoner=reasoner,
+        decision_engine=_Decision(),
+    )
+    main.evidence_pool.append({
+        "sequence": 1, "motor": "structure", "method": "detect",
+        "status": "COMPLETED", "output": {"bias": "BULLISH"},
+    })
+    main.build_setup(mtf={"entry": "LONG"})
+
+    assert reasoner.kwargs["motor_evidence"][0]["output"] == {"bias": "BULLISH"}
+
+
+def test_analysis_keeps_existing_diagnostics_and_adds_actual_motor_trace():
+    main, _ = _main()
+    payload = {
+        "analysis": {"motor_diagnostics": {"motor_outputs": {"mtf": {"entry": "LONG"}}}},
+        "decision": {"action": "EXECUTE", "signal": "LONG"},
+    }
+
+    def pipeline(_data):
+        main.motors["structure"]  # registered specialist remains available to pipeline
+        return payload
+
+    result = main.analyze({"symbol": "BTC/USDT"}, pipeline=pipeline)
+    diagnostics = result["analysis"]["motor_diagnostics"]
+
+    assert diagnostics["motor_outputs"]["mtf"]["entry"] == "LONG"
+    assert diagnostics["execution_trace"]["not_invoked"] == ["liquidity", "smt", "structure"]
+    assert result["main_engine"]["evidence_pool_count"] == 0
