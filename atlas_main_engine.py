@@ -198,4 +198,6 @@ class AtlasMainEngine:
         enriched["decision_authority"] = "ATLAS_MAIN_ENGINE"
         self.last_motor_report["operational_blockers"] = blockers
         self.last_motor_report["operational_warnings"] = warnings
+        self.last_motor_report["final_action"] = enriched.get("action")
+        self.last_motor_report["final_direction"] = enriched.get("signal")
         return enriched
