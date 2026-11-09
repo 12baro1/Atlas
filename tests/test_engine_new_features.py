@@ -65,6 +65,15 @@ def test_analyze_produces_structure_state(engine):
     assert "external_structure" in analysis
     assert "eqh_eql" in analysis
 
+    trace = result["main_engine"]["motor_diagnostics"]
+    invoked = set(trace["invoked_motors"])
+    assert {"market_structure", "bos", "choch", "liquidity", "orderblocks",
+            "mitigation", "fvg", "liquidity_sweep", "mtf", "ote",
+            "entry", "entry_optimizer", "entry_confirmation", "confluence",
+            "signal", "risk", "rr", "dynamic_tp", "trade_quality"} <= invoked
+    assert trace["error_count"] == 0
+    assert trace["evidence_count"] == trace["call_total"]
+
 
 def test_analyze_scanner_statistics_backtest_recording(engine):
     result = engine.analyze(synthetic_data())
