@@ -210,3 +210,21 @@ def test_unconfirmed_countertrend_candidate_remains_blocked_by_mtf_conflict():
     result = evaluate(payload)
     assert result["allowed"] is False
     assert "Multi-timeframe direction is not aligned" in result["blockers"]
+
+
+def test_tp_levels_in_same_liquidity_cluster_are_rejected():
+    payload = base_payload()
+    payload["dynamic_tp"]["tp1"] = 102.0
+    payload["dynamic_tp"]["tp2"] = 102.2
+    payload["dynamic_tp"]["tp3"] = 106.0
+    result = evaluate(payload)
+    assert result["allowed"] is False
+    assert any("same liquidity cluster" in item.lower() for item in result["blockers"])
+
+
+def test_tp_levels_with_separate_structural_spacing_pass():
+    payload = base_payload()
+    payload["dynamic_tp"]["tp1"] = 102.0
+    payload["dynamic_tp"]["tp2"] = 104.0
+    payload["dynamic_tp"]["tp3"] = 106.0
+    assert evaluate(payload)["allowed"] is True
