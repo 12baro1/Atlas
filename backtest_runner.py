@@ -305,6 +305,10 @@ class BacktestRunner:
         self.stale_limits_cancelled = 0
         self.stale_limit_signal_candle_target = 0
         self.stale_limit_target_before_fill = 0
+        self.stale_limit_targets_rebased = 0
+        self.stale_limit_target_rebase_rejected = 0
+        self.seen_setup_ids = set()
+        self.duplicate_setups_skipped = 0
         self.market_fallback_fills = 0
         self.market_fallback_rejected_rr = 0
         self.market_fallback_rejected_distance = 0
@@ -512,9 +516,17 @@ class BacktestRunner:
                     self.overlapping_signals_skipped += 1
                 continue
 
+            setup_identity = self._setup_identity(result)
+            if setup_identity is not None and setup_identity in self.seen_setup_ids:
+                self.duplicate_setups_skipped += 1
+                continue
+
             open_before = self.open_trades
             unfilled_before = self.unfilled_limits
+            candidates_before = self.candidate_signals
             trade = self._to_trade(result, candles, idx + 1, lenient=lenient, signal_index=idx)
+            if self.candidate_signals > candidates_before and setup_identity is not None:
+                self.seen_setup_ids.add(setup_identity)
             if trade is not None:
                 self._record(trade)
                 exit_index = trade.get("exit_index")
@@ -529,6 +541,93 @@ class BacktestRunner:
                 busy_until_index = min(total - 1, idx + self.limit_expiry_bars - 1)
 
         return self.statistics()
+
+    def _setup_identity(self, result):
+        """Stable identity for one structural POI; ignores candle-to-candle entry drift."""
+        payload = result if isinstance(result, dict) else {}
+        analysis = payload.get("analysis") if isinstance(payload.get("analysis"), dict) else {}
+        entry = analysis.get("entry") if isinstance(analysis.get("entry"), dict) else {}
+        risk = payload.get("risk") if isinstance(payload.get("risk"), dict) else {}
+        signal = payload.get("signal") if isinstance(payload.get("signal"), dict) else {}
+        direction = str(signal.get("signal") or entry.get("direction") or "").upper()
+        if direction not in {"LONG", "SHORT"}:
+            return None
+        zone = entry.get("poi_zone") if isinstance(entry.get("poi_zone"), dict) else {}
+        low = _num(zone.get("low"), digits=8)
+        high = _num(zone.get("high"), digits=8)
+        candidate_id = str(entry.get("setup_candidate_id") or "").strip()
+        source = str(entry.get("poi_source") or "").upper()
+        stop = _num(risk.get("stop_loss"), digits=8)
+        if candidate_id and low is not None and high is not None:
+            return (direction, candidate_id, source, low, high)
+        if low is not None and high is not None:
+            return (direction, source, low, high, stop)
+        # Without a stable POI identity there is no safe basis for deduplication.
+        # Do not collapse unrelated MARKET signals that happen to share levels.
+        return None
+
+    def _rebase_remaining_targets(self, risk, direction, candle):
+        """Remove targets already touched before LIMIT fill and validate the remaining plan."""
+        direction = str(direction or "").upper()
+        is_long = direction == "LONG"
+        current_weights = risk.get("target_rebased_weights")
+        if not isinstance(current_weights, dict):
+            current_weights = self.tp_weights if isinstance(self.tp_weights, dict) else {}
+        targets = [
+            (index, _num(risk.get(f"tp{index}")), current_weights.get(f"tp{index}", 1.0))
+            for index in range(1, 4)
+            if _num(risk.get(f"tp{index}")) is not None
+        ]
+        if not targets:
+            return False, "no_structural_targets"
+
+        close = _num(getattr(candle, "close", None))
+        high = _num(getattr(candle, "high", None))
+        low = _num(getattr(candle, "low", None))
+        entry = _num(risk.get("entry"))
+        stop = _num(risk.get("stop_loss"))
+        if None in (close, high, low, entry, stop):
+            return False, "incomplete_levels"
+
+        remaining = []
+        for original_index, target, weight in targets:
+            touched = high >= target if is_long else low <= target
+            still_ahead = target > close if is_long else target < close
+            if not touched and still_ahead:
+                remaining.append((target, weight))
+        if not remaining:
+            return False, "no_remaining_structural_target"
+
+        risk_distance = abs(entry - stop)
+        if risk_distance <= 0:
+            return False, "invalid_structural_risk"
+        target_map = {f"tp{i}": item[0] for i, item in enumerate(remaining[:3], start=1)}
+        rebased_weights = {
+            f"tp{i}": item[1] for i, item in enumerate(remaining[:3], start=1)
+        }
+        cost = estimate_plan_cost(
+            entry_price=entry,
+            targets=target_map,
+            weights=rebased_weights,
+            entry_type="LIMIT",
+            maker_fee_rate=self.maker_fee_rate,
+            taker_fee_rate=self.taker_fee_rate,
+            spread_rate=self.spread_rate,
+            slippage_rate=self.slippage_rate,
+        )
+        first_target = remaining[0][0]
+        first_reward = first_target - entry if is_long else entry - first_target
+        net_first_rr = (first_reward - float(cost.get("total", 0.0))) / risk_distance
+        minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
+        if first_reward <= 0 or net_first_rr < minimum_net_rr:
+            return False, "remaining_target_net_rr_below_minimum"
+
+        for index in range(1, 4):
+            risk[f"tp{index}"] = remaining[index - 1][0] if index <= len(remaining) else None
+        risk["target_rebased_weights"] = rebased_weights
+        risk["target_rebased_after_pre_fill_touch"] = True
+        risk["target_rebase_net_first_rr"] = round(net_first_rr, 4)
+        return True, "remaining_structural_targets_rebased"
 
     def _market_fallback_check(self, opened, planned_entry, stop, tp1, direction, risk):
         """Check a next-open MARKET replacement for a missed LIMIT without chasing."""
@@ -582,7 +681,7 @@ class BacktestRunner:
         self.candidate_signals += 1
         self.candidate_direction_counts[signal_dir] = self.candidate_direction_counts.get(signal_dir, 0) + 1
 
-        risk = (result or {}).get("risk") or {}
+        risk = dict((result or {}).get("risk") or {})
         if isinstance(risk, dict) and risk.get("risk_setup_valid") is False:
             self.invalid_candidates += 1
             return None
@@ -624,9 +723,9 @@ class BacktestRunner:
                 return None
             is_long = signal_dir == "LONG"
 
-            # A LIMIT is submitted only after the signal candle closes. If a
-            # structural target was already touched during that candle, the
-            # pending order is stale before it even exists.
+            # A target touched on the signal candle is removed from the plan.
+            # The pending LIMIT may continue only if a later structural target
+            # remains ahead of price and still pays for its execution costs.
             if signal_index is not None and 0 <= signal_index < entry_index and signal_index < len(candles):
                 signal_candle = candles[signal_index]
                 target_hit_before_order = any(
@@ -635,10 +734,16 @@ class BacktestRunner:
                     if target is not None
                 )
                 if target_hit_before_order:
-                    self.stale_limits_cancelled += 1
+                    # Count the stale target event independently of whether
+                    # the remaining plan can be rebased or must be cancelled.
                     self.stale_limit_signal_candle_target += 1
-                    self.stale_limit_direction_counts[signal_dir] = self.stale_limit_direction_counts.get(signal_dir, 0) + 1
-                    return None
+                    rebased, _ = self._rebase_remaining_targets(risk, signal_dir, signal_candle)
+                    if rebased:
+                        self.stale_limit_targets_rebased += 1
+                    else:
+                        self.stale_limits_cancelled += 1
+                        self.stale_limit_direction_counts[signal_dir] = self.stale_limit_direction_counts.get(signal_dir, 0) + 1
+                        return None
 
             expiry_index = min(len(candles), entry_index + self.limit_expiry_bars)
             for candidate_index in range(entry_index, expiry_index):
@@ -648,19 +753,9 @@ class BacktestRunner:
                     continue
                 gap_fill = (opened <= limit_price) if is_long else (opened >= limit_price)
                 touched = candle.low <= limit_price if is_long else candle.high >= limit_price
-                target_already_hit = any(
-                    (candle.high >= target if is_long else candle.low <= target)
-                    for target in (_num(risk.get('tp1')), _num(risk.get('tp2')), _num(risk.get('tp3')))
-                    if target is not None
-                )
-                # If a target is reached on a candle that never touches the
-                # pending entry, cancel the stale order. If both are touched
-                # in one candle, OHLC cannot reveal the path: keep the fill but
-                # apply the conservative fill-candle handling below.
+                # Assess a next-open MARKET replacement before using the full
+                # candle range: the open is known before any later target touch.
                 if not touched:
-                    # A missed LIMIT may be replaced at the next candle open,
-                    # but only while TP1 is still ahead, price remains near the
-                    # planned POI, and cost-adjusted reward is still >= minimum.
                     fallback_ok, fallback_net_rr, fallback_reason = self._market_fallback_check(
                         opened, limit_price, _num(stop), _num(risk.get("tp1")), signal_dir, risk
                     )
@@ -675,13 +770,28 @@ class BacktestRunner:
                         self.market_fallback_rejected_distance += 1
                     elif fallback_reason == "rr":
                         self.market_fallback_rejected_rr += 1
-                    if target_already_hit:
-                        # No fill occurred before the target. Do not fabricate a
-                        # late LIMIT fill; cancel the stale order.
+
+                target_already_hit = any(
+                    (candle.high >= target if is_long else candle.low <= target)
+                    for target in (_num(risk.get("tp1")), _num(risk.get("tp2")), _num(risk.get("tp3")))
+                    if target is not None
+                )
+                if target_already_hit and not touched:
+                    # Count target contact before fill even when the remaining
+                    # targets are valid and the LIMIT is allowed to stay active.
+                    self.stale_limit_target_before_fill += 1
+                    # If the LIMIT remains pending after the candle, remove
+                    # targets already traded through and keep viable targets ahead.
+                    rebased, _ = self._rebase_remaining_targets(risk, signal_dir, candle)
+                    if rebased:
+                        self.stale_limit_targets_rebased += 1
+                    else:
+                        self.stale_limit_target_rebase_rejected += 1
                         self.stale_limits_cancelled += 1
-                        self.stale_limit_target_before_fill += 1
                         self.stale_limit_direction_counts[signal_dir] = self.stale_limit_direction_counts.get(signal_dir, 0) + 1
                         return None
+                # If entry and target are touched in one candle, event order is unknown.
+                if not touched:
                     continue
                 entry_price = min(limit_price, opened) if is_long else max(limit_price, opened)
                 # If price opens through the limit, fill is at the open and
@@ -730,6 +840,7 @@ class BacktestRunner:
         self.filled_direction_counts[signal_dir] = self.filled_direction_counts.get(signal_dir, 0) + 1
 
         use_partial = bool(getattr(self, "partial_exits", True))
+        trade_tp_weights = risk.get("target_rebased_weights") or self.tp_weights
         if limit_intrabar_fill:
             fill_candle = candles[fill_index]
             fill_stop_hit = _candle_touched_stop(
@@ -753,7 +864,7 @@ class BacktestRunner:
                         targets=tps,
                         future_candles=future,
                         direction=signal_dir,
-                        tp_weights=self.tp_weights,
+                        tp_weights=trade_tp_weights,
                     )
                 else:
                     outcome = simulate_trade(
@@ -812,7 +923,7 @@ class BacktestRunner:
                 exit_reason=outcome.get("exit_reason"),
                 targets=tps,
                 reached_levels=outcome.get("levels") or ([outcome.get("tp")] if outcome.get("tp") else []),
-                tp_weights=self.tp_weights,
+                tp_weights=trade_tp_weights,
                 partial_exits=use_partial,
                 maker_fee_rate=self.maker_fee_rate,
                 taker_fee_rate=self.taker_fee_rate,
@@ -1005,11 +1116,21 @@ class BacktestRunner:
                 "stale_limits_cancelled": self.stale_limits_cancelled,
                 "stale_limit_signal_candle_target": self.stale_limit_signal_candle_target,
                 "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
+                "stale_limit_targets_rebased": self.stale_limit_targets_rebased,
+                "stale_limit_target_rebase_rejected": self.stale_limit_target_rebase_rejected,
+                "duplicate_setups_skipped": self.duplicate_setups_skipped,
                 "market_fallback_fills": self.market_fallback_fills,
                 "market_fallback_rejected_rr": self.market_fallback_rejected_rr,
                 "market_fallback_rejected_distance": self.market_fallback_rejected_distance,
                 "candidate_direction_counts": dict(self.candidate_direction_counts),
                 "filled_direction_counts": dict(self.filled_direction_counts),
+                "direction_fill_rates": {
+                    side: round(
+                        self.filled_direction_counts.get(side, 0)
+                        / max(1, self.candidate_direction_counts.get(side, 0)) * 100.0, 2
+                    )
+                    for side in ("LONG", "SHORT")
+                },
                 "unfilled_limit_direction_counts": dict(self.unfilled_limit_direction_counts),
                 "expired_limit_direction_counts": dict(self.expired_limit_direction_counts),
                 "stale_limit_direction_counts": dict(self.stale_limit_direction_counts),
@@ -1088,11 +1209,21 @@ class BacktestRunner:
             "stale_limits_cancelled": self.stale_limits_cancelled,
             "stale_limit_signal_candle_target": self.stale_limit_signal_candle_target,
             "stale_limit_target_before_fill": self.stale_limit_target_before_fill,
+            "stale_limit_targets_rebased": self.stale_limit_targets_rebased,
+            "stale_limit_target_rebase_rejected": self.stale_limit_target_rebase_rejected,
+            "duplicate_setups_skipped": self.duplicate_setups_skipped,
             "market_fallback_fills": self.market_fallback_fills,
             "market_fallback_rejected_rr": self.market_fallback_rejected_rr,
             "market_fallback_rejected_distance": self.market_fallback_rejected_distance,
             "candidate_direction_counts": dict(self.candidate_direction_counts),
             "filled_direction_counts": dict(self.filled_direction_counts),
+            "direction_fill_rates": {
+                side: round(
+                    self.filled_direction_counts.get(side, 0)
+                    / max(1, self.candidate_direction_counts.get(side, 0)) * 100.0, 2
+                )
+                for side in ("LONG", "SHORT")
+            },
             "unfilled_limit_direction_counts": dict(self.unfilled_limit_direction_counts),
             "expired_limit_direction_counts": dict(self.expired_limit_direction_counts),
             "stale_limit_direction_counts": dict(self.stale_limit_direction_counts),

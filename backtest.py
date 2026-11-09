@@ -459,6 +459,9 @@ def _combine_stats(all_stats):
         "stale_limits_cancelled": 0,
         "stale_limit_signal_candle_target": 0,
         "stale_limit_target_before_fill": 0,
+        "stale_limit_targets_rebased": 0,
+        "stale_limit_target_rebase_rejected": 0,
+        "duplicate_setups_skipped": 0,
         "market_fallback_fills": 0,
         "market_fallback_rejected_rr": 0,
         "market_fallback_rejected_distance": 0,
@@ -483,6 +486,8 @@ def _combine_stats(all_stats):
             "raw_long_signals", "raw_short_signals", "non_directional_results",
             "unfilled_limits", "expired_limits", "stale_limits_cancelled",
             "stale_limit_signal_candle_target", "stale_limit_target_before_fill",
+            "stale_limit_targets_rebased", "stale_limit_target_rebase_rejected",
+            "duplicate_setups_skipped",
             "market_fallback_fills", "market_fallback_rejected_rr",
             "market_fallback_rejected_distance",
             "overlapping_signals_skipped", "open_trades",
@@ -612,8 +617,21 @@ def _report(stats, name):
     print(f"  Dolmayan LIMIT : {stats.get('unfilled_limits', 0)}")
     print(f"  Süresi dolan LIMIT: {stats.get('expired_limits', 0)}")
     print(f"  Hedefe geç kalan LIMIT iptali: {stats.get('stale_limits_cancelled', 0)}")
+    print(f"  Hedef sonrası kalan TP'ye göre güncellenen LIMIT: {stats.get('stale_limit_targets_rebased', 0)}")
+    print(f"  Maliyet/RR nedeniyle güncellenemeyen LIMIT: {stats.get('stale_limit_target_rebase_rejected', 0)}")
+    print(f"  Aynı setup tekrarları atlandı: {stats.get('duplicate_setups_skipped', 0)}")
     print(f"  Aday yönleri   : {stats.get('candidate_direction_counts', {})}")
     print(f"  Dolan yönler   : {stats.get('filled_direction_counts', {})}")
+    direction_fill_rates = stats.get("direction_fill_rates")
+    if not isinstance(direction_fill_rates, dict):
+        candidates_by_side = stats.get("candidate_direction_counts", {})
+        fills_by_side = stats.get("filled_direction_counts", {})
+        direction_fill_rates = {
+            side: round(
+                fills_by_side.get(side, 0) / max(1, candidates_by_side.get(side, 0)) * 100.0, 2
+            ) for side in ("LONG", "SHORT")
+        }
+    print(f"  Yön bazlı dolum oranı: {direction_fill_rates}")
     print(f"  Dolmayan yönler: {stats.get('unfilled_limit_direction_counts', {})}")
     print(f"  Süresi dolan yönler: {stats.get('expired_limit_direction_counts', {})}")
     print(f"  Hedef öncesi iptal yönleri: {stats.get('stale_limit_direction_counts', {})}")

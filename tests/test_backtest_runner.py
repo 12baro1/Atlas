@@ -545,7 +545,8 @@ def test_limit_order_is_cancelled_if_target_hits_before_fill():
         "analysis": {"entry": {"entry_type": "LIMIT"}},
     }
     assert runner._to_trade(result, candles, entry_index=0) is None
-    assert runner.statistics()["stale_limits_cancelled"] == 1
+    assert runner.statistics()["stale_limit_targets_rebased"] == 1
+    assert runner.statistics()["stale_limits_cancelled"] == 0
     assert runner.statistics()["stale_limit_target_before_fill"] == 1
 
 
@@ -563,7 +564,8 @@ def test_signal_candle_target_touch_is_counted_separately_for_stale_limit():
     }
     assert runner._to_trade(result, candles, entry_index=1, signal_index=0) is None
     stats = runner.statistics()
-    assert stats["stale_limits_cancelled"] == 1
+    assert stats["stale_limit_targets_rebased"] == 1
+    assert stats["stale_limits_cancelled"] == 0
     assert stats["stale_limit_signal_candle_target"] == 1
     assert stats["stale_limit_target_before_fill"] == 0
 
@@ -692,7 +694,8 @@ def test_limit_is_cancelled_when_target_was_hit_on_signal_candle():
         "analysis": {"entry": {"entry_type": "LIMIT"}},
     }
     assert runner._to_trade(result, candles, entry_index=1, signal_index=0) is None
-    assert runner.statistics()["stale_limits_cancelled"] == 1
+    assert runner.statistics()["stale_limit_targets_rebased"] == 1
+    assert runner.statistics()["stale_limits_cancelled"] == 0
     assert runner.statistics()["candidate_signals"] == 1
 
 
@@ -737,6 +740,82 @@ def test_missed_limit_market_reassessment_rejected_when_net_rr_below_minimum():
     assert runner.market_fallback_fills == 0
     assert runner.market_fallback_rejected_rr == 1
     assert runner.stale_limits_cancelled == 1
+
+
+def test_runner_rebases_already_touched_tp_to_remaining_structural_target_before_limit_fill():
+    runner = BacktestRunner(
+        partial_exits=False, fee_rate=0.0002, limit_expiry_bars=5
+    )
+    candles = [
+        _candle(1, 101.0, 102.5, 100.2, 102.2),  # TP1 touched before order exists
+        _candle(2, 102.2, 103.0, 100.5, 102.8),  # TP1 still passed; no fill
+        _candle(3, 102.8, 104.5, 100.5, 104.0),  # TP2 touched; no fill
+        _candle(4, 104.0, 105.0, 99.5, 100.5),   # LIMIT fills; TP3 remains
+        _candle(5, 100.5, 107.0, 100.0, 106.5),  # remaining TP3
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 100.0, "stop_loss": 99.0, "tp1": 102.0, "tp2": 104.0, "tp3": 106.0},
+        "analysis": {"entry": {"entry_type": "LIMIT", "poi_source": "FVG", "poi_zone": {"low": 99.5, "high": 100.5}}},
+    }
+    trade = runner._to_trade(result, candles, entry_index=1, signal_index=0)
+    assert trade is not None
+    assert trade["entry"] == 100.0
+    assert trade["tps"] == [106.0, None, None]
+    assert runner.stale_limit_targets_rebased >= 2
+    assert trade["result"] == "WIN"
+
+
+def test_runner_rebases_already_touched_tp_for_short_limit_before_fill():
+    runner = BacktestRunner(
+        partial_exits=False, fee_rate=0.0002, limit_expiry_bars=5
+    )
+    candles = [
+        _candle(1, 100.0, 100.5, 97.5, 97.8),  # TP1 touched before order exists
+        _candle(2, 97.8, 99.5, 97.0, 97.2),    # no fill; TP2 remains ahead
+        _candle(3, 97.2, 99.0, 95.5, 96.0),    # TP2 touched; TP3 remains
+        _candle(4, 96.0, 100.5, 95.0, 100.2),  # short LIMIT fills
+        _candle(5, 100.2, 100.5, 93.5, 94.0),  # remaining TP3
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "SHORT"},
+        "risk": {"entry": 100.0, "stop_loss": 101.0, "tp1": 98.0, "tp2": 96.0, "tp3": 94.0},
+        "analysis": {"entry": {"entry_type": "LIMIT", "poi_source": "FVG", "poi_zone": {"low": 99.5, "high": 100.5}}},
+    }
+    trade = runner._to_trade(result, candles, entry_index=1, signal_index=0)
+    assert trade is not None
+    assert trade["entry"] == 100.0
+    assert trade["tps"] == [94.0, None, None]
+    assert runner.stale_limit_targets_rebased >= 2
+    assert trade["result"] == "WIN"
+
+
+def test_runner_reports_long_short_fill_rates_separately():
+    runner = BacktestRunner()
+    runner.candidate_direction_counts = {"LONG": 4, "SHORT": 6}
+    runner.filled_direction_counts = {"LONG": 2, "SHORT": 1}
+    rates = runner.statistics()["direction_fill_rates"]
+    assert rates == {"LONG": 50.0, "SHORT": 16.67}
+
+
+def test_runner_deduplicates_the_same_structural_setup_across_candles():
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 90.0, "stop_loss": 89.0, "tp1": 95.0, "tp2": 96.0, "tp3": 97.0},
+        "analysis": {"entry": {
+            "entry_type": "LIMIT", "direction": "LONG",
+            "setup_candidate_id": "LONG:FVG:0", "poi_source": "FVG",
+            "poi_zone": {"low": 90.0, "high": 91.0},
+        }},
+    }
+    runner = BacktestRunner(analyze_fn=lambda window: result, limit_expiry_bars=2)
+    candles = [_candle(i, 100.0, 101.0, 99.0, 100.0) for i in range(310)]
+    stats = runner.run({"symbol": "BTC/USDT:USDT", "15m": candles})
+    assert stats["candidate_signals"] == 1
+    assert stats["duplicate_setups_skipped"] > 0
 
 
 def test_backtest_does_not_count_overlapping_positions_as_independent_trades():
