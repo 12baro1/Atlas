@@ -622,12 +622,16 @@ def _report(stats, name):
     print(f"  Aynı setup tekrarları atlandı: {stats.get('duplicate_setups_skipped', 0)}")
     print(f"  Aday yönleri   : {stats.get('candidate_direction_counts', {})}")
     print(f"  Dolan yönler   : {stats.get('filled_direction_counts', {})}")
-    print(f"  Yön bazlı dolum oranı: {stats.get('direction_fill_rates', {
-        side: round(
-            stats.get('filled_direction_counts', {}).get(side, 0)
-            / max(1, stats.get('candidate_direction_counts', {}).get(side, 0)) * 100.0, 2
-        ) for side in ('LONG', 'SHORT')
-    })}")
+    direction_fill_rates = stats.get("direction_fill_rates")
+    if not isinstance(direction_fill_rates, dict):
+        candidates_by_side = stats.get("candidate_direction_counts", {})
+        fills_by_side = stats.get("filled_direction_counts", {})
+        direction_fill_rates = {
+            side: round(
+                fills_by_side.get(side, 0) / max(1, candidates_by_side.get(side, 0)) * 100.0, 2
+            ) for side in ("LONG", "SHORT")
+        }
+    print(f"  Yön bazlı dolum oranı: {direction_fill_rates}")
     print(f"  Dolmayan yönler: {stats.get('unfilled_limit_direction_counts', {})}")
     print(f"  Süresi dolan yönler: {stats.get('expired_limit_direction_counts', {})}")
     print(f"  Hedef öncesi iptal yönleri: {stats.get('stale_limit_direction_counts', {})}")
