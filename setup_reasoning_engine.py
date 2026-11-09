@@ -145,9 +145,9 @@ class SetupReasoningEngine:
                 continue
             price = self._number(item.get("price"))
             if price is not None and low <= price <= high:
+                # Evidence prices are absolute POI coordinates; keep their
+                # low-to-high position unchanged for both trade directions.
                 position = (price - low) / (high - low)
-                if direction == "SHORT":
-                    position = 1.0 - position
                 weighted.append((position, weight))
                 continue
             bias = str(item.get("bias") or "").upper()
