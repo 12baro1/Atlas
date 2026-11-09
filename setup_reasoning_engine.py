@@ -239,11 +239,30 @@ class SetupReasoningEngine:
                  higher_timeframe_orderblocks=None, higher_timeframe_fvg=None,
                  optimization=None, breaker=None, ifvg=None, trendline_sweep=None,
                  eqh_eql=None, inducement=None, premium_discount=None,
-                 internal_structure=None, trendline_liquidity=None):
+                 internal_structure=None, trendline_liquidity=None,
+                 motor_evidence=None):
         base_entry = base_entry if isinstance(base_entry, dict) else {}
+        evidence_records = [
+            item for item in (motor_evidence or [])
+            if isinstance(item, dict) and item.get("status") == "COMPLETED"
+        ]
+        motor_evidence_sources = sorted({
+            str(item.get("motor")) for item in evidence_records if item.get("motor")
+        })
         current = self._number(current_price)
         if current is None or current <= 0:
-            return {"candidates": [], "selected": base_entry, "reason": "current_price_unavailable"}
+            return {
+                "candidates": [],
+                "selected": {
+                    "valid": False,
+                    "direction": "WAIT",
+                    "reason": "Current price unavailable; main engine cannot construct a setup",
+                    "entry_reason_code": "CURRENT_PRICE_UNAVAILABLE",
+                },
+                "reason": "current_price_unavailable",
+                "motor_evidence_count": len(evidence_records),
+                "motor_evidence_sources": motor_evidence_sources,
+            }
         mtf = mtf if isinstance(mtf, dict) else {}
         fvg = fvg if isinstance(fvg, list) else []
         orderblocks = orderblocks if isinstance(orderblocks, list) else []
@@ -338,7 +357,11 @@ class SetupReasoningEngine:
                         entry_price = low + (high - low) * 0.38
                     else:
                         entry_price = high
-                    stop = low - atr_buffer
+                    # Stop must invalidate the full overlapping OTE/POI zone.
+                    # ATR is only a small optional clearance, never the stop anchor.
+                    stop_reference = min(low, ote_bounds[0]) if ote_overlap and ote_bounds else low
+                    stop = stop_reference - atr_buffer
+                    stop_source = "ote_invalidation" if stop_reference < low else f"{source.lower()}_invalidation"
                 else:
                     if inside and market_confirmed:
                         entry_price = current
@@ -346,7 +369,9 @@ class SetupReasoningEngine:
                         entry_price = high - (high - low) * 0.38
                     else:
                         entry_price = low
-                    stop = high + atr_buffer
+                    stop_reference = max(high, ote_bounds[1]) if ote_overlap and ote_bounds else high
+                    stop = stop_reference + atr_buffer
+                    stop_source = "ote_invalidation" if stop_reference > high else f"{source.lower()}_invalidation"
 
                 # Reuse EntryOptimizer's price only for the exact POI it analyzed.
                 optimized_price = self._number((optimization or {}).get("optimized_entry")) if isinstance(optimization, dict) else None
@@ -452,7 +477,7 @@ class SetupReasoningEngine:
                 )
                 candidate = {
                     "valid": True, "direction": direction, "entry": entry_price,
-                    "stop_loss": stop, "stop_source": source.lower(),
+                    "stop_loss": stop, "stop_source": stop_source,
                     "entry_type": "MARKET" if inside and market_confirmed else "LIMIT",
                     "entry_type_reason": entry_type_reason,
                     "requires_pullback": not (inside and market_confirmed),
@@ -475,6 +500,7 @@ class SetupReasoningEngine:
                     "entry_distance_label": distance_label,
                     "supporting_evidence": support,
                     "opposing_evidence": opposition,
+                    "motor_evidence_sources": motor_evidence_sources,
                     "market_context": market_context,
                     "reasoning": (
                         f"{direction} {source}: POI {low:g}-{high:g}; "
@@ -487,7 +513,18 @@ class SetupReasoningEngine:
                 candidates.append(candidate)
 
         if not candidates:
-            return {"candidates": [], "selected": base_entry, "reason": "no_additional_executable_poi"}
+            return {
+                "candidates": [],
+                "selected": {
+                    "valid": False,
+                    "direction": "WAIT",
+                    "reason": "No structurally valid POI candidate",
+                    "entry_reason_code": "NO_MAIN_ENGINE_SETUP",
+                },
+                "reason": "no_structurally_valid_poi",
+                "motor_evidence_count": len(evidence_records),
+            "motor_evidence_sources": motor_evidence_sources,
+            }
 
         # Lexicographic scenario selection; no additive votes or confidence score.
         # Prefer a valid structural target, then best projected RR, confirmed
@@ -511,4 +548,10 @@ class SetupReasoningEngine:
             f"; {len(candidates)} candidates compared; selected by target geometry, "
             "projected R, confirmed structure and POI location"
         )
-        return {"candidates": candidates, "selected": selected, "reason": "best_structural_candidate"}
+        return {
+            "candidates": candidates,
+            "selected": selected,
+            "reason": "best_structural_candidate",
+            "motor_evidence_count": len(evidence_records),
+            "motor_evidence_sources": motor_evidence_sources,
+        }

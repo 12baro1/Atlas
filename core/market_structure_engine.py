@@ -47,7 +47,7 @@ class MarketStructureEngine:
                         index=i,
                         price=low,
                         kind="LOW",
-                        confirmation_index=i + max(right, 10)
+                        confirmation_index=i + self.pivot_right
                     )
                 )
 

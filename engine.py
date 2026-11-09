@@ -56,6 +56,7 @@ from session_filter import SessionFilter
 from signal_engine import SignalEngine
 from setup_quality_engine import SetupQualityEngine
 from setup_reasoning_engine import SetupReasoningEngine
+from atlas_main_engine import AtlasMainEngine, MotorProxy
 from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
 from trade_manager import TradeManager
@@ -112,6 +113,18 @@ def _tp1_touched_on_signal_candle(direction, candle, tp1):
 
 class AtlasEngine:
     """Atlas'ın tüm analiz motorlarını yöneten ana sınıf."""
+
+    def __setattr__(self, name, value):
+        # Test/extension replacements remain attached to the central evidence bus.
+        main_engine = self.__dict__.get("main_engine")
+        if (
+            main_engine is not None
+            and name in main_engine.motors
+            and value is not None
+            and not isinstance(value, MotorProxy)
+        ):
+            value = main_engine.attach_motor(name, value)
+        object.__setattr__(self, name, value)
 
     REQUIRED_TIMEFRAMES = ("1w", "1d", "4h", "15m")
     SWEEP_TIMEFRAMES = ("15m", "1h", "4h", "1d")
@@ -194,9 +207,34 @@ class AtlasEngine:
         self.scanner = ScannerEngine()
         self.statistics = StatisticsEngine()
         self.backtest = BacktestEngine()
+        # Explicit specialist inventory: services/state containers are not motors.
+        # Every registered motor is wrapped so calls publish evidence through the
+        # single main authority instead of bypassing the shared evidence pool.
+        specialist_motor_names = (
+            "bos", "choch", "liquidity", "orderblocks", "orderbook",
+            "mitigation", "fvg", "liquidity_sweep", "breaker", "trendline",
+            "trend", "market_phase", "market_regime", "trade_quality", "mtf",
+            "premium_discount", "killzone", "session", "ote",
+            "htf_orderblock", "htf_fvg", "smt", "unicorn", "cisd",
+            "volume_profile", "institutional", "entry", "entry_optimizer",
+            "entry_confirmation", "confluence", "signal", "risk", "rr",
+            "dynamic_tp", "setup_quality", "news_filter", "correlation",
+            "cooldown", "learning", "manual_quality_gate",
+        )
+        self.main_engine = AtlasMainEngine(
+            motors={name: getattr(self, name) for name in specialist_motor_names},
+            setup_reasoner=self.setup_reasoner,
+            decision_engine=self.decision,
+        )
+        for motor_name in specialist_motor_names:
+            setattr(self, motor_name, self.main_engine.motors[motor_name])
 
     def analyze(self, data):
-        """Çoklu zaman dilimi verisini analiz eder ve birleşik çıktı üretir."""
+        """Route every market analysis through the single main engine."""
+        return self.main_engine.analyze(data, pipeline=self._analyze_with_motors)
+
+    def _analyze_with_motors(self, data):
+        """Execute registered specialist motors and assemble their evidence."""
         self._validate_market_data(data)
 
         symbol = data.get("symbol", "UNKNOWN")
@@ -392,7 +430,7 @@ class AtlasEngine:
             trendline_liquidity=structure_state.get("trendline_liquidity", []),
         )
 
-        decision_state = self.decision.decide(
+        decision_state = self.main_engine.decide(
             signal=execution_state["signal"],
             confluence=execution_state["confluence"],
             entry=execution_state["entry"],
@@ -415,8 +453,8 @@ class AtlasEngine:
             cooldown=cooldown_state,
         )
 
-        decision_state = self._apply_external_risk_filters(
-            decision=decision_state,
+        decision_state = self.main_engine.apply_operational_gates(
+            decision_state,
             news_filter=news_state,
             correlation=correlation_state,
             cooldown=cooldown_state,
@@ -803,7 +841,9 @@ class AtlasEngine:
 
     def _analyze_timeframe(self, candles):
         """Tek zaman dilimi için pivot, etiket, BOS ve CHoCH üretir."""
-        engine = self.structure_engine_cls()
+        engine = self.main_engine.attach_motor(
+            "market_structure", self.structure_engine_cls()
+        )
 
         engine.find_pivots(candles)
         engine.calculate_strength(candles)
@@ -1132,7 +1172,7 @@ class AtlasEngine:
         )
         # Build independent LONG/SHORT POI scenarios from the full motor context.
         # Secondary evidence shapes the scenario; it is not a score-based veto.
-        reasoning = self.setup_reasoner.generate(
+        reasoning = self.main_engine.build_setup(
             base_entry=entry,
             mtf=mtf,
             structure=entry_structure,
@@ -1169,7 +1209,7 @@ class AtlasEngine:
         )
         setup_candidates = reasoning.get("candidates", [])
         selected_candidate = reasoning.get("selected")
-        if isinstance(selected_candidate, dict) and selected_candidate.get("valid"):
+        if isinstance(selected_candidate, dict):
             selected_candidate["optimization"] = optimization
             selected_candidate["setup_reasoning"] = {
                 "selected_id": selected_candidate.get("setup_candidate_id"),
@@ -1180,15 +1220,25 @@ class AtlasEngine:
                 "opposing_evidence": selected_candidate.get("opposing_evidence", []),
                 "market_context": selected_candidate.get("market_context", []),
             }
+            # The main engine's selected candidate is the only setup.
+            # Never fall back to a second, independently-created EntryEngine setup.
             entry = selected_candidate
         else:
-            entry["setup_reasoning"] = {
-                "selected_id": None,
-                "candidate_count": 0,
-                "reason": reasoning.get("reason"),
-                "thesis": "Existing EntryEngine result retained; no additional candidate passed structural checks.",
-                "supporting_evidence": [],
-                "opposing_evidence": [],
+            entry = {
+                "valid": False,
+                "direction": "WAIT",
+                "entry": None,
+                "stop_loss": None,
+                "reason": reasoning.get("reason") or "Main engine produced no setup",
+                "entry_reason_code": "NO_MAIN_ENGINE_SETUP",
+                "setup_reasoning": {
+                    "selected_id": None,
+                    "candidate_count": len(setup_candidates),
+                    "reason": reasoning.get("reason"),
+                    "thesis": "No setup selected by AtlasMainEngine.",
+                    "supporting_evidence": [],
+                    "opposing_evidence": [],
+                },
             }
 
         confirmation = self.entry_confirmation.confirm(
@@ -1275,18 +1325,9 @@ class AtlasEngine:
             "cooldown": cooldown or {},
             "orderbook": orderbook,
         }
-        # Only macro-news protection and duplicate-position cooldown are
-        # hard external gates. Correlation and order-book pressure remain
-        # optimizer evidence/warnings; they must not veto an otherwise valid POI.
-        hard_external_filters = {
-            "news_filter": setup_quality["external_risk_filters"]["news_filter"],
-            "cooldown": setup_quality["external_risk_filters"]["cooldown"],
-        }
-        if any(not (flt or {}).get("trade_allowed", True) for flt in hard_external_filters.values()):
-            setup_quality["trade_allowed"] = False
-            setup_quality.setdefault("blockers", []).extend(
-                name for name, flt in hard_external_filters.items() if not (flt or {}).get("trade_allowed", True)
-            )
+        # News and duplicate-position cooldown are enforced once, by
+        # AtlasMainEngine after the single decision. They remain visible here
+        # as diagnostics, but do not create a second setup-quality veto.
         soft_external_warnings = [
             name for name in ("correlation", "orderbook")
             if not (setup_quality["external_risk_filters"].get(name) or {}).get("trade_allowed", True)

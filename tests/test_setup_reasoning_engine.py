@@ -207,3 +207,58 @@ def test_valid_short_poi_inside_zone_creates_deeper_limit_without_sweep():
     assert selected["entry"] > 103
     assert 100 <= selected["entry"] <= 105
     assert selected["stop_loss"] >= 105
+
+
+
+def test_shared_motor_evidence_is_carried_into_selected_setup():
+    result = _run(
+        motor_evidence=[
+            {"motor": "market_structure", "status": "COMPLETED", "output": {"bias": "BULLISH"}},
+            {"motor": "liquidity", "status": "COMPLETED", "output": {"levels": [120]}},
+            {"motor": "smt", "status": "ERROR", "error": "test"},
+        ],
+    )
+    assert result["motor_evidence_count"] == 2
+    assert result["motor_evidence_sources"] == ["liquidity", "market_structure"]
+    assert result["selected"]["motor_evidence_sources"] == ["liquidity", "market_structure"]
+
+
+def test_missing_current_price_never_falls_back_to_entry_engine_setup():
+    result = _run(current_price=None, base_entry={"valid": True, "direction": "LONG", "entry": 100})
+    assert result["candidates"] == []
+    assert result["selected"]["valid"] is False
+    assert result["selected"]["direction"] == "WAIT"
+    assert result["selected"]["entry_reason_code"] == "CURRENT_PRICE_UNAVAILABLE"
+
+
+
+def test_long_stop_is_beyond_the_overlapping_ote_and_poi():
+    result = _run(
+        mtf={"entry": "LONG", "weekly": "NEUTRAL", "daily": "BULLISH", "h4": "BULLISH"},
+        current_price=103,
+        fvg=[{"type": "BULLISH", "from": 100, "to": 105, "filled": False}],
+        liquidity_sweep={"is_sweep": False, "sell_side": False, "buy_side": False},
+        ote={"fib62": 98, "fib79": 103},
+        liquidity=[{"type": "BUY_SIDE", "price": 120}],
+        structure=[],
+    )
+    selected = result["selected"]
+    assert selected["direction"] == "LONG"
+    assert selected["stop_loss"] <= 98
+    assert selected["stop_source"] == "ote_invalidation"
+
+
+def test_short_stop_is_beyond_the_overlapping_ote_and_poi():
+    result = _run(
+        mtf={"entry": "SHORT", "weekly": "NEUTRAL", "daily": "BEARISH", "h4": "BEARISH"},
+        current_price=103,
+        fvg=[{"type": "BEARISH", "from": 100, "to": 105, "filled": False}],
+        liquidity_sweep={"is_sweep": False, "sell_side": False, "buy_side": False},
+        ote={"fib62": 101, "fib79": 108},
+        liquidity=[{"type": "SELL_SIDE", "price": 90}],
+        structure=[],
+    )
+    selected = result["selected"]
+    assert selected["direction"] == "SHORT"
+    assert selected["stop_loss"] >= 108
+    assert selected["stop_source"] == "ote_invalidation"
