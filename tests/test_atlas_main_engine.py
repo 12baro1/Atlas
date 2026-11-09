@@ -342,3 +342,33 @@ def test_main_engine_selects_best_executable_candidate_not_reasoner_choice():
     assert result["selected"]["setup_candidate_id"] == "best-quality"
     assert result["selected"]["selected_by"] == "ATLAS_MAIN_ENGINE"
     assert main.last_motor_report["selected_candidate_valid"] is True
+
+
+def test_main_engine_finalizes_stop_and_structural_tp_ladder():
+    entry = {
+        "valid": True, "direction": "LONG", "entry": 100.0,
+        "stop_loss": 96.0, "tp1": 110.0, "tp2": 105.0, "tp3": 105.5,
+    }
+    risk = {"risk_setup_valid": True, "stop_loss": 95.0}
+    targets = {
+        "tp1": 110.0, "tp2": 105.0, "tp3": 105.5,
+        "minimum_target_separation": 2.0,
+    }
+    result = AtlasMainEngine.finalize_setup_geometry(entry, risk, targets)
+    assert result["entry"]["stop_loss"] == 95.0
+    assert result["entry"]["tp1"] == 105.0
+    assert result["entry"]["tp2"] == 110.0
+    assert result["entry"]["tp3"] is None
+    assert result["risk"]["stop_loss"] == 95.0
+    assert result["targets"]["selected_by"] == "ATLAS_MAIN_ENGINE"
+    assert result["entry"]["final_geometry_authority"] == "ATLAS_MAIN_ENGINE"
+
+
+def test_main_engine_rejects_final_geometry_with_stop_on_wrong_side():
+    result = AtlasMainEngine.finalize_setup_geometry(
+        {"valid": True, "direction": "LONG", "entry": 100.0, "stop_loss": 101.0},
+        {"risk_setup_valid": False},
+        {"tp1": 105.0},
+    )
+    assert result["entry"]["valid"] is False
+    assert result["entry"]["entry_reason_code"] == "INVALID_FINAL_STOP"
