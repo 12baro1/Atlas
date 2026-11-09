@@ -106,8 +106,9 @@ class DynamicTPEngine:
                 default=None,
             )
         )
+        selected_best_rr = max(target_rrs, default=None)
         missing_rr_level = next(
-            (rr for rr in self.MIN_RR_LEVELS if best_candidate_rr is None or best_candidate_rr < rr),
+            (rr for rr in self.MIN_RR_LEVELS if selected_best_rr is None or selected_best_rr < rr),
             None,
         )
         return {
