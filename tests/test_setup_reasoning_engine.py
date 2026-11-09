@@ -290,3 +290,60 @@ def test_short_stop_is_beyond_the_overlapping_ote_and_poi():
     assert selected["direction"] == "SHORT"
     assert selected["stop_loss"] >= 108
     assert selected["stop_source"] == "ote_invalidation"
+
+
+
+def test_short_limit_rejects_targets_already_crossed_before_entry():
+    result = _run(
+        mtf={"entry": "SHORT", "weekly": "BEARISH", "daily": "BEARISH", "h4": "BEARISH"},
+        current_price=75000,
+        fvg=[{"type": "BEARISH", "from": 113000, "to": 114000, "filled": False}],
+        orderblocks=[],
+        liquidity_sweep={"is_sweep": False, "sell_side": False, "buy_side": False},
+        liquidity=[
+            {"type": "SELL_SIDE", "price": 75150},
+            {"type": "SELL_SIDE", "price": 75200},
+            {"type": "SELL_SIDE", "price": 75300},
+        ],
+        structure=[],
+        smt={},
+    )
+    assert result["candidates"] == []
+    assert result["selected"]["valid"] is False
+
+
+def test_short_limit_keeps_targets_still_ahead_of_current_price():
+    result = _run(
+        mtf={"entry": "SHORT", "weekly": "BEARISH", "daily": "BEARISH", "h4": "BEARISH"},
+        current_price=75000,
+        fvg=[{"type": "BEARISH", "from": 113000, "to": 114000, "filled": False}],
+        orderblocks=[],
+        liquidity_sweep={"is_sweep": False, "sell_side": False, "buy_side": False},
+        liquidity=[
+            {"type": "SELL_SIDE", "price": 100000},
+            {"type": "SELL_SIDE", "price": 90000},
+            {"type": "SELL_SIDE", "price": 70000},
+        ],
+        structure=[],
+        smt={},
+    )
+    selected = result["selected"]
+    assert selected["valid"] is True
+    assert selected["entry_type"] == "LIMIT"
+    assert selected["projected_target"] == 70000
+    assert selected["projected_target"] < 75000
+
+
+def test_long_limit_rejects_targets_already_crossed_before_entry():
+    result = _run(
+        mtf={"entry": "LONG", "weekly": "BULLISH", "daily": "BULLISH", "h4": "BULLISH"},
+        current_price=100000,
+        fvg=[{"type": "BULLISH", "from": 90000, "to": 91000, "filled": False}],
+        orderblocks=[],
+        liquidity_sweep={"is_sweep": False, "sell_side": False, "buy_side": False},
+        liquidity=[{"type": "BUY_SIDE", "price": 95000}],
+        structure=[],
+        smt={},
+    )
+    assert result["candidates"] == []
+    assert result["selected"]["valid"] is False
