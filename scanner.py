@@ -1,67 +1,12 @@
-import ccxt
-import logging
-import os
-import sys
-from universe_engine import select_symbols
+"""Backward-compatible scanner entrypoint routed through the current Atlas CLI.
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-logger = logging.getLogger("atlas.raw_scanner")
+The former module-level CCXT scanner duplicated market selection and network
+startup outside AtlasRuntime/AtlasMainEngine. Use the same terminal workflow as
+`atlas`, `main.py`, and `atlas_entry.py`.
+"""
 
-# Bybit API olmadan sadece public veri için exchange oluştur
-exchange = ccxt.bybit({
-    "enableRateLimit": True,
-    "options": {"defaultType": "swap"},
-})
+from atlas_app import main
 
-markets = exchange.load_markets()
-symbols, universe_stats = select_symbols(
-    markets=markets,
-    suffix="/USDT:USDT",
-    require_active=True,
-    require_swap=False,
-)
 
-backend = getattr(ccxt, "BACKEND", "unknown")
-if backend == "mock":
-    allow_mock = os.getenv("ATLAS_ALLOW_MOCK", "0").strip().lower() in {"1", "true", "yes"}
-    if not allow_mock:
-        logger.error(
-            "ccxt mock backend aktif. Canli tarama icin once `python3 -m pip install ccxt` calistirin. "
-            "Sadece test/offline icin `ATLAS_ALLOW_MOCK=1 python3 scanner.py` kullanin."
-        )
-        sys.exit(2)
-    logger.warning(
-        "ccxt mock backend aktif (ATLAS_ALLOW_MOCK=1). Sonuclar test/offline verisine dayanir."
-    )
-
-logger.info(
-    "Tarama havuzu | toplam=%s kalan=%s suffix_elendi=%s inactive_elendi=%s",
-    universe_stats["total_markets"],
-    universe_stats["kept"],
-    universe_stats["skipped_suffix"],
-    universe_stats["skipped_inactive"],
-)
-
-success = 0
-failed = 0
-empty = 0
-
-for i, symbol in enumerate(symbols, 1):
-    try:
-        candles = exchange.fetch_ohlcv(symbol, "15m", limit=1000)
-
-        if len(candles) > 0:
-            success += 1
-            print(f"[{i}/{len(symbols)}] ✅ {symbol} ({len(candles)} mum)")
-        else:
-            empty += 1
-            print(f"[{i}/{len(symbols)}] ❌ {symbol}")
-
-    except Exception as e:
-        failed += 1
-        print(f"[{i}/{len(symbols)}] HATA {symbol}: {e}")
-
-logger.info("Tarama bitti | basarili=%s bos=%s hatali=%s", success, empty, failed)
+if __name__ == "__main__":
+    raise SystemExit(main())
