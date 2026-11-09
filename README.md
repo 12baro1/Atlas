@@ -1,151 +1,126 @@
 # Atlas
 
-**Atlas, kripto piyasalarını Smart Money Concepts (SMC) yaklaşımıyla analiz eden, Android üzerinde terminalden çalışan bir işlem analiz aracıdır.**
+Atlas, kripto piyasalarını SMC (Smart Money Concepts) yaklaşımıyla analiz eden, terminal üzerinden çalışan bir analiz aracıdır. Android UserLAnd/Ubuntu ve Linux üzerinde kullanılabilir.
 
-Atlas; piyasa yapısını, likiditeyi, FVG ve OTE bölgelerini, çoklu zaman dilimi uyumunu, risk/ödül oranını ve Bybit emir defteri verisini birlikte değerlendirerek işlem kurulumu arar. Uygun koşullar oluştuğunda LONG veya SHORT yönünde giriş planı üretir.
+**Bu sürüm analiz aracıdır; otomatik al-sat yapmaz.** Borsaya emir veya pozisyon göndermez. Analiz için herkese açık piyasa verilerini kullanır. Bybit API anahtarı gerekmez.
 
-Atlas bir borsa işlem botu değildir. **Borsaya emir göndermez, Telegram kullanmaz ve sohbet amaçlı yapay zekâ çalıştırmaz.** Piyasa verilerini analiz eder; işlem kararını ve uygulamasını kullanıcıya bırakır.
+## Gereksinimler
 
-## Özellikler
-
-- Çoklu zaman dilimi piyasa ve trend analizi
-- SMC tabanlı yapı, BOS/CHoCH, likidite süpürmesi, EQH/EQL, FVG ve OTE değerlendirmesi
-- Bybit herkese açık emir defterinden anlık likidite kontrolü
-- LONG/SHORT yönü, MARKET/LIMIT giriş türü, giriş, stop-loss ve kâr-al seviyeleri
-- Risk/ödül ve işlem kalitesi kontrolleri
-- Manuel işlem günlüğü ve geçmiş sonuç özeti
-- Terminal üzerinden tek ekranlı kullanım
-
-> Atlas'ın puanları kazanma olasılığı değildir. Hiçbir sinyal kâr garantisi vermez. Emir defteri anlık görüntüdür; gerçekleşmiş alım-satım akışını tek başına göstermez.
+- Ubuntu (UserLAnd) veya Linux
+- Python 3, venv ve pip
+- Git
+- İnternet bağlantısı
 
 ## Kurulum
 
-Aşağıdaki adımlar Android üzerinde **UserLAnd + Ubuntu** içindir. Kurulum için internet bağlantısı ve terminal erişimi gerekir.
-
-### 1. Gerekli paketleri yükle
-
-UserLAnd içinde Ubuntu oturumunu aç ve çalıştır:
+Ubuntu terminalinde aşağıdaki komutları sırayla çalıştır:
 
 ```bash
 sudo apt update
 sudo apt install -y git python3 python3-venv python3-pip build-essential
-```
-
-UserLAnd oturumunda `sudo` kullanılamıyorsa aynı komutları `sudo` olmadan çalıştır.
-
-### 2. Depoyu indir
-
-```bash
-cd ~
 git clone https://github.com/12baro1/Atlas.git
 cd Atlas
-```
-
-Depo daha önce indirilmişse yeniden klonlamak yerine:
-
-```bash
-cd ~/Atlas
-git pull origin main
-```
-
-### 3. Python sanal ortamını oluştur ve etkinleştir
-
-```bash
 python3 -m venv venv
 source venv/bin/activate
-```
-
-Terminal satırının başında `(venv)` görünmesi sanal ortamın etkin olduğunu gösterir.
-
-### 4. Python bağımlılıklarını yükle
-
-```bash
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-### 5. Atlas komutunu kur
+UserLAnd ortamında `sudo` kullanılamıyorsa apt komutlarını sudo olmadan çalıştır.
 
-```bash
-python3 atlas_app.py --install-cli
-source ~/.bashrc
-```
+## Başlatma
 
-Kurulumu doğrula:
-
-```bash
-which atlas
-```
-
-### 6. Atlas'ı başlat
-
-```bash
-atlas
-```
-
-Komut bulunamazsa veya PATH henüz yenilenmediyse proje klasöründe şu komutla doğrudan başlatabilirsin:
+Her yeni terminal oturumunda:
 
 ```bash
 cd ~/Atlas
 source venv/bin/activate
-python atlas_app.py
+./atlas
+```
+
+İstersen komutu sisteme kurup her klasörden `atlas` olarak çalıştırabilirsin:
+
+```bash
+python atlas_app.py --install-cli
+source ~/.bashrc
+atlas
+```
+
+Komut bulunamazsa proje klasöründen `./atlas` ile başlat.
+
+Belirli bir sembolle doğrudan açmak için:
+
+```bash
+./atlas BTC
+./atlas ETH
 ```
 
 ## Kullanım
 
-Atlas açıldığında tek ekranlı terminal arayüzündeki komut alanına sembol veya komut yaz:
+Atlas açıldığında komut alanına sembol veya desteklenen komutlardan birini yaz:
 
 | Komut | İşlev |
 |---|---|
 | `BTC`, `ETH`, `SOL` | İlgili USDT perpetual piyasasını analiz eder |
-| `BRC` | BRC/USDT perpetual piyasasını analiz eder |
-| `işlem ver` | Hacmi yüksek ilk beş uygun USDT perpetual piyasada geçerli kurulum arar |
-| `likidite BTC` | BTC için BSL/SSL, EQH/EQL ve son likidite süpürmesini gösterir |
-| `performans` | Otomatik sinyal sonuçları ile manuel işlem kayıtlarını ayrı gösterir |
-| `öğrenme` | Manuel işlem geçmişindeki setup eşleşmelerini özetler |
-| `yardım` | Kullanılabilir komutları gösterir |
-| `çıkış` | Atlas'ı kapatır |
+| `işlem ver` | Varsayılan taramayı çalıştırır ve uygun kurulum arar |
+| `50 analiz et` | 50 piyasayı tarar |
+| `100 analiz et` | 100 piyasayı tarar |
+| `en iyi 5 işlem` | Tarama sonuçlarından en iyi 5 kurulumu listeler |
+| `tüm piyasayı tara` | Desteklenen tüm USDT perpetual piyasalarını tarar |
+| `likidite BTC` | BTC likidite seviyelerini gösterir |
+| `performans` | Kayıtlı işlem performansını gösterir |
+| `öğrenme` | Kayıtlı öğrenme verisini gösterir |
+| `yardım` | Komutları listeler |
+| `çıkış` | Programdan çıkar |
 
-Atlas'ı belirli bir coin ile doğrudan açmak da mümkündür:
+Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Geçerli koşulları sağlayan kurulum yoksa Atlas sinyal üretmeyebilir.
 
-```bash
-atlas BTC
-atlas ETH
-```
-
-`işlem ver` komutu tüm piyasayı taramaz; hacme göre seçilmiş ilk beş piyasayla sınırlıdır. Geçerli koşulları sağlayan kurulum bulunmazsa Atlas zorla işlem üretmez.
-
-## Test ve backtest
+## Backtest
 
 Sanal ortam açıkken proje klasöründe:
 
 ```bash
-python -m pytest -q
-python backtest.py --symbol BTC/USDT:USDT --days 90
+python3 backtest.py --symbol BTC/USDT:USDT --days 7
 ```
 
-Backtest sonuçları kullanılan veri aralığına ve varsayımlara bağlıdır. Gerçek işlem öncesinde komisyon, kayma, örneklem büyüklüğü ve maksimum düşüş ayrıca değerlendirilmelidir.
+Birden fazla sembol:
 
-### Execution maliyetleri
+```bash
+python3 backtest.py --symbols "BTC/USDT:USDT,ETH/USDT:USDT" --days 30
+```
 
-Backtest ve risk motoru aynı işlem-başı maliyet modelini kullanır:
+Backtest geçmiş veriyi simüle eder; gerçek piyasa dolumunu veya gelecekteki performansı garanti etmez.
 
-- Bekleyen LIMIT dolumu: maker komisyonu
-- MARKET giriş ve STOP/trailing-stop çıkışı: taker komisyonu
-- Spread ve slippage: yalnızca MARKET/STOP gerçekleşen bacaklarına tek yönlü uygulanır
-- Varsayılan maker/taker oranları sırasıyla 0.02% ve 0.055%'tir; bunlar Bybit standart (Non-VIP) türev oranlarıdır. Hesabın gerçek oranını Bybit Fee Rate ekranından kontrol et.
-- Oranlar `ATLAS_MAKER_FEE_RATE`, `ATLAS_TAKER_FEE_RATE`, `ATLAS_STOP_SPREAD_BUFFER_RATE` ve `ATLAS_STOP_SLIPPAGE_BUFFER_RATE` ortam değişkenleriyle değiştirilebilir.
-- Funding maliyeti ve OHLCV verisinden görülemeyen gerçek emir kuyruğu/market impact bu modelde yer almaz.
+## Güncelleme
 
-## Veri ve güvenlik
+```bash
+cd ~/Atlas
+git pull --ff-only origin main
+source venv/bin/activate
+python -m pip install -r requirements.txt
+```
 
-- Piyasa verisi Bybit'in herkese açık piyasa verisi arayüzünden alınır.
-- Mum ve emir defteri verisi için borsa API anahtarı gerekmez.
-- Atlas borsaya emir göndermez; otomatik işlem yürütmez.
-- Telegram bildirimi ve sohbet amaçlı yapay zekâ ürün akışının parçası değildir.
-- Analiz için internet bağlantısı gerekir.
-- İşlem kararı, pozisyon büyüklüğü ve emir uygulaması kullanıcı sorumluluğundadır.
+## Sorun giderme
 
-## Sorumluluk reddi
+**`atlas: command not found`**
 
-Atlas eğitim ve piyasa analizi amacıyla geliştirilmiştir; yatırım tavsiyesi değildir. Sinyaller hatalı olabilir, stop-loss çalışması kayma yaşayabilir ve sermaye kaybı oluşabilir. Önce demo ortamında test et; geçmiş test sonuçlarını gelecekteki performans garantisi olarak değerlendirme.
+```bash
+cd ~/Atlas
+source venv/bin/activate
+./atlas
+```
+
+**`No module named ...`**
+
+```bash
+cd ~/Atlas
+source venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+## Güvenlik
+
+- Analiz için borsa API anahtarı girme; Atlas'ın normal kullanımında gerekmez.
+- Gerçek API anahtarı, parola veya kişisel erişim bilgilerini depoya yükleme.
+- Sinyaller yatırım tavsiyesi değildir ve kâr garantisi vermez.
+- Önce demo ortamında doğrula. Kaldıraçlı işlemlerde sermayenin tamamı kaybedilebilir.
