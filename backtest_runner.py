@@ -751,31 +751,9 @@ class BacktestRunner:
                     continue
                 gap_fill = (opened <= limit_price) if is_long else (opened >= limit_price)
                 touched = candle.low <= limit_price if is_long else candle.high >= limit_price
-                target_already_hit = any(
-                    (candle.high >= target if is_long else candle.low <= target)
-                    for target in (_num(risk.get('tp1')), _num(risk.get('tp2')), _num(risk.get('tp3')))
-                    if target is not None
-                )
-                if target_already_hit and not touched:
-                    # Target was reached while the LIMIT was still pending.
-                    # Rebase only when the order did not fill on this candle.
-                    rebased, _ = self._rebase_remaining_targets(risk, signal_dir, candle)
-                    if rebased:
-                        self.stale_limit_targets_rebased += 1
-                        target_already_hit = False
-                    else:
-                        self.stale_limit_target_rebase_rejected += 1
-                        self.stale_limits_cancelled += 1
-                        self.stale_limit_target_before_fill += 1
-                        self.stale_limit_direction_counts[signal_dir] = self.stale_limit_direction_counts.get(signal_dir, 0) + 1
-                        return None
-                # If entry and an old target are both touched in this candle,
-                # OHLC cannot establish event order. Keep the original targets;
-                # the intrabar-fill path excludes this candle from TP simulation.
+                # Assess a next-open MARKET replacement before using the full
+                # candle range: the open is known before any later target touch.
                 if not touched:
-                    # A missed LIMIT may be replaced at the next candle open,
-                    # but only while TP1 is still ahead, price remains near the
-                    # planned POI, and cost-adjusted reward is still >= minimum.
                     fallback_ok, fallback_net_rr, fallback_reason = self._market_fallback_check(
                         opened, limit_price, _num(stop), _num(risk.get("tp1")), signal_dir, risk
                     )
@@ -790,6 +768,26 @@ class BacktestRunner:
                         self.market_fallback_rejected_distance += 1
                     elif fallback_reason == "rr":
                         self.market_fallback_rejected_rr += 1
+
+                target_already_hit = any(
+                    (candle.high >= target if is_long else candle.low <= target)
+                    for target in (_num(risk.get("tp1")), _num(risk.get("tp2")), _num(risk.get("tp3")))
+                    if target is not None
+                )
+                if target_already_hit and not touched:
+                    # If the LIMIT remains pending after the candle, remove
+                    # targets already traded through and keep viable targets ahead.
+                    rebased, _ = self._rebase_remaining_targets(risk, signal_dir, candle)
+                    if rebased:
+                        self.stale_limit_targets_rebased += 1
+                    else:
+                        self.stale_limit_target_rebase_rejected += 1
+                        self.stale_limits_cancelled += 1
+                        self.stale_limit_target_before_fill += 1
+                        self.stale_limit_direction_counts[signal_dir] = self.stale_limit_direction_counts.get(signal_dir, 0) + 1
+                        return None
+                # If entry and target are touched in one candle, event order is unknown.
+                if not touched:
                     continue
                 entry_price = min(limit_price, opened) if is_long else max(limit_price, opened)
                 # If price opens through the limit, fill is at the open and
