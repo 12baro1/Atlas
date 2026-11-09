@@ -195,21 +195,27 @@ class AtlasEngine:
         self.scanner = ScannerEngine()
         self.statistics = StatisticsEngine()
         self.backtest = BacktestEngine()
-        # All specialist engines are registered under one main authority.
-        # Existing attributes remain aliases for backward compatibility.
+        # Explicit specialist inventory: services/state containers are not motors.
+        # Every registered motor is wrapped so calls publish evidence through the
+        # single main authority instead of bypassing the shared evidence pool.
+        specialist_motor_names = (
+            "bos", "choch", "liquidity", "orderblocks", "orderbook",
+            "mitigation", "fvg", "liquidity_sweep", "breaker", "trendline",
+            "trend", "market_phase", "market_regime", "trade_quality", "mtf",
+            "premium_discount", "killzone", "session", "ote",
+            "htf_orderblock", "htf_fvg", "smt", "unicorn", "cisd",
+            "volume_profile", "institutional", "entry", "entry_optimizer",
+            "entry_confirmation", "confluence", "signal", "risk", "rr",
+            "dynamic_tp", "setup_quality", "news_filter", "correlation",
+            "cooldown", "learning", "manual_quality_gate",
+        )
         self.main_engine = AtlasMainEngine(
-            motors={
-                name: value for name, value in vars(self).items()
-                if name not in {
-                    "logger", "structure_engine_cls", "config", "position",
-                    "trade", "trade_journal", "manual_trade_service",
-                    "telegram", "_telegram_signal_cache", "_telegram_threads",
-                    "main_engine",
-                }
-            },
+            motors={name: getattr(self, name) for name in specialist_motor_names},
             setup_reasoner=self.setup_reasoner,
             decision_engine=self.decision,
         )
+        for motor_name in specialist_motor_names:
+            setattr(self, motor_name, self.main_engine.motors[motor_name])
 
     def analyze(self, data):
         """Route every market analysis through the single main engine."""
@@ -823,7 +829,9 @@ class AtlasEngine:
 
     def _analyze_timeframe(self, candles):
         """Tek zaman dilimi için pivot, etiket, BOS ve CHoCH üretir."""
-        engine = self.structure_engine_cls()
+        engine = self.main_engine.attach_motor(
+            "market_structure", self.structure_engine_cls()
+        )
 
         engine.find_pivots(candles)
         engine.calculate_strength(candles)
@@ -1189,7 +1197,7 @@ class AtlasEngine:
         )
         setup_candidates = reasoning.get("candidates", [])
         selected_candidate = reasoning.get("selected")
-        if isinstance(selected_candidate, dict) and selected_candidate.get("valid"):
+        if isinstance(selected_candidate, dict):
             selected_candidate["optimization"] = optimization
             selected_candidate["setup_reasoning"] = {
                 "selected_id": selected_candidate.get("setup_candidate_id"),
@@ -1200,15 +1208,25 @@ class AtlasEngine:
                 "opposing_evidence": selected_candidate.get("opposing_evidence", []),
                 "market_context": selected_candidate.get("market_context", []),
             }
+            # The main engine's selected candidate is the only setup.
+            # Never fall back to a second, independently-created EntryEngine setup.
             entry = selected_candidate
         else:
-            entry["setup_reasoning"] = {
-                "selected_id": None,
-                "candidate_count": 0,
-                "reason": reasoning.get("reason"),
-                "thesis": "Existing EntryEngine result retained; no additional candidate passed structural checks.",
-                "supporting_evidence": [],
-                "opposing_evidence": [],
+            entry = {
+                "valid": False,
+                "direction": "WAIT",
+                "entry": None,
+                "stop_loss": None,
+                "reason": reasoning.get("reason") or "Main engine produced no setup",
+                "entry_reason_code": "NO_MAIN_ENGINE_SETUP",
+                "setup_reasoning": {
+                    "selected_id": None,
+                    "candidate_count": len(setup_candidates),
+                    "reason": reasoning.get("reason"),
+                    "thesis": "No setup selected by AtlasMainEngine.",
+                    "supporting_evidence": [],
+                    "opposing_evidence": [],
+                },
             }
 
         confirmation = self.entry_confirmation.confirm(
