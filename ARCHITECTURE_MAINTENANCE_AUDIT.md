@@ -29,7 +29,7 @@ The dates below are the last commit dates observed on the audit baseline, not pr
 
 ## Legacy / dormant code kept out of the live decision path
 
-- `scanner.py` (last change 2026-08-02) is an older standalone raw CCXT scanner. The supported terminal path uses `atlas_app.py`, `atlas_tui.py`, `atlas_runtime.py`, and `scanner_engine.py`.
+- `scanner.py` (last change 2026-08-02) was an older standalone raw CCXT scanner that loaded markets at import time and bypassed the main runtime. It is now a side-effect-free compatibility wrapper around `atlas_app.main`, matching `main.py` and `atlas_entry.py`.
 - `main.py` and `atlas_entry.py` are thin backward-compatible wrappers around `atlas_app.main`.
 - `execution_engine.py` is an intentional compatibility alias for `BybitExecutionEngine`; the terminal analysis workflow does not send orders.
 - `core/market_state.py` and `plugins/bos|choch|fvg|liquidity` are legacy plugin-era components. The current main engine uses root specialist engines and `core.market_structure_engine`; no current main-engine dispatch through `core.plugin_manager` was found.
@@ -51,6 +51,7 @@ These dormant files were not blindly deleted or wired back into the main engine.
 - State persistence ignores malformed top-level sections and cache shapes.
 - Learning persistence sanitizes malformed legacy buckets and uses atomic replacement.
 - Scanner rejects missing, non-finite, directionally invalid or unvalidated trade geometry.
+- Legacy `scanner.py` import no longer starts a CCXT market request or a separate scanning implementation.
 
 ## Validation boundary
 
