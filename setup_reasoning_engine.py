@@ -478,7 +478,9 @@ class SetupReasoningEngine:
                     "market_context": market_context,
                     "reasoning": (
                         f"{direction} {source}: POI {low:g}-{high:g}; "
-                        + ("süpürme sonrası dönüş teyitli" if inside and market_confirmed else "fiyatın POI bölgesine geri çekilmesi bekleniyor")
+                        + ("süpürme sonrası dönüş teyitli" if inside and market_confirmed else
+                           "POI içinden derin LIMIT bekleniyor" if inside else
+                           "fiyatın POI bölgesine geri çekilmesi bekleniyor")
                         + (f"; {entry_depth_reason}" if entry_depth_reason else "")
                     ),
                 }
