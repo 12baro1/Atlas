@@ -61,16 +61,18 @@ def test_candidate_selection_prefers_better_projected_rr_not_motor_vote_count():
         liquidity=[{"type": "BUY_SIDE", "price": 120}, {"type": "BUY_SIDE", "price": 150}],
     )
     assert len(result["candidates"]) == 2
-    assert result["selected"]["projected_rr"] == max(
-        candidate["projected_rr"] for candidate in result["candidates"]
+    assert result["selected"]["net_projected_rr"] == max(
+        candidate["net_projected_rr"] for candidate in result["candidates"]
     )
 
 
 def test_candidate_entry_uses_evidence_balance_instead_of_fixed_deep_limit():
     result = _run(
+        mtf={"entry": "LONG", "weekly": "BULLISH", "daily": "BULLISH", "h4": "BULLISH"},
         optimization={
             "applied": True,
             "evidence": [
+                {"source": "volume_poc", "price": 104.5, "weight": 3.0},
                 {"source": "smt", "bias": "ALIGNED", "weight": 3.0},
                 {"source": "orderbook", "bias": "SUPPORTIVE", "weight": 2.0},
             ],
