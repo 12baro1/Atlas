@@ -386,6 +386,29 @@ class SetupReasoningEngine:
                     sweep.get("is_sweep") and sweep_expected and post.get("confirmed")
                     and self._direction(post.get("direction")) == direction
                 )
+                support, opposition = self._evidence(
+                    direction, mtf, sweep, structure, ote, htf_orderblock, htf_fvg,
+                    smt, unicorn, cisd, volume_profile, institutional, orderbook,
+                    correlation, market_phase, regime, breaker=breaker,
+                    ifvg=ifvg, trendline_sweep=trendline_sweep, eqh_eql=eqh_eql,
+                    inducement=inducement, premium_discount=premium_discount,
+                    internal_structure=internal_structure,
+                )
+                # Keep specialist price levels and add the full directional evidence
+                # from the main reasoner, including motors unavailable to EntryOptimizer.
+                entry_evidence = [
+                    item for item in ((optimization or {}).get("evidence") or [])
+                    if isinstance(item, dict) and item.get("price") is not None
+                ] if isinstance(optimization, dict) else []
+                entry_evidence.extend(
+                    {"source": label, "bias": "SUPPORTIVE", "weight": 1.0}
+                    for label in support
+                )
+                entry_evidence.extend(
+                    {"source": label, "bias": "COUNTERPRESSURE", "weight": 1.0}
+                    for label in opposition
+                )
+                candidate_optimization = {"evidence": entry_evidence}
                 if direction == "LONG":
                     if inside and market_confirmed:
                         entry_price = current
@@ -426,9 +449,9 @@ class SetupReasoningEngine:
                 if not (inside and market_confirmed):
                     if optimized_price is not None and same_base_poi and low <= optimized_price <= high:
                         entry_price = optimized_price
-                    elif isinstance(optimization, dict) and optimization.get("evidence"):
+                    elif entry_evidence:
                         entry_price = self._entry_from_evidence(
-                            direction, low, high, optimization,
+                            direction, low, high, candidate_optimization,
                             default_position=0.38 if inside else 0.50,
                         )
 
@@ -445,14 +468,6 @@ class SetupReasoningEngine:
                 ):
                     continue
 
-                support, opposition = self._evidence(
-                    direction, mtf, sweep, structure, ote, htf_orderblock, htf_fvg,
-                    smt, unicorn, cisd, volume_profile, institutional, orderbook,
-                    correlation, market_phase, regime, breaker=breaker,
-                    ifvg=ifvg, trendline_sweep=trendline_sweep, eqh_eql=eqh_eql,
-                    inducement=inducement, premium_discount=premium_discount,
-                    internal_structure=internal_structure,
-                )
                 support.append(f"{source} POI supports {direction}")
                 market_context = []
                 if isinstance(market_phase, dict) and market_phase.get("phase"):
