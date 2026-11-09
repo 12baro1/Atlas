@@ -244,7 +244,17 @@ class SetupReasoningEngine:
         base_entry = base_entry if isinstance(base_entry, dict) else {}
         current = self._number(current_price)
         if current is None or current <= 0:
-            return {"candidates": [], "selected": base_entry, "reason": "current_price_unavailable"}
+            return {
+                "candidates": [],
+                "selected": {
+                    "valid": False,
+                    "direction": "WAIT",
+                    "reason": "Current price unavailable; main engine cannot construct a setup",
+                    "entry_reason_code": "CURRENT_PRICE_UNAVAILABLE",
+                },
+                "reason": "current_price_unavailable",
+                "motor_evidence_count": len(motor_evidence or []),
+            }
         mtf = mtf if isinstance(mtf, dict) else {}
         fvg = fvg if isinstance(fvg, list) else []
         orderblocks = orderblocks if isinstance(orderblocks, list) else []
