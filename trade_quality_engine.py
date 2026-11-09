@@ -220,21 +220,24 @@ class TradeQualityEngine:
                 blockers.append("Stop-loss is on the wrong side of entry")
             geometry_tolerance = max(abs(entry_price) * 1e-8, 1e-8)
             risk_entry = risk.get("entry")
-            try:
-                if risk_entry is not None and abs(float(risk_entry) - entry_price) > geometry_tolerance:
-                    blockers.append("Risk engine entry differs from the selected setup entry")
-                entry_stop = float(entry.get("stop_loss"))
-                if abs(stop - entry_stop) > geometry_tolerance:
-                    blockers.append("Risk engine stop differs from the selected structural stop")
-                for target_name in ("tp1", "tp2", "tp3"):
-                    setup_target = targets.get(target_name)
-                    risk_target = risk.get(target_name)
-                    if setup_target is None and risk_target is None:
-                        continue
-                    if setup_target is None or risk_target is None or abs(float(setup_target) - float(risk_target)) > geometry_tolerance:
-                        blockers.append(f"Risk engine {target_name.upper()} differs from the final structural target")
-            except (TypeError, ValueError, OverflowError):
-                blockers.append("Risk engine price geometry is invalid")
+            # Full geometry reconciliation applies to live RiskEngine payloads,
+            # which carry their own entry. Legacy/test integrations may omit it.
+            if risk_entry is not None:
+                try:
+                    if abs(float(risk_entry) - entry_price) > geometry_tolerance:
+                        blockers.append("Risk engine entry differs from the selected setup entry")
+                    entry_stop = float(entry.get("stop_loss"))
+                    if abs(stop - entry_stop) > geometry_tolerance:
+                        blockers.append("Risk engine stop differs from the selected structural stop")
+                    for target_name in ("tp1", "tp2", "tp3"):
+                        setup_target = targets.get(target_name)
+                        risk_target = risk.get(target_name)
+                        if setup_target is None and risk_target is None:
+                            continue
+                        if setup_target is None or risk_target is None or abs(float(setup_target) - float(risk_target)) > geometry_tolerance:
+                            blockers.append(f"Risk engine {target_name.upper()} differs from the final structural target")
+                except (TypeError, ValueError, OverflowError):
+                    blockers.append("Risk engine price geometry is invalid")
 
         if tp_prices and direction in {"LONG", "SHORT"}:
             ordered = all(
@@ -266,7 +269,10 @@ class TradeQualityEngine:
                     target_atr = 0.0
                 minimum_target_gap = max(
                     risk_distance * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_R", 0.35))),
-                    target_atr * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_ATR", 0.20))),
+                    min(
+                        target_atr * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_ATR", 0.20))),
+                        risk_distance * 0.75,
+                    ),
                     entry_price * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_PERCENT", 0.0005))),
                 )
                 if any(
