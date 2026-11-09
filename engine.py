@@ -630,6 +630,7 @@ class AtlasEngine:
             if existing.get("side") == side and existing.get("entry") == entry:
                 return existing
 
+        analysis = result_payload.get("analysis") or {}
         trade = {
             "symbol": symbol,
             "side": side,
