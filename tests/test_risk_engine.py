@@ -439,3 +439,32 @@ def test_risk_engine_normalizes_weights_only_over_valid_targets(monkeypatch):
 
 def test_default_minimum_stop_atr_floor_is_not_micro_tight():
     assert Config.MIN_STOP_ATR_MULTIPLIER >= 0.25
+
+
+def test_risk_engine_rejects_stop_on_wrong_side_of_explicit_setup_direction():
+    risk = RiskEngine().calculate(
+        entry=100.0,
+        stop_loss=101.0,
+        dynamic_tp={"tp1": 102.0},
+        atr_value=0.0,
+        direction="LONG",
+    )
+    assert risk is not None
+    assert risk["risk_setup_valid"] is False
+    assert "wrong side" in risk["risk_setup_reason"].lower()
+
+
+def test_risk_engine_rejects_tight_structural_stop_without_moving_it(monkeypatch):
+    monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.35)
+    monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", False)
+    monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
+    risk = RiskEngine().calculate(
+        entry=100.0,
+        stop_loss=99.8,
+        dynamic_tp={"tp1": 102.0, "tp2": 104.0, "tp3": 106.0},
+        atr_value=1.0,
+        direction="LONG",
+    )
+    assert risk["risk_setup_valid"] is False
+    assert risk["stop_loss"] == 99.8
+    assert risk["stop_adjusted"] is False
