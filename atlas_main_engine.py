@@ -127,6 +127,9 @@ class AtlasMainEngine:
             "motor_diagnostics": diagnostics,
         })
         if isinstance(result, dict):
+            decision = result.get("decision") or {}
+            self.last_motor_report.setdefault("final_action", decision.get("action"))
+            self.last_motor_report.setdefault("final_direction", decision.get("signal"))
             analysis = result.get("analysis")
             if isinstance(analysis, dict):
                 existing_diagnostics = analysis.get("motor_diagnostics")
