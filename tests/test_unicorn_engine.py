@@ -42,10 +42,20 @@ def _base_payload(direction, phase="Expansion"):
         "market_phase": {"phase": phase},
         "liquidity_sweep": sweep,
         "smt": {"active": True, "direction": setup_direction, "confidence": 78},
-        "orderblocks": [{"type": setup_direction}],
-        "eqh_eql": {"active": True},
-        "inducement": {"active": True},
-        "ote": {"valid": True},
+        "orderblocks": [{"type": setup_direction, "mitigated": False}],
+        "eqh_eql": {
+            "active": True,
+            "eql": [{"type": "SELL_SIDE"}] if direction == "BULLISH" else [],
+            "eqh": [{"type": "BUY_SIDE"}] if direction == "BEARISH" else [],
+        },
+        "inducement": {
+            "active": True,
+            "direction": "LONG" if direction == "BULLISH" else "SHORT",
+        },
+        "ote": {
+            "valid": True,
+            "zone": "DISCOUNT" if direction == "BULLISH" else "PREMIUM",
+        },
     }
 
 
@@ -99,3 +109,19 @@ def test_returns_inactive_when_no_breaker_fvg_overlap():
     assert result["active"] is False
     assert result["best"] is None
     assert result["confidence"] == 0
+
+
+def test_opposing_orderblock_equal_level_inducement_and_ote_do_not_confirm_direction():
+    engine = UnicornEngine()
+    payload = _base_payload("BULLISH")
+    payload["orderblocks"] = [{"type": "BEARISH", "mitigated": False}]
+    payload["eqh_eql"] = {"active": True, "eqh": [{"type": "BUY_SIDE"}], "eql": []}
+    payload["inducement"] = {"active": True, "direction": "SHORT"}
+    payload["ote"] = {"valid": True, "zone": "PREMIUM"}
+
+    validation = engine._validate_context("BULLISH", payload)
+
+    assert validation["orderblock"] is False
+    assert validation["eqh_eql"] is False
+    assert validation["inducement"] is False
+    assert validation["ote"] is False
