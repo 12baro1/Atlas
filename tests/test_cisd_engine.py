@@ -67,3 +67,26 @@ def test_detect_multi_returns_best_event():
     assert result["active"] is True
     assert result["best"] is not None
     assert result["best"]["timeframe"] == "15m"
+
+
+def test_neutral_current_delivery_does_not_create_false_bearish_cisd():
+    engine = CISDEngine()
+    candles = []
+    for i in range(6):
+        base = 100 - i
+        candles.append(_candle(i, base + 1, base + 1.2, base - 0.2, base))
+    for i in range(6, 12):
+        candles.append(_candle(i, 90, 90, 90, 90))
+
+    result = engine.detect(
+        candles=candles,
+        structure=[],
+        liquidity_sweep={},
+        market_phase={},
+        smt={},
+        timeframe="15m",
+    )
+
+    assert result["active"] is False
+    assert result["direction"] == "NONE"
+    assert result["to_state"] == "NEUTRAL"
