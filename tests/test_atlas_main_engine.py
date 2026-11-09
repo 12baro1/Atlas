@@ -271,7 +271,7 @@ def test_final_decision_contains_full_shared_evidence_lineage():
     assert result["motor_evidence_count"] == 1
     assert result["motor_evidence_sources"] == ["structure"]
 
-def test_main_engine_final_authority_blocks_impossible_far_limit_and_bad_geometry():
+def test_main_engine_keeps_valid_far_limit_setup_and_labels_distance():
     main, _ = _main()
     result = main.decide(
         signal={"signal": "SHORT"}, entry={
@@ -282,8 +282,23 @@ def test_main_engine_final_authority_blocks_impossible_far_limit_and_bad_geometr
         current_price=75100, max_limit_distance_pct=0.05,
         max_market_distance_pct=0.003,
     )
+    assert result["action"] == "EXECUTE"
+    assert result["entry_distance_label"] == "UZAK GİRİŞ"
+    assert result["entry_distance_percent"] > 0.05
+
+
+def test_main_engine_still_blocks_far_market_execution():
+    main, _ = _main()
+    result = main.decide(
+        signal={"signal": "LONG"}, entry={
+            "valid": True, "direction": "LONG", "entry": 110,
+            "stop_loss": 95, "entry_type": "MARKET",
+        }, risk={"stop_loss": 95}, targets={"tp1": 120},
+        current_price=100, max_limit_distance_pct=0.05,
+        max_market_distance_pct=0.003,
+    )
     assert result["action"] == "SKIP"
-    assert "ENTRY_TOO_FAR_FROM_MARKET" in result["critical_blockers"]
+    assert "MARKET_ENTRY_TOO_FAR" in result["critical_blockers"]
 
 
 def test_main_engine_final_authority_blocks_target_on_wrong_side_of_entry():
