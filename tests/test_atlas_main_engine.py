@@ -195,3 +195,21 @@ def test_analysis_keeps_existing_diagnostics_and_adds_actual_motor_trace():
     assert diagnostics["motor_outputs"]["mtf"]["entry"] == "LONG"
     assert diagnostics["execution_trace"]["not_invoked"] == ["liquidity", "smt", "structure"]
     assert result["main_engine"]["evidence_pool_count"] == 0
+
+
+
+def test_analysis_report_preserves_single_setup_and_final_decision():
+    main, _ = _main()
+    payload = {"decision": {"action": "EXECUTE", "signal": "LONG"}}
+
+    def pipeline(_data):
+        main.build_setup(mtf={"entry": "LONG"})
+        main.decide(signal={"signal": "LONG"}, entry={"valid": True})
+        return payload
+
+    result = main.analyze({"symbol": "BTC/USDT"}, pipeline=pipeline)
+
+    assert result["main_engine"]["setup_candidate_count"] == 1
+    assert result["main_engine"]["selected_candidate_valid"] is True
+    assert result["main_engine"]["final_action"] == "EXECUTE"
+    assert result["main_engine"]["final_direction"] == "LONG"
