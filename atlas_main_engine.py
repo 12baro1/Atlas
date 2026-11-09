@@ -174,6 +174,12 @@ class AtlasMainEngine:
         decision = dict(decision or {})
         decision["decision_authority"] = "ATLAS_MAIN_ENGINE"
         decision["motor_registry_size"] = len(self.motors)
+        diagnostics = self.motor_diagnostics()
+        decision["motor_evidence_count"] = diagnostics["evidence_count"]
+        decision["motor_evidence_sources"] = sorted({
+            record["motor"] for record in self.evidence_pool
+            if record.get("status") == "COMPLETED" and record.get("motor")
+        })
         self.last_motor_report["final_action"] = decision.get("action")
         self.last_motor_report["final_direction"] = decision.get("signal")
         return decision
