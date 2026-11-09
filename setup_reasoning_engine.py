@@ -628,6 +628,7 @@ class SetupReasoningEngine:
                     "checks": list(base_entry.get("checks") or []),
                     "setup_candidate_id": f"{direction}:{source}:{index}",
                     "direction_source": direction_source,
+                    "confirmed_sweep_reversal": direction_source == "CONFIRMED_SWEEP_REVERSAL",
                     "projected_target": targets[-1] if targets else None,
                     "projected_rr": projected_rr,
                     "estimated_execution_cost_rr": round(execution_cost_rr, 4),
