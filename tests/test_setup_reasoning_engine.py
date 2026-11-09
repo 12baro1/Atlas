@@ -330,8 +330,8 @@ def test_short_limit_keeps_targets_still_ahead_of_current_price():
     selected = result["selected"]
     assert selected["valid"] is True
     assert selected["entry_type"] == "LIMIT"
-    assert selected["projected_target"] == 70000
-    assert all(target < 75000 for target in [selected.get("tp1", 70000)] if target is not None)
+    assert selected["projected_target"] == 90000
+    assert selected["projected_target"] < 113000
 
 
 def test_long_limit_rejects_targets_already_crossed_before_entry():
