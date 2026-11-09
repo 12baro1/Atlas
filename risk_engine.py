@@ -109,6 +109,8 @@ class RiskEngine:
         atr_floor_distance = max(atr_snapshot * min_stop_atr_multiplier, percent_floor_distance)
         spread_buffer = self._resolve_buffer(spread, entry, spread_rate, minimum_tick_distance)
         slippage_buffer = self._resolve_buffer(slippage, entry, slippage_rate, minimum_tick_distance)
+        execution_spread_rate = spread_buffer / abs(entry) if entry else 0.0
+        execution_slippage_rate = slippage_buffer / abs(entry) if entry else 0.0
         # Stop geometry is structural and volatility-based. Spread/slippage are
         # execution costs; adding them to the stop-distance floor can reject a
         # valid structural stop for the wrong reason. They remain included in
@@ -224,8 +226,8 @@ class RiskEngine:
                         entry_type=resolved_entry_type,
                         maker_fee_rate=maker_fee_rate,
                         taker_fee_rate=taker_fee_rate,
-                        spread_rate=spread_rate,
-                        slippage_rate=slippage_rate,
+                        spread_rate=execution_spread_rate,
+                        slippage_rate=execution_slippage_rate,
                     )
                     fee_in_r = plan_cost["total"] / risk
                     weighted_net_rr = round(weighted_rr - fee_in_r, 4)
@@ -247,8 +249,8 @@ class RiskEngine:
             entry_type=resolved_entry_type,
             maker_fee_rate=maker_fee_rate,
             taker_fee_rate=taker_fee_rate,
-            spread_rate=spread_rate,
-            slippage_rate=slippage_rate,
+            spread_rate=execution_spread_rate,
+            slippage_rate=execution_slippage_rate,
         )
         effective_risk_per_unit = max(risk + stop_cost["total"], minimum_tick_distance)
         position_size_raw = target_capital_at_risk / effective_risk_per_unit
