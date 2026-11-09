@@ -261,7 +261,7 @@ def test_risk_engine_caps_position_size_to_config_limit(monkeypatch):
     assert risk["position_size_raw"] > 50.0
     assert risk["position_size"] == pytest.approx(50.0)
     assert risk["position_size_capped"] is True
-    assert risk["capital_at_risk"] == pytest.approx(50.0 * risk["effective_risk_per_unit"])
+    assert risk["capital_at_risk"] == pytest.approx(round(50.0 * risk["effective_risk_per_unit"], 2))
 
 
 def test_risk_engine_marks_invalid_setup_when_auto_expand_disabled(monkeypatch):
