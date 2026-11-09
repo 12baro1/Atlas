@@ -376,3 +376,28 @@ def test_far_poi_is_kept_for_diagnostics_but_never_selected_as_actionable_setup(
     assert result["candidates"][0]["execution_eligible"] is False
     assert result["selected"]["valid"] is False
     assert result["selected"]["entry_reason_code"] == "ENTRY_TOO_FAR"
+
+
+
+def test_entry_price_ignores_directional_labels_without_price_coordinates():
+    reasoner = SetupReasoningEngine()
+    without_labels = reasoner._entry_from_evidence(
+        "LONG", 100.0, 110.0, {"evidence": []}, default_position=0.38
+    )
+    with_labels = reasoner._entry_from_evidence(
+        "LONG", 100.0, 110.0,
+        {"evidence": [
+            {"source": "smt", "bias": "ALIGNED", "weight": 100.0},
+            {"source": "orderbook", "bias": "COUNTERPRESSURE", "weight": 100.0},
+        ]},
+        default_position=0.38,
+    )
+    assert with_labels == without_labels
+
+
+def test_short_poi_default_entry_uses_high_side_of_zone():
+    reasoner = SetupReasoningEngine()
+    entry = reasoner._entry_from_evidence(
+        "SHORT", 100.0, 110.0, {"evidence": []}, default_position=0.62
+    )
+    assert entry == 106.2
