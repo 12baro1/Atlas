@@ -237,6 +237,13 @@ class DynamicTPEngine:
         return candidates[0], candidates[1], candidates[2]
 
     def _nudge_level(self, entry, risk, direction, picked, used):
+        """Legacy helper retained for callers; new TP selection never nudges structure."""
+        step = max(risk * 0.1, 1e-12)
+        sign = 1.0 if direction == "LONG" else -1.0
+        guard = 0
+        while picked in used and guard < 500:
+            picked = round(picked + sign * step, 8)
+            guard += 1
         return picked
 
     def _safe_float(self, value):
