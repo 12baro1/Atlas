@@ -576,8 +576,14 @@ class BacktestRunner:
         """Remove targets already touched before LIMIT fill and validate the remaining plan."""
         direction = str(direction or "").upper()
         is_long = direction == "LONG"
-        targets = [_num(risk.get(f"tp{i}")) for i in range(1, 4)]
-        targets = [value for value in targets if value is not None]
+        current_weights = risk.get("target_rebased_weights")
+        if not isinstance(current_weights, dict):
+            current_weights = self.tp_weights if isinstance(self.tp_weights, dict) else {}
+        targets = [
+            (index, _num(risk.get(f"tp{index}")), current_weights.get(f"tp{index}", 1.0))
+            for index in range(1, 4)
+            if _num(risk.get(f"tp{index}")) is not None
+        ]
         if not targets:
             return False, "no_structural_targets"
 
@@ -590,23 +596,25 @@ class BacktestRunner:
             return False, "incomplete_levels"
 
         remaining = []
-        for target in targets:
+        for original_index, target, weight in targets:
             touched = high >= target if is_long else low <= target
             still_ahead = target > close if is_long else target < close
             if not touched and still_ahead:
-                remaining.append(target)
+                remaining.append((target, weight))
         if not remaining:
             return False, "no_remaining_structural_target"
 
         risk_distance = abs(entry - stop)
         if risk_distance <= 0:
             return False, "invalid_structural_risk"
-        target_map = {f"tp{i}": value for i, value in enumerate(remaining[:3], start=1)}
-        weights = self.tp_weights if isinstance(self.tp_weights, dict) else None
+        target_map = {f"tp{i}": item[0] for i, item in enumerate(remaining[:3], start=1)}
+        rebased_weights = {
+            f"tp{i}": item[1] for i, item in enumerate(remaining[:3], start=1)
+        }
         cost = estimate_plan_cost(
             entry_price=entry,
             targets=target_map,
-            weights=weights,
+            weights=rebased_weights,
             entry_type="LIMIT",
             maker_fee_rate=self.maker_fee_rate,
             taker_fee_rate=self.taker_fee_rate,
@@ -620,7 +628,8 @@ class BacktestRunner:
             return False, "remaining_target_net_rr_below_minimum"
 
         for index in range(1, 4):
-            risk[f"tp{index}"] = remaining[index - 1] if index <= len(remaining) else None
+            risk[f"tp{index}"] = remaining[index - 1][0] if index <= len(remaining) else None
+        risk["target_rebased_weights"] = rebased_weights
         risk["target_rebased_after_pre_fill_touch"] = True
         risk["target_rebase_net_first_rr"] = round(net_first_rr, 4)
         return True, "remaining_structural_targets_rebased"
@@ -837,6 +846,7 @@ class BacktestRunner:
         self.filled_direction_counts[signal_dir] = self.filled_direction_counts.get(signal_dir, 0) + 1
 
         use_partial = bool(getattr(self, "partial_exits", True))
+        trade_tp_weights = risk.get("target_rebased_weights") or self.tp_weights
         if limit_intrabar_fill:
             fill_candle = candles[fill_index]
             fill_stop_hit = _candle_touched_stop(
@@ -860,7 +870,7 @@ class BacktestRunner:
                         targets=tps,
                         future_candles=future,
                         direction=signal_dir,
-                        tp_weights=self.tp_weights,
+                        tp_weights=trade_tp_weights,
                     )
                 else:
                     outcome = simulate_trade(
@@ -919,7 +929,7 @@ class BacktestRunner:
                 exit_reason=outcome.get("exit_reason"),
                 targets=tps,
                 reached_levels=outcome.get("levels") or ([outcome.get("tp")] if outcome.get("tp") else []),
-                tp_weights=self.tp_weights,
+                tp_weights=trade_tp_weights,
                 partial_exits=use_partial,
                 maker_fee_rate=self.maker_fee_rate,
                 taker_fee_rate=self.taker_fee_rate,
