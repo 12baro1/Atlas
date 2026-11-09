@@ -132,7 +132,7 @@ class RiskEngine:
                     minimum_stop_distance,
                 )
             elif reject_tight_stops:
-                # Stop genişletilemiyor ve sıkı stopları kabul etmiyoruz; güvenli hale getirilemedi → SKIP.
+                # Yapısal stop minimum ATR mesafesinin altında ve otomatik genişletme kapalı.
                 self.logger.info(
                     "Risk skipped: stop below minimum and auto-expand disabled | entry=%s stop=%s requested=%s min=%s",
                     entry,
@@ -457,7 +457,7 @@ class RiskEngine:
     ):
         reason_code = {
             "Stop Loss invalid": "INVALID_STOP",
-            "Invalid Risk Setup": "UNSAFE_WIDE_OR_EXPAND_DISABLED",
+            "Invalid Risk Setup": "TIGHT_STOP_BELOW_MINIMUM",
         }.get(reason, "RISK_INVALID")
 
         self.logger.warning(

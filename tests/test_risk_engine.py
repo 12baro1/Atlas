@@ -281,6 +281,7 @@ def test_risk_engine_marks_invalid_setup_when_auto_expand_disabled(monkeypatch):
     assert risk is not None
     assert risk["risk_setup_valid"] is False
     assert risk["risk_setup_reason"] == "Invalid Risk Setup"
+    assert risk["reason_code"] == "TIGHT_STOP_BELOW_MINIMUM"
     assert risk["rr"] is None
 
 
