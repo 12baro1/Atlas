@@ -8,7 +8,7 @@ def _run(**overrides):
         "structure": [{"choch": True, "direction": "BULLISH", "label": "HH"}],
         "fvg": [{"type": "BULLISH", "from": 100, "to": 105, "filled": False}],
         "orderblocks": [],
-        "current_price": 107.5,
+        "current_price": 110,
         "candles": [],
         "liquidity_sweep": {
             "is_sweep": True, "sell_side": True, "buy_side": False,
@@ -334,7 +334,7 @@ def test_short_limit_keeps_targets_still_ahead_of_current_price():
     assert selected["entry_reason_code"] == "ENTRY_TOO_FAR"
     assert len(result["candidates"]) == 1
     assert result["candidates"][0]["entry_too_far"] is True
-    assert result["candidates"][0]["entry"] == 113000
+    assert result["candidates"][0]["entry"] == 113572.0
 
 
 def test_long_limit_rejects_targets_already_crossed_before_entry():
