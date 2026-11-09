@@ -4,6 +4,7 @@ Atlas SMC Engine v2
 """
 
 from config import Config
+from execution_costs import estimate_stop_cost
 
 
 class PositionManager:
@@ -37,6 +38,11 @@ class PositionManager:
             "symbol": symbol,
             "side": trade.get("side") or trade.get("direction"),
             "entry": entry_price,
+            "entry_type": (
+                trade.get("entry_type")
+                or (entry_record.get("entry_type") if isinstance(entry_record, dict) else None)
+                or "LIMIT"
+            ),
             "stop_loss": stop_loss,
             "tp1": tp1,
             "tp2": tp2,
@@ -89,8 +95,15 @@ class PositionManager:
                 if pos.get("tp1") is not None and price >= pos["tp1"] and not pos["hit_tp1"]:
                     self._take_partial(pos, percent=30)
                     pos["hit_tp1"] = True
-                    cost_rate = max(0.0, float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.0)))
-                    pos["stop_loss"] = pos["entry"] * (1.0 + cost_rate)
+                    breakeven_cost = estimate_stop_cost(
+                        entry_price=pos["entry"], stop_price=pos["entry"],
+                        entry_type=pos.get("entry_type", "LIMIT"),
+                        maker_fee_rate=getattr(Config, "MAKER_FEE_RATE", 0.0002),
+                        taker_fee_rate=getattr(Config, "TAKER_FEE_RATE", 0.00055),
+                        spread_rate=getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002),
+                        slippage_rate=getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003),
+                    )["total"]
+                    pos["stop_loss"] = pos["entry"] + breakeven_cost
                     pos["tp1_breakeven_stop"] = pos["stop_loss"]
                     pos["sl_moved_to_entry"] = True
                     changed_positions.append(dict(pos, event="TP1", partial_percent=30))
@@ -117,8 +130,15 @@ class PositionManager:
                 if pos.get("tp1") is not None and price <= pos["tp1"] and not pos["hit_tp1"]:
                     self._take_partial(pos, percent=30)
                     pos["hit_tp1"] = True
-                    cost_rate = max(0.0, float(getattr(Config, "ROUND_TRIP_COST_RATE", 0.0)))
-                    pos["stop_loss"] = pos["entry"] * (1.0 - cost_rate)
+                    breakeven_cost = estimate_stop_cost(
+                        entry_price=pos["entry"], stop_price=pos["entry"],
+                        entry_type=pos.get("entry_type", "LIMIT"),
+                        maker_fee_rate=getattr(Config, "MAKER_FEE_RATE", 0.0002),
+                        taker_fee_rate=getattr(Config, "TAKER_FEE_RATE", 0.00055),
+                        spread_rate=getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002),
+                        slippage_rate=getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003),
+                    )["total"]
+                    pos["stop_loss"] = pos["entry"] - breakeven_cost
                     pos["tp1_breakeven_stop"] = pos["stop_loss"]
                     pos["sl_moved_to_entry"] = True
                     changed_positions.append(dict(pos, event="TP1", partial_percent=30))
@@ -141,6 +161,7 @@ class PositionManager:
                     trade={
                         "side": pos["side"],
                         "entry": pos["entry"],
+                        "entry_type": pos.get("entry_type", "LIMIT"),
                         "stop_loss": pos["stop_loss"],
                         "tp1": pos["tp1"],
                         "tp2": pos["tp2"],
