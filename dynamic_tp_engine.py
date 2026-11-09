@@ -99,9 +99,12 @@ class DynamicTPEngine:
         selected = selected[:3]
         tp1, tp2, tp3 = self._order_target_levels(direction, entry, risk, selected)
         target_rrs = [round(self._reward(entry, price, direction) / risk, 4) for price in selected]
-        best_candidate_rr = max(
-            (self._reward(entry, price, direction) / risk for price in raw_targets),
-            default=None,
+        best_candidate_rr = (
+            max(target_rrs) if synthetic else
+            max(
+                (self._reward(entry, price, direction) / risk for price in raw_targets),
+                default=None,
+            )
         )
         missing_rr_level = next(
             (rr for rr in self.MIN_RR_LEVELS if best_candidate_rr is None or best_candidate_rr < rr),
