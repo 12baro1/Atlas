@@ -109,22 +109,23 @@ class AtlasMainEngine:
         if not callable(pipeline):
             raise TypeError("AtlasMainEngine requires a callable motor pipeline")
         self.reset_evidence()
+        self.last_motor_report = {"pipeline": "RUNNING"}
         try:
             result = pipeline(market_data)
         except Exception:
             diagnostics = self.motor_diagnostics()
-            self.last_motor_report = {
+            self.last_motor_report.update({
                 "registered_motors": diagnostics["expected_motors"],
                 "pipeline": "FAILED",
                 "motor_diagnostics": diagnostics,
-            }
+            })
             raise
         diagnostics = self.motor_diagnostics()
-        self.last_motor_report = {
+        self.last_motor_report.update({
             "registered_motors": diagnostics["expected_motors"],
             "pipeline": "COMPLETED",
             "motor_diagnostics": diagnostics,
-        }
+        })
         if isinstance(result, dict):
             analysis = result.get("analysis")
             if isinstance(analysis, dict):
