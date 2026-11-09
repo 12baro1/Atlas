@@ -64,6 +64,8 @@ def test_build_smt_state_passes_expected_contract():
     assert capture.kwargs["primary_symbol"] == "SOL/USDT:USDT"
     assert capture.kwargs["timeframes"] == engine.SMT_TIMEFRAMES
     assert "SOL/USDT:USDT" in capture.kwargs["smt_universe"]
+    assert engine.main_engine.motor_call_counts["smt"] == 1
+    assert engine.main_engine.evidence_pool[-1]["motor"] == "smt"
 
 
 def test_compose_analysis_includes_smt_key():
