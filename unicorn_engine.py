@@ -130,6 +130,7 @@ class UnicornEngine:
         inducement = payload.get("inducement", {})
         ote = payload.get("ote", {})
 
+        structure = [item for item in structure if isinstance(item, dict)] if isinstance(structure, (list, tuple)) else []
         has_bos = any(item.get("bos") and item.get("direction") == direction for item in structure)
         has_choch = any(item.get("choch") and item.get("direction") == direction for item in structure)
 
@@ -143,10 +144,30 @@ class UnicornEngine:
             sweep_ok = bool(liquidity_sweep.get("buy_side"))
 
         smt_ok = smt.get("active") and smt.get("direction") == direction
-        orderblock_ok = bool(orderblocks)
-        eq_ok = bool(eqh_eql.get("active"))
-        inducement_ok = bool(inducement.get("active"))
-        ote_ok = bool(ote.get("valid"))
+        orderblocks = orderblocks if isinstance(orderblocks, (list, tuple)) else []
+        orderblock_ok = any(
+            isinstance(block, dict)
+            and str(block.get("type", "")).upper() == direction
+            and not block.get("mitigated")
+            for block in orderblocks
+        )
+
+        # Bullish setups need sell-side equal lows; bearish setups need
+        # buy-side equal highs. A generic EQH/EQL flag is not directional proof.
+        equal_levels = eqh_eql.get("eql" if direction == "BULLISH" else "eqh", [])
+        eq_ok = bool(equal_levels) if isinstance(equal_levels, (list, tuple)) else False
+
+        expected_inducement = "LONG" if direction == "BULLISH" else "SHORT"
+        inducement_ok = (
+            bool(inducement.get("active"))
+            and str(inducement.get("direction", "")).upper() == expected_inducement
+        )
+
+        expected_ote_zone = "DISCOUNT" if direction == "BULLISH" else "PREMIUM"
+        ote_ok = (
+            bool(ote.get("valid"))
+            and str(ote.get("zone", "")).upper() == expected_ote_zone
+        )
 
         return {
             "bos": has_bos,
