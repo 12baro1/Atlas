@@ -1,47 +1,137 @@
-"""Single authority for Atlas setup construction and final trade decisions.
+"""Atlas main authority and shared specialist-evidence coordinator.
 
-Specialist engines remain focused analysis motors. AtlasMainEngine owns their
-registry and is the only public coordinator used by AtlasEngine for setup
-reasoning and final decision output. It does not duplicate their calculations.
+Flow: market data -> specialist motors -> shared evidence pool -> one setup
+builder -> one final decision. Specialist motors publish evidence only; the
+main engine owns setup construction and final decision authority.
 """
-
+from collections import Counter
 from copy import deepcopy
 
 
+class MotorProxy:
+    """Transparent adapter: every specialist call is executed and recorded by the main engine."""
+
+    __slots__ = ("_main", "_name", "_target")
+
+    def __init__(self, main, name, target):
+        object.__setattr__(self, "_main", main)
+        object.__setattr__(self, "_name", name)
+        object.__setattr__(self, "_target", target)
+
+    def __getattr__(self, attribute):
+        value = getattr(self._target, attribute)
+        if not callable(value):
+            return value
+
+        def invoke(*args, **kwargs):
+            return self._main.execute_motor(
+                self._name, attribute, value, *args, **kwargs
+            )
+        invoke.__name__ = getattr(value, "__name__", attribute)
+        return invoke
+
+    def __setattr__(self, attribute, value):
+        setattr(self._target, attribute, value)
+
+
 class AtlasMainEngine:
-    """Atlas'ın büyük patron motoru: motor kanıtlarını tek işlem planında birleştirir."""
+    """Atlas'ın tek ana motoru: kanıtları toplar, setup kurar ve karar verir."""
 
     def __init__(self, *, motors, setup_reasoner, decision_engine):
-        self.motors = dict(motors or {})
         self.setup_reasoner = setup_reasoner
         self.decision_engine = decision_engine
+        self.motors = {}
+        self._targets = {}
+        self.evidence_pool = []
+        self.motor_errors = []
+        self.motor_call_counts = Counter()
+        self._sequence = 0
         self.last_motor_report = {}
+        for name, target in dict(motors or {}).items():
+            self.attach_motor(name, target)
+
+    def attach_motor(self, name, target):
+        """Register one specialist and return its transparent main-engine adapter."""
+        if not name or target is None:
+            raise ValueError("A named specialist motor instance is required")
+        self._targets[name] = target
+        proxy = MotorProxy(self, name, target)
+        self.motors[name] = proxy
+        return proxy
+
+    def execute_motor(self, name, method, callable_, *args, **kwargs):
+        """Run a specialist exactly once and place its raw output in shared evidence."""
+        self._sequence += 1
+        sequence = self._sequence
+        self.motor_call_counts[name] += 1
+        try:
+            output = callable_(*args, **kwargs)
+        except Exception as exc:
+            record = {
+                "sequence": sequence, "motor": name, "method": method,
+                "status": "ERROR", "error": f"{type(exc).__name__}: {exc}",
+            }
+            self.evidence_pool.append(record)
+            self.motor_errors.append(record)
+            raise
+        self.evidence_pool.append({
+            "sequence": sequence, "motor": name, "method": method,
+            "status": "COMPLETED", "output": output,
+        })
+        return output
+
+    def reset_evidence(self):
+        self.evidence_pool = []
+        self.motor_errors = []
+        self.motor_call_counts = Counter()
+        self._sequence = 0
+
+    def evidence_snapshot(self):
+        """Return actual motor outputs in execution order for the setup authority."""
+        return list(self.evidence_pool)
+
+    def motor_diagnostics(self):
+        expected = sorted(self.motors)
+        invoked = sorted(name for name, count in self.motor_call_counts.items() if count)
+        return {
+            "expected_motors": expected,
+            "invoked_motors": invoked,
+            "not_invoked": sorted(set(expected) - set(invoked)),
+            "call_counts": dict(self.motor_call_counts),
+            "call_total": sum(self.motor_call_counts.values()),
+            "error_count": len(self.motor_errors),
+            "errors": list(self.motor_errors),
+            "evidence_count": len(self.evidence_pool),
+        }
 
     def analyze(self, market_data, *, pipeline):
-        """Own the complete analysis lifecycle; pipeline executes registered motors."""
+        """Main engine controls lifecycle; pipeline is the ordered expert-analysis adapter."""
         if not callable(pipeline):
-            raise TypeError("AtlasMainEngine requires a callable motor pipeline")
-        self.last_motor_report = {
-            "registered_motors": sorted(self.motors),
-            "pipeline": "RUNNING",
-        }
+            raise TypeError("AtlasMainEngine requires a callable specialist-analysis adapter")
+        self.reset_evidence()
         result = pipeline(market_data)
-        self.last_motor_report["pipeline"] = "COMPLETED"
+        diagnostics = self.motor_diagnostics()
+        self.last_motor_report = {
+            "registered_motors": diagnostics["expected_motors"],
+            "pipeline": "COMPLETED",
+            "motor_diagnostics": diagnostics,
+        }
         if isinstance(result, dict):
-            decision = result.get("decision") or {}
+            analysis = result.get("analysis")
+            if isinstance(analysis, dict):
+                analysis["motor_diagnostics"] = diagnostics
             result["main_engine"] = {
                 **self.last_motor_report,
-                "final_action": decision.get("action"),
-                "final_direction": decision.get("signal"),
+                "evidence_pool_count": diagnostics["evidence_count"],
             }
         return result
 
     def build_setup(self, **motor_outputs):
-        """Run the setup-construction motor with the complete specialist evidence."""
+        """The single setup construction point; all specialist evidence is passed here."""
+        motor_outputs.setdefault("motor_evidence", self.evidence_snapshot())
         result = self.setup_reasoner.generate(**motor_outputs)
         result = result if isinstance(result, dict) else {
-            "candidates": [],
-            "selected": None,
+            "candidates": [], "selected": None,
             "reason": "Setup reasoning returned an invalid result",
         }
         candidates = result.get("candidates")
@@ -49,20 +139,20 @@ class AtlasMainEngine:
         selected = result.get("selected")
         if not isinstance(selected, dict):
             result["selected"] = {
-                "valid": False,
-                "direction": "WAIT",
+                "valid": False, "direction": "WAIT",
                 "reason": result.get("reason") or "No coherent setup candidate",
             }
-        self.last_motor_report = {
+        result["decision_authority"] = "ATLAS_MAIN_ENGINE"
+        self.last_motor_report.update({
             "registered_motors": sorted(self.motors),
             "setup_candidate_count": len(result["candidates"]),
             "selected_candidate_valid": bool(result["selected"].get("valid")),
             "setup_reason": result.get("reason"),
-        }
+        })
         return result
 
     def decide(self, **motor_outputs):
-        """The only final-decision entry point used by the top-level Atlas engine."""
+        """Only final decision entry point."""
         decision = self.decision_engine.decide(**motor_outputs)
         decision = dict(decision or {})
         decision["decision_authority"] = "ATLAS_MAIN_ENGINE"
@@ -73,29 +163,14 @@ class AtlasMainEngine:
 
     def apply_operational_gates(self, decision, *, news_filter=None,
                                 correlation=None, cooldown=None):
-        """Apply operational safety gates after the main setup decision.
-
-        Specialist market evidence is not converted into duplicate vetoes.
-        Only macro-news protection and duplicate-position cooldown are hard
-        operational gates; correlation remains a warning.
-        """
+        """Apply only operational hard gates; correlation remains evidence/warning."""
         enriched = deepcopy(decision or {})
-        blockers = []
-        warnings = []
+        blockers, warnings = [], []
         for name, payload in (("news_filter", news_filter), ("cooldown", cooldown)):
-            if not isinstance(payload, dict):
-                continue
-            if not payload.get("active", True):
-                continue
-            if not payload.get("trade_allowed", True):
+            if isinstance(payload, dict) and payload.get("active", True) and not payload.get("trade_allowed", True):
                 blockers.append(f"{name}: {payload.get('reason', 'blocked')}")
-
-        if isinstance(correlation, dict) and correlation.get("active", True):
-            if not correlation.get("trade_allowed", True):
-                warnings.append(
-                    f"correlation: {correlation.get('reason', 'counterpressure; retained as evidence')}"
-                )
-
+        if isinstance(correlation, dict) and correlation.get("active", True) and not correlation.get("trade_allowed", True):
+            warnings.append(f"correlation: {correlation.get('reason', 'counterpressure; retained as evidence')}")
         if warnings:
             enriched["external_warnings"] = list(enriched.get("external_warnings") or []) + warnings
         if blockers:
