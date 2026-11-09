@@ -84,3 +84,20 @@ def test_strength_is_bounded_to_configured_pivot_context():
     engine.calculate_strength(candles)
 
     assert all(pivot.strength <= 4 for pivot in pivots)
+
+
+def test_pivot_strength_measures_prominence_not_just_local_extremum():
+    candles = [
+        Candle(time=0, open=99, high=99.0, low=97.0, close=98.0, volume=1),
+        Candle(time=1, open=99, high=99.9, low=97.9, close=98.5, volume=1),
+        Candle(time=2, open=99, high=100.0, low=98.0, close=99.0, volume=1),
+        Candle(time=3, open=99, high=99.95, low=97.95, close=98.5, volume=1),
+        Candle(time=4, open=99, high=99.9, low=97.9, close=98.5, volume=1),
+    ]
+    engine = MarketStructureEngine()
+    pivots = engine.find_pivots(candles, left=2, right=2)
+    engine.calculate_strength(candles)
+    high_pivot = next(pivot for pivot in pivots if pivot.kind == "HIGH")
+
+    assert high_pivot.strength < 4
+    assert engine.filter_noise(min_strength=3) == []
