@@ -397,18 +397,13 @@ class SetupReasoningEngine:
                 )
                 # Keep specialist price levels and add the full directional evidence
                 # from the main reasoner, including motors unavailable to EntryOptimizer.
+                # Only concrete price coordinates may move an entry.
+                # Directional confluence labels are setup-quality evidence, not
+                # price levels; averaging them creates arbitrary POI prices.
                 entry_evidence = [
                     item for item in ((optimization or {}).get("evidence") or [])
                     if isinstance(item, dict) and item.get("price") is not None
                 ] if isinstance(optimization, dict) else []
-                entry_evidence.extend(
-                    {"source": label, "bias": "SUPPORTIVE", "weight": 1.0}
-                    for label in support
-                )
-                entry_evidence.extend(
-                    {"source": label, "bias": "COUNTERPRESSURE", "weight": 1.0}
-                    for label in opposition
-                )
                 candidate_optimization = {"evidence": entry_evidence}
                 if direction == "LONG":
                     if inside and market_confirmed:
@@ -453,7 +448,10 @@ class SetupReasoningEngine:
                     elif entry_evidence:
                         entry_price = self._entry_from_evidence(
                             direction, low, high, candidate_optimization,
-                            default_position=0.38 if inside else 0.50,
+                            default_position=(
+                                (0.38 if direction == "LONG" else 0.62)
+                                if inside else 0.50
+                            ),
                         )
 
                 # An inside-POI LIMIT must remain on the retracement side
