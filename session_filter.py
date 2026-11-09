@@ -29,7 +29,9 @@ class SessionFilter:
 
         london = london_start <= hour < london_end
         newyork = newyork_start <= hour < newyork_end
-        overlap = newyork_start <= hour < london_end + 2
+        # The overlap exists only when the configured windows are both active.
+        # The former end+2 expression could report impossible hours as overlap.
+        overlap = london and newyork
 
         active = (london or newyork) and not weekend
 
