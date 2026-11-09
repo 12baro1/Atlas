@@ -330,10 +330,22 @@ class SetupReasoningEngine:
                     and self._direction(post.get("direction")) == direction
                 )
                 if direction == "LONG":
-                    entry_price = current if inside and market_confirmed else high
+                    if inside and market_confirmed:
+                        entry_price = current
+                    elif inside:
+                        # No sweep is not a veto: wait for a deeper retrace
+                        # inside the same valid POI instead of discarding it.
+                        entry_price = low + (high - low) * 0.38
+                    else:
+                        entry_price = high
                     stop = low - atr_buffer
                 else:
-                    entry_price = current if inside and market_confirmed else low
+                    if inside and market_confirmed:
+                        entry_price = current
+                    elif inside:
+                        entry_price = high - (high - low) * 0.38
+                    else:
+                        entry_price = low
                     stop = high + atr_buffer
 
                 # Reuse EntryOptimizer's price only for the exact POI it analyzed.
@@ -433,7 +445,10 @@ class SetupReasoningEngine:
                 entry_type_reason = (
                     "Süpürme sonrası reclaim POI içinde doğrulandı"
                     if inside and market_confirmed
-                    else entry_depth_reason or "Fiyatın seçilen POI giriş bölgesine dönmesi gerekiyor"
+                    else entry_depth_reason or (
+                        "Süpürme olmadan POI içi derin LIMIT; 15m kanıtları yürütme girdisi"
+                        if inside else "Fiyatın seçilen POI giriş bölgesine dönmesi gerekiyor"
+                    )
                 )
                 candidate = {
                     "valid": True, "direction": direction, "entry": entry_price,
