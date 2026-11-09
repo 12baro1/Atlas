@@ -608,7 +608,7 @@ class SetupReasoningEngine:
                     "requires_pullback": not (inside and market_confirmed),
                     "poi_source": source, "poi_zone": {"low": low, "high": high},
                     "ote_confluence": ote_overlap, "stop_buffer": atr_buffer,
-                    "entry_reason_code": "ENTRY_READY", "entry_zone_crossed": False,
+                    "entry_zone_crossed": False,
                     "entry_too_far": bool(distance_exceeded),
                     "execution_eligible": execution_eligible,
                     "entry_reason_code": "ENTRY_READY" if execution_eligible else "ENTRY_TOO_FAR",
