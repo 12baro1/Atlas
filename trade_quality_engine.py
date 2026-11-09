@@ -218,6 +218,12 @@ class TradeQualityEngine:
         if direction in {"LONG", "SHORT"} and entry_price is not None and stop is not None:
             if (direction == "LONG" and stop >= entry_price) or (direction == "SHORT" and stop <= entry_price):
                 blockers.append("Stop-loss is on the wrong side of entry")
+            risk_entry = risk.get("entry")
+            try:
+                if risk_entry is not None and abs(float(risk_entry) - entry_price) > max(abs(entry_price) * 1e-8, 1e-12):
+                    blockers.append("Risk engine entry differs from the selected setup entry")
+            except (TypeError, ValueError, OverflowError):
+                blockers.append("Risk engine entry is invalid")
 
         if tp_prices and direction in {"LONG", "SHORT"}:
             ordered = all(
@@ -235,10 +241,28 @@ class TradeQualityEngine:
             if risk_distance and risk_distance > 0:
                 final_rr = abs(tp_prices[-1] - entry_price) / risk_distance
                 first_rr = abs(tp_prices[0] - entry_price) / risk_distance
-                if first_rr < 0.8:
+                if first_rr < float(getattr(Config, "MIN_TP1_RR", 0.80)):
                     blockers.append("TP1 is too close relative to structural risk")
                 if final_rr < float(minimum_rr):
                     blockers.append("Final structural target does not meet minimum RR")
+
+                target_atr = 0.0
+                try:
+                    if candles and len(candles) >= 15:
+                        from utils.atr import atr as calculate_atr
+                        target_atr = max(0.0, float(calculate_atr(candles, period=14)))
+                except (TypeError, ValueError, OverflowError):
+                    target_atr = 0.0
+                minimum_target_gap = max(
+                    risk_distance * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_R", 0.35))),
+                    target_atr * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_ATR", 0.20))),
+                    entry_price * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_PERCENT", 0.0005))),
+                )
+                if any(
+                    abs(tp_prices[index + 1] - tp_prices[index]) < minimum_target_gap
+                    for index in range(len(tp_prices) - 1)
+                ):
+                    blockers.append("Adjacent TP levels belong to the same liquidity cluster")
 
         if entry.get("entry_type") not in {"LIMIT", "MARKET"}:
             blockers.append("No executable LIMIT or MARKET order type")
