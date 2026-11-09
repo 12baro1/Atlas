@@ -72,14 +72,28 @@ class MarketStructureEngine:
                 confirmation_index = pivot.index + self.pivot_right
             right_index = min(candle_count, int(confirmation_index) + 1)
 
+            context = [
+                candles[index]
+                for index in range(left_index, right_index)
+                if index != pivot.index
+            ]
+            if not context:
+                pivot.strength = 0
+                continue
+
+            average_range = sum(
+                max(0.0, float(candle.high) - float(candle.low))
+                for candle in context
+            ) / len(context)
+            minimum_separation = max(average_range * 0.10, abs(float(pivot.price)) * 1e-8)
+
             strength = 0
-            for index in range(left_index, right_index):
-                if index == pivot.index:
-                    continue
-                candle = candles[index]
-                if pivot.kind == "HIGH" and float(candle.high) < pivot.price:
-                    strength += 1
-                elif pivot.kind == "LOW" and float(candle.low) > pivot.price:
+            for candle in context:
+                if pivot.kind == "HIGH":
+                    separation = pivot.price - float(candle.high)
+                else:
+                    separation = float(candle.low) - pivot.price
+                if separation >= minimum_separation:
                     strength += 1
             pivot.strength = strength
         return self.pivots
