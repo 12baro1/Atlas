@@ -8,7 +8,7 @@ def _run(**overrides):
         "structure": [{"choch": True, "direction": "BULLISH", "label": "HH"}],
         "fvg": [{"type": "BULLISH", "from": 100, "to": 105, "filled": False}],
         "orderblocks": [],
-        "current_price": 110,
+        "current_price": 106,
         "candles": [],
         "liquidity_sweep": {
             "is_sweep": True, "sell_side": True, "buy_side": False,
@@ -51,7 +51,7 @@ def test_no_candidate_is_created_without_a_real_directional_poi():
     assert result["selected"]["valid"] is False
 
 
-def test_candidate_selection_prefers_better_net_rr_over_nearest_poi():
+def test_candidate_selection_does_not_choose_farther_poi_over_nearby_valid_poi():
     result = _run(
         fvg=[
             {"type": "BULLISH", "from": 105, "to": 106, "filled": False},
@@ -61,10 +61,11 @@ def test_candidate_selection_prefers_better_net_rr_over_nearest_poi():
         liquidity=[{"type": "BUY_SIDE", "price": 120}, {"type": "BUY_SIDE", "price": 150}],
     )
     assert len(result["candidates"]) == 2
-    far_candidate = min(result["candidates"], key=lambda item: item["entry_distance_pct"])
-    quality_candidate = max(result["candidates"], key=lambda item: item["net_first_target_rr"])
-    assert quality_candidate["entry_distance_pct"] > far_candidate["entry_distance_pct"]
-    assert result["selected"]["setup_candidate_id"] == quality_candidate["setup_candidate_id"]
+    far_candidate = max(result["candidates"], key=lambda item: item["entry_distance_pct"])
+    near_candidate = min(result["candidates"], key=lambda item: item["entry_distance_pct"])
+    assert far_candidate["execution_eligible"] is False
+    assert near_candidate["execution_eligible"] is True
+    assert result["selected"]["setup_candidate_id"] == near_candidate["setup_candidate_id"]
 
 
 def test_candidate_entry_uses_evidence_balance_instead_of_fixed_deep_limit():
@@ -329,10 +330,11 @@ def test_short_limit_keeps_targets_still_ahead_of_current_price():
         smt={},
     )
     selected = result["selected"]
-    assert selected["valid"] is True
-    assert selected["entry_type"] == "LIMIT"
-    assert selected["projected_target"] == 70000
-    assert selected["projected_target"] < 75000
+    assert selected["valid"] is False
+    assert selected["entry_reason_code"] == "ENTRY_TOO_FAR"
+    assert len(result["candidates"]) == 1
+    assert result["candidates"][0]["entry_too_far"] is True
+    assert result["candidates"][0]["entry"] == 113572.0
 
 
 def test_long_limit_rejects_targets_already_crossed_before_entry():
@@ -357,3 +359,20 @@ def test_structural_stop_uses_wider_atr_clearance_buffer(monkeypatch):
     selected = result["selected"]
     assert selected["stop_buffer"] == 5.0
     assert selected["stop_loss"] <= selected["entry"] - 5.0
+
+
+
+def test_far_poi_is_kept_for_diagnostics_but_never_selected_as_actionable_setup():
+    result = _run(
+        mtf={"entry": "LONG", "weekly": "BULLISH", "daily": "BULLISH", "h4": "BULLISH"},
+        current_price=120,
+        fvg=[{"type": "BULLISH", "from": 100, "to": 105, "filled": False}],
+        liquidity_sweep={"is_sweep": False, "sell_side": False, "buy_side": False},
+        liquidity=[{"type": "BUY_SIDE", "price": 130}],
+        structure=[],
+    )
+    assert len(result["candidates"]) == 1
+    assert result["candidates"][0]["entry_too_far"] is True
+    assert result["candidates"][0]["execution_eligible"] is False
+    assert result["selected"]["valid"] is False
+    assert result["selected"]["entry_reason_code"] == "ENTRY_TOO_FAR"
