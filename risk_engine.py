@@ -362,6 +362,8 @@ class RiskEngine:
             "entry_type": resolved_entry_type,
             "maker_fee_rate": maker_fee_rate,
             "taker_fee_rate": taker_fee_rate,
+            "spread_rate": round(execution_spread_rate, 8),
+            "slippage_rate": round(execution_slippage_rate, 8),
             "plan_cost_quote_per_unit": round(plan_cost["total"], 10) if plan_cost else None,
             "stop_cost_quote_per_unit": round(stop_cost["total"], 10),
             "stop_cost_breakdown": stop_cost,
