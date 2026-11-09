@@ -95,3 +95,34 @@ def test_state_file_only_contains_one_result(tmp_path):
     # Yapı listesi sadece last_result içinde bir kez (üst seviyede değil)
     assert "structure" not in sym
     assert sym["last_result"]["analysis"]["structure"][0]["i"] == 1
+
+def test_load_sanitizes_invalid_persisted_state_sections(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_text(
+        json.dumps({
+            "version": 1,
+            "symbols": ["not", "a", "mapping"],
+            "open_positions": "invalid",
+            "updated_at": "not-a-time",
+        }),
+        encoding="utf-8",
+    )
+    engine = StateEngine(path=str(path))
+
+    assert engine.state["symbols"] == {}
+    assert engine.state["open_positions"] == {}
+    assert engine.state["updated_at"] is None
+    assert engine.load_open_positions() == []
+
+
+def test_corrupt_cached_result_and_last_candle_fail_closed(tmp_path):
+    engine = StateEngine(path=str(tmp_path / "state.json"))
+    engine.state["symbols"]["X"] = {
+        "last_candle": "bad-shape",
+        "last_result": ["not", "a", "mapping"],
+    }
+    candles = [_candle(100, 1.0), _candle(200, 2.0)]
+
+    assert engine.has_new_entry_candle("X", candles) is True
+    assert engine.new_candles_since_last("X", candles) == candles
+    assert engine.restore_cached_result("X") is None
