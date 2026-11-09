@@ -1,15 +1,4 @@
-"""
-timing.py
-Atlas için ORTAK zamanlama / look-ahead kuralları.
-
-HTF mumsal kullanım kuralý:
-  Bir üst zaman dilimi mumu, ancak ve ancak tamamen kapandığında analize girer.
-      kapandý = (c.time + periyot) <= referans_zaman_ms
-
-Backtest ve canlý analiz AYNI bu fonksiyonu kullanýr. Böylece canlý taramanýn
-oluþmakta olan HTF mumunun OHLC'sini geçmiş karara sýz dýrmadýðý garanti edilir
-ve backtest ile üretim davranýþý arasýnda zamanlama farký kalmaz.
-"""
+"""Shared look-ahead-safe higher-timeframe candle boundaries."""
 
 TF_PERIOD_MS = {
     "15m": 15 * 60 * 1000,
@@ -21,21 +10,30 @@ TF_PERIOD_MS = {
 
 
 def closed_htf_candles(candles, reference_time_ms, timeframe=None):
-    """Bir üst zaman dilimi serisinden referans ana kadar TAMAMEN KAPANMIS mumleri dondurur.
+    """Return only fully closed candles, in chronological order.
 
-    Kural: yalnizca `c.time + periyot <= reference_time_ms` mumlari dahil edilir.
-    Hala olusturmada olan HTF mumunun OHLC'si ileriye donuk bilgi saklar;
-    analize alinmaz. Eger timeframe bilinmiyorsa (0 periyot) yalnizca
-    `c.time <= ref` sarti uygulanir (eski davranis guvenlik agi olarak korunur).
+    Filtering every row (rather than breaking at the first future row) makes
+    this safe when exchange/cache input is not already sorted.
     """
     if not candles:
         return []
+    try:
+        reference_ms = int(reference_time_ms)
+    except (TypeError, ValueError, OverflowError):
+        return []
+
     period_ms = TF_PERIOD_MS.get(str(timeframe).lower(), 0) if timeframe else 0
-    out = []
-    for c in candles:
-        if c.time > reference_time_ms:
-            break
-        if period_ms > 0 and (c.time + period_ms - reference_time_ms) > 0:
-            break
-        out.append(c)
-    return out
+    closed = []
+    for candle in candles:
+        try:
+            candle_time = int(candle.time)
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            continue
+        if candle_time > reference_ms:
+            continue
+        if period_ms > 0 and candle_time + period_ms > reference_ms:
+            continue
+        closed.append((candle_time, candle))
+
+    closed.sort(key=lambda item: item[0])
+    return [candle for _, candle in closed]
