@@ -283,11 +283,14 @@ class BacktestRunner:
         self.taker_fee_rate = self._safe_cost_rate(
             getattr(Config, "TAKER_FEE_RATE", 0.00055) if taker_fee_rate is None else taker_fee_rate
         )
+        legacy_mode = self.legacy_fee_rate is not None
         self.spread_rate = self._safe_cost_rate(
-            getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002) if spread_rate is None else spread_rate
+            (0.0 if legacy_mode else getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002))
+            if spread_rate is None else spread_rate
         )
         self.slippage_rate = self._safe_cost_rate(
-            getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003) if slippage_rate is None else slippage_rate
+            (0.0 if legacy_mode else getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003))
+            if slippage_rate is None else slippage_rate
         )
         self.partial_exits = bool(partial_exits)
         self.tp_weights = tp_weights
@@ -865,7 +868,7 @@ class BacktestRunner:
             "spread_cost_quote": round(cost_parts.get("spread", 0.0), 10),
             "slippage_cost_quote": round(cost_parts.get("slippage", 0.0), 10),
             "execution_cost_rr": round(execution_cost_rr, 4),
-            "cost_model": "per_fill_maker_taker_market_friction" if self.legacy_fee_rate is None else "legacy_notional_proxy",
+            "cost_model": "per_fill_maker_taker_market_friction" if self.legacy_fee_rate is None else "round_trip_fee_plus_spread_slippage_proxy",
             "_w": net_rr > 0.0,
             "_tp": outcome.get("tp", 0),
             "_levels": outcome.get("levels") or [],
