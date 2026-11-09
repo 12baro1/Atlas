@@ -353,7 +353,7 @@ def test_long_limit_rejects_targets_already_crossed_before_entry():
 
 
 
-def test_structural_stop_uses_wider_atr_clearance_buffer(monkeypatch):
+def test_structural_stop_uses_small_atr_clearance_buffer(monkeypatch):
     monkeypatch.setattr("utils.atr.atr", lambda candles, period=14: 10.0)
     result = _run(candles=[object()])
     selected = result["selected"]
