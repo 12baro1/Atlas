@@ -25,9 +25,23 @@ class StateEngine:
             with self.path.open("r", encoding="utf-8") as handle:
                 payload = json.load(handle)
             if isinstance(payload, dict):
-                self.state.update(payload)
-                self.state.setdefault("symbols", {})
-                self.state.setdefault("open_positions", {})
+                symbols = payload.get("symbols")
+                positions = payload.get("open_positions")
+                if isinstance(symbols, dict):
+                    self.state["symbols"] = {
+                        str(symbol): value
+                        for symbol, value in symbols.items()
+                        if isinstance(value, dict)
+                    }
+                if isinstance(positions, dict):
+                    self.state["open_positions"] = {
+                        str(key): value
+                        for key, value in positions.items()
+                        if isinstance(value, dict)
+                    }
+                updated_at = payload.get("updated_at")
+                if isinstance(updated_at, (int, float)) and not isinstance(updated_at, bool):
+                    self.state["updated_at"] = updated_at
         except (OSError, json.JSONDecodeError):
             # Keep running with empty state; next successful save repairs the file.
             pass
@@ -53,20 +67,42 @@ class StateEngine:
         if not candles:
             return True
         symbol_state = self.get_symbol_state(symbol) or {}
-        last_time = symbol_state.get("last_candle", {}).get("time")
-        return last_time is None or int(candles[-1].time) > int(last_time)
+        last_time = self._last_candle_time(symbol_state)
+        try:
+            current_time = int(candles[-1].time)
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            return True
+        return last_time is None or current_time > last_time
 
     def new_candles_since_last(self, symbol, candles):
         symbol_state = self.get_symbol_state(symbol) or {}
-        last_time = symbol_state.get("last_candle", {}).get("time")
+        last_time = self._last_candle_time(symbol_state)
         if last_time is None:
             return candles
-        return [candle for candle in candles if int(candle.time) > int(last_time)]
+        result = []
+        for candle in candles:
+            try:
+                candle_time = int(candle.time)
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                continue
+            if candle_time > last_time:
+                result.append(candle)
+        return result
+
+    @staticmethod
+    def _last_candle_time(symbol_state):
+        last_candle = symbol_state.get("last_candle") if isinstance(symbol_state, dict) else None
+        if not isinstance(last_candle, dict):
+            return None
+        try:
+            return int(last_candle.get("time"))
+        except (TypeError, ValueError, OverflowError):
+            return None
 
     def restore_cached_result(self, symbol):
         symbol_state = self.get_symbol_state(symbol) or {}
         cached = symbol_state.get("last_result")
-        if not cached:
+        if not isinstance(cached, dict) or not cached:
             return None
         cached = dict(cached)
         cached["incremental"] = {"cache_hit": True, "reason": "no_new_candle"}
@@ -93,7 +129,10 @@ class StateEngine:
         self.save()
 
     def load_open_positions(self):
-        return list(self.state.get("open_positions", {}).values())
+        positions = self.state.get("open_positions", {})
+        if not isinstance(positions, dict):
+            return []
+        return [dict(position) for position in positions.values() if isinstance(position, dict)]
 
     def _compact_result(self, result):
         if not isinstance(result, dict):
