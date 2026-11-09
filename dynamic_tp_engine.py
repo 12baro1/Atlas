@@ -3,9 +3,14 @@ dynamic_tp_engine.py
 Atlas Dynamic TP Engine
 """
 
+import math
+
 from utils.atr import atr as calculate_atr
+from config import Config
+
 
 class DynamicTPEngine:
+    """Select real, directional market-structure objectives without inventing spacing."""
 
     MIN_RR_LEVELS = (1.0, 2.0, 3.0)
 
@@ -23,264 +28,232 @@ class DynamicTPEngine:
         allow_rr_fallback=True,
         exclude_targets_through=None,
     ):
-
+        direction = str(direction or "").upper()
         if direction not in {"LONG", "SHORT"}:
-            return {"tp1": None, "tp2": None, "tp3": None, "reason": "invalid_direction", "sources": []}
-
-        risk = abs(entry - stop_loss) if stop_loss is not None else 0
+            return self._empty("invalid_direction")
+        entry = self._safe_float(entry)
+        stop_loss = self._safe_float(stop_loss)
+        if entry is None or stop_loss is None or entry <= 0 or stop_loss <= 0:
+            return self._empty("invalid_levels")
+        if (direction == "LONG" and stop_loss >= entry) or (direction == "SHORT" and stop_loss <= entry):
+            return self._empty("stop_on_wrong_side")
+        risk = abs(entry - stop_loss)
         if risk <= 0:
-            return {"tp1": None, "tp2": None, "tp3": None, "reason": "invalid_risk", "sources": []}
+            return self._empty("invalid_risk")
 
         atr_snapshot = self._resolve_atr(atr_value=atr_value, candles=candles)
-        targets = self._collect_targets(direction, entry, liquidity, fvg, orderblocks, structure)
+        raw_targets = self._collect_targets(direction, entry, liquidity, fvg, orderblocks, structure)
         excluded_passed_targets = []
         cutoff = self._safe_float(exclude_targets_through)
         if cutoff is not None and cutoff > 0:
             if direction == "LONG":
-                excluded_passed_targets = [price for price in targets if price <= cutoff]
-                targets = [price for price in targets if price > cutoff]
+                excluded_passed_targets = [price for price in raw_targets if price <= cutoff]
+                raw_targets = [price for price in raw_targets if price > cutoff]
             else:
-                excluded_passed_targets = [price for price in targets if price >= cutoff]
-                targets = [price for price in targets if price < cutoff]
+                excluded_passed_targets = [price for price in raw_targets if price >= cutoff]
+                raw_targets = [price for price in raw_targets if price < cutoff]
 
-        selected_targets = []
-        selected_sources = []
-        previous_target = None
-        missing_rr_level = None
-        best_candidate_rr = None
-
-        for rr_multiple in self.MIN_RR_LEVELS:
-            target, source = self._select_target_for_rr(
-                direction=direction,
-                entry=entry,
-                risk=risk,
-                targets=targets,
-                minimum_rr=rr_multiple,
-                previous_target=previous_target,
-                atr_snapshot=atr_snapshot,
-            )
-
-            if target is None and not allow_rr_fallback:
-                # Structural targets already found remain usable. Stop looking
-                # for farther RR tiers instead of invalidating the whole setup.
-                if selected_targets:
-                    missing_rr_level = rr_multiple
-                    candidate_rr = [
-                        round((entry - price if direction == "SHORT" else price - entry) / risk, 4)
-                        for price in targets
-                        if (entry - price if direction == "SHORT" else price - entry) > 0
-                    ]
-                    best_candidate_rr = max(candidate_rr) if candidate_rr else None
-                    break
-                candidate_rr = [
-                    round((entry - price if direction == "SHORT" else price - entry) / risk, 4)
-                    for price in targets
-                    if (entry - price if direction == "SHORT" else price - entry) > 0
-                ]
-                return {
-                    "tp1": None,
-                    "tp2": None,
-                    "tp3": None,
-                    "reason": "no_valid_structural_targets",
-                    "sources": ["missing_structural_target"],
-                    "synthetic_targets": False,
-                    "atr": round(atr_snapshot, 8),
-                    "candidate_count": len(targets),
-                    "candidate_targets": [round(float(price), 8) for price in targets],
-                    "excluded_passed_targets": [round(float(price), 8) for price in excluded_passed_targets],
-                    "target_exclusion_price": round(cutoff, 8) if cutoff is not None and cutoff > 0 else None,
-                    "missing_rr_level": rr_multiple,
-                    "best_candidate_rr": max(candidate_rr) if candidate_rr else None,
-                }
-            if target is None:
-                target = self._fallback_rr_level(entry, risk, direction, rr_multiple)
-                source = "rr_fallback"
-
-            selected_targets.append(target)
-            selected_sources.append(source)
-            previous_target = target
-
-        if not selected_targets:
-            return {
-                "tp1": None, "tp2": None, "tp3": None,
-                "reason": "no_valid_structural_targets",
-                "sources": ["missing_structural_target"],
-                "synthetic_targets": False,
-                "atr": round(atr_snapshot, 8),
-                "candidate_count": len(targets),
-                "candidate_targets": [round(float(price), 8) for price in targets],
-                "excluded_passed_targets": [round(float(price), 8) for price in excluded_passed_targets],
-                "target_exclusion_price": round(cutoff, 8) if cutoff is not None and cutoff > 0 else None,
-                "missing_rr_level": self.MIN_RR_LEVELS[0],
-                "best_candidate_rr": None,
-            }
-
-        tp1, tp2, tp3 = self._order_target_levels(
+        selected = self.select_structural_targets(
             direction=direction,
             entry=entry,
             risk=risk,
-            targets=selected_targets,
+            targets=raw_targets,
             atr_snapshot=atr_snapshot,
         )
+        sources = ["market_structure"] * len(selected)
+        synthetic = False
 
+        if not selected and allow_rr_fallback:
+            selected = [
+                self._fallback_rr_level(entry, risk, direction, rr)
+                for rr in self.MIN_RR_LEVELS
+            ]
+            sources = ["rr_fallback"] * len(selected)
+            synthetic = True
+
+        if not selected:
+            candidate_rrs = [
+                self._reward(entry, price, direction) / risk
+                for price in raw_targets
+                if self._reward(entry, price, direction) > 0
+            ]
+            best_candidate_rr = max(candidate_rrs) if candidate_rrs else None
+            missing_rr_level = next(
+                (rr for rr in self.MIN_RR_LEVELS if best_candidate_rr is None or best_candidate_rr < rr),
+                None,
+            )
+            return {
+                **self._empty("no_valid_structural_targets"),
+                "sources": ["missing_structural_target"],
+                "synthetic_targets": False,
+                "atr": round(atr_snapshot, 8),
+                "candidate_count": len(raw_targets),
+                "candidate_targets": [round(price, 8) for price in raw_targets],
+                "excluded_passed_targets": [round(price, 8) for price in excluded_passed_targets],
+                "target_exclusion_price": round(cutoff, 8) if cutoff is not None and cutoff > 0 else None,
+                "missing_rr_level": missing_rr_level,
+                "best_candidate_rr": round(best_candidate_rr, 4) if best_candidate_rr is not None else None,
+                "minimum_target_separation": self.minimum_target_separation(entry, risk, atr_snapshot),
+            }
+
+        selected = selected[:3]
+        tp1, tp2, tp3 = self._order_target_levels(direction, entry, risk, selected)
+        target_rrs = [round(self._reward(entry, price, direction) / risk, 4) for price in selected]
+        best_candidate_rr = max(
+            (self._reward(entry, price, direction) / risk for price in raw_targets),
+            default=None,
+        )
+        missing_rr_level = next(
+            (rr for rr in self.MIN_RR_LEVELS if best_candidate_rr is None or best_candidate_rr < rr),
+            None,
+        )
         return {
             "tp1": tp1,
             "tp2": tp2,
             "tp3": tp3,
-            "reason": ",".join(selected_sources),
-            "sources": selected_sources,
-            "synthetic_targets": any(source == "rr_fallback" for source in selected_sources),
+            "reason": ",".join(sources),
+            "sources": sources,
+            "synthetic_targets": synthetic,
             "atr": round(atr_snapshot, 8),
-            "candidate_count": len(targets),
-            "candidate_targets": [round(float(price), 8) for price in targets],
-            "excluded_passed_targets": [round(float(price), 8) for price in excluded_passed_targets],
+            "candidate_count": len(raw_targets),
+            "candidate_targets": [round(price, 8) for price in raw_targets],
+            "clustered_targets": [round(price, 8) for price in selected],
+            "excluded_passed_targets": [round(price, 8) for price in excluded_passed_targets],
             "target_exclusion_price": round(cutoff, 8) if cutoff is not None and cutoff > 0 else None,
-            "target_rrs": [
-                round((entry - price if direction == "SHORT" else price - entry) / risk, 4)
-                for price in selected_targets
-            ],
+            "target_rrs": target_rrs,
             "missing_rr_level": missing_rr_level,
-            "best_candidate_rr": best_candidate_rr,
+            "best_candidate_rr": round(best_candidate_rr, 4) if best_candidate_rr is not None else None,
+            "minimum_target_separation": self.minimum_target_separation(entry, risk, atr_snapshot),
         }
+
+    @staticmethod
+    def _empty(reason):
+        return {
+            "tp1": None, "tp2": None, "tp3": None,
+            "reason": reason, "sources": [], "synthetic_targets": False,
+        }
+
+    @staticmethod
+    def _reward(entry, target, direction):
+        return target - entry if direction == "LONG" else entry - target
+
+    def minimum_target_separation(self, entry, risk, atr_snapshot=0.0):
+        risk_floor = risk * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_R", 0.35)))
+        atr_floor = atr_snapshot * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_ATR", 0.20)))
+        percent_floor = entry * max(0.0, float(getattr(Config, "MIN_TP_TARGET_SEPARATION_PERCENT", 0.0005)))
+        return max(risk_floor, atr_floor, percent_floor, 1e-12)
+
+    def select_structural_targets(self, direction, entry, risk, targets, atr_snapshot=0.0):
+        """Return nearest valid objectives, collapsing levels that belong to one price cluster."""
+        direction = str(direction or "").upper()
+        if direction not in {"LONG", "SHORT"} or risk <= 0:
+            return []
+        minimum_first_rr = max(0.0, float(getattr(Config, "MIN_TP1_RR", 0.80)))
+        min_separation = self.minimum_target_separation(entry, risk, atr_snapshot)
+        valid = []
+        for raw in targets or []:
+            price = self._safe_float(raw)
+            if price is None or price <= 0:
+                continue
+            reward = self._reward(entry, price, direction)
+            if reward <= 0 or reward / risk < minimum_first_rr:
+                continue
+            if not any(abs(price - existing) <= max(entry, price) * 1e-10 for existing in valid):
+                valid.append(price)
+        valid.sort(reverse=(direction == "SHORT"))
+        selected = []
+        for price in valid:
+            if not selected or abs(price - selected[-1]) >= min_separation:
+                selected.append(price)
+                if len(selected) == 3:
+                    break
+        return selected
 
     def _collect_targets(self, direction, entry, liquidity, fvg, orderblocks, structure):
         targets = []
-
-        # Targets must be opposing-side liquidity pools. A long seeks BSL;
-        # a short seeks SSL. Unknown liquidity types are not treated as targets.
         expected_liquidity = "BUY_SIDE" if direction == "LONG" else "SELL_SIDE"
         for item in liquidity or []:
-            if not isinstance(item, dict) or item.get("type") != expected_liquidity:
+            if not isinstance(item, dict) or str(item.get("type", "")).upper() != expected_liquidity:
                 continue
             price = self._safe_float(item.get("price"))
-            if price is None:
-                continue
-            if direction == "LONG" and price > entry:
-                targets.append(price)
-            elif direction == "SHORT" and price < entry:
+            if price is not None and self._reward(entry, price, direction) > 0:
                 targets.append(price)
 
-        # An opposing, still-unfilled imbalance may be used as an objective;
-        # filled gaps are already mitigated and must not be recycled as targets.
         expected_fvg = "BEARISH" if direction == "LONG" else "BULLISH"
         for item in fvg or []:
-            if not isinstance(item, dict) or item.get("type") != expected_fvg or item.get("filled", False):
+            if not isinstance(item, dict) or str(item.get("type", "")).upper() != expected_fvg or item.get("filled", False):
                 continue
-            if direction == "LONG":
-                price = self._safe_float(item.get("from"))
-                if price is not None and price > entry:
-                    targets.append(price)
-            else:
-                price = self._safe_float(item.get("to"))
-                if price is not None and price < entry:
-                    targets.append(price)
+            key = "from" if direction == "LONG" else "to"
+            price = self._safe_float(item.get(key))
+            if price is not None and self._reward(entry, price, direction) > 0:
+                targets.append(price)
 
-        # Opposing fresh order blocks are supply targets for longs and demand
-        # targets for shorts. Mitigated blocks are excluded.
         expected_ob = "BEARISH" if direction == "LONG" else "BULLISH"
         for item in orderblocks or []:
-            if not isinstance(item, dict) or item.get("type") != expected_ob or item.get("mitigated", False):
+            if not isinstance(item, dict) or str(item.get("type", "")).upper() != expected_ob or item.get("mitigated", False):
                 continue
-            if direction == "LONG":
-                price = self._safe_float(item.get("low"))
-                if price is not None and price > entry:
-                    targets.append(price)
-            else:
-                price = self._safe_float(item.get("high"))
-                if price is not None and price < entry:
-                    targets.append(price)
+            key = "low" if direction == "LONG" else "high"
+            price = self._safe_float(item.get(key))
+            if price is not None and self._reward(entry, price, direction) > 0:
+                targets.append(price)
 
         for item in structure or []:
+            if not isinstance(item, dict):
+                continue
             label = str(item.get("label", "")).upper()
             price = self._safe_float(item.get("price"))
             if price is None:
                 continue
-
             if direction == "LONG" and label in {"HH", "LH"} and price > entry:
                 targets.append(price)
-            if direction == "SHORT" and label in {"LL", "HL"} and price < entry:
+            elif direction == "SHORT" and label in {"LL", "HL"} and price < entry:
                 targets.append(price)
 
-        if direction == "LONG":
-            return sorted(set(targets))
-        return sorted(set(targets), reverse=True)
+        return sorted(set(targets), reverse=(direction == "SHORT"))
 
     def _select_target_for_rr(self, direction, entry, risk, targets, minimum_rr, previous_target=None, atr_snapshot=0.0):
-        # ATR is a volatility descriptor, not a second RR denominator. Requiring
-        # both risk*R and ATR*R can push targets several times farther away than
-        # the actual structural risk and suppress otherwise valid liquidity TP.
-        minimum_reward = risk * minimum_rr
-
         for target in targets:
-            if previous_target is not None:
-                if direction == "LONG" and target <= previous_target:
-                    continue
-                if direction == "SHORT" and target >= previous_target:
-                    continue
-
-            reward = target - entry if direction == "LONG" else entry - target
-            if reward <= 0:
+            if previous_target is not None and (
+                (direction == "LONG" and target <= previous_target)
+                or (direction == "SHORT" and target >= previous_target)
+            ):
                 continue
-
-            rr = reward / risk
-            if rr >= minimum_rr and reward >= minimum_reward:
+            if self._reward(entry, target, direction) / risk >= minimum_rr:
                 return target, "market_structure"
-
         return None, None
 
     def _fallback_rr_level(self, entry, risk, direction, rr_multiple):
-        level = entry + (risk * rr_multiple) if direction == "LONG" else entry - (risk * rr_multiple)
+        level = entry + risk * rr_multiple if direction == "LONG" else entry - risk * rr_multiple
         return round(level, 8)
 
     def _order_target_levels(self, direction, entry, risk, targets, atr_snapshot=0.0):
-        """Return the three already-validated structural targets in trade order.
-
-        Do not manufacture, nudge, or ATR-expand targets here. The caller has
-        selected each target against its required R multiple; this method only
-        normalizes ordering and refuses duplicate/missing levels.
-        """
-        candidates = []
-        for price in targets:
-            value = self._safe_float(price)
-            if value is None:
-                continue
-            reward = value - entry if direction == "LONG" else entry - value
-            if reward > 0 and value not in candidates:
-                candidates.append(value)
+        candidates = [
+            price for price in targets
+            if self._reward(entry, price, direction) > 0
+        ]
         candidates.sort(key=lambda price: abs(price - entry))
-        # Keep every real structural objective, even when fewer than three
-        # exist. Missing levels stay None; they are never synthesized or nudged.
         candidates = candidates[:3]
         candidates.extend([None] * (3 - len(candidates)))
         return candidates[0], candidates[1], candidates[2]
 
     def _nudge_level(self, entry, risk, direction, picked, used):
-        """Çakışan seviyeyi trade yönünde basamak basamak öteleyerek benzersiz yapar."""
-        step = max(risk * 0.1, 1e-12)
-        sign = 1.0 if direction == "LONG" else -1.0
-        guard = 0
-        while picked in used and guard < 500:
-            picked = round(picked + sign * step, 8)
-            guard += 1
         return picked
 
     def _safe_float(self, value):
         try:
-            return float(value)
-        except (TypeError, ValueError):
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
             return None
+        return number if math.isfinite(number) else None
 
     def _resolve_atr(self, atr_value=None, candles=None):
         if atr_value is not None:
-            try:
-                return max(0.0, float(atr_value))
-            except (TypeError, ValueError):
-                return 0.0
-
+            value = self._safe_float(atr_value)
+            return max(0.0, value) if value is not None else 0.0
         if candles:
             try:
-                return max(0.0, float(calculate_atr(candles, period=14)))
+                value = self._safe_float(calculate_atr(candles, period=14))
+                return max(0.0, value) if value is not None else 0.0
             except Exception:
                 return 0.0
-
         return 0.0
