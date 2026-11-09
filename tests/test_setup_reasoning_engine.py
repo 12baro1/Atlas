@@ -51,20 +51,20 @@ def test_no_candidate_is_created_without_a_real_directional_poi():
     assert result["selected"]["valid"] is False
 
 
-def test_candidate_selection_prefers_nearest_valid_poi_before_projected_rr():
+def test_candidate_selection_prefers_better_net_rr_over_nearest_poi():
     result = _run(
         fvg=[
-            {"type": "BULLISH", "from": 100, "to": 105, "filled": False},
-            {"type": "BULLISH", "from": 106, "to": 108, "filled": False},
+            {"type": "BULLISH", "from": 105, "to": 106, "filled": False},
+            {"type": "BULLISH", "from": 108, "to": 110, "filled": False},
         ],
         current_price=112,
         liquidity=[{"type": "BUY_SIDE", "price": 120}, {"type": "BUY_SIDE", "price": 150}],
     )
     assert len(result["candidates"]) == 2
-    selected_distance = result["selected"]["entry_distance_pct"]
-    assert selected_distance == min(
-        candidate["entry_distance_pct"] for candidate in result["candidates"]
-    )
+    far_candidate = min(result["candidates"], key=lambda item: item["entry_distance_pct"])
+    quality_candidate = max(result["candidates"], key=lambda item: item["net_first_target_rr"])
+    assert quality_candidate["entry_distance_pct"] > far_candidate["entry_distance_pct"]
+    assert result["selected"]["setup_candidate_id"] == quality_candidate["setup_candidate_id"]
 
 
 def test_candidate_entry_uses_evidence_balance_instead_of_fixed_deep_limit():
@@ -348,3 +348,12 @@ def test_long_limit_rejects_targets_already_crossed_before_entry():
     )
     assert result["candidates"] == []
     assert result["selected"]["valid"] is False
+
+
+
+def test_structural_stop_uses_wider_atr_clearance_buffer(monkeypatch):
+    monkeypatch.setattr("utils.atr.atr", lambda candles, period=14: 10.0)
+    result = _run(candles=[object()])
+    selected = result["selected"]
+    assert selected["stop_buffer"] == 5.0
+    assert selected["stop_loss"] <= selected["entry"] - 5.0
