@@ -98,7 +98,7 @@ class Config:
     MAKER_FEE_RATE = float(os.getenv("ATLAS_MAKER_FEE_RATE", "0.0002"))
     TAKER_FEE_RATE = float(os.getenv("ATLAS_TAKER_FEE_RATE", "0.00055"))
     # Legacy single-rate proxy retained only for older integrations.
-    ROUND_TRIP_COST_RATE = float(os.getenv("ATLAS_ROUND_TRIP_COST_RATE", "0.00075"))
+    ROUND_TRIP_COST_RATE = float(os.getenv("ATLAS_ROUND_TRIP_COST_RATE", "0.0020"))
     ATR_PERIOD = 14
     # Structural invalidation remains primary; ATR is a volatility floor, not a demand to force every stop to 0.75 ATR.
     MIN_STOP_ATR_MULTIPLIER = 0.25
