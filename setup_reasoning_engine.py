@@ -578,6 +578,14 @@ class SetupReasoningEngine:
                 candidate_distance = abs(entry_price - current)
                 atr_distance = candidate_distance / atr_value if atr_value and atr_value > 0 else None
                 distance_pct = candidate_distance / current if current > 0 else None
+                max_setup_distance_atr = float(getattr(Config, "MAX_SETUP_ENTRY_DISTANCE_ATR", 2.0))
+                max_setup_distance_pct = float(getattr(Config, "MAX_SETUP_ENTRY_DISTANCE_PERCENT", 0.05))
+                distance_exceeded = (
+                    distance_pct is not None and distance_pct > max_setup_distance_pct
+                ) or (
+                    atr_distance is not None and atr_distance > max_setup_distance_atr
+                )
+                execution_eligible = not distance_exceeded
                 distance_label = (
                     "YAKIN GİRİŞ"
                     if distance_pct is not None and distance_pct <= 0.02
@@ -601,7 +609,10 @@ class SetupReasoningEngine:
                     "poi_source": source, "poi_zone": {"low": low, "high": high},
                     "ote_confluence": ote_overlap, "stop_buffer": atr_buffer,
                     "entry_reason_code": "ENTRY_READY", "entry_zone_crossed": False,
-                    "entry_too_far": False, "score": max(50, int(base_entry.get("score", 50) or 50)),
+                    "entry_too_far": bool(distance_exceeded),
+                    "execution_eligible": execution_eligible,
+                    "entry_reason_code": "ENTRY_READY" if execution_eligible else "ENTRY_TOO_FAR",
+                    "score": max(50, int(base_entry.get("score", 50) or 50)),
                     "reason": "Structurally valid POI candidate",
                     "checks": list(base_entry.get("checks") or []),
                     "setup_candidate_id": f"{direction}:{source}:{index}",
@@ -648,9 +659,28 @@ class SetupReasoningEngine:
             "motor_evidence_sources": motor_evidence_sources,
             }
 
-        # Main authority ranks trade quality first. Market proximity is only
-        # a late tie-breaker; it must never beat a structurally and economically
-        # superior candidate merely because that candidate is closer to spot.
+        # Structurally valid distant POIs remain in candidates for diagnostics,
+        # but only execution-eligible candidates may become the selected setup.
+        eligible_candidates = [item for item in candidates if item.get("execution_eligible", True)]
+        if not eligible_candidates:
+            nearest = min(candidates, key=lambda item: abs(item["entry"] - current))
+            return {
+                "candidates": candidates,
+                "selected": {
+                    "valid": False,
+                    "direction": "WAIT",
+                    "reason": "All structurally valid POIs are too far from current market price",
+                    "entry_reason_code": "ENTRY_TOO_FAR",
+                    "nearest_candidate_distance_pct": nearest.get("entry_distance_pct"),
+                    "nearest_candidate_distance_atr": nearest.get("entry_distance_atr"),
+                },
+                "reason": "all_poi_candidates_too_far",
+                "motor_evidence_count": len(evidence_records),
+                "motor_evidence_sources": motor_evidence_sources,
+            }
+
+        # Main authority ranks trade quality among actionable-distance candidates.
+        # Distance is a hard execution boundary, not merely a late tie-breaker.
         def rank(candidate):
             net_rr = candidate.get("net_projected_rr")
             first_rr = candidate.get("net_first_target_rr")
@@ -672,7 +702,7 @@ class SetupReasoningEngine:
                 candidate.get("poi_source") in {"ORDER_BLOCK", "HTF_ORDER_BLOCK"},
                 -distance,
             )
-        selected = max(candidates, key=rank)
+        selected = max(eligible_candidates, key=rank)
         selected = dict(selected)
         selected["reasoning"] = selected["reasoning"] + (
             f"; {len(candidates)} candidates compared; selected by target geometry, "
