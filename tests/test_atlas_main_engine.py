@@ -80,3 +80,28 @@ def test_missing_selected_candidate_is_normalized_to_invalid_setup():
     result = main.build_setup()
     assert result["candidates"] == []
     assert result["selected"]["valid"] is False
+
+def test_main_engine_owns_full_pipeline_lifecycle():
+    main, _ = _main()
+    calls = []
+    payload = {"decision": {"action": "EXECUTE", "signal": "SHORT"}}
+
+    def pipeline(data):
+        calls.append(data)
+        return payload
+
+    result = main.analyze({"symbol": "BTC/USDT"}, pipeline=pipeline)
+    assert calls == [{"symbol": "BTC/USDT"}]
+    assert result["main_engine"]["pipeline"] == "COMPLETED"
+    assert result["main_engine"]["final_action"] == "EXECUTE"
+    assert result["main_engine"]["final_direction"] == "SHORT"
+
+
+def test_main_engine_rejects_missing_pipeline():
+    main, _ = _main()
+    try:
+        main.analyze({"symbol": "BTC/USDT"}, pipeline=None)
+    except TypeError as exc:
+        assert "callable motor pipeline" in str(exc)
+    else:
+        raise AssertionError("missing pipeline must fail explicitly")
