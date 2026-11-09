@@ -212,7 +212,11 @@ class AtlasEngine:
         )
 
     def analyze(self, data):
-        """Çoklu zaman dilimi verisini analiz eder ve birleşik çıktı üretir."""
+        """Route every market analysis through the single main engine."""
+        return self.main_engine.analyze(data, pipeline=self._analyze_with_motors)
+
+    def _analyze_with_motors(self, data):
+        """Execute registered specialist motors and assemble their evidence."""
         self._validate_market_data(data)
 
         symbol = data.get("symbol", "UNKNOWN")
