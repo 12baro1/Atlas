@@ -291,7 +291,7 @@ class AtlasMainEngine:
         import math
 
         setup = dict(entry) if isinstance(entry, dict) else {}
-        risk_payload = dict(risk) if isinstance(risk, dict) else {}
+        risk_payload = dict(risk) if isinstance(risk, dict) else None
         target_payload = dict(targets) if isinstance(targets, dict) else {}
         if not setup.get("valid"):
             return {"entry": setup, "risk": risk_payload, "targets": target_payload}
@@ -300,8 +300,8 @@ class AtlasMainEngine:
         try:
             entry_price = float(setup.get("entry"))
             requested_stop = float(setup.get("stop_loss"))
-            risk_stop = risk_payload.get("stop_loss")
-            stop = float(risk_stop) if risk_payload.get("risk_setup_valid") is True and risk_stop is not None else requested_stop
+            risk_stop = risk_payload.get("stop_loss") if isinstance(risk_payload, dict) else None
+            stop = float(risk_stop) if isinstance(risk_payload, dict) and risk_payload.get("risk_setup_valid") is True and risk_stop is not None else requested_stop
         except (TypeError, ValueError, OverflowError):
             setup.update({"valid": False, "reason": "Main authority: invalid entry/stop geometry",
                           "entry_reason_code": "INVALID_FINAL_GEOMETRY"})
@@ -311,7 +311,7 @@ class AtlasMainEngine:
             setup.update({"valid": False, "reason": "Main authority: non-finite/non-positive entry or stop",
                           "entry_reason_code": "INVALID_FINAL_GEOMETRY"})
             return {"entry": setup, "risk": risk_payload, "targets": target_payload}
-        risk_entry = risk_payload.get("entry")
+        risk_entry = risk_payload.get("entry") if isinstance(risk_payload, dict) else None
         if risk_entry is not None:
             try:
                 risk_entry = float(risk_entry)
@@ -362,8 +362,9 @@ class AtlasMainEngine:
         setup["stop_loss"] = stop
         setup.update(final_targets)
         setup["final_geometry_authority"] = "ATLAS_MAIN_ENGINE"
-        risk_payload["stop_loss"] = stop
-        risk_payload.update(final_targets)
+        if isinstance(risk_payload, dict):
+            risk_payload["stop_loss"] = stop
+            risk_payload.update(final_targets)
         target_payload.update(final_targets)
         target_payload["selected_by"] = "ATLAS_MAIN_ENGINE"
         target_payload["final_geometry_authority"] = "ATLAS_MAIN_ENGINE"
