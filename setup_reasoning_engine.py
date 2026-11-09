@@ -654,15 +654,20 @@ class SetupReasoningEngine:
             net_rr = candidate.get("net_projected_rr")
             first_rr = candidate.get("net_first_target_rr")
             distance = abs(candidate["entry"] - current) / current
+            # Prefer the nearest still-valid POI first. Previously projected
+            # RR dominated this ordering, allowing a very distant POI with a
+            # huge theoretical target to beat a nearby, executable setup.
+            # Distance is a ranking preference, not a hard filter: if only a
+            # distant valid POI exists it remains visible and is labeled far.
             return (
                 candidate.get("projected_target") is not None,
+                distance * -1.0,
                 net_rr if net_rr is not None else -1.0,
                 first_rr if first_rr is not None else -1.0,
                 candidate.get("structure_aligned", False),
                 candidate.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL",
                 candidate.get("ote_confluence", False),
                 candidate.get("orderflow_supportive", False),
-                distance * -1.0,
                 candidate.get("poi_source") in {"ORDER_BLOCK", "HTF_ORDER_BLOCK"},
             )
         selected = max(candidates, key=rank)
