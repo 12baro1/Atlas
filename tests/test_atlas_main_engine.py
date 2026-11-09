@@ -213,3 +213,29 @@ def test_analysis_report_preserves_single_setup_and_final_decision():
     assert result["main_engine"]["selected_candidate_valid"] is True
     assert result["main_engine"]["final_action"] == "EXECUTE"
     assert result["main_engine"]["final_direction"] == "LONG"
+
+
+
+def test_analysis_failure_keeps_motor_error_report():
+    class _BrokenMotor:
+        def analyze(self, _data):
+            raise RuntimeError("specialist failed")
+
+    main = AtlasMainEngine(
+        motors={"broken": _BrokenMotor()},
+        setup_reasoner=_SetupReasoner(),
+        decision_engine=_Decision(),
+    )
+
+    def pipeline(data):
+        return main.motors["broken"].analyze(data)
+
+    try:
+        main.analyze({"symbol": "BTC/USDT"}, pipeline=pipeline)
+    except RuntimeError as exc:
+        assert "specialist failed" in str(exc)
+    else:
+        raise AssertionError("failed specialist must abort analysis")
+
+    assert main.last_motor_report["pipeline"] == "FAILED"
+    assert main.last_motor_report["motor_diagnostics"]["error_count"] == 1
