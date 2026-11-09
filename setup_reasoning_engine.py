@@ -239,7 +239,8 @@ class SetupReasoningEngine:
                  higher_timeframe_orderblocks=None, higher_timeframe_fvg=None,
                  optimization=None, breaker=None, ifvg=None, trendline_sweep=None,
                  eqh_eql=None, inducement=None, premium_discount=None,
-                 internal_structure=None, trendline_liquidity=None):
+                 internal_structure=None, trendline_liquidity=None,
+                 motor_evidence=None):
         base_entry = base_entry if isinstance(base_entry, dict) else {}
         current = self._number(current_price)
         if current is None or current <= 0:
@@ -487,7 +488,17 @@ class SetupReasoningEngine:
                 candidates.append(candidate)
 
         if not candidates:
-            return {"candidates": [], "selected": base_entry, "reason": "no_additional_executable_poi"}
+            return {
+                "candidates": [],
+                "selected": {
+                    "valid": False,
+                    "direction": "WAIT",
+                    "reason": "No structurally valid POI candidate",
+                    "entry_reason_code": "NO_MAIN_ENGINE_SETUP",
+                },
+                "reason": "no_structurally_valid_poi",
+                "motor_evidence_count": len(motor_evidence or []),
+            }
 
         # Lexicographic scenario selection; no additive votes or confidence score.
         # Prefer a valid structural target, then best projected RR, confirmed
@@ -511,4 +522,9 @@ class SetupReasoningEngine:
             f"; {len(candidates)} candidates compared; selected by target geometry, "
             "projected R, confirmed structure and POI location"
         )
-        return {"candidates": candidates, "selected": selected, "reason": "best_structural_candidate"}
+        return {
+            "candidates": candidates,
+            "selected": selected,
+            "reason": "best_structural_candidate",
+            "motor_evidence_count": len(motor_evidence or []),
+        }
