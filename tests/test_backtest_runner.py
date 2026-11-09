@@ -545,7 +545,8 @@ def test_limit_order_is_cancelled_if_target_hits_before_fill():
         "analysis": {"entry": {"entry_type": "LIMIT"}},
     }
     assert runner._to_trade(result, candles, entry_index=0) is None
-    assert runner.statistics()["stale_limits_cancelled"] == 1
+    assert runner.statistics()["stale_limit_targets_rebased"] == 1
+    assert runner.statistics()["stale_limits_cancelled"] == 0
     assert runner.statistics()["stale_limit_target_before_fill"] == 1
 
 
@@ -563,7 +564,8 @@ def test_signal_candle_target_touch_is_counted_separately_for_stale_limit():
     }
     assert runner._to_trade(result, candles, entry_index=1, signal_index=0) is None
     stats = runner.statistics()
-    assert stats["stale_limits_cancelled"] == 1
+    assert stats["stale_limit_targets_rebased"] == 1
+    assert stats["stale_limits_cancelled"] == 0
     assert stats["stale_limit_signal_candle_target"] == 1
     assert stats["stale_limit_target_before_fill"] == 0
 
@@ -692,7 +694,8 @@ def test_limit_is_cancelled_when_target_was_hit_on_signal_candle():
         "analysis": {"entry": {"entry_type": "LIMIT"}},
     }
     assert runner._to_trade(result, candles, entry_index=1, signal_index=0) is None
-    assert runner.statistics()["stale_limits_cancelled"] == 1
+    assert runner.statistics()["stale_limit_targets_rebased"] == 1
+    assert runner.statistics()["stale_limits_cancelled"] == 0
     assert runner.statistics()["candidate_signals"] == 1
 
 
