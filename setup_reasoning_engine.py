@@ -7,6 +7,7 @@ structural validity, target geometry and execution quality.
 import math
 
 from config import Config
+from execution_costs import estimate_plan_cost, estimate_stop_cost
 
 
 class SetupReasoningEngine:
@@ -124,6 +125,43 @@ class SetupReasoningEngine:
                 elif direction == "SHORT" and label in {"LL", "HL"} and price < entry:
                     levels.append(price)
         return sorted(set(levels), reverse=(direction == "SHORT"))
+
+    def _entry_from_evidence(self, direction, low, high, optimization, default_position=0.38):
+        """Choose a price inside each POI from specialist evidence, not a fixed deep-limit offset."""
+        evidence = optimization.get("evidence") if isinstance(optimization, dict) else None
+        if not isinstance(evidence, list) or not evidence:
+            position = max(0.12, min(0.88, float(default_position)))
+            return low + (high - low) * position
+
+        weighted = [(0.50, 2.0)]
+        for item in evidence:
+            if not isinstance(item, dict):
+                continue
+            try:
+                weight = max(0.0, float(item.get("weight", 0.0) or 0.0))
+            except (TypeError, ValueError, OverflowError):
+                weight = 0.0
+            if weight <= 0:
+                continue
+            price = self._number(item.get("price"))
+            if price is not None and low <= price <= high:
+                position = (price - low) / (high - low)
+                if direction == "SHORT":
+                    position = 1.0 - position
+                weighted.append((position, weight))
+                continue
+            bias = str(item.get("bias") or "").upper()
+            if bias in {"ALIGNED", "SUPPORTIVE", "CONFIRMED"}:
+                weighted.append((0.62, weight))
+            elif bias in {"OPPOSED", "COUNTERPRESSURE", "MANIPULATION_RISK", "WEAK"}:
+                weighted.append((0.18, weight))
+            elif bias == "CONTEXT":
+                weighted.append((0.50, weight))
+
+        total = sum(weight for _, weight in weighted)
+        position = sum(value * weight for value, weight in weighted) / max(total, 1e-9)
+        position = max(0.12, min(0.88, position))
+        return low + (high - low) * position
 
     def _evidence(self, direction, mtf, sweep, structure, ote, htf_orderblock,
                   htf_fvg, smt, unicorn, cisd, volume_profile, institutional,
@@ -373,7 +411,9 @@ class SetupReasoningEngine:
                     stop = stop_reference + atr_buffer
                     stop_source = "ote_invalidation" if stop_reference > high else f"{source.lower()}_invalidation"
 
-                # Reuse EntryOptimizer's price only for the exact POI it analyzed.
+                # Re-score every candidate POI with the same specialist evidence.
+                # The optimizer's one-zone price is reused only for that exact POI;
+                # other POIs receive their own evidence-weighted price.
                 optimized_price = self._number((optimization or {}).get("optimized_entry")) if isinstance(optimization, dict) else None
                 base_zone = base_entry.get("poi_zone") if isinstance(base_entry.get("poi_zone"), dict) else {}
                 base_source = str(base_entry.get("poi_source") or "").upper()
@@ -383,8 +423,14 @@ class SetupReasoningEngine:
                     and self._number(base_zone.get("low")) == low
                     and self._number(base_zone.get("high")) == high
                 )
-                if optimized_price is not None and same_base_poi and low <= optimized_price <= high and not (inside and market_confirmed):
-                    entry_price = optimized_price
+                if not (inside and market_confirmed):
+                    if optimized_price is not None and same_base_poi and low <= optimized_price <= high:
+                        entry_price = optimized_price
+                    elif isinstance(optimization, dict) and optimization.get("evidence"):
+                        entry_price = self._entry_from_evidence(
+                            direction, low, high, optimization,
+                            default_position=0.38 if inside else 0.50,
+                        )
 
                 executable = (
                     (inside and market_confirmed)
@@ -422,14 +468,11 @@ class SetupReasoningEngine:
                 ]
                 if active_trendline_pools:
                     market_context.append(f"Trendline liquidity pools: {len(active_trendline_pools)}")
-                # Counterpressure refines the fill location inside this same POI;
-                # it never removes an otherwise valid structural scenario.
+                # Counterpressure is already reflected in the evidence-weighted
+                # price above; do not overwrite it with the same fixed 38% level.
                 entry_depth_reason = None
                 if opposition and not (inside and market_confirmed):
-                    deeper = low + (high - low) * 0.38 if direction == "LONG" else high - (high - low) * 0.38
-                    if (direction == "LONG" and current > deeper) or (direction == "SHORT" and current < deeper):
-                        entry_price = deeper
-                        entry_depth_reason = "Karşı baskı nedeniyle POI içinde daha derin LIMIT tercih edildi"
+                    entry_depth_reason = "Karşı baskı ve uzman motor kanıtları POI içi girişe yansıtıldı"
 
                 risk = abs(entry_price - stop)
                 if risk <= 0 or (direction == "LONG" and stop >= entry_price) or (
@@ -445,6 +488,39 @@ class SetupReasoningEngine:
                     fvg=target_fvg, orderblocks=target_obs, structure=structure,
                 )
                 projected_rr = abs(targets[-1] - entry_price) / risk if targets else None
+                target_map = {
+                    f"tp{index}": price
+                    for index, price in enumerate(targets[:3], start=1)
+                }
+                cost_weights = getattr(Config, "PARTIAL_EXIT_WEIGHTS", None)
+                maker_fee = getattr(Config, "MAKER_FEE_RATE", 0.0002)
+                taker_fee = getattr(Config, "TAKER_FEE_RATE", 0.00055)
+                spread_rate = getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002)
+                slippage_rate = getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)
+                candidate_entry_type = "MARKET" if inside and market_confirmed else "LIMIT"
+                plan_cost = estimate_plan_cost(
+                    entry_price=entry_price, targets=target_map,
+                    weights=cost_weights, entry_type=candidate_entry_type,
+                    maker_fee_rate=maker_fee, taker_fee_rate=taker_fee,
+                    spread_rate=spread_rate, slippage_rate=slippage_rate,
+                )
+                stop_cost = estimate_stop_cost(
+                    entry_price=entry_price, stop_price=stop,
+                    entry_type=candidate_entry_type,
+                    maker_fee_rate=maker_fee, taker_fee_rate=taker_fee,
+                    spread_rate=spread_rate, slippage_rate=slippage_rate,
+                )
+                execution_cost_rr = float(plan_cost.get("total", 0.0)) / risk
+                stop_cost_rr = float(stop_cost.get("total", 0.0)) / risk
+                nearest_target_rr = abs(targets[0] - entry_price) / risk if targets else None
+                net_first_target_rr = (
+                    nearest_target_rr - execution_cost_rr
+                    if nearest_target_rr is not None else None
+                )
+                net_projected_rr = (
+                    projected_rr - execution_cost_rr
+                    if projected_rr is not None else None
+                )
 
                 structure_events = [
                     event for event in (structure or [])
@@ -491,6 +567,11 @@ class SetupReasoningEngine:
                     "direction_source": direction_source,
                     "projected_target": targets[-1] if targets else None,
                     "projected_rr": projected_rr,
+                    "estimated_execution_cost_rr": round(execution_cost_rr, 4),
+                    "estimated_stop_cost_rr": round(stop_cost_rr, 4),
+                    "net_first_target_rr": round(net_first_target_rr, 4) if net_first_target_rr is not None else None,
+                    "net_projected_rr": round(net_projected_rr, 4) if net_projected_rr is not None else None,
+                    "execution_economics_valid": bool(net_first_target_rr is not None and net_first_target_rr > 0),
                     "structure_aligned": structure_aligned,
                     "orderflow_supportive": orderflow_supportive,
                     "counterpressure_adjusted": bool(entry_depth_reason),
@@ -526,15 +607,16 @@ class SetupReasoningEngine:
             "motor_evidence_sources": motor_evidence_sources,
             }
 
-        # Lexicographic scenario selection; no additive votes or confidence score.
-        # Prefer a valid structural target, then best projected RR, confirmed
-        # reversal trigger, OTE overlap, POI overlap, then nearer executable entry.
+        # Lexicographic scenario selection; execution costs are priced before
+        # raw reward so a wide-looking target cannot hide fee drag.
         def rank(candidate):
-            rr = candidate.get("projected_rr")
+            net_rr = candidate.get("net_projected_rr")
+            first_rr = candidate.get("net_first_target_rr")
             distance = abs(candidate["entry"] - current) / current
             return (
                 candidate.get("projected_target") is not None,
-                rr if rr is not None else -1.0,
+                net_rr if net_rr is not None else -1.0,
+                first_rr if first_rr is not None else -1.0,
                 candidate.get("structure_aligned", False),
                 candidate.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL",
                 candidate.get("ote_confluence", False),
