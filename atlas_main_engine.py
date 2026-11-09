@@ -165,19 +165,25 @@ class AtlasMainEngine:
         ]
         if eligible:
             def candidate_rank(candidate):
-                first_rr = candidate.get("net_first_target_rr")
-                net_rr = candidate.get("net_projected_rr")
-                try:
-                    distance = float(candidate.get("entry_distance_pct"))
-                except (TypeError, ValueError, OverflowError):
-                    distance = float("inf")
+                import math
+
+                def finite_number(value, default):
+                    try:
+                        number = float(value)
+                    except (TypeError, ValueError, OverflowError):
+                        return default
+                    return number if math.isfinite(number) else default
+
+                first_rr = finite_number(candidate.get("net_first_target_rr"), -1.0)
+                net_rr = finite_number(candidate.get("net_projected_rr"), -1.0)
+                distance = finite_number(candidate.get("entry_distance_pct"), float("inf"))
                 support = len(candidate.get("supporting_evidence") or [])
                 opposition = len(candidate.get("opposing_evidence") or [])
                 return (
                     candidate.get("projected_target") is not None,
                     candidate.get("execution_economics_valid", False),
-                    float(first_rr) if first_rr is not None else -1.0,
-                    float(net_rr) if net_rr is not None else -1.0,
+                    first_rr,
+                    net_rr,
                     bool(candidate.get("structure_aligned")),
                     candidate.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL",
                     bool(candidate.get("ote_confluence")),
