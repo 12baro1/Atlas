@@ -252,3 +252,21 @@ def test_final_action_report_reflects_operational_gate_override():
     assert result["action"] == "SKIP"
     assert main.last_motor_report["final_action"] == "SKIP"
     assert main.last_motor_report["final_direction"] == "LONG"
+
+
+
+def test_final_decision_contains_full_shared_evidence_lineage():
+    class _Motor:
+        def detect(self):
+            return {"structure": "confirmed"}
+
+    main = AtlasMainEngine(
+        motors={"structure": _Motor()},
+        setup_reasoner=_SetupReasoner(),
+        decision_engine=_Decision(),
+    )
+    main.motors["structure"].detect()
+    result = main.decide(signal={"signal": "LONG"}, entry={"valid": True})
+
+    assert result["motor_evidence_count"] == 1
+    assert result["motor_evidence_sources"] == ["structure"]
