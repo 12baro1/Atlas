@@ -302,8 +302,8 @@ def test_short_limit_rejects_targets_already_crossed_before_entry():
         liquidity_sweep={"is_sweep": False, "sell_side": False, "buy_side": False},
         liquidity=[
             {"type": "SELL_SIDE", "price": 75150},
-            {"type": "SELL_SIDE", "price": 74810},
-            {"type": "SELL_SIDE", "price": 73400},
+            {"type": "SELL_SIDE", "price": 75200},
+            {"type": "SELL_SIDE", "price": 75300},
         ],
         structure=[],
         smt={},
@@ -330,8 +330,8 @@ def test_short_limit_keeps_targets_still_ahead_of_current_price():
     selected = result["selected"]
     assert selected["valid"] is True
     assert selected["entry_type"] == "LIMIT"
-    assert selected["projected_target"] == 90000
-    assert selected["projected_target"] < 113000
+    assert selected["projected_target"] == 70000
+    assert selected["projected_target"] < 75000
 
 
 def test_long_limit_rejects_targets_already_crossed_before_entry():
