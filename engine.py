@@ -219,7 +219,7 @@ class AtlasEngine:
             "volume_profile", "institutional", "entry", "entry_optimizer",
             "entry_confirmation", "confluence", "signal", "risk", "rr",
             "dynamic_tp", "setup_quality", "news_filter", "correlation",
-            "cooldown", "learning", "manual_quality_gate",
+            "cooldown", "learning",
         )
         self.main_engine = AtlasMainEngine(
             motors={name: getattr(self, name) for name in specialist_motor_names},
