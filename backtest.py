@@ -11,13 +11,15 @@ her sinyali SL/TP vuruşuyla simüle eder ve expectancy/winrate/profit factor ra
 """
 
 import argparse
+import json
 import logging
 import math
-import time
 import os
-import ccxt
-import sys
 import subprocess
+import sys
+import time
+
+import ccxt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -44,6 +46,67 @@ BACKTEST_WARMUP_CANDLES = {
     "1d": 500,
     "1w": 300,
 }
+
+# Yerel OHLCV cache'i: her backtestte aynı tarihi baştan indirmek yerine
+# indirilen mumları diske yazar. Cache sadece okunur kaynak; sahte veri üretilmez.
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".backtest_cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+
+def _cache_path(symbol, timeframe):
+    safe = symbol.replace("/", "_").replace(":", "_")
+    return os.path.join(CACHE_DIR, f"{safe}_{timeframe}.json")
+
+
+def _load_cached_candles(symbol, timeframe, since_ms, now_ms):
+    """Cache'den sadece [since_ms, now_ms) penceresi içinde kalan mumları döndür."""
+    path = _cache_path(symbol, timeframe)
+    if not os.path.exists(path):
+        return None
+    duration_ms = TIMEFRAME_DURATION_MS.get(timeframe)
+    if duration_ms is None:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        rows = payload.get("rows") or []
+        candles = []
+        for r in rows:
+            try:
+                c = Candle(
+                    time=int(r[0]),
+                    open=float(r[1]),
+                    high=float(r[2]),
+                    low=float(r[3]),
+                    close=float(r[4]),
+                    volume=float(r[5]),
+                )
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if since_ms <= c.time and c.time + duration_ms <= now_ms:
+                candles.append(c)
+        candles.sort(key=lambda c: c.time)
+        seen = set()
+        deduped = []
+        for c in candles:
+            if c.time in seen:
+                continue
+            seen.add(c.time)
+            deduped.append(c)
+        return deduped
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _save_cached_candles(symbol, timeframe, candles):
+    """Tüm indirilmiş mumları cache dosyasına yazar (overwrite)."""
+    path = _cache_path(symbol, timeframe)
+    try:
+        rows = [[c.time, c.open, c.high, c.low, c.close, c.volume] for c in candles]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"rows": rows}, f)
+    except OSError as exc:
+        logging.warning("Cache yazımı başarısız | %s %s: %s", symbol, timeframe, exc)
 
 
 def _market_listing_time_ms(symbol):
@@ -221,7 +284,12 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
     return ordered
 
 def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None):
-    """Load evaluation history, clamped to the market's actual listing date."""
+    """Load evaluation history, clamped to the market's actual listing date.
+
+    Gerçek Bybit OHLCV verisi CCXT üzerinden indirilir ve yerel cache'e
+    kaydedilir. Aynı tarih aralığına tekrar ihtiyaç duyan bir sonraki backtest
+    cache'den okunur; baştan indirilmez. Sahte veya rastgele veri üretilmez.
+    """
     if float(days) <= 0:
         raise ValueError("Backtest days must be greater than zero")
     now = time.time() * 1000 if now_ms is None else float(now_ms)
@@ -230,6 +298,20 @@ def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None):
         history_days = _history_days_for_timeframe(days, tf)
         requested_since = now - int(history_days * 86_400_000)
         since = max(requested_since, listing_time_ms) if listing_time_ms else requested_since
+        duration_ms = TIMEFRAME_DURATION_MS[tf]
+
+        cached = _load_cached_candles(symbol, tf, since, now)
+        if cached is not None:
+            data[tf] = cached
+            logging.info(
+                "%s %s -> %s candles (cache) (history %.1f days)",
+                symbol,
+                tf,
+                len(cached),
+                history_days,
+            )
+            continue
+
         fetch_limit = limit + 2 if tf == "1w" else limit
         candles = _fetch_history(
             symbol, tf, since_ms=since, limit=fetch_limit
@@ -237,11 +319,11 @@ def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None):
         # Bybit includes the currently-forming candle in OHLCV responses.
         # A historical decision may only use candles that were fully closed
         # at the backtest's fixed as-of timestamp.
-        duration_ms = TIMEFRAME_DURATION_MS[tf]
         candles = [candle for candle in candles if candle.time + duration_ms <= now]
+        _save_cached_candles(symbol, tf, candles)
         data[tf] = candles
         logging.info(
-            "%s %s -> %s candles (history %.1f days)",
+            "%s %s -> %s candles (fetched) (history %.1f days)",
             symbol,
             tf,
             len(candles),
