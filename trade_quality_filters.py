@@ -527,7 +527,7 @@ class TradeQualityFilters:
                 "reddedilmez"
             )
             detail["warnings"].append(
-                f"LIMIT entry far: {distance_atr:.2f} ATR; kept pending"
+                f"LIMIT entry is far: {distance_atr:.2f} ATR; kept pending"
             )
             return detail
 

@@ -205,12 +205,15 @@ class Config:
     QUALITY_MAX_ENTRY_DISTANCE_ATR = 2.0
     # Stop yapısal invalidasyon tarafında gerekli minimum ATR (RiskEngine zaten uygular).
     QUALITY_MIN_STOP_ATR = 0.25
-    # Stop bu ATR değerini aşarsa "anlamsız geniş stop" engeli. 4-5 ATR civarı
-    # yüksek volatilitede hala yapısal olabilir; engel yalnızca gerçekten aşırı
-    # geniş (anlamsız) stoplara uygulanır.
-    QUALITY_MAX_STOP_ATR = 6.0
+    # Stop bu ATR değerini aşarsa "anlamsız geniş stop" engeli. 3 ATR'nin üzeri
+    # genellikle yapısal invalidasyon yerine volatilite şumu anlamına gelir; bu
+    # seviyede stop, komisyon/spread oranını yükselecek kadar geniş ve tek bir
+    # kayıpta çok sayıda küçük kârı ezer.
+    QUALITY_MAX_STOP_ATR = 3.0
     # TP/RR: net RR (komisyon+spread sonrası) bu değerin altındaysa engel.
-    QUALITY_MIN_NET_RR = 1.5
+    # 1.5R, típik комисyon/spread oranında minimal bir kâr marjı bırakır;
+    # 2.0R, gerçek kâr/örneklem dengesi için daha güvenli bir zemindir.
+    QUALITY_MIN_NET_RR = 2.0
     # TP hedefleri sentetik değil gerçek likiditeden gelmelidir.
     QUALITY_REJECT_SYNTHETIC_TP = True
     # Motor çetelişi: bu güven üstündeki ve yönünde karşı olan motor "güçlü" sayılır.

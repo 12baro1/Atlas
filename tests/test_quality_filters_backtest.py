@@ -299,9 +299,10 @@ def test_filters_do_not_veto_independently_and_report_elimination():
         f"winners_blocked={total_winners_blocked} losers_blocked={total_losers_blocked}"
     )
 
-    # Beklenen eşlemeler (her engelli işlem tek bir filtreye düşer).
-    assert report["stop_quality"]["blocked"] == 4
-    assert report["stop_quality"]["losers_blocked"] == 4
+    # Beklenen eşlemeler: 4 tight stop + 3 wide (4.0-4.5 ATR) MARKET girişi
+    # stop kalitesi filtresi ile engellenir.
+    assert report["stop_quality"]["blocked"] == 7
+    assert report["stop_quality"]["losers_blocked"] == 7
     assert report["entry_distance"]["blocked"] == 3
     assert report["entry_distance"]["losers_blocked"] == 3
     assert report["tp_rr_consistency"]["blocked"] == 4   # 3 düşük net RR + 1 sentetik TP

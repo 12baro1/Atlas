@@ -229,8 +229,15 @@ def test_far_market_entry_blocked():
 def test_far_limit_entry_is_advisory_not_blocker():
     filters = TradeQualityFilters()
     # LIMIT girişi uzakta ama beklemede tutulur, reddedilmez.
-    ctx = base_ctx(direction="LONG", entry={"entry": 106.0, "stop_loss": 98.0, "entry_type": "LIMIT"},
-                   current_price=100.0, atr=2.0)
+    # Stop 3.0 ATR civarında (maksimum geniş-stop eşiğinin üstünde değil).
+    # risk.stop_loss ile entry.stop_loss aynı olmalı (stop_quality risk'ten okur).
+    # TP1 en az 1R olacak şekilde ayarlandı.
+    ctx = base_ctx(direction="LONG", entry={"entry": 106.0, "stop_loss": 100.0, "entry_type": "LIMIT"},
+                   current_price=100.0, atr=2.0,
+                   risk={"risk_setup_valid": True, "entry": 106.0, "stop_loss": 100.0,
+                         "weighted_net_rr": 3.0, "execution_rr": 3.0},
+                   dynamic_tp={"tp1": 112.0, "tp2": 118.0, "tp3": 124.0,
+                               "sources": ["market_structure"] * 3, "synthetic_targets": False})
     result = _run(filters, ctx)
     f = result["filters"]["entry_distance"]
     assert f["passed"] is True
