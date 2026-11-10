@@ -196,6 +196,35 @@ class Config:
     QUALITY_REQUIRE_STACK_CONFLUENCE = False
     QUALITY_ALLOWED_MARKET_PHASES = ("Expansion", "Trending", "Reversal")
 
+    # --- Kontrollü işlem kalite filtreleri (ana karar motoruna kanıt üretir,
+    # alt motorlarda tek başına veto kullanmaz) ---
+    # HTF (4H) yapısı işlem yönüne karşıyken güçlü ters yapı eşiği.
+    # Yalnızca bestäteki karşıyönlü yapı engeller; nötr HTF engellemez.
+    QUALITY_HTF_STRONG_CONFLICT_BLOCK = True
+    # Girişin güncel fiyattan ATR cinsinden mesafesi bu değeri aşarsa "geç giriş" engeli.
+    QUALITY_MAX_ENTRY_DISTANCE_ATR = 2.0
+    # Stop yapısal invalidasyon tarafında gerekli minimum ATR (RiskEngine zaten uygular).
+    QUALITY_MIN_STOP_ATR = 0.25
+    # Stop bu ATR değerini aşarsa "anlamsız geniş stop" engeli. 3 ATR'nin üzeri
+    # genellikle yapısal invalidasyon yerine volatilite şumu anlamına gelir; bu
+    # seviyede stop, komisyon/spread oranını yükselecek kadar geniş ve tek bir
+    # kayıpta çok sayıda küçük kârı ezer.
+    QUALITY_MAX_STOP_ATR = 3.0
+    # TP/RR: net RR (komisyon+spread sonrası) bu değerin altındaysa engel.
+    # 1.5R, típik комисyon/spread oranında minimal bir kâr marjı bırakır;
+    # 2.0R, gerçek kâr/örneklem dengesi için daha güvenli bir zemindir.
+    QUALITY_MIN_NET_RR = 2.0
+    # TP hedefleri sentetik değil gerçek likiditeden gelmelidir.
+    QUALITY_REJECT_SYNTHETIC_TP = True
+    # Motor çetelişi: bu güven üstündeki ve yönünde karşı olan motor "güçlü" sayılır.
+    QUALITY_MOTOR_CONFIDENCE_THRESHOLD = 75
+    # Bu sayıya eşit veya daha fazla güçlü karşı motor varsa engel; tek bir karşı
+    # motor (veya zayıf motorlar) işlemi engellemez.
+    QUALITY_MAX_STRONG_OPPOSING_MOTORS = 1
+    # Likidite: sweep her işlemde zorunlu DEĞIL. Sweep yoksa yalnızca kanıt zayıflar,
+    # işlem engellenmez.
+    QUALITY_REQUIRE_SWEEP = False
+
     # Sessions (UTC)
     LONDON_START = 7
     LONDON_END = 10

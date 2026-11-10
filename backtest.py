@@ -411,14 +411,17 @@ def _validate_backtest_coverage(data, symbol, days, now_ms, listing_time_ms=None
 
         first_open = min(c.time for c in candles)
         last_close = max(c.time + duration for c in candles)
-        # Candle boundaries are timeframe-aligned; allow two full intervals
-        # for exchange boundary/availability differences, but not partial history.
+        # Candle boundaries are timeframe-aligned. Exchange provider may not
+        # cover the full requested history (e.g. Bybit 15m is limited to the
+        # most recent ~1000 candles). Use whatever real data is available
+        # instead of fabricating history; the warmup floor is enforced
+        # separately in _validate_backtest_history.
         if first_open > effective_start + 2 * duration:
-            missing_days = (first_open - effective_start) / 86_400_000
-            raise RuntimeError(
-                f"{symbol} {tf}: başlangıç verisi eksik. İstenen başlangıç "
-                f"{history_days:.1f} günlük geçmiş; kullanılabilir başlangıca göre "
-                f"ilk mum {missing_days:.1f} gün geç geliyor."
+            logging.warning(
+                "%s %s: istenen baslangic (%s) ile mevcut ilk mum (%s) arasinda "
+                "aralik var; mevcut gerçek veriyle devam ediliyor.",
+                symbol, tf, time.strftime("%Y-%m-%d %H:%M", time.gmtime(effective_start / 1000)),
+                time.strftime("%Y-%m-%d %H:%M", time.gmtime(first_open / 1000)),
             )
         if last_close < now - 2 * duration:
             stale_days = (now - last_close) / 86_400_000
@@ -807,6 +810,174 @@ def _configured_partial_tp_weights():
     return weights
 
 
+def _effective_now_ms(data):
+    """Backtest referans zamanı: veri bize verdiği son kapanmış mumun kapanışı.
+
+    Backtest "gerçek şu an" yerine exchange'in sunduğu son kapanış anı üzerinden
+    replay yapar. Böylece Bybit'in henüz kapanmamış mumundan kaynaklanan
+    freshness hatası alınmaz ve tarihsel veri tutarlı kalır.
+    """
+    last_closes = []
+    for tf in ("15m", "1h", "4h", "1d", "1w"):
+        candles = data.get(tf) or []
+        if candles:
+            duration = TIMEFRAME_DURATION_MS.get(tf, 0)
+            last_closes.append(max(c.time + duration for c in candles))
+    if not last_closes:
+        return time.time() * 1000
+    return float(min(last_closes))
+
+
+def _checkpoint_path(checkpoint_dir, symbol, days):
+    safe = symbol.replace("/", "_").replace(":", "_")
+    return os.path.join(checkpoint_dir, f"backtest_chunk_{safe}_{int(days)}d.json")
+
+
+def _load_checkpoint(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _save_checkpoint(path, payload):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except OSError as exc:
+        logging.warning("Checkpoint yazımı başarısız | %s: %s", path, exc)
+
+
+def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
+                           resume, step, limit_expiry_bars, lenient):
+    """Büyük backtesti tarih aralıklarına göre parçalara böler ve kalıcı checkpoint'ler yazar.
+
+    Her parça bağımsız veri indirir ve çalışır; bellekte tek parça kadar veri
+    tutulur. Parça sonuçları JSON checkpoint dosyasına yazılır. Program
+    durursa --resume ile tamamlanmış parçalar atlanarak kaldığı yerden devam
+    edilir. Tüm parçalar tamamlanmazsa sonuç INCOMPLETE olarak işaretlenir.
+    """
+    total_chunks = max(1, math.ceil(float(days) / float(chunk_days)))
+    overall_status = "SUCCESS"
+    combined_all = []
+
+    for symbol in symbols:
+        listing_time_ms = _market_listing_time_ms(symbol)
+        checkpoint_path = _checkpoint_path(checkpoint_dir, symbol, days)
+        checkpoint = _load_checkpoint(checkpoint_path) if resume else None
+
+        completed_chunks = set()
+        chunk_results = {}
+        if checkpoint and checkpoint.get("symbol") == symbol:
+            completed_chunks = set(checkpoint.get("completed_chunks", []))
+            chunk_results = {
+                str(k): v for k, v in (checkpoint.get("results") or {}).items()
+            }
+
+        print(
+            f"\n=== {symbol} | {days}g | parçalı backtest "
+            f"(parça={chunk_days}g, toplam={total_chunks}) ==="
+        )
+
+        for chunk_index in range(total_chunks):
+            # Parça 0 = en yeni (şuandan geriye chunk_days), parça N = daha eski.
+            chunk_now_ms = time.time() * 1000 - chunk_index * chunk_days * 86_400_000
+            chunk_label = f"{chunk_index + 1}/{total_chunks}"
+
+            if chunk_index in completed_chunks:
+                print(f"  [atlandi] {chunk_label} (checkpoint'te tamamlanmis)")
+                combined_all.append((symbol, chunk_results[str(chunk_index)]))
+                continue
+
+            print(f"  [isleniyor] {chunk_label} ...", flush=True)
+            try:
+                data = load_historical(
+                    symbol, days=chunk_days, now_ms=chunk_now_ms,
+                    listing_time_ms=listing_time_ms,
+                )
+                attach_historical_smt_universe(data, chunk_days, chunk_now_ms)
+                _validate_backtest_history(data, symbol)
+                effective_now_ms = _effective_now_ms(data)
+                _validate_backtest_coverage(
+                    data, symbol, chunk_days, effective_now_ms,
+                    listing_time_ms=listing_time_ms,
+                )
+                runner = BacktestRunner(
+                    analyze_fn=build_analyze_fn(engine),
+                    maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002)),
+                    taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055)),
+                    spread_rate=float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002)),
+                    slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)),
+                    tp_weights=_configured_partial_tp_weights(),
+                    limit_expiry_bars=limit_expiry_bars,
+                )
+                stats = runner.run(data, step=step, lenient=lenient)
+                _report(stats, f"{symbol} parca {chunk_label}")
+                chunk_results[str(chunk_index)] = stats
+                completed_chunks.add(chunk_index)
+                combined_all.append((symbol, stats))
+
+                _save_checkpoint(checkpoint_path, {
+                    "symbol": symbol,
+                    "days": days,
+                    "chunk_days": chunk_days,
+                    "total_chunks": total_chunks,
+                    "completed_chunks": sorted(completed_chunks),
+                    "results": chunk_results,
+                    "status": "IN_PROGRESS",
+                    "updated_at": time.time(),
+                })
+                pct = len(completed_chunks) / total_chunks * 100
+                print(f"  [tamamlandi] {chunk_label} | ilerleme %{pct:.0f}")
+            except Exception as exc:
+                logging.exception("Parça başarısız | %s %s: %s", symbol, chunk_label, exc)
+                overall_status = "FAILED"
+                _save_checkpoint(checkpoint_path, {
+                    "symbol": symbol,
+                    "days": days,
+                    "chunk_days": chunk_days,
+                    "total_chunks": total_chunks,
+                    "completed_chunks": sorted(completed_chunks),
+                    "results": chunk_results,
+                    "status": "FAILED",
+                    "error": f"{chunk_label}: {type(exc).__name__}: {exc}",
+                    "updated_at": time.time(),
+                })
+                break
+
+        if len(completed_chunks) == total_chunks:
+            _save_checkpoint(checkpoint_path, {
+                "symbol": symbol,
+                "days": days,
+                "chunk_days": chunk_days,
+                "total_chunks": total_chunks,
+                "completed_chunks": sorted(completed_chunks),
+                "results": chunk_results,
+                "status": "SUCCESS",
+                "updated_at": time.time(),
+            })
+        elif completed_chunks:
+            overall_status = "INCOMPLETE"
+
+    if combined_all:
+        combined = _combine_stats(combined_all)
+        print("\n=== BIRLEŞTİRİLİK SONUÇ ===")
+        _report(combined, "TÜM PARÇALAR (BİRLEŞTİRİLİK)")
+        print(f"\n{len(symbols)} sembol | Parçalı mod")
+        print(f"{'Sembol':<22} {'Sinyal':>7} {'Winrate':>9} {'PF':>6} {'NetRR':>8}")
+        for symbol, stats in combined_all:
+            print(
+                f"{symbol:<22} {stats['total']:>7} {stats['winrate']:>8}% "
+                f"{stats['profit_factor']:>6} {stats['net_rr']:>8.2f}"
+            )
+    else:
+        print("\nHIÇ PARÇA TAMAMLANAMADI.")
+
+    return overall_status
+
+
 def _git_revision():
     """Return the exact source revision used for this historical run."""
     try:
@@ -837,6 +1008,18 @@ def main():
         "--lenient",
         action="store_true",
         help="Decision kapısını atla; ham sinyal (LONG/SHORT) seviyesinde edge ölç",
+    )
+    parser.add_argument(
+        "--chunk-days", type=int, default=0,
+        help="Tarih aralığını bu günlük parçalara bölerek çalıştır (0 = tek parça; önerilen: 15)"
+    )
+    parser.add_argument(
+        "--checkpoint-dir", default=".backtest_checkpoints",
+        help="Checkpoint ve parça sonuçlarının kaydedileceği dizin"
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Kaldığı yerden devam et (tamamlanmış parçaları atla)"
     )
     args = parser.parse_args()
 
@@ -880,6 +1063,24 @@ def main():
     )
     all_stats = []
     backtest_now_ms = time.time() * 1000
+
+    # Eğer parçalı backtest istenmişse ayrı akışı kullan (bellek/CPU kontrolü,
+    # kalıcı checkpoint, kaldığı yerden devam et, ilerleme yüzdesi).
+    if args.chunk_days and args.chunk_days > 0:
+        overall_status = run_segmented_backtest(
+            engine=engine,
+            symbols=symbols,
+            days=args.days,
+            chunk_days=args.chunk_days,
+            checkpoint_dir=args.checkpoint_dir,
+            resume=args.resume,
+            step=args.step,
+            limit_expiry_bars=args.limit_expiry_bars,
+            lenient=args.lenient,
+        )
+        print(f"\nGENEL DURUM: {overall_status}")
+        return
+
     for symbol in symbols:
         listing_time_ms = _market_listing_time_ms(symbol)
         if listing_time_ms is not None:
@@ -890,8 +1091,9 @@ def main():
         )
         attach_historical_smt_universe(data, args.days, backtest_now_ms)
         _validate_backtest_history(data, symbol)
+        effective_now_ms = _effective_now_ms(data)
         _validate_backtest_coverage(
-            data, symbol, args.days, backtest_now_ms,
+            data, symbol, args.days, effective_now_ms,
             listing_time_ms=listing_time_ms,
         )
         runner = BacktestRunner(

@@ -418,6 +418,7 @@ class AtlasEngine:
             trendline_sweep=structure_state.get("trendline_sweep"),
             ifvg=structure_state.get("ifvg"),
             eqh_eql=structure_state.get("eqh_eql"),
+            liquidity_layers=structure_state.get("liquidity_layers"),
             internal_structure=structure_state.get("internal_structure"),
             external_structure=structure_state.get("external_structure"),
             market_regime=market_regime_state,
@@ -1126,6 +1127,7 @@ class AtlasEngine:
         trendline_sweep=None,
         ifvg=None,
         eqh_eql=None,
+        liquidity_layers=None,
         internal_structure=None,
         external_structure=None,
         market_regime=None,
@@ -1512,6 +1514,9 @@ class AtlasEngine:
             institutional=institutional,
             market_phase=market_phase,
             setup_quality=setup_quality,
+            entry_structure=entry_structure,
+            liquidity_layers=liquidity_layers,
+            eqh_eql=eqh_eql,
         )
 
         # Candidate reasoning replaces vote/score aggregation.

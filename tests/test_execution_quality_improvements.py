@@ -1,8 +1,18 @@
 import pytest
 
 from config import Config
+from core.candle import Candle
 from risk_engine import RiskEngine
 from trade_quality_engine import TradeQualityEngine
+
+
+def _candle_atr(atr=2.0, base=100.0, n=15):
+    """Gerçek Candle nesneleriyle ATR≈2 üret (mock object yerine)."""
+    return [
+        Candle(time=1000 + i * 60, open=base + i, high=base + i + atr,
+               low=base + i - atr, close=base + i + atr / 2, volume=1.0)
+        for i in range(n)
+    ]
 
 
 def _quality_payload(entry_price):
@@ -31,7 +41,7 @@ def _quality_payload(entry_price):
         },
         "risk": {"risk_setup_valid": True, "stop_loss": 98.0, "stop_adjusted": False},
         "current_price": 100.0,
-        "candles": [object()] * 15,
+        "candles": _candle_atr(),
     }
 
 
@@ -87,7 +97,11 @@ def test_structural_stop_that_cannot_cover_execution_costs_is_still_rejected(mon
 def test_limit_entry_distance_caps_are_advisory_and_reported(monkeypatch):
     import utils.atr
 
-    monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 1.0)
+    # Stop 3.0 ATR'nin üstünde değil (entry=102.5, stop=98.0, atr=2.0 -> 2.25 ATR),
+    # dolayısıyla stop kalitesi filtresi engel değildir; yalnızca uzak LIMIT
+    # advisory olarak raporlanır.
+    monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 2.0)
+    monkeypatch.setattr(Config, "QUALITY_MAX_ENTRY_DISTANCE_ATR", 1.0)
     monkeypatch.setattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_ATR", 3.0)
     monkeypatch.setattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_PERCENT", 0.05)
 
