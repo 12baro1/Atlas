@@ -2,13 +2,31 @@
 
 Scores remain diagnostic only. This gate checks whether the actual trade geometry
 and the underlying SMC evidence agree before a signal can be executed.
+
+Kontrollü işlem kalite filtreleri (trade_quality_filters.py) bu sınıf tarafından
+çalıştırılır ve ürettikleri kritik engeller DecisionEngine'e (tek ana karar
+motoru) trade_quality engelleri üzerinden iletilir. Filtreler tek başına karar
+vermez; DecisionEngine nihai kabul/red kararı verir.
 """
 
 from config import Config
+from trade_quality_filters import TradeQualityFilters
 
 
 class TradeQualityEngine:
     """Validate the complete setup rather than trusting a weighted score."""
+
+    def __init__(self):
+        self.filters = TradeQualityFilters()
+
+    def reset_filters(self):
+        """Filtre bazlı çıkarma sayacını sıfırlar (test/rapor için)."""
+        self.filters.reset_elimination()
+
+    def filter_elimination_report(self):
+        """Her filtre: kaç işlem değerlendirildi, kaç engelledi, kaç kazanan/
+        kaybedeni çıkardı."""
+        return self.filters.elimination_report()
 
     def evaluate(
         self,
@@ -31,6 +49,10 @@ class TradeQualityEngine:
         institutional=None,
         market_phase=None,
         setup_quality=None,
+        h4_structure=None,
+        entry_structure=None,
+        liquidity_layers=None,
+        eqh_eql=None,
     ):
         entry = entry if isinstance(entry, dict) else {}
         confirmation = confirmation if isinstance(confirmation, dict) else {}
@@ -329,6 +351,47 @@ class TradeQualityEngine:
                         blockers.append("TP1 has already been reached before the pending LIMIT entry; setup is stale")
                     else:
                         blockers.append("TP1 has already been reached; market entry would be chasing")
+
+        # Kontrollü kalite filtreleri: alt motorlarda bağımsız veto yok, hepsi
+        # DecisionEngine'e (tek ana karar motoru) trade_quality üzerinden kanıt
+        # olarak sunulur. Kritik engeller blockers'a; yumuşak işaretler warnings'a
+        # dökülür. Sweep zorunlu değildir (QUALITY_REQUIRE_SWEEP = False).
+        atr_for_filters = atr if (atr is not None and atr > 0) else 0.0
+        filter_result = self.filters.evaluate_all(
+            direction=direction,
+            entry=entry,
+            risk=risk,
+            dynamic_tp=dynamic_tp,
+            current_price=current,
+            candles=candles,
+            atr_value=atr_for_filters,
+            mtf=mtf,
+            h4_structure=h4_structure,
+            entry_structure=entry_structure,
+            liquidity_sweep=liquidity_sweep,
+            liquidity_layers=liquidity_layers,
+            eqh_eql=eqh_eql,
+            smt=smt,
+            cisd=cisd,
+            volume_profile=volume_profile,
+            institutional=institutional,
+            unicorn=unicorn,
+        )
+        blockers.extend(filter_result["critical_blockers"])
+        warnings.extend(filter_result["warnings"])
+        # Filtre skoru/cezaları karar motoru skoru üzerinden yansıtır; burada
+        # yalnızca uyarlanabilir ipuçları olarak saklanır.
+        try:
+            setup_quality_dict = setup_quality if isinstance(setup_quality, dict) else {}
+            setup_quality_dict.setdefault("quality_filters", {
+                "allowed": filter_result["allowed"],
+                "critical_blockers": filter_result["critical_blockers"],
+                "adjustments": filter_result["adjustments"],
+                "warnings": filter_result["warnings"],
+                "filters": filter_result["filters"],
+            })
+        except (AttributeError, TypeError):
+            pass
 
         # Keep the blocker list stable and free of duplicate messages.
         blockers = list(dict.fromkeys(str(item) for item in blockers if item))
