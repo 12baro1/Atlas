@@ -417,30 +417,7 @@ class SetupReasoningEngine:
                         entry_price = high
                     # Stop must invalidate the full overlapping OTE/POI zone.
                     # ATR is only a small optional clearance, never the stop anchor.
-                    # Dynamic buffer: structural clearance plus just enough to meet
-                    # the risk engine's minimum ATR floor. No unnecessary widening
-                    # when the natural entry-to-edge risk is already sufficient.
                     stop_reference = min(low, ote_bounds[0]) if ote_overlap and ote_bounds else low
-                    natural_risk = entry_price - stop_reference
-                    min_risk = (
-                        atr_value * float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.35))
-                        if atr_value
-                        else 0.0
-                    )
-                    structural_clearance = (
-                        atr_value * float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10))
-                        if atr_value
-                        else 0.0
-                    )
-                    if natural_risk >= min_risk:
-                        atr_buffer = structural_clearance
-                    else:
-                        # Yeterli değilse sadece minimum zemine ulaşacak kadar genişlet;
-                        # structural_clearance'ı üstüne ekleme (aşırı genişleme olmasın).
-                        atr_buffer = min_risk - natural_risk + max(
-                            0.01, atr_value * 0.01 if atr_value else 0.0
-                        )
-                    stop = stop_reference - atr_buffer
                     stop_source = "ote_invalidation" if stop_reference < low else f"{source.lower()}_invalidation"
                 else:
                     if inside and market_confirmed:
@@ -449,25 +426,9 @@ class SetupReasoningEngine:
                         entry_price = high - (high - low) * 0.38
                     else:
                         entry_price = low
+                    # Stop must invalidate the full overlapping OTE/POI zone.
+                    # ATR is only a small optional clearance, never the stop anchor.
                     stop_reference = max(high, ote_bounds[1]) if ote_overlap and ote_bounds else high
-                    natural_risk = stop_reference - entry_price
-                    min_risk = (
-                        atr_value * float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.35))
-                        if atr_value
-                        else 0.0
-                    )
-                    structural_clearance = (
-                        atr_value * float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10))
-                        if atr_value
-                        else 0.0
-                    )
-                    if natural_risk >= min_risk:
-                        atr_buffer = structural_clearance
-                    else:
-                        atr_buffer = min_risk - natural_risk + max(
-                            0.01, atr_value * 0.01 if atr_value else 0.0
-                        )
-                    stop = stop_reference + atr_buffer
                     stop_source = "ote_invalidation" if stop_reference > high else f"{source.lower()}_invalidation"
 
                 # Re-score every candidate POI with the same specialist evidence.
@@ -500,6 +461,38 @@ class SetupReasoningEngine:
                         entry_price = max(entry_price, min(high, current + clearance))
                     else:
                         entry_price = min(entry_price, max(low, current - clearance))
+
+                # Stop must invalidate the full overlapping OTE/POI zone.
+                # Calculated AFTER entry_price is finalized (including
+                # clearance adjustment above) so total risk stays >= risk
+                # engine's minimum ATR floor. No unnecessary widening when
+                # natural entry-to-edge risk is already sufficient.
+                natural_risk = abs(entry_price - stop_reference)
+                min_risk = (
+                    atr_value * float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.35))
+                    if atr_value
+                    else 0.0
+                )
+                structural_clearance = (
+                    atr_value * float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10))
+                    if atr_value
+                    else 0.0
+                )
+                if natural_risk >= min_risk:
+                    atr_buffer = structural_clearance
+                else:
+                    # Yeterli değilse sadece minimum zemine ulaşacak kadar genişlet.
+                    atr_buffer = min_risk - natural_risk + max(
+                        0.01, atr_value * 0.01 if atr_value else 0.0
+                    )
+                if direction == "LONG":
+                    stop = stop_reference - atr_buffer
+                else:
+                    stop = stop_reference + atr_buffer
+                stop_source = "ote_invalidation" if (
+                    (direction == "LONG" and stop_reference < low)
+                    or (direction == "SHORT" and stop_reference > high)
+                ) else f"{source.lower()}_invalidation"
 
                 executable = (
                     (inside and market_confirmed)
