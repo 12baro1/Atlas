@@ -25,7 +25,7 @@ class DynamicTPEngine:
         structure=None,
         candles=None,
         atr_value=None,
-        allow_rr_fallback=True,
+        allow_rr_fallback=False,
         exclude_targets_through=None,
     ):
         direction = str(direction or "").upper()

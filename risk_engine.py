@@ -94,7 +94,7 @@ class RiskEngine:
             )
 
         atr_period = int(getattr(Config, "ATR_PERIOD", 14))
-        min_stop_atr_multiplier = float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.25))
+        min_stop_atr_multiplier = float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.35))
         min_tick_fallback = float(getattr(Config, "MIN_TICK_DISTANCE_FALLBACK", 0.01))
         spread_rate = float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002))
         slippage_rate = float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003))

@@ -188,8 +188,10 @@ class TradeQualityEngine:
 
         if not risk.get("risk_setup_valid"):
             blockers.append(risk.get("risk_setup_reason") or "Risk engine rejected the stop")
-        if risk.get("stop_adjusted"):
-            blockers.append("Stop was changed by risk sizing; original structure must be recalculated")
+        # stop_adjusted: RiskEngine stopu yapısal minimum zemine getirdi. Engine zaten
+        # genişletilen stop ile TP'yi yeniden hesaplıyor (engine.py _calculate_risk +
+        # finalize_setup_geometry). Bu otomatik bir engel değil; giriş/stop/TP
+        # tutarlılığı final geometry ile doğrulanır.
         net_rr_value = risk.get("weighted_net_rr", risk.get("net_rr"))
         if net_rr_value is not None:
             try:

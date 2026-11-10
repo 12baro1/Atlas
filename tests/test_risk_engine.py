@@ -67,6 +67,7 @@ def test_dynamic_tp_engine_enforces_minimum_rr_levels_for_long():
         liquidity=[{"price": 1.5772}],
         fvg=[{"from": 1.5774, "to": 1.5776}],
         orderblocks=[{"high": 1.5787}],
+        allow_rr_fallback=True,
     )
 
     risk = abs(1.5769 - 1.5608)
@@ -86,6 +87,7 @@ def test_dynamic_tp_engine_enforces_minimum_rr_levels_for_short():
         liquidity=[{"price": 99.9}],
         fvg=[{"from": 99.8, "to": 99.7}],
         orderblocks=[{"low": 99.6}],
+        allow_rr_fallback=True,
     )
 
     assert result["tp1"] == pytest.approx(99.0)
@@ -101,6 +103,7 @@ def test_rr_engine_derives_rr_from_tp3_when_missing():
         liquidity=[],
         fvg=[],
         orderblocks=[],
+        allow_rr_fallback=True,
     )
 
     risk = RiskEngine().calculate(
@@ -307,6 +310,7 @@ def test_dynamic_tp_never_emits_duplicate_levels():
             fvg=[],
             orderblocks=[],
             structure=[],
+            allow_rr_fallback=True,
         )
         tp1, tp2, tp3 = r["tp1"], r["tp2"], r["tp3"]
         assert len({tp1, tp2, tp3}) == 3, f"{direction}: duplicate TP levels {tp1},{tp2},{tp3}"
@@ -319,12 +323,13 @@ def test_dynamic_tp_long_sl_behind_entry_rejected():
         direction="LONG",
         entry=10.0,
         stop_loss=9.0,
-        liquidity=[{"price": 11.0}],
+        liquidity=[{"price": 11.0, "type": "BUY_SIDE"}],
         fvg=[],
         orderblocks=[],
         structure=[],
+        allow_rr_fallback=True,
     )
-    tps = [r["tp1"], r["tp2"], r["tp3"]]
+    tps = [tp for tp in (r["tp1"], r["tp2"], r["tp3"]) if tp is not None]
     assert r["tp1"] == 11.0
     assert all(tp > 10.0 for tp in tps), f"LONG TP'leri entry altina dusemez: {tps}"
 

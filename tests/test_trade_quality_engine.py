@@ -109,7 +109,9 @@ def test_synthetic_targets_are_rejected():
 def test_invalid_or_adjusted_stop_is_rejected():
     payload = base_payload()
     payload["risk"]["stop_adjusted"] = True
-    assert evaluate(payload)["allowed"] is False
+    # stop_adjusted artık otomatik bir engel değildir; engine genişletilen stop ile
+    # TP'yi yeniden hesaplar ve final geometry tutarlılığı doğrulanır.
+    assert evaluate(payload)["allowed"] is True
     payload["risk"]["stop_adjusted"] = False
     payload["risk"]["risk_setup_valid"] = False
     assert evaluate(payload)["allowed"] is False
