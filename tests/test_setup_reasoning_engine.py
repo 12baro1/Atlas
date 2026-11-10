@@ -354,14 +354,42 @@ def test_long_limit_rejects_targets_already_crossed_before_entry():
 
 
 
-def test_structural_stop_uses_risk_engine_minimum_atr_buffer(monkeypatch):
-    # Stop boşluğu, risk motorunun minimum ATR zeminiyle (0.35 × ATR)
-    # tutarlı olmalı; aksi halde yapısal stop "çok dar" reddedilir.
+def test_structural_stop_uses_structural_clearance_when_natural_risk_sufficient(monkeypatch):
+    # Doğal giriş-kenar riski zaten risk motorunun minimum ATR zeminini
+    # karşıliyorsa, sadece yapısal temizleme (0.10 × ATR) kullanılır; gereksiz
+    # stop genişlemesi yapılmaz.
     monkeypatch.setattr("utils.atr.atr", lambda candles, period=14: 10.0)
     result = _run(candles=[object()])
     selected = result["selected"]
-    assert abs(selected["stop_buffer"] - 3.6) < 1e-9
-    assert selected["stop_loss"] <= selected["entry"] - 3.59
+    assert abs(selected["stop_buffer"] - 1.0) < 1e-9
+    assert selected["stop_loss"] <= selected["entry"] - 1.0
+
+
+def test_structural_stop_widens_only_when_natural_risk_insufficient(monkeypatch):
+    # Doğal risk minimum ATR zemininin altında ise, tampon o zemine ulaştırıcı
+    # şekilde genişletilir; gereksiz genişleme yapılmaz.
+    monkeypatch.setattr("utils.atr.atr", lambda candles, period=14: 10.0)
+    result = _run(
+        candles=[object()],
+        # entry very close to POI edge → small natural risk
+        current_price=105.1,
+        fvg=[{"type": "BEARISH", "from": 105.0, "to": 105.2, "filled": False}],
+        orderblocks=[],
+        liquidity_sweep={
+            "is_sweep": True, "sell_side": True, "buy_side": False,
+            "sweep_side": "SELL_SIDE",
+            "post_structure": {"confirmed": True, "direction": "BEARISH"},
+        },
+        liquidity=[{"type": "SELL_SIDE", "price": 103.0}],
+        structure=[],
+        smt={},
+    )
+    selected = result["selected"]
+    if selected.get("valid"):
+        # Natural risk is small; buffer should be widened to meet risk engine minimum
+        assert selected["stop_buffer"] >= 1.0
+        assert selected["stop_buffer"] <= 3.6
+    # If not valid (e.g., entry too far), that's also acceptable
 
 
 

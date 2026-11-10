@@ -313,7 +313,6 @@ class SetupReasoningEngine:
             if a and b and a != b:
                 ote_bounds = min(a, b), max(a, b)
         require_ote = str(regime.get("regime", "")).upper() in {"TRENDING_UP", "TRENDING_DOWN"}
-        atr_buffer = 0.0
         atr_value = None
         if candles:
             try:
@@ -321,18 +320,6 @@ class SetupReasoningEngine:
                 atr_value = self._number(
                     calculate_atr(candles, period=int(getattr(Config, "ATR_PERIOD", 14)))
                 )
-                # Stop boşluğu yapısal geçersizlik kenarından itibaren RiskEngine'in
-                # minimum ATR zeminiyle eşleşmeli veya onun üstünde olmalı. Eşittir
-                # olurken kayan nokta hassaslığı "eşit ama daha küçük" gibi görünür
-                # ve geçerli durdurmalar "çok dar" reddedilir. %0'lık ayrı bir
-                # margin (0.01 ATR) bu sınır durumunu ortadan kaldırır ve giriş/SL/TP
-                # aynı fiyat referansından hesaplanmaya devam eder.
-                buffer_multiplier = max(
-                    float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10)),
-                    float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.35)),
-                ) + 0.01
-                if atr_value and atr_value > 0 and math.isfinite(buffer_multiplier):
-                    atr_buffer = atr_value * max(0.0, buffer_multiplier)
             except (TypeError, ValueError, OverflowError, ZeroDivisionError):
                 pass
 
@@ -430,7 +417,29 @@ class SetupReasoningEngine:
                         entry_price = high
                     # Stop must invalidate the full overlapping OTE/POI zone.
                     # ATR is only a small optional clearance, never the stop anchor.
+                    # Dynamic buffer: structural clearance plus just enough to meet
+                    # the risk engine's minimum ATR floor. No unnecessary widening
+                    # when the natural entry-to-edge risk is already sufficient.
                     stop_reference = min(low, ote_bounds[0]) if ote_overlap and ote_bounds else low
+                    natural_risk = entry_price - stop_reference
+                    min_risk = (
+                        atr_value * float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.35))
+                        if atr_value
+                        else 0.0
+                    )
+                    structural_clearance = (
+                        atr_value * float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10))
+                        if atr_value
+                        else 0.0
+                    )
+                    if natural_risk >= min_risk:
+                        atr_buffer = structural_clearance
+                    else:
+                        # Yeterli değilse sadece minimum zemine ulaşacak kadar genişlet;
+                        # structural_clearance'ı üstüne ekleme (aşırı genişleme olmasın).
+                        atr_buffer = min_risk - natural_risk + max(
+                            0.01, atr_value * 0.01 if atr_value else 0.0
+                        )
                     stop = stop_reference - atr_buffer
                     stop_source = "ote_invalidation" if stop_reference < low else f"{source.lower()}_invalidation"
                 else:
@@ -441,6 +450,23 @@ class SetupReasoningEngine:
                     else:
                         entry_price = low
                     stop_reference = max(high, ote_bounds[1]) if ote_overlap and ote_bounds else high
+                    natural_risk = stop_reference - entry_price
+                    min_risk = (
+                        atr_value * float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.35))
+                        if atr_value
+                        else 0.0
+                    )
+                    structural_clearance = (
+                        atr_value * float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10))
+                        if atr_value
+                        else 0.0
+                    )
+                    if natural_risk >= min_risk:
+                        atr_buffer = structural_clearance
+                    else:
+                        atr_buffer = min_risk - natural_risk + max(
+                            0.01, atr_value * 0.01 if atr_value else 0.0
+                        )
                     stop = stop_reference + atr_buffer
                     stop_source = "ote_invalidation" if stop_reference > high else f"{source.lower()}_invalidation"
 
