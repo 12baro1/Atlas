@@ -319,7 +319,7 @@ def test_decision_accepts_positive_weighted_net_rr_when_target_rr_passes():
                 "rr": 3.5,
                 "selected_rr": 3.5,
                 "weighted_rr": 2.0,
-                "weighted_net_rr": 1.8,
+                "weighted_net_rr": 2.5,
                 "risk": 1.0,
                 "position_size": 1.0,
             }
@@ -332,6 +332,71 @@ def test_decision_accepts_positive_weighted_net_rr_when_target_rr_passes():
         for item in result["critical_blockers"]
     )
 
+
+def test_decision_rejects_weighted_net_rr_below_central_threshold():
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            risk={
+                "entry": 100.0,
+                "stop_loss": 99.0,
+                "rr": 3.5,
+                "selected_rr": 3.5,
+                "weighted_rr": 2.0,
+                "weighted_net_rr": 1.8,
+                "risk": 1.0,
+                "position_size": 1.0,
+            }
+        )
+    )
+    assert result["action"] != "EXECUTE"
+    assert any("RR below minimum" in item for item in result["critical_blockers"])
+
+
+def test_decision_rejects_short_without_confirmed_sweep():
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            signal={"signal": "SHORT", "confidence": 96, "grade": "S+", "strength": "ELITE"},
+            risk={
+                "entry": 100.0,
+                "stop_loss": 101.0,
+                "rr": 3.5,
+                "selected_rr": 3.5,
+                "weighted_rr": 2.5,
+                "weighted_net_rr": 2.2,
+                "risk": 1.0,
+                "position_size": 1.0,
+            },
+            mtf={"valid": True, "entry": "SHORT"},
+            liquidity_sweep={"is_sweep": True, "buy_side": False, "post_structure": {"confirmed": False}},
+        )
+    )
+    assert result["action"] != "EXECUTE"
+    assert any("confirmed liquidity sweep" in item for item in result["critical_blockers"])
+
+
+def test_decision_accepts_short_with_confirmed_sweep():
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            signal={"signal": "SHORT", "confidence": 96, "grade": "S+", "strength": "ELITE"},
+            risk={
+                "entry": 100.0,
+                "stop_loss": 101.0,
+                "rr": 3.5,
+                "selected_rr": 3.5,
+                "weighted_rr": 2.5,
+                "weighted_net_rr": 2.2,
+                "risk": 1.0,
+                "position_size": 1.0,
+            },
+            mtf={"valid": True, "entry": "SHORT"},
+            liquidity_sweep={
+                "is_sweep": True,
+                "buy_side": True,
+                "post_structure": {"confirmed": True, "direction": "BEARISH"},
+            },
+        )
+    )
+    assert result["action"] == "EXECUTE"
 
 
 def test_decision_fails_closed_when_weighted_net_rr_is_unavailable():

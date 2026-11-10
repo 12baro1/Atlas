@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.candle import Candle
 from backtest_runner import simulate_trade, simulate_trade_partial, BacktestRunner
+from config import Config
 
 
 def _candle(t, o, h, l, cl):
@@ -532,7 +533,8 @@ def test_limit_order_expires_after_configured_bars():
     assert stats["unfilled_limits"] == 1
 
 
-def test_limit_order_is_cancelled_if_target_hits_before_fill():
+def test_limit_order_is_cancelled_if_target_hits_before_fill(monkeypatch):
+    monkeypatch.setattr(Config, "MINIMUM_NET_RR", 1.5, raising=False)
     runner = BacktestRunner(partial_exits=False, limit_expiry_bars=4)
     candles = [
         _candle(1, 99.0, 101.0, 96.0, 100.0),  # TP reached; limit 95 untouched
@@ -550,7 +552,8 @@ def test_limit_order_is_cancelled_if_target_hits_before_fill():
     assert runner.statistics()["stale_limit_target_before_fill"] == 1
 
 
-def test_signal_candle_target_touch_is_counted_separately_for_stale_limit():
+def test_signal_candle_target_touch_is_counted_separately_for_stale_limit(monkeypatch):
+    monkeypatch.setattr(Config, "MINIMUM_NET_RR", 1.5, raising=False)
     runner = BacktestRunner(partial_exits=False, limit_expiry_bars=4)
     candles = [
         _candle(1, 99.0, 101.0, 96.0, 99.0),
@@ -681,7 +684,8 @@ def test_runner_reports_stage_rejection_diagnostics():
     }
 
 
-def test_limit_is_cancelled_when_target_was_hit_on_signal_candle():
+def test_limit_is_cancelled_when_target_was_hit_on_signal_candle(monkeypatch):
+    monkeypatch.setattr(Config, "MINIMUM_NET_RR", 1.5, raising=False)
     runner = BacktestRunner(partial_exits=False, limit_expiry_bars=4)
     candles = [
         _candle(1, 99.0, 101.0, 96.0, 99.5),  # TP1 hit before order submission

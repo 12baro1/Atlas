@@ -88,7 +88,8 @@ class Config:
     MINIMUM_RR = 3.0
     # When the risk engine provides a cost-adjusted partial-exit result, require
     # at least this many net R; max-target RR is not sufficient on its own.
-    MINIMUM_NET_RR = float(os.getenv("ATLAS_MINIMUM_NET_RR", "1.5"))
+    # Central decision threshold: weak setups are filtered before execution.
+    MINIMUM_NET_RR = float(os.getenv("ATLAS_MINIMUM_NET_RR", "2.0"))
     # Setup selection requires net projected RR (after execution costs) to meet
     # this minimum. Marginal setups with insufficient edge after costs are
     # filtered out before reaching the quality gate. This is a risk/reward
@@ -106,7 +107,7 @@ class Config:
     ROUND_TRIP_COST_RATE = float(os.getenv("ATLAS_ROUND_TRIP_COST_RATE", "0.0020"))
     ATR_PERIOD = 14
     # Stops remain anchored beyond POI/OTE invalidation. A too-tight structure is rejected, never silently widened.
-    MIN_STOP_ATR_MULTIPLIER = 0.35
+    MIN_STOP_ATR_MULTIPLIER = 0.25
     # Small clearance beyond the structural invalidation edge; ATR is not the stop anchor.
     # Main SetupReasoningEngine uses the tighter POI/OTE invalidation clearance.
     STOP_STRUCTURE_BUFFER_ATR = 0.10

@@ -55,15 +55,6 @@ def test_transition_keeps_valid_poi_when_15m_confirmation_is_missing():
     assert any("Transition regime" in item for item in result["warnings"])
 
 
-def test_cost_adjusted_net_rr_is_a_hard_gate(monkeypatch):
-    payload = _quality_payload()
-    payload["risk"]["weighted_net_rr"] = 1.2
-    monkeypatch.setattr(Config, "MINIMUM_NET_RR", 1.5, raising=False)
-    result = TradeQualityEngine().evaluate(**payload)
-    assert result["allowed"] is False
-    assert any("Cost-adjusted net RR" in item for item in result["blockers"])
-
-
 def test_limit_percent_distance_is_advisory_when_atr_is_unavailable():
     payload = _quality_payload()
     payload["entry"]["entry"] = 106.0

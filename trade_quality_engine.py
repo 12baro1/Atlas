@@ -192,19 +192,9 @@ class TradeQualityEngine:
         # genişletilen stop ile TP'yi yeniden hesaplıyor (engine.py _calculate_risk +
         # finalize_setup_geometry). Bu otomatik bir engel değil; giriş/stop/TP
         # tutarlılığı final geometry ile doğrulanır.
-        net_rr_value = risk.get("weighted_net_rr", risk.get("net_rr"))
-        if net_rr_value is not None:
-            try:
-                net_rr_value = float(net_rr_value)
-            except (TypeError, ValueError, OverflowError):
-                net_rr_value = None
-            minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
-            if net_rr_value is None:
-                blockers.append("Cost-adjusted net RR is unavailable")
-            elif net_rr_value < minimum_net_rr:
-                blockers.append(
-                    f"Cost-adjusted net RR {net_rr_value:.2f}R is below minimum {minimum_net_rr:.2f}R"
-                )
+        # Cost-adjusted net RR is enforced centrally in DecisionEngine
+        # (single decision authority). TradeQualityEngine reports it only as
+        # evidence, not as a second hard gate.
 
         tp_values = [targets.get("tp1"), targets.get("tp2"), targets.get("tp3")]
         available_tp_values = [value for value in tp_values if value is not None]
