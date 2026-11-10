@@ -31,7 +31,8 @@ def test_load_historical_uses_distinct_since_dates(monkeypatch):
         return []
 
     monkeypatch.setattr(backtest, "_fetch_history", fake_fetch)
-    backtest.load_historical("BTC/USDT:USDT", days=60, now_ms=now_ms)
+    backtest.load_historical("BTC/USDT:USDT", days=60, now_ms=now_ms,
+                             use_cache=False)
 
     assert captured["1w"][0] == now_ms - int(2174 * 86_400_000)
     assert captured["1w"][1] == 302

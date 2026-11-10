@@ -283,12 +283,14 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
         ordered.append(candle)
     return ordered
 
-def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None):
+def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None,
+                    use_cache=True):
     """Load evaluation history, clamped to the market's actual listing date.
 
     Gerçek Bybit OHLCV verisi CCXT üzerinden indirilir ve yerel cache'e
-    kaydedilir. Aynı tarih aralığına tekrar ihtiyaç duyan bir sonraki backtest
+    kaydedilir. Aynı tarih aralığındaki sonraki backtest
     cache'den okunur; baştan indirilmez. Sahte veya rastgele veri üretilmez.
+    ``use_cache=False`` testi ve izole ortamlar için cache'i atlar.
     """
     if float(days) <= 0:
         raise ValueError("Backtest days must be greater than zero")
@@ -300,17 +302,18 @@ def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None):
         since = max(requested_since, listing_time_ms) if listing_time_ms else requested_since
         duration_ms = TIMEFRAME_DURATION_MS[tf]
 
-        cached = _load_cached_candles(symbol, tf, since, now)
-        if cached is not None:
-            data[tf] = cached
-            logging.info(
-                "%s %s -> %s candles (cache) (history %.1f days)",
-                symbol,
-                tf,
-                len(cached),
-                history_days,
-            )
-            continue
+        if use_cache:
+            cached = _load_cached_candles(symbol, tf, since, now)
+            if cached is not None:
+                data[tf] = cached
+                logging.info(
+                    "%s %s -> %s candles (cache) (history %.1f days)",
+                    symbol,
+                    tf,
+                    len(cached),
+                    history_days,
+                )
+                continue
 
         fetch_limit = limit + 2 if tf == "1w" else limit
         candles = _fetch_history(
@@ -320,7 +323,8 @@ def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None):
         # A historical decision may only use candles that were fully closed
         # at the backtest's fixed as-of timestamp.
         candles = [candle for candle in candles if candle.time + duration_ms <= now]
-        _save_cached_candles(symbol, tf, candles)
+        if use_cache:
+            _save_cached_candles(symbol, tf, candles)
         data[tf] = candles
         logging.info(
             "%s %s -> %s candles (fetched) (history %.1f days)",

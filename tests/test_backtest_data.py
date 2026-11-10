@@ -28,7 +28,8 @@ def test_load_historical_excludes_unclosed_candles(monkeypatch, timeframe):
     monkeypatch.setattr(backtest, "_fetch_history", fake_fetch)
     monkeypatch.setattr(backtest, "TIMEFRAMES", {timeframe: 1000})
 
-    data = backtest.load_historical("BTC/USDT:USDT", days=1, now_ms=now_ms)
+    data = backtest.load_historical("BTC/USDT:USDT", days=1, now_ms=now_ms,
+                                    use_cache=False)
 
     assert [c.time for c in data[timeframe]] == [now_ms - duration]
 
@@ -61,7 +62,7 @@ def test_load_historical_clamps_since_to_market_listing(monkeypatch):
 
     backtest.load_historical(
         "ETH/USDT:USDT", days=1, now_ms=now_ms,
-        listing_time_ms=listing_time_ms,
+        listing_time_ms=listing_time_ms, use_cache=False,
     )
 
     assert all(since == listing_time_ms for _, since in seen)
@@ -75,7 +76,8 @@ def test_load_historical_does_not_mutate_source_candle_list(monkeypatch):
     monkeypatch.setattr(backtest, "_fetch_history", lambda *args, **kwargs: source)
     monkeypatch.setattr(backtest, "TIMEFRAMES", {"15m": 1000})
 
-    data = backtest.load_historical("BTC/USDT:USDT", days=1, now_ms=now_ms)
+    data = backtest.load_historical("BTC/USDT:USDT", days=1, now_ms=now_ms,
+                                    use_cache=False)
 
     assert len(source) == 2
     assert len(data["15m"]) == 1
