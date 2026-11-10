@@ -1,5 +1,6 @@
 import os
 import stat
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -73,3 +74,34 @@ def test_install_cli_creates_symlink(monkeypatch, tmp_path):
 
     mode = os.stat(source).st_mode
     assert mode & stat.S_IXUSR
+
+
+def test_launcher_prefers_shipped_virtualenv():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    launcher = os.path.join(repo_root, "atlas")
+    assert os.path.exists(launcher)
+    assert os.access(launcher, os.X_OK)
+
+    with open(launcher, encoding="utf-8") as handle:
+        content = handle.read()
+
+    # The installed environment lives at .venv; the launcher must prefer it so
+    # analysis dependencies (e.g. ccxt) are importable. It keeps backward
+    # compatibility with a legacy venv/ name but must not rely on it alone.
+    assert ".venv/bin/python" in content
+    assert "venv/bin/python" in content
+
+    venv_python = os.path.join(repo_root, ".venv", "bin", "python")
+    assert os.path.exists(venv_python)
+    assert os.access(venv_python, os.X_OK)
+
+
+def test_launcher_virtualenv_can_import_market_data_deps():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    venv_python = os.path.join(repo_root, ".venv", "bin", "python")
+    result = subprocess.run(
+        [venv_python, "-c", "import ccxt, textual"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

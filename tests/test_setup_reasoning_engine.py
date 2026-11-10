@@ -354,12 +354,14 @@ def test_long_limit_rejects_targets_already_crossed_before_entry():
 
 
 
-def test_structural_stop_uses_small_atr_clearance_buffer(monkeypatch):
+def test_structural_stop_uses_risk_engine_minimum_atr_buffer(monkeypatch):
+    # Stop boşluğu, risk motorunun minimum ATR zeminiyle (0.35 × ATR)
+    # tutarlı olmalı; aksi halde yapısal stop "çok dar" reddedilir.
     monkeypatch.setattr("utils.atr.atr", lambda candles, period=14: 10.0)
     result = _run(candles=[object()])
     selected = result["selected"]
-    assert selected["stop_buffer"] == 1.0
-    assert selected["stop_loss"] <= selected["entry"] - 1.0
+    assert abs(selected["stop_buffer"] - 3.6) < 1e-9
+    assert selected["stop_loss"] <= selected["entry"] - 3.59
 
 
 

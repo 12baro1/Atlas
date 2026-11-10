@@ -233,6 +233,24 @@ def test_tp_levels_with_separate_structural_spacing_pass():
     assert evaluate(payload)["allowed"] is True
 
 
+def test_multiple_high_confidence_specialist_conflicts_are_blocked():
+    payload = base_payload()
+    payload["smt"] = {"active": True, "direction": "BEARISH", "confidence": 88}
+    payload["institutional"] = {"active": True, "direction": "SHORT", "confidence": 86}
+    result = evaluate(payload)
+    assert result["allowed"] is False
+    assert any("yüksek-güvenli uzman motoru" in item.lower() for item in result["blockers"])
+
+
+def test_single_high_confidence_conflict_remains_advisory():
+    payload = base_payload()
+    payload["smt"] = {"active": True, "direction": "BEARISH", "confidence": 88}
+    result = evaluate(payload)
+    assert result["allowed"] is True
+    assert result["blockers"] == []
+    assert any("SMT" in item for item in result["warnings"])
+
+
 def test_risk_output_must_match_the_final_structural_stop_and_targets():
     payload = base_payload()
     payload["risk"]["stop_loss"] = 97.5

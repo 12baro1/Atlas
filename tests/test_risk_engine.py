@@ -468,3 +468,24 @@ def test_risk_engine_rejects_tight_structural_stop_without_moving_it(monkeypatch
     assert risk["risk_setup_valid"] is False
     assert risk["stop_loss"] == 99.8
     assert risk["stop_adjusted"] is False
+
+
+def test_risk_engine_does_not_adjust_stop_that_already_clears_atr_floor(monkeypatch):
+    # Stop zaten minimum ATR zemini (0.35 × ATR = 0.35) karşılıyorsa
+    # risk motoru stop'u değiştirmemelidir; giriş/SL/TP aynı referans üzerinden
+    # devam eder ve RR tutarlı kalır.
+    monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.35)
+    monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", True)
+    monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
+    risk = RiskEngine().calculate(
+        entry=100.0,
+        stop_loss=99.6,
+        dynamic_tp={"tp1": 102.0, "tp2": 104.0, "tp3": 106.0},
+        atr_value=1.0,
+        direction="LONG",
+    )
+    assert risk is not None
+    assert risk["risk_setup_valid"] is True
+    assert risk["stop_adjusted"] is False
+    assert risk["stop_loss"] == 99.6
+    assert risk["risk"] == pytest.approx(0.4)

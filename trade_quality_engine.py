@@ -142,6 +142,7 @@ class TradeQualityEngine:
         # than the proposed entry. Keep high-confidence disagreement visible,
         # but let execution-critical structure, entry, sweep, regime, risk and
         # target checks decide whether the trade is executable.
+        high_confidence_conflicts = 0
         for name, module in (
             ("SMT", smt),
             ("Unicorn", unicorn),
@@ -158,6 +159,14 @@ class TradeQualityEngine:
             module_direction = self._module_direction(module)
             if confidence >= 75 and module_direction in {"LONG", "SHORT"} and module_direction != direction:
                 warnings.append(f"{name} high-confidence direction conflicts with the trade")
+                if confidence >= 85:
+                    high_confidence_conflicts += 1
+        # Birden fazla yüksek-güvenli uzman motoru yönde çeliştiğinde kurulum
+        # işlem kalitesini bozar; tek bir çelişki uyarı olarak kalır.
+        if high_confidence_conflicts >= 2:
+            blockers.append(
+                f"{high_confidence_conflicts} yüksek-güvenli uzman motoru işlem yönüne karşı"
+            )
 
         phase = str((market_phase or {}).get("phase", "")).strip()
         if phase and phase.lower() == "manipulation":

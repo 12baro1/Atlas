@@ -321,7 +321,16 @@ class SetupReasoningEngine:
                 atr_value = self._number(
                     calculate_atr(candles, period=int(getattr(Config, "ATR_PERIOD", 14)))
                 )
-                buffer_multiplier = float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10))
+                # Stop boşluğu yapısal geçersizlik kenarından itibaren RiskEngine'in
+                # minimum ATR zeminiyle eşleşmeli veya onun üstünde olmalı. Eşittir
+                # olurken kayan nokta hassaslığı "eşit ama daha küçük" gibi görünür
+                # ve geçerli durdurmalar "çok dar" reddedilir. %0'lık ayrı bir
+                # margin (0.01 ATR) bu sınır durumunu ortadan kaldırır ve giriş/SL/TP
+                # aynı fiyat referansından hesaplanmaya devam eder.
+                buffer_multiplier = max(
+                    float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10)),
+                    float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.35)),
+                ) + 0.01
                 if atr_value and atr_value > 0 and math.isfinite(buffer_multiplier):
                     atr_buffer = atr_value * max(0.0, buffer_multiplier)
             except (TypeError, ValueError, OverflowError, ZeroDivisionError):
