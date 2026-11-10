@@ -700,21 +700,39 @@ class SetupReasoningEngine:
             }
 
         # Structurally valid distant POIs remain in candidates for diagnostics,
-        # but only execution-eligible candidates may become the selected setup.
-        eligible_candidates = [item for item in candidates if item.get("execution_eligible", True)]
+        # but only execution-eligible candidates with sufficient net edge after
+        # costs may become the selected setup. This filters out marginal setups
+        # where execution costs consume the RR edge - a risk/reward quality
+        # filter, not an artificial trade-count reduction.
+        min_setup_net_rr = float(getattr(Config, "MIN_SETUP_NET_RR", 2.0))
+        eligible_candidates = [
+            item for item in candidates
+            if item.get("execution_eligible", True)
+            and item.get("execution_economics_valid", False)
+            and item.get("net_projected_rr") is not None
+            and item.get("net_projected_rr") >= min_setup_net_rr
+        ]
         if not eligible_candidates:
-            nearest = min(candidates, key=lambda item: abs(item["entry"] - current))
+            # Candidates exist but none pass the net-RR quality filter, or all
+            # are too far from current price. Return WAIT with no target.
+            nearest = min(candidates, key=lambda item: abs(item["entry"] - current)) if candidates else None
             return {
                 "candidates": candidates,
                 "selected": {
                     "valid": False,
                     "direction": "WAIT",
-                    "reason": "All structurally valid POIs are too far from current market price",
-                    "entry_reason_code": "ENTRY_TOO_FAR",
-                    "nearest_candidate_distance_pct": nearest.get("entry_distance_pct"),
-                    "nearest_candidate_distance_atr": nearest.get("entry_distance_atr"),
+                    "reason": (
+                        "All structurally valid POIs are too far from current market price"
+                        if nearest and nearest.get("entry_too_far")
+                        else "No setup meets minimum net RR after execution costs"
+                    ),
+                    "entry_reason_code": "ENTRY_TOO_FAR" if (nearest and nearest.get("entry_too_far")) else "NET_RR_BELOW_MINIMUM",
+                    "projected_target": None,
+                    "projected_rr": None,
+                    "nearest_candidate_distance_pct": nearest.get("entry_distance_pct") if nearest else None,
+                    "nearest_candidate_distance_atr": nearest.get("entry_distance_atr") if nearest else None,
                 },
-                "reason": "all_poi_candidates_too_far",
+                "reason": "no_eligible_candidates",
                 "motor_evidence_count": len(evidence_records),
                 "motor_evidence_sources": motor_evidence_sources,
             }
