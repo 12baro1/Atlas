@@ -665,9 +665,26 @@ class TradeQualityFilters:
         if entry_price is not None and stop is not None:
             risk_distance = abs(entry_price - stop)
 
+        direction_norm = str(direction or entry.get("direction") or "").upper()
+        if direction_norm not in {"LONG", "SHORT"} and entry_price is not None and stop is not None:
+            direction_norm = "LONG" if stop < entry_price else "SHORT"
+
+        # Yön işaretli TP doğrulaması: mutlak değer, yanlış tarafta kalan bir
+        # hedefi geçerli gösteremez. LONG: TP > Entry, SHORT: TP < Entry.
+        tp_levels = (("tp1", tp1), ("tp2", tp2), ("tp3", tp3))
+        wrong_side_tps = [
+            name for name, value in tp_levels
+            if value is not None and entry_price is not None and (
+                (direction_norm == "LONG" and value <= entry_price)
+                or (direction_norm == "SHORT" and value >= entry_price)
+            )
+        ]
+
         tp1_rr = None
         if risk_distance and risk_distance > 0 and tp1 is not None:
-            tp1_rr = abs(tp1 - entry_price) / risk_distance
+            tp1_rr = (
+                (tp1 - entry_price) if direction_norm == "LONG" else (entry_price - tp1)
+            ) / risk_distance
 
         reasons = []
 
@@ -692,6 +709,58 @@ class TradeQualityFilters:
             detail["severity"] = "critical"
             detail["reason"] = "Geçerli yapısal TP hedefi yok"
             detail["critical_blockers"].append("TP/RR: no valid structural target")
+            return detail
+
+        if direction_norm not in {"LONG", "SHORT"}:
+            detail["passed"] = False
+            detail["severity"] = "critical"
+            detail["reason"] = "TP/RR doğrulaması için yön belirlenemedi"
+            detail["critical_blockers"].append("TP/RR: direction unresolved")
+            return detail
+
+        if entry_price is None or stop is None:
+            detail["passed"] = False
+            detail["severity"] = "critical"
+            detail["reason"] = "TP/RR doğrulanamadı: entry veya stop yok"
+            detail["critical_blockers"].append("TP/RR: missing entry or stop")
+            return detail
+
+        if tp1 is None:
+            detail["passed"] = False
+            detail["severity"] = "critical"
+            detail["reason"] = "TP1 hedefi yok; TP/RR doğrulaması yapılamaz"
+            detail["critical_blockers"].append("TP/RR: TP1 missing")
+            return detail
+
+        if wrong_side_tps:
+            detail["passed"] = False
+            detail["severity"] = "critical"
+            detail["reason"] = (
+                f"TP yanlış tarafta ({direction_norm}): {', '.join(wrong_side_tps)}"
+            )
+            detail["critical_blockers"].append(
+                f"TP/RR: {'/'.join(wrong_side_tps)} on wrong side of entry ({direction_norm})"
+            )
+            return detail
+
+        present_tps = [value for _, value in tp_levels if value is not None]
+        ordered = all(
+            (
+                present_tps[index] < present_tps[index + 1]
+                if direction_norm == "LONG"
+                else present_tps[index] > present_tps[index + 1]
+            )
+            for index in range(len(present_tps) - 1)
+        )
+        if not ordered:
+            detail["passed"] = False
+            detail["severity"] = "critical"
+            detail["reason"] = (
+                f"TP sıralaması bozuk ({direction_norm}: TP1<TP2<TP3 beklenir)"
+                if direction_norm == "LONG"
+                else f"TP sıralaması bozuk ({direction_norm}: TP1>TP2>TP3 beklenir)"
+            )
+            detail["critical_blockers"].append("TP/RR: broken target ordering")
             return detail
 
         if tp1_rr is not None and tp1_rr < min_tp1_rr:
