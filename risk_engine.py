@@ -54,6 +54,174 @@ class RiskEngine:
         weighted_rr = sum(float(rr_by_tp[name]) * normalized[name] for name in available)
         return normalized, weighted_rr
 
+    def reconcile_final_geometry_payload(self, risk, entry, stop_loss, targets):
+        """Final geometri kilitlendikten sonra türetilmiş risk metriklerini tazele.
+
+        finalize_setup_geometry SL/TP merdivenini dedupe edip yeniden sıraladığı
+        için payload içindeki rr/weighted_rr/weighted_net_rr/position_size değerleri
+        önceki (bayat) geometriye ait kalabilir. Bu metrikler burada YENİDEN
+        hesaplanır; analyze() ile aynı altyapı ve aynı maliyet modeli kullanılır
+        (RREngine.calculate_breakdown, _resolve_partial_exit_weights,
+        estimate_plan_cost, estimate_stop_cost). Maliyet sıfırdan bir kez dahil
+        edilir; mevcut değerler üzerinden tekrar düşülmez (çift sayım yok).
+
+        Dönüş: güncellenmiş risk payload'ı (yerinde değiştirir).
+        """
+        if not isinstance(risk, dict):
+            return risk
+        try:
+            entry_price = float(entry)
+            final_stop = float(stop_loss)
+        except (TypeError, ValueError, OverflowError):
+            return risk
+        if not (math.isfinite(entry_price) and math.isfinite(final_stop) and entry_price > 0 and final_stop > 0):
+            return risk
+        risk_distance = abs(entry_price - final_stop)
+        if risk_distance <= 0:
+            return risk
+
+        resolved_entry_type = str(risk.get("entry_type") or "LIMIT").upper()
+
+        def _payload_rate(name, config_name, default):
+            value = risk.get(name)
+            try:
+                return float(value) if value is not None else float(getattr(Config, config_name, default))
+            except (TypeError, ValueError, OverflowError):
+                return float(getattr(Config, config_name, default))
+
+        maker_fee_rate = _payload_rate("maker_fee_rate", "MAKER_FEE_RATE", 0.0002)
+        taker_fee_rate = _payload_rate("taker_fee_rate", "TAKER_FEE_RATE", 0.00055)
+        spread_rate = _payload_rate("spread_rate", "STOP_SPREAD_BUFFER_RATE", 0.0002)
+        slippage_rate = _payload_rate("slippage_rate", "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)
+
+        tp_values = {}
+        if isinstance(targets, dict):
+            for name in ("tp1", "tp2", "tp3"):
+                try:
+                    value = float(targets.get(name))
+                except (TypeError, ValueError, OverflowError):
+                    value = None
+                if value is not None and math.isfinite(value) and value > 0:
+                    tp_values[name] = value
+
+        rr = None
+        net_rr = None
+        weighted_rr = None
+        weighted_net_rr = None
+        partial_exit_weights = {}
+        plan_cost = None
+        fee_in_r = None
+
+        rr_breakdown = self.rr_engine.calculate_breakdown(
+            entry=entry_price,
+            stop_loss=final_stop,
+            tp1=tp_values.get("tp1"),
+            tp2=tp_values.get("tp2"),
+            tp3=tp_values.get("tp3"),
+            selection_rule=str(risk.get("rr_selection_rule") or "max_rr"),
+        )
+
+        if rr_breakdown is not None:
+            rr = rr_breakdown["selected_rr"]
+            rr_by_tp = rr_breakdown.get("rr_by_tp") or {}
+            risk["rr_by_tp"] = rr_by_tp
+            risk["rr1"] = rr_by_tp.get("tp1")
+            risk["rr2"] = rr_by_tp.get("tp2")
+            risk["rr3"] = rr_by_tp.get("tp3")
+            risk["selected_tp"] = rr_breakdown.get("selected_tp")
+            risk["selected_rr"] = rr_breakdown.get("selected_rr")
+            risk["target_max_rr"] = rr_breakdown.get("selected_rr")
+            risk["rr"] = rr
+            risk["rr_basis"] = "max_target"
+
+            partial_exit_weights, weighted_rr = self._resolve_partial_exit_weights(rr_by_tp)
+            if weighted_rr is not None:
+                plan_cost = estimate_plan_cost(
+                    entry_price=entry_price,
+                    targets={"tp1": tp_values.get("tp1"), "tp2": tp_values.get("tp2"), "tp3": tp_values.get("tp3")},
+                    weights=partial_exit_weights,
+                    entry_type=resolved_entry_type,
+                    maker_fee_rate=maker_fee_rate,
+                    taker_fee_rate=taker_fee_rate,
+                    spread_rate=spread_rate,
+                    slippage_rate=slippage_rate,
+                )
+                fee_in_r = plan_cost["total"] / risk_distance
+                weighted_net_rr = round(weighted_rr - fee_in_r, 4)
+                net_rr = weighted_net_rr
+                risk["weighted_rr"] = round(weighted_rr, 4)
+                risk["weighted_net_rr"] = weighted_net_rr
+                risk["net_rr"] = net_rr
+                risk["execution_rr"] = weighted_net_rr
+                risk["cost_drag_rr"] = round(fee_in_r, 4)
+                risk["plan_cost_quote_per_unit"] = round(plan_cost["total"], 10)
+            else:
+                risk["weighted_rr"] = None
+                risk["weighted_net_rr"] = None
+                risk["net_rr"] = None
+                risk["execution_rr"] = rr
+                risk["cost_drag_rr"] = None
+                risk["plan_cost_quote_per_unit"] = None
+        else:
+            for name in (
+                "rr_by_tp", "rr1", "rr2", "rr3", "selected_tp", "selected_rr",
+                "rr", "target_max_rr", "net_rr", "weighted_rr", "weighted_net_rr",
+                "execution_rr", "cost_drag_rr", "plan_cost_quote_per_unit", "rr_basis",
+            ):
+                risk[name] = None
+        risk["partial_exit_weights"] = dict(partial_exit_weights)
+
+        # Pozisyon boyutu nihai net-RR ve nihai stop mesafesine göre yeniden ölçeklenir.
+        minimum_net_rr = _payload_rate("minimum_net_rr", "MINIMUM_NET_RR", 1.5)
+        risk_reduction_factor = 1.0
+        if net_rr is not None and minimum_net_rr > 0 and net_rr < minimum_net_rr:
+            risk_reduction_factor = clamp(net_rr / minimum_net_rr, 0.0, 1.0)
+
+        base_risk_percent = _payload_rate("risk_percent_base", "RISK_PERCENT", 1.0)
+        effective_risk_percent = max(0.0, base_risk_percent * risk_reduction_factor)
+        account_balance = float(getattr(Config, "INITIAL_BALANCE", 1000.0))
+        target_capital_at_risk = account_balance * (effective_risk_percent / 100)
+
+        stop_cost = estimate_stop_cost(
+            entry_price=entry_price,
+            stop_price=final_stop,
+            entry_type=resolved_entry_type,
+            maker_fee_rate=maker_fee_rate,
+            taker_fee_rate=taker_fee_rate,
+            spread_rate=spread_rate,
+            slippage_rate=slippage_rate,
+        )
+        minimum_tick_distance = risk.get("minimum_tick_distance")
+        try:
+            minimum_tick_distance = float(minimum_tick_distance) if minimum_tick_distance is not None else 1e-12
+        except (TypeError, ValueError, OverflowError):
+            minimum_tick_distance = 1e-12
+        effective_risk_per_unit = max(risk_distance + stop_cost["total"], minimum_tick_distance)
+        position_size_raw = target_capital_at_risk / effective_risk_per_unit
+
+        try:
+            sizing_factor = float(risk.get("sizing_factor")) if risk.get("sizing_factor") is not None else 1.0
+        except (TypeError, ValueError, OverflowError):
+            sizing_factor = 1.0
+        adjusted_position_size = position_size_raw * sizing_factor
+        max_position_size_limit = _payload_rate("position_size_limit", "MAX_POSITION_SIZE", 1000.0)
+        capped_position_size = min(adjusted_position_size, max_position_size_limit)
+
+        risk["risk"] = round(risk_distance, 8)
+        risk["risk_percent"] = round(effective_risk_percent, 4)
+        risk["risk_reduction_factor"] = round(risk_reduction_factor, 4)
+        risk["capital_at_risk_target"] = round(target_capital_at_risk, 2)
+        risk["position_size_raw"] = round(position_size_raw, 4)
+        risk["position_size_pre_cap"] = round(adjusted_position_size, 4)
+        risk["position_size"] = round(capped_position_size, 4)
+        risk["position_size_capped"] = capped_position_size < adjusted_position_size
+        risk["capital_at_risk"] = round(capped_position_size * effective_risk_per_unit, 2)
+        risk["stop_cost_quote_per_unit"] = round(stop_cost["total"], 10)
+        risk["stop_cost_breakdown"] = stop_cost
+        risk["effective_risk_per_unit"] = round(effective_risk_per_unit, 8)
+        risk["final_geometry_reconciled"] = True
+        return risk
+
     def calculate(
         self,
         entry,
