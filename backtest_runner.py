@@ -133,12 +133,15 @@ def simulate_trade_partial(
     direction="LONG",
     tp_weights=None,
 ):
-    """Kısmi TP ve gecikmeli trailing-stop simülasyonu.
+    """Kısmi TP ve gecikmeli trailing-stop simülasyonu (journal ile aynı mum mantığı).
 
-    TP ağırlıkları normalize edilir. Bir mumda yalnızca sıradaki tek hedef
-    gerçekleşmiş sayılır; OHLC verisi TP1→TP2 sırasını kanıtlayamaz.
-    TP1 sonrası breakeven, TP2 sonrası TP1 stopu bir sonraki mumdan itibaren
-    etkinleşir. Stopta gap varsa gerçekleşme fiyatı mum açılışıdır.
+    TP ağırlıkları normalize edilir. trade_journal.resolve_signal_outcome ile
+    birebir aynı mum değerlendirmesi kullanılır: hedefler sırayla dolu; her
+    dolumdan sonra taşınan koruyucu stop bu mumun aralığındaysa kalan pozisyon
+    AYNI MUMDA konservatif kapanır ve sonraki hedef sayılmaz (OHLC mum içi
+    fiyat sırasını kanıtlayamaz → iyimser varsayım yok). İlk stopta gap varsa
+    gerçekleşme fiyatı mum açılışıdır; taşınan stopta journal gibi stop
+    fiyatı kullanılır.
     """
     direction = (direction or "LONG").upper()
     entry = _num(entry)
@@ -172,7 +175,6 @@ def simulate_trade_partial(
     is_long = direction in ("LONG", "BUY")
     realized_rr = 0.0
     closed_frac = 0.0
-    next_level_idx = 0
     reached_tp = 0
     trailing_stop = stop
     exit_reason = None
@@ -181,6 +183,13 @@ def simulate_trade_partial(
     stop_gap = False
     stop_gap_distance = 0.0
     stop_gap_r = 0.0
+
+    weight_by_level = {
+        level_no: weights[index] for index, (level_no, _) in enumerate(levels)
+    }
+    tp_by_level = dict(levels)
+    hit_levels = set()
+    reached_order = []
 
     for candle_offset, candle in enumerate(future_candles):
         low = _num(candle.low)
@@ -220,30 +229,71 @@ def simulate_trade_partial(
             stop_gap_r = stop_gap_distance / risk_distance
             break
 
-        # OHLC mumunda hedeflerin sırası bilinemez: mum başına yalnızca bir TP say.
-        if next_level_idx < len(levels):
-            level_no, tp_price = levels[next_level_idx]
+        # trade_journal ile birebir mum mantığı: mum başındaki taşınan stop
+        # saklanır, hedefler sırayla değerlendirilir; her dolumdan sonra yeni
+        # stop bu mumun aralığındaysa kalan pozisyon AYNI MUMDA kapanır ve
+        # sonraki hedefler sayılmaz (OHLC sıra kanıtı yok → konservatif).
+        carried_stop = trailing_stop
+        for level_no, tp_price in levels:
+            if level_no in hit_levels:
+                continue
             hit = high >= tp_price if is_long else low <= tp_price
-            if hit:
-                weight = weights[next_level_idx]
-                rr = abs(tp_price - entry) / risk_distance
-                realized_rr += weight * rr
-                closed_frac += weight
-                reached_tp = level_no
-                exit_price = tp_price
-                next_level_idx += 1
+            if not hit:
+                continue
 
-                # Yeni trailing stop sonraki mumda aktif olur.
-                available = {number for number, _ in levels}
-                if level_no == 1 and len(levels) > 1:
-                    trailing_stop = entry
-                elif level_no == 2 and 1 in available and 3 in available:
-                    trailing_stop = next(price for number, price in levels if number == 1)
+            weight = weight_by_level[level_no]
+            rr = (
+                (tp_price - entry) / risk_distance
+                if is_long
+                else (entry - tp_price) / risk_distance
+            )
+            realized_rr += weight * rr
+            closed_frac += weight
+            reached_tp = level_no
+            exit_price = tp_price
+            hit_levels.add(level_no)
+            reached_order.append(level_no)
 
-                if closed_frac >= 1.0 - 1e-9:
-                    exit_reason = f"TP{reached_tp}"
-                    exit_offset = candle_offset
-                    break
+            # Koruyucu stop taşıma: journal kuralı (ilk TP1 → breakeven,
+            # TP2 sonrası → TP1 seviyesi; aksi halde stop korunur).
+            if level_no == 1:
+                if is_long:
+                    trailing_stop = max(carried_stop if carried_stop is not None else stop, entry)
+                else:
+                    trailing_stop = min(carried_stop if carried_stop is not None else stop, entry)
+            elif level_no == 2 and 3 not in hit_levels and 1 in tp_by_level:
+                trailing_stop = tp_by_level[1]
+
+            if closed_frac >= 1.0 - 1e-9:
+                exit_reason = f"TP{reached_tp}"
+                exit_offset = candle_offset
+                break
+
+            # Journalın aynı-mum konservatif kontrolü: taşınan stop bu mumun
+            # aralığında ise kalan pay burada, stop fiyatından kapanır.
+            remaining = 1.0 - closed_frac
+            moved_stop_hit = remaining > 0.0 and (
+                (is_long and low <= trailing_stop)
+                or (not is_long and high >= trailing_stop)
+            )
+            if moved_stop_hit:
+                rr_stop = (
+                    (trailing_stop - entry) / risk_distance
+                    if is_long
+                    else (entry - trailing_stop) / risk_distance
+                )
+                realized_rr += remaining * rr_stop
+                closed_frac = 1.0
+                exit_reason = "TRAILING_STOP"
+                exit_offset = candle_offset
+                exit_price = trailing_stop
+                stop_gap = False
+                stop_gap_distance = 0.0
+                stop_gap_r = 0.0
+                break
+
+        if closed_frac >= 1.0 - 1e-9:
+            break
 
     if closed_frac < 1.0 - 1e-9:
         return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
@@ -253,7 +303,7 @@ def simulate_trade_partial(
         "result": result,
         "tp": reached_tp,
         "net_rr": _num(realized_rr, 4),
-        "levels": [level_no for level_no, _ in levels[:next_level_idx]],
+        "levels": list(reached_order),
         "exit_reason": exit_reason,
         "exit_offset": exit_offset,
         "exit_price": _num(exit_price),

@@ -174,9 +174,10 @@ def test_runner_applies_round_trip_fee_rate_once():
 
 
 
-def test_partial_tp1_trailing_stop_activates_on_next_candle_and_skips_tp2_same_bar():
-    # TP1 is counted; neither the same-bar breakeven touch nor TP2 is assumed
-    # to have occurred after TP1. The new stop becomes active next candle.
+def test_partial_tp1_same_candle_breakeven_close_matches_journal():
+    # trade_journal ile birebir aynı mum mantığı: TP1 dolduğunda taşınan
+    # breakeven stopu bu mumun aralığındaysa kalan pay AYNI MUMDA kapanır
+    # (OHLC mum içi sırayı kanıtlayamaz → konservatif) ve TP2 sayılmaz.
     first = _tl(10.5, o=10.0, h=12.5, l=9.9, cl=10.5)
     second = _tl(10.0, o=10.5, h=10.6, l=9.9, cl=10.0)
     out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], [first, second], "LONG")
@@ -184,7 +185,20 @@ def test_partial_tp1_trailing_stop_activates_on_next_candle_and_skips_tp2_same_b
     assert out["tp"] == 1
     assert out["net_rr"] == 0.5
     assert out["exit_reason"] == "TRAILING_STOP"
-    assert out["exit_offset"] == 1
+    assert out["exit_offset"] == 0
+    assert out["exit_price"] == 10.0
+
+
+def test_partial_tp2_same_candle_with_tp1_stop_inside_range():
+    # TP1 + TP2 aynı mumda (journal sıralı dolum kuralı); taşınan TP1 stopu
+    # mum aralığında olsa da kalan pay 0 olduğundan pozisyon TP2'de kapanır.
+    candle = _tl(11.0, o=10.0, h=12.5, l=10.5, cl=12.0)
+    out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], [candle], "LONG")
+    assert out["result"] == "WIN"
+    assert out["tp"] == 2
+    assert out["net_rr"] == 1.5
+    assert out["exit_reason"] == "TP2"
+    assert out["exit_offset"] == 0
 
 
 def test_limit_order_is_not_filled_without_price_touch():

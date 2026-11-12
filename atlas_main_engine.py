@@ -379,6 +379,15 @@ class AtlasMainEngine:
         target_payload.update(final_targets)
         target_payload["selected_by"] = "ATLAS_MAIN_ENGINE"
         target_payload["final_geometry_authority"] = "ATLAS_MAIN_ENGINE"
+
+        # Geometri artık kesin: risk payload'ındaki RR/weighted/net/boyut alanları
+        # bayat kalmamalı. Mevcut RiskEngine altyapısıyla yeniden hesaplanır.
+        if isinstance(risk_payload, dict) and risk_payload.get("risk_setup_valid") is True:
+            from risk_engine import RiskEngine
+
+            risk_payload = RiskEngine().reconcile_final_geometry_payload(
+                risk_payload, entry_price, stop, final_targets
+            )
         return {"entry": setup, "risk": risk_payload, "targets": target_payload}
 
     def decide(self, **motor_outputs):
