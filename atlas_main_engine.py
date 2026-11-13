@@ -59,6 +59,39 @@ class AtlasMainEngine:
         self.motors[name] = proxy
         return proxy
 
+    @staticmethod
+    def _collect_event_ids(payload, *, max_nodes=20000, max_depth=12):
+        """Collect only explicitly supplied stable event IDs; never infer identity from labels."""
+        event_ids = set()
+        stack = [(payload, 0)]
+        visited = set()
+        visited_nodes = 0
+        while stack and visited_nodes < max_nodes:
+            value, depth = stack.pop()
+            visited_nodes += 1
+            if depth > max_depth or not isinstance(value, (dict, list, tuple)):
+                continue
+            identity = id(value)
+            if identity in visited:
+                continue
+            visited.add(identity)
+            if isinstance(value, dict):
+                event_id = value.get("event_id")
+                if isinstance(event_id, str) and event_id.strip():
+                    event_ids.add(event_id.strip())
+                stack.extend(
+                    (child, depth + 1)
+                    for child in value.values()
+                    if isinstance(child, (dict, list, tuple))
+                )
+            else:
+                stack.extend(
+                    (child, depth + 1)
+                    for child in value
+                    if isinstance(child, (dict, list, tuple))
+                )
+        return sorted(event_ids)
+
     def execute_motor(self, name, method, callable_, *args, **kwargs):
         """Run a specialist exactly once and place its raw output in shared evidence."""
         self._sequence += 1
@@ -77,6 +110,7 @@ class AtlasMainEngine:
         self.evidence_pool.append({
             "sequence": sequence, "motor": name, "method": method,
             "status": "COMPLETED", "output": output,
+            "event_ids": self._collect_event_ids(output),
         })
         return output
 
@@ -93,6 +127,26 @@ class AtlasMainEngine:
     def motor_diagnostics(self):
         expected = sorted(self.motors)
         invoked = sorted(name for name, count in self.motor_call_counts.items() if count)
+        event_occurrences = Counter()
+        event_sources = {}
+        for record in self.evidence_pool:
+            motor = str(record.get("motor") or "UNKNOWN")
+            for event_id in record.get("event_ids") or []:
+                event_occurrences[event_id] += 1
+                event_sources.setdefault(event_id, set()).add(motor)
+        duplicate_events = {
+            event_id: {
+                "occurrences": count,
+                "motors": sorted(event_sources.get(event_id) or []),
+            }
+            for event_id, count in event_occurrences.items()
+            if count > 1
+        }
+        cross_motor_duplicates = {
+            event_id: details
+            for event_id, details in duplicate_events.items()
+            if len(details["motors"]) > 1
+        }
         return {
             "expected_motors": expected,
             "invoked_motors": invoked,
@@ -102,6 +156,13 @@ class AtlasMainEngine:
             "error_count": len(self.motor_errors),
             "errors": list(self.motor_errors),
             "evidence_count": len(self.evidence_pool),
+            "event_identity": {
+                "occurrences": sum(event_occurrences.values()),
+                "unique": len(event_occurrences),
+                "duplicate_ids": len(duplicate_events),
+                "cross_motor_duplicate_ids": len(cross_motor_duplicates),
+                "cross_motor_duplicates": dict(list(sorted(cross_motor_duplicates.items()))[:50]),
+            },
         }
 
     def analyze(self, market_data, *, pipeline):
