@@ -136,3 +136,61 @@ def test_pending_limit_is_rejected_when_tp1_was_already_reached(monkeypatch):
 
     assert result["allowed"] is False
     assert any("pending LIMIT entry" in item and "stale" in item for item in result["blockers"])
+
+
+
+def test_poi_quality_rejects_entry_outside_explicit_poi_zone(monkeypatch):
+    import utils.atr
+
+    monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 2.0)
+    payload = _quality_payload(100.0)
+    payload["entry"].update({
+        "poi_source": "FVG",
+        "poi_zone": {"low": 98.0, "high": 99.0},
+        "ote_confluence": True,
+        "structure_aligned": True,
+    })
+
+    result = TradeQualityEngine().evaluate(**payload)
+
+    assert result["allowed"] is False
+    assert any("POI quality: entry outside selected zone" in item for item in result["blockers"])
+
+
+def test_poi_quality_accepts_valid_confluent_fvg_zone(monkeypatch):
+    import utils.atr
+
+    monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 2.0)
+    payload = _quality_payload(100.0)
+    payload["entry"].update({
+        "poi_source": "FVG",
+        "poi_zone": {"low": 99.0, "high": 101.0},
+        "ote_confluence": True,
+        "structure_aligned": True,
+    })
+
+    result = TradeQualityEngine().evaluate(**payload)
+
+    assert result["allowed"] is True
+    assert result["setup_quality"]["quality_filters"]["filters"]["poi_quality"]["score"] >= 50
+
+
+def test_stop_atr_quality_uses_final_structural_stop_floor(monkeypatch):
+    import utils.atr
+
+    monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 2.0)
+    monkeypatch.setattr(Config, "QUALITY_MIN_STOP_ATR", 0.25)
+    monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75)
+    payload = _quality_payload(100.0)
+    payload["entry"]["stop_loss"] = 99.2
+    payload["risk"]["stop_loss"] = 99.2
+    payload["dynamic_tp"].update({
+        "tp1": 100.88,
+        "tp2": 101.68,
+        "tp3": 102.56,
+    })
+
+    result = TradeQualityEngine().evaluate(**payload)
+
+    assert result["allowed"] is False
+    assert any("Stop too tight" in item for item in result["blockers"])
