@@ -246,11 +246,21 @@ class SetupReasoningEngine:
             sweep_direction = "LONG" if sweep_side == "SELL_SIDE" or (sweep or {}).get("sell_side") else (
                 "SHORT" if sweep_side == "BUY_SIDE" or (sweep or {}).get("buy_side") else "NONE"
             )
-            if sweep_direction == direction and post.get("confirmed"):
-                append_evidence(
-                    supporting, "Liquidity sweep + confirmed post-sweep structure",
-                    post.get("event_id") or (sweep or {}).get("event_id"),
-                )
+            if bool((sweep or {}).get("ambiguous_sweep")) or (
+                (sweep or {}).get("buy_side") and (sweep or {}).get("sell_side")
+            ):
+                sweep_direction = "NONE"
+            if sweep_direction == direction:
+                if post.get("confirmed"):
+                    append_evidence(
+                        supporting, "Liquidity sweep + confirmed post-sweep structure",
+                        post.get("event_id") or (sweep or {}).get("event_id"),
+                    )
+                else:
+                    append_evidence(
+                        supporting, "Liquidity sweep without post-sweep confirmation",
+                        (sweep or {}).get("event_id"),
+                    )
             elif sweep_direction != "NONE":
                 append_evidence(opposing, "Opposing liquidity sweep", (sweep or {}).get("event_id"))
         if isinstance(structure, list):
