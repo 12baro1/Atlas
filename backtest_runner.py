@@ -1018,6 +1018,7 @@ class BacktestRunner:
             ),
             "poi_type": (
                 (analysis.get("entry") or {}).get("poi_type")
+                or (analysis.get("entry") or {}).get("poi_source")
                 or (analysis.get("entry") or {}).get("source")
                 or analysis.get("entry_source")
                 or "UNKNOWN"
