@@ -1794,6 +1794,10 @@ class TradeJournal:
         breakeven = [m for m in closed if m.get("result") == "BREAKEVEN"]
         early_exit = [m for m in closed if m.get("result") == "EARLY_EXIT"]
         r_values = [self._num(m.get("pnl_rr"), 0.0) for m in closed]
+        actual_cost_trades = [m for m in closed if m.get("pnl_rr_basis") == "net_actual_costs"]
+        price_only_trades = [m for m in closed if m.get("pnl_rr_basis") != "net_actual_costs"]
+        actual_cost_r = [self._num(m.get("pnl_rr"), 0.0) for m in actual_cost_trades]
+        price_only_r = [self._num(m.get("pnl_rr"), 0.0) for m in price_only_trades]
         return {
             "total": len(closed),
             "wins": len(wins),
@@ -1807,6 +1811,18 @@ class TradeJournal:
             "expectancy": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
             "profit_factor": self._profit_factor(r_values),
             "average_r": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
+            "actual_cost_accounting": {
+                "net_actual_costs_count": len(actual_cost_trades),
+                "gross_price_only_count": len(price_only_trades),
+                "actual_cost_quote_total": round(sum(self._num(m.get("execution_cost_quote"), 0.0) for m in actual_cost_trades), 8),
+                "net_actual_costs_expectancy": round(sum(actual_cost_r) / len(actual_cost_r), 4) if actual_cost_r else None,
+                "net_actual_costs_profit_factor": self._profit_factor(actual_cost_r) if actual_cost_r else None,
+                "gross_price_only_expectancy": round(sum(price_only_r) / len(price_only_r), 4) if price_only_r else None,
+                "gross_price_only_profit_factor": self._profit_factor(price_only_r) if price_only_r else None,
+            },
+            "performance_basis": "mixed" if actual_cost_trades and price_only_trades else (
+                "net_actual_costs" if actual_cost_trades else "gross_price_only"
+            ),
         }
 
     # ------------------------------------------------------------------
@@ -1916,6 +1932,9 @@ class TradeJournal:
             "grade": manual.get("grade"),
             "confidence": manual.get("confidence"),
             "cause_code": self._classify_trade_cause(manual.get("manual_exit_reason") or manual.get("close_reason") or manual.get("exit_reason"), r_value, manual.get("payload")),
+            "pnl_rr_basis": manual.get("pnl_rr_basis") or "gross_price_only",
+            "execution_cost_rr": manual.get("execution_cost_rr"),
+            "execution_cost_quote": manual.get("execution_cost_quote"),
         }
 
     def find_manual_trade(self, *, signal_id=None, manual_id=None):
