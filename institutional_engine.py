@@ -160,7 +160,13 @@ class InstitutionalAnalysisEngine:
 
         total_volume = max(sum(abs(value) for value in deltas), 1e-9)
         delta_value = deltas[-1] if deltas else 0.0
+        event_id = None
+        if candles:
+            timestamp = self._price(candles[-1], "time")
+            if timestamp > 0:
+                event_id = f"cvd:candle_proxy:{int(timestamp)}"
         return {
+            "event_id": event_id,
             "value": round(cumulative, 8),
             "delta": round(delta_value, 8),
             "delta_pct": round((cumulative / total_volume) * 100, 2),
@@ -184,7 +190,13 @@ class InstitutionalAnalysisEngine:
         total = max(bullish + bearish, 1e-9)
         imbalance = net / total
 
+        event_id = None
+        if candles:
+            timestamp = self._price(candles[-1], "time")
+            if timestamp > 0:
+                event_id = f"cvd:candle_proxy:{int(timestamp)}"
         return {
+            "event_id": event_id,
             "bullish": round(bullish, 8),
             "bearish": round(bearish, 8),
             "net": round(net, 8),
@@ -201,6 +213,7 @@ class InstitutionalAnalysisEngine:
         buy_volume = 0.0
         sell_volume = 0.0
         used = 0
+        newest_timestamp = None
         for trade in trades:
             if not isinstance(trade, dict):
                 continue
@@ -231,6 +244,12 @@ class InstitutionalAnalysisEngine:
                 sell_volume += amount
             else:
                 continue
+            if timestamp is not None:
+                try:
+                    numeric_timestamp = int(float(timestamp))
+                    newest_timestamp = max(newest_timestamp or numeric_timestamp, numeric_timestamp)
+                except (TypeError, ValueError, OverflowError):
+                    pass
             used += 1
 
         total = buy_volume + sell_volume
@@ -238,7 +257,9 @@ class InstitutionalAnalysisEngine:
             return None
         net = buy_volume - sell_volume
         imbalance = net / total
+        event_id = f"cvd:bybit_trades:{newest_timestamp}" if newest_timestamp is not None else None
         cvd = {
+            "event_id": event_id,
             "value": round(net, 8),
             "delta": round(net, 8),
             "delta_pct": round(imbalance * 100, 2),
@@ -250,6 +271,7 @@ class InstitutionalAnalysisEngine:
             "timestamp_validated": now_ms is not None,
         }
         volume_delta = {
+            "event_id": event_id,
             "bullish": round(buy_volume, 8),
             "bearish": round(sell_volume, 8),
             "net": round(net, 8),
