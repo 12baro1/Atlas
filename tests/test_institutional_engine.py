@@ -97,6 +97,8 @@ def test_candle_cvd_is_explicitly_marked_as_proxy():
     assert cvd["source"] == "candle_direction_proxy"
     assert cvd["is_proxy"] is True
     assert delta["source"] == "candle_direction_proxy"
+    assert cvd["event_id"] == delta["event_id"]
+    assert cvd["event_id"].startswith("cvd:candle_proxy:")
 
 
 def test_funding_rate_uses_decimal_rate_threshold():
@@ -105,6 +107,20 @@ def test_funding_rate_uses_decimal_rate_threshold():
     assert engine._funding_rate({"funding_rate": [0.0003]}, closes)["bias"] == "SHORT"
     assert engine._funding_rate({"funding_rate": [-0.0003]}, closes)["bias"] == "LONG"
 
+
+
+def test_recent_trade_cvd_has_identity_from_newest_valid_trade():
+    engine = InstitutionalAnalysisEngine()
+    trades = [
+        {"side": "buy", "amount": 1, "timestamp": 6_000},
+        {"side": "sell", "amount": 1, "timestamp": 7_000},
+        {"side": "buy", "amount": 1, "timestamp": 8_000},
+        {"side": "sell", "amount": 1, "timestamp": 9_000},
+        {"side": "buy", "amount": 1, "timestamp": 10_000},
+    ]
+    result = engine._trade_flow(trades, now_ms=10_000)
+    assert result["cvd"]["event_id"] == "cvd:bybit_trades:10000"
+    assert result["volume_delta"]["event_id"] == result["cvd"]["event_id"]
 
 
 def test_trade_flow_ignores_stale_timestamped_trades():
