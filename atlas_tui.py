@@ -296,7 +296,7 @@ class AtlasTUIApp(App):
                     entry_type = str(card.get("entry_type") or "").upper()
                     has_levels = bool(card.get("entry")) and bool(card.get("stop_loss")) and len(card.get("tp_levels") or []) >= 1
                     market_signal = action in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and direction and entry_type == "MARKET" and has_levels
-                    limit_signal = entry_type == "LIMIT" and direction and has_levels
+                    limit_signal = action in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and entry_type == "LIMIT" and direction and has_levels
                     if market_signal or limit_signal:
                         result_text = format_card_text(card)
                         result_text += f"\n\nAnaliz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn"
