@@ -309,7 +309,7 @@ ETH 12g + BTC 28g toplam **35 işlem, 4 kazanan** — **hiçbir segment için is
 - Farklı: (a) canlıda orderbook/correlation/economic-news/cooldown etkin, backtestte kapatılıyor (özellik, bilinçli); (b) canlıda learning durumu etki edebilir, backtestte kapalı; (c) backtest analiz snapshot'ları bellekte tutulur; tracking kapatıldığı ve `TradeJournal(db_path=None)` kurulduğu için canlı journal DB'sine yazılmaz; (d) canlı MARKET fill gerçek spread/slippage, backtest proxy.
 
 ### 4.7 Walk-forward / OOS
-- PR #111 ile `--walk-forward` eklendi: `--chunk-days` ile tarihsel parçalar ayrılır; daha eski %70 IS, en yeni %30 OOS olarak raporlanır. Parametreler iki dönemde de sabittir; bu komut otomatik optimizasyon yapmaz, dokunulmamış son dönemde performansı ölçer. En az iki parça zorunludur.
+- PR #111 ile `--walk-forward` eklendi: `--chunk-days` ile tarihsel parçalar ayrılır; daha eski IS ve yaklaşık en yeni %30 OOS (tam parça sınırına yuvarlanır) olarak raporlanır. Parametreler iki dönemde de sabittir; bu komut otomatik optimizasyon yapmaz, dokunulmamış son dönemde performansı ölçer. En az iki parça zorunludur.
 
 ### 4.8 Ölçüm sırasında saptanan çalıştırma güvenilirliği sorunları (yeni bulgular)
 1. **Uzun tek-koşu backtest bellek baskısı:** 28-gün tek koşu ~47 dk sonra hata mesajı olmadan sonlandı (ortamda swap kullanımı, ~7.5GB RAM). Ürün CLI'sında `--chunk-days` segmented modu mevcut; **varsayılan davranış haline getirilmeli ve Android/UserLAnd için belgelenmeli.** Rapor çıktısı stdout-only; JSON/CSV kancası yok.
