@@ -18,6 +18,7 @@ Tasarım ilkeleri:
 import json
 import math
 import os
+import shutil
 import threading
 from pathlib import Path
 
@@ -168,9 +169,29 @@ class LearningEngine:
             try:
                 with tmp_path.open("w", encoding="utf-8") as handle:
                     json.dump(self.stats, handle, ensure_ascii=False, indent=2, allow_nan=False)
+                backup_path = self.path.with_suffix(self.path.suffix + ".bak")
+                if self.path.exists():
+                    try:
+                        shutil.copyfile(self.path, backup_path)
+                    except OSError:
+                        # A failed optional backup must not prevent atomic state save.
+                        pass
                 os.replace(tmp_path, self.path)
             finally:
                 tmp_path.unlink(missing_ok=True)
+
+    def rollback_last_save(self):
+        """Restore the last atomically saved learning snapshot, if one exists."""
+        backup_path = self.path.with_suffix(self.path.suffix + ".bak")
+        if not backup_path.exists():
+            return False
+        with self._save_lock:
+            try:
+                os.replace(backup_path, self.path)
+            except OSError:
+                return False
+            self.load()
+        return True
 
     # ------------------------------------------------------------------
     # Besleme (backward-compatible popülasyon)
@@ -209,7 +230,7 @@ class LearningEngine:
 
         records = sorted(
             [record for record in records if isinstance(record, dict)],
-            key=lambda record: int(record.get("closed_at") or 0),
+            key=lambda record: self._safe_int(record.get("closed_at"), 0),
         )
         half_life_days = float(getattr(Config, "LEARNING_HALF_LIFE_DAYS", 45) or 0)
         alpha = float(getattr(Config, "LEARNING_BETA_PRIOR_ALPHA", 2.0))
