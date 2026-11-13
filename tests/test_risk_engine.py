@@ -534,3 +534,26 @@ def test_risk_engine_uses_final_stop_distance_for_atr_ratio(monkeypatch):
     assert risk["risk_setup_valid"] is True
     assert risk["stop_adjusted"] is True
     assert risk["risk"] == pytest.approx(0.75)
+
+
+
+def test_final_geometry_reconciliation_rechecks_stop_execution_cost(monkeypatch):
+    monkeypatch.setattr(Config, "MAX_STOP_EXECUTION_COST_R", 0.50)
+    initial = RiskEngine().calculate(
+        entry=100.0,
+        stop_loss=99.0,
+        dynamic_tp={"tp1": 102.0, "tp2": 104.0, "tp3": 106.0},
+        atr_value=0.0,
+        tick_size=0.01,
+    )
+    assert initial["risk_setup_valid"] is True
+
+    reconciled = RiskEngine().reconcile_final_geometry_payload(
+        initial,
+        entry=100.0,
+        stop_loss=99.99,
+        targets={"tp1": 102.0, "tp2": 104.0, "tp3": 106.0},
+    )
+
+    assert reconciled["risk_setup_valid"] is False
+    assert reconciled["reason_code"] == "STOP_EXECUTION_COST_TOO_HIGH"
