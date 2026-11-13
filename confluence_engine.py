@@ -14,6 +14,12 @@ class ConfluenceEngine:
         if not event_id and isinstance(module.get("best"), dict):
             event_id = module["best"].get("event_id")
         if not event_id:
+            for nested_key in ("cvd", "volume_delta", "snapshot"):
+                nested = module.get(nested_key)
+                if isinstance(nested, dict) and nested.get("event_id"):
+                    event_id = nested["event_id"]
+                    break
+        if not event_id:
             return True
         identity = str(event_id).strip()
         if not identity:
@@ -316,7 +322,7 @@ class ConfluenceEngine:
         # Equal High / Equal Low
         eqh_eql_event_ids = [
             item.get("event_id") for key in ("eqh", "eql")
-            for item in (eqh_eql or {}).get(key, [])
+            for item in ((eqh_eql or {}).get(key) or [])
             if isinstance(item, dict) and item.get("event_id")
         ]
         eqh_eql_unique = True
