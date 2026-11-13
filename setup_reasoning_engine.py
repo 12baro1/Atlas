@@ -319,9 +319,15 @@ class SetupReasoningEngine:
             if reference_side != direction:
                 corr_supportive, corr_opposing = corr_opposing, corr_supportive
             if corr_supportive:
-                supporting.append("Cross-market correlation supports entry")
+                append_evidence(
+                    supporting, "Cross-market correlation supports entry",
+                    correlation.get("event_id"),
+                )
             if corr_opposing:
-                opposing.append("Cross-market counterpressure")
+                append_evidence(
+                    opposing, "Cross-market counterpressure",
+                    correlation.get("event_id"),
+                )
         return supporting, opposing
 
     def generate(self, *, base_entry, mtf, structure, fvg, orderblocks,
