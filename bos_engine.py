@@ -24,7 +24,7 @@ class BOSEngine:
                 return index
         return None
 
-    def detect(self, pivots, candles=None):
+    def detect(self, pivots, candles=None, timeframe="unknown"):
         structure = []
         if len(pivots) < 2:
             return structure
@@ -87,6 +87,19 @@ class BOSEngine:
                         event["break_index"] = break_index
                 last_low = pivot
 
+            # Stable identity for the same confirmed pivot/BOS across motors.
+            try:
+                event_price = float(event["price"])
+                price_key = format(event_price, ".12g")
+            except (TypeError, ValueError, OverflowError):
+                price_key = str(event.get("price"))
+            event["event_id"] = (
+                f"{str(timeframe or 'unknown').lower()}:structure:"
+                f"{pivot_index}:{event.get('confirmation_index')}:"
+                f"{str(event.get('kind') or '').upper()}:"
+                f"{str(event.get('label') or '').upper()}:"
+                f"{price_key}:{event.get('break_index')}"
+            )
             structure.append(event)
 
         return structure
