@@ -294,6 +294,31 @@ class RiskEngine:
         # cost-adjusted RR and position sizing below.
         minimum_stop_distance = max(atr_floor_distance, minimum_tick_distance)
 
+        # A structurally valid stop can still be economically untradeable when
+        # round-trip execution friction consumes too much of its risk distance.
+        # Reject such geometry; never move a structural invalidation level just
+        # to satisfy a cost threshold.
+        maker_fee_rate = float(getattr(Config, "MAKER_FEE_RATE", 0.0002))
+        taker_fee_rate = float(getattr(Config, "TAKER_FEE_RATE", 0.00055))
+        stop_cost_floor_multiple = max(
+            0.0, float(getattr(Config, "MIN_STOP_COST_MULTIPLIER", 2.0))
+        )
+        estimated_stop_cost = estimate_stop_cost(
+            entry_price=entry,
+            stop_price=stop_loss,
+            entry_type=entry_type,
+            maker_fee_rate=maker_fee_rate,
+            taker_fee_rate=taker_fee_rate,
+            spread_rate=execution_spread_rate,
+            slippage_rate=execution_slippage_rate,
+        )
+        minimum_stop_cost_distance = (
+            estimated_stop_cost["total"] * stop_cost_floor_multiple
+        )
+        minimum_stop_distance = max(
+            minimum_stop_distance, minimum_stop_cost_distance
+        )
+
         requested_risk = abs(entry - stop_loss)
         stop_too_tight = requested_risk < minimum_stop_distance
         adjusted_stop_loss = stop_loss
@@ -325,7 +350,11 @@ class RiskEngine:
                     entry,
                     stop_loss,
                     side=side,
-                    reason="Invalid Risk Setup",
+                    reason=(
+                        "Stop distance below execution-cost floor"
+                        if requested_risk < minimum_stop_cost_distance
+                        else "Invalid Risk Setup"
+                    ),
                     atr=atr_snapshot,
                     minimum_stop_distance=minimum_stop_distance,
                     tick_size=resolved_tick_size,
@@ -467,6 +496,8 @@ class RiskEngine:
             "minimum_tick_distance": round(minimum_tick_distance, 8),
 
             "minimum_stop_distance": round(minimum_stop_distance, 8),
+            "minimum_stop_cost_distance": round(minimum_stop_cost_distance, 8),
+            "minimum_stop_cost_multiplier": stop_cost_floor_multiple,
 
             "minimum_stop_percent": round(min_stop_percent, 8),
 
