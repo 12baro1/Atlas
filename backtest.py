@@ -866,8 +866,9 @@ def _checkpoint_path(checkpoint_dir, symbol, days):
 
 def _load_checkpoint(path):
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return payload if isinstance(payload, dict) else None
     except (OSError, ValueError, json.JSONDecodeError):
         return None
 
