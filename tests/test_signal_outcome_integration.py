@@ -890,6 +890,12 @@ def test_manual_trade_net_r_uses_explicit_actual_fees_and_fill_size(tmp_path):
     assert closed["execution_cost_rr"] == pytest.approx(0.06)
     assert closed["pnl_rr"] == pytest.approx(1.94)
     assert closed["pnl_rr_basis"] == "net_actual_costs"
+    performance = journal.manual_trade_performance()
+    assert performance["actual_cost_accounting"]["net_actual_costs_count"] == 1
+    assert performance["actual_cost_accounting"]["gross_price_only_count"] == 0
+    learning_record = journal.learning_records(source="manual")[0]
+    assert learning_record["pnl_rr_basis"] == "net_actual_costs"
+    assert learning_record["execution_cost_rr"] == pytest.approx(0.06)
 
 
 def test_manual_trade_refuses_actual_costs_without_position_size(tmp_path):
