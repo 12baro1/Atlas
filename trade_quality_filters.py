@@ -37,6 +37,7 @@ class TradeQualityFilters:
         self.elimination = {
             "htf_ltf_alignment": {"total": 0, "blocked": 0, "winners_blocked": 0, "losers_blocked": 0},
             "liquidity_quality": {"total": 0, "blocked": 0, "winners_blocked": 0, "losers_blocked": 0},
+            "poi_quality": {"total": 0, "blocked": 0, "winners_blocked": 0, "losers_blocked": 0},
             "entry_distance": {"total": 0, "blocked": 0, "winners_blocked": 0, "losers_blocked": 0},
             "stop_quality": {"total": 0, "blocked": 0, "winners_blocked": 0, "losers_blocked": 0},
             "tp_rr_consistency": {"total": 0, "blocked": 0, "winners_blocked": 0, "losers_blocked": 0},
@@ -131,7 +132,20 @@ class TradeQualityFilters:
         if not f2["passed"]:
             result["allowed"] = False
 
-        # 3. Giriş mesafesi
+        # 3. POI kalitesi: açıkça sağlanan POI metadata'sını doğrula.
+        f_poi = self._filter_poi_quality(
+            direction=direction, entry=entry, atr=atr,
+            entry_structure=entry_structure or h4_structure,
+            liquidity_sweep=liquidity_sweep,
+        )
+        result["filters"]["poi_quality"] = f_poi
+        result["critical_blockers"].extend(f_poi.get("critical_blockers", []))
+        result["adjustments"].extend(f_poi.get("adjustments", []))
+        result["warnings"].extend(f_poi.get("warnings", []))
+        if not f_poi["passed"]:
+            result["allowed"] = False
+
+        # 4. Giriş mesafesi
         f3 = self._filter_entry_distance(
             direction=direction, entry=entry, current_price=current_price,
             atr=atr,
@@ -502,6 +516,123 @@ class TradeQualityFilters:
         detail["score"] = score
         return detail
 
+    # ---------------------------------------------------------------- POI quality
+
+    def _filter_poi_quality(self, *, direction, entry, atr, entry_structure, liquidity_sweep):
+        """FVG/OB kalitesini kaynak, bölge geometrisi ve bağımsız confluence ile puanla.
+
+        Eski sinyal payload'larında POI metadata'sı yoksa geriye dönük uyumluluk
+        için yalnızca uyarı üretir. Metadata açıkça verilmiş fakat geçersizse veto eder.
+        """
+        detail = {
+            "name": "POI kalitesi",
+            "passed": True,
+            "severity": "none",
+            "reason": "",
+            "score_delta": 0,
+            "critical_blockers": [],
+            "adjustments": [],
+            "warnings": [],
+        }
+
+        source = str(
+            entry.get("poi_source") or entry.get("poi_type") or entry.get("source") or ""
+        ).strip().upper().replace("-", "_").replace(" ", "_")
+        zone = entry.get("poi_zone") if isinstance(entry.get("poi_zone"), dict) else None
+        if not source and zone is None:
+            detail["reason"] = "POI metadata unavailable; legacy setup retained"
+            detail["warnings"].append("POI quality metadata unavailable")
+            detail["metadata_available"] = False
+            return detail
+
+        recognized_sources = {
+            "FVG", "BULLISH_FVG", "BEARISH_FVG",
+            "ORDER_BLOCK", "ORDERBLOCK", "HTF_ORDER_BLOCK", "HTF_OB",
+        }
+        score = 0
+        reasons = []
+        if source in recognized_sources:
+            score += 30
+            reasons.append(f"recognized POI source: {source}")
+        elif source:
+            reasons.append(f"unrecognized POI source: {source}")
+
+        low = self._safe_float(zone.get("low")) if zone else None
+        high = self._safe_float(zone.get("high")) if zone else None
+        entry_price = self._safe_float(entry.get("entry"))
+        zone_valid = low is not None and high is not None and low > 0 and high > low
+        tolerance = (
+            max(atr * 0.10, abs(entry_price) * 1e-8)
+            if atr > 0 and entry_price is not None
+            else (abs(entry_price) * 1e-8 if entry_price is not None else 0.0)
+        )
+        inside_zone = bool(
+            zone_valid and entry_price is not None
+            and low - tolerance <= entry_price <= high + tolerance
+        )
+        if inside_zone:
+            score += 30
+            reasons.append("entry is inside the POI zone")
+        elif zone_valid:
+            reasons.append("entry is outside the POI zone")
+        elif zone is not None:
+            reasons.append("POI zone has invalid bounds")
+
+        if bool(entry.get("ote_confluence") or entry.get("ote_overlap") or entry.get("ote_valid")):
+            score += 15
+            reasons.append("OTE confluence")
+        if bool(entry.get("structure_aligned")):
+            score += 15
+            reasons.append("structure aligned")
+        if bool(entry.get("confirmed_sweep_reversal")):
+            score += 10
+            reasons.append("confirmed liquidity-sweep reversal")
+        if bool(entry.get("orderflow_supportive")):
+            score += 5
+            reasons.append("supportive orderflow")
+
+        detail["score"] = score
+        detail["poi_source"] = source or None
+        detail["zone_valid"] = zone_valid
+        detail["entry_inside_zone"] = inside_zone
+        minimum_score = max(0, int(getattr(Config, "QUALITY_MIN_POI_SCORE", 50)))
+        detail["minimum_score"] = minimum_score
+
+        if source and source not in recognized_sources:
+            detail["passed"] = False
+            detail["severity"] = "critical"
+            detail["reason"] = "Unsupported POI source; " + "; ".join(reasons)
+            detail["critical_blockers"].append("POI quality: unsupported POI source")
+            return detail
+        if zone is not None and not zone_valid:
+            detail["passed"] = False
+            detail["severity"] = "critical"
+            detail["reason"] = "Invalid POI zone bounds"
+            detail["critical_blockers"].append("POI quality: invalid zone bounds")
+            return detail
+        if zone_valid and entry_price is not None and not inside_zone:
+            detail["passed"] = False
+            detail["severity"] = "critical"
+            detail["reason"] = "Entry is outside the selected POI zone"
+            detail["critical_blockers"].append("POI quality: entry outside selected zone")
+            return detail
+        if score < minimum_score:
+            detail["passed"] = False
+            detail["severity"] = "critical"
+            detail["reason"] = f"POI evidence score too low: {score} < {minimum_score}; " + "; ".join(reasons)
+            detail["critical_blockers"].append(
+                f"POI quality: score {score} below minimum {minimum_score}"
+            )
+            return detail
+
+        detail["passed"] = True
+        detail["severity"] = "none"
+        detail["reason"] = f"POI quality passed ({score}/{minimum_score}+): " + "; ".join(reasons)
+        if score >= 80:
+            detail["score_delta"] = 4
+            detail["adjustments"].append({"delta": 4, "label": "High-quality POI confluence"})
+        return detail
+
     # ---------------------------------------------------------------- filter 3
 
     def _filter_entry_distance(self, *, direction, entry, current_price, atr):
@@ -526,14 +657,23 @@ class TradeQualityFilters:
         entry_type = str(entry.get("entry_type") or "").upper()
         max_distance_atr = float(getattr(Config, "QUALITY_MAX_ENTRY_DISTANCE_ATR", 2.0))
 
-        if entry_price is None or current is None or atr <= 0:
+        if entry_price is None or current is None:
             detail["passed"] = True
-            detail["reason"] = "ATR veya fiyat eksik; mesafe filtresi devre dışı"
+            detail["reason"] = "Giriş veya güncel fiyat eksik; mesafe filtresi devre dışı"
             return detail
 
         distance = abs(entry_price - current)
+        distance_pct = distance / abs(current) if current else 0.0
+        if atr <= 0:
+            detail["passed"] = True
+            detail["reason"] = "ATR yok; LIMIT mesafesi yüzde bazında yalnızca uyarılır"
+            if entry_type == "LIMIT" and distance_pct > float(getattr(Config, "QUALITY_MAX_ENTRY_DISTANCE_PCT", 0.02)):
+                detail["severity"] = "warning"
+                detail["distance_pct"] = round(distance_pct * 100, 4)
+                detail["warnings"].append(f"LIMIT entry is far: {distance_pct:.2%}; ATR unavailable, kept pending")
+            return detail
+
         distance_atr = distance / atr
-        distance_pct = distance / abs(current)
 
         detail["distance_atr"] = round(distance_atr, 3)
         detail["distance_pct"] = round(distance_pct * 100, 4)
@@ -593,7 +733,10 @@ class TradeQualityFilters:
 
         entry_price = self._safe_float(entry.get("entry"))
         stop = self._safe_float(risk.get("stop_loss", entry.get("stop_loss")))
-        min_stop_atr = float(getattr(Config, "QUALITY_MIN_STOP_ATR", 0.25))
+        min_stop_atr = max(
+            float(getattr(Config, "QUALITY_MIN_STOP_ATR", 0.75)),
+            float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75)),
+        )
         max_stop_atr = float(getattr(Config, "QUALITY_MAX_STOP_ATR", 4.0))
 
         if entry_price is None or stop is None or atr <= 0:

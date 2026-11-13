@@ -399,6 +399,8 @@ class BacktestRunner:
         self.entry_type_reason_counts = {}
         self.entry_validity_counts = {}
         self.decision_blocker_counts = {}
+        self.direction_action_counts = {}
+        self.direction_blocker_counts = {}
 
     @staticmethod
     def _safe_cost_rate(value):
@@ -458,6 +460,9 @@ class BacktestRunner:
             signal_dir = str(signal.get("signal", "")).upper()
             action = str(decision.get("action", "MISSING")).upper() or "MISSING"
             self.action_counts[action] = self.action_counts.get(action, 0) + 1
+            if signal_dir in {"LONG", "SHORT"}:
+                direction_action = f"{signal_dir}|{action}"
+                self.direction_action_counts[direction_action] = self.direction_action_counts.get(direction_action, 0) + 1
             if signal_dir not in {"LONG", "SHORT"}:
                 wait_reason = str(signal.get("wait_reason") or "unspecified")
                 self.wait_reason_counts[wait_reason] = self.wait_reason_counts.get(wait_reason, 0) + 1
@@ -530,15 +535,19 @@ class BacktestRunner:
                     key = str(blocker).strip()
                     if key:
                         self.decision_blocker_counts[key] = self.decision_blocker_counts.get(key, 0) + 1
+                        if signal_dir in {"LONG", "SHORT"}:
+                            side_key = f"{signal_dir}|{key}"
+                            self.direction_blocker_counts[side_key] = self.direction_blocker_counts.get(side_key, 0) + 1
             risk_meta = result.get("risk") if isinstance(result, dict) else {}
             if isinstance(risk_meta, dict) and risk_meta.get("risk_setup_valid") is False:
                 risk_reason = str(risk_meta.get("reason_code") or risk_meta.get("risk_setup_reason") or "unspecified")
                 self.risk_reason_counts[risk_reason] = self.risk_reason_counts.get(risk_reason, 0) + 1
             if isinstance(risk_meta, dict):
                 atr_value = _num(risk_meta.get("atr"))
-                stop_distance = _num(risk_meta.get("requested_risk"))
+                # Report the final executable stop, not the pre-expansion request.
+                stop_distance = _num(risk_meta.get("risk"))
                 if stop_distance is None:
-                    stop_distance = _num(risk_meta.get("risk"))
+                    stop_distance = _num(risk_meta.get("requested_risk"))
                 if atr_value and atr_value > 0 and stop_distance is not None:
                     ratio = stop_distance / atr_value
                     bucket = "<0.10 ATR" if ratio < 0.10 else "<0.25 ATR" if ratio < 0.25 else "<0.50 ATR" if ratio < 0.50 else ">=0.50 ATR"
@@ -728,10 +737,20 @@ class BacktestRunner:
             tradeable_dir = signal_dir in ("LONG", "SHORT") and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
         if not tradeable_dir:
             return None
+        if not lenient and (
+            decision.get("entry_valid") is False
+            or decision.get("risk_valid") is False
+        ):
+            self.invalid_candidates += 1
+            return None
         self.candidate_signals += 1
         self.candidate_direction_counts[signal_dir] = self.candidate_direction_counts.get(signal_dir, 0) + 1
 
         risk = dict((result or {}).get("risk") or {})
+        risk_side = str(risk.get("side") or "").upper()
+        if risk_side in {"LONG", "SHORT"} and risk_side != signal_dir:
+            self.invalid_candidates += 1
+            return None
         if isinstance(risk, dict) and risk.get("risk_setup_valid") is False:
             self.invalid_candidates += 1
             return None
@@ -844,6 +863,10 @@ class BacktestRunner:
                 if not touched:
                     continue
                 entry_price = min(limit_price, opened) if is_long else max(limit_price, opened)
+                if gap_fill:
+                    # A marketable resting LIMIT takes liquidity at the open;
+                    # charge taker fee and market friction, not maker pricing.
+                    entry_type = "MARKETABLE_LIMIT"
                 # If price opens through the limit, fill is at the open and
                 # the candle's later range can be simulated. Otherwise the
                 # intrabar path is unknown: do not count a TP touched before
@@ -985,6 +1008,11 @@ class BacktestRunner:
             spread_slippage_rr = (cost_parts["spread"] + cost_parts["slippage"]) / risk_distance if risk_distance > 0 else 0.0
         # Preserve actual price-path R (including stop gaps) and subtract costs once.
         net_rr = round(gross_rr - execution_cost_rr, 4)
+        entry_fee_rr = cost_parts.get("entry_fee", 0.0) / risk_distance if risk_distance > 0 else 0.0
+        exit_fee_rr = cost_parts.get("exit_fee", 0.0) / risk_distance if risk_distance > 0 else 0.0
+        spread_rr = cost_parts.get("spread", 0.0) / risk_distance if risk_distance > 0 else 0.0
+        slippage_rr = cost_parts.get("slippage", 0.0) / risk_distance if risk_distance > 0 else 0.0
+        cost_reconciliation_error_rr = (gross_rr - execution_cost_rr) - net_rr
 
         signal_index = max(0, int(signal_index if signal_index is not None else entry_index - 1))
         exit_offset = outcome.get("exit_offset")
@@ -1048,7 +1076,12 @@ class BacktestRunner:
             "gross_rr": round(gross_rr, 4),
             "net_rr": round(max(net_rr, -99.0), 4),
             "fee_rr": round(fee_rr, 4),
+            "entry_fee_rr": round(entry_fee_rr, 4),
+            "exit_fee_rr": round(exit_fee_rr, 4),
+            "spread_rr": round(spread_rr, 4),
+            "slippage_rr": round(slippage_rr, 4),
             "spread_slippage_rr": round(spread_slippage_rr, 4),
+            "cost_reconciliation_error_rr": round(cost_reconciliation_error_rr, 8),
             "entry_fee_quote": round(cost_parts.get("entry_fee", 0.0), 10),
             "exit_fee_quote": round(cost_parts.get("exit_fee", 0.0), 10),
             "spread_cost_quote": round(cost_parts.get("spread", 0.0), 10),
@@ -1215,6 +1248,8 @@ class BacktestRunner:
                 "entry_type_reason_counts": dict(self.entry_type_reason_counts),
                 "entry_validity_counts": dict(self.entry_validity_counts),
                 "decision_blocker_counts": dict(self.decision_blocker_counts),
+                "direction_action_counts": dict(self.direction_action_counts),
+                "direction_blocker_counts": dict(self.direction_blocker_counts),
                 "unfilled_limits": self.unfilled_limits,
                 "expired_limits": self.expired_limits,
                 "stale_limits_cancelled": self.stale_limits_cancelled,
@@ -1248,6 +1283,7 @@ class BacktestRunner:
                 "gross_profit_rr": 0, "gross_loss_rr": 0,
                 "gross_rr": 0, "gross_expectancy": 0, "gross_profit_factor": 0,
                 "total_execution_cost_rr": 0,
+                "entry_fee_rr": 0, "exit_fee_rr": 0, "spread_rr": 0, "slippage_rr": 0,
                 "tp1": 0, "tp2": 0, "tp3": 0,
                 "sample_base": "realized_closed_trades",
                 "performance_gate": self.performance_gate(),
@@ -1309,6 +1345,8 @@ class BacktestRunner:
             "entry_type_reason_counts": dict(self.entry_type_reason_counts),
             "entry_validity_counts": dict(self.entry_validity_counts),
             "decision_blocker_counts": dict(self.decision_blocker_counts),
+            "direction_action_counts": dict(self.direction_action_counts),
+            "direction_blocker_counts": dict(self.direction_blocker_counts),
             "unfilled_limits": self.unfilled_limits,
             "expired_limits": self.expired_limits,
             "stale_limits_cancelled": self.stale_limits_cancelled,
@@ -1349,6 +1387,10 @@ class BacktestRunner:
             "gross_expectancy": round(gross_total_rr / self.total, 4),
             "gross_profit_factor": round(gross_pf, 4),
             "total_execution_cost_rr": round(total_execution_cost_rr, 4),
+            "entry_fee_rr": round(sum(float(h.get("entry_fee_rr", 0.0) or 0.0) for h in self.history), 4),
+            "exit_fee_rr": round(sum(float(h.get("exit_fee_rr", 0.0) or 0.0) for h in self.history), 4),
+            "spread_rr": round(sum(float(h.get("spread_rr", 0.0) or 0.0) for h in self.history), 4),
+            "slippage_rr": round(sum(float(h.get("slippage_rr", 0.0) or 0.0) for h in self.history), 4),
             "net_rr": round(self.net_rr, 4),
             "tp1": self.tp1,
             "tp2": self.tp2,

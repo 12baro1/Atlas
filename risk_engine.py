@@ -147,7 +147,28 @@ class RiskEngine:
                     slippage_rate=slippage_rate,
                 )
                 fee_in_r = plan_cost["total"] / risk_distance
-                weighted_net_rr = round(weighted_rr - fee_in_r, 4)
+                # Net R includes planned TP-path costs and worst-case stop-exit
+                # friction. estimate_stop_cost includes entry fees, already
+                # charged in plan_cost, so only its stop-exit portion is added
+                # to the losing-risk denominator.
+                stop_cost_for_rr = estimate_stop_cost(
+                    entry_price=entry_price,
+                    stop_price=final_stop,
+                    entry_type=resolved_entry_type,
+                    maker_fee_rate=maker_fee_rate,
+                    taker_fee_rate=taker_fee_rate,
+                    spread_rate=spread_rate,
+                    slippage_rate=slippage_rate,
+                )
+                stop_exit_cost = max(
+                    0.0, stop_cost_for_rr["total"] - stop_cost_for_rr["entry_fee"]
+                )
+                net_reward_quote = weighted_rr * risk_distance - plan_cost["total"]
+                net_risk_quote = risk_distance + stop_exit_cost
+                weighted_net_rr = (
+                    round(net_reward_quote / net_risk_quote, 4)
+                    if net_risk_quote > 0 else None
+                )
                 net_rr = weighted_net_rr
                 risk["weighted_rr"] = round(weighted_rr, 4)
                 risk["weighted_net_rr"] = weighted_net_rr
@@ -191,6 +212,29 @@ class RiskEngine:
             spread_rate=spread_rate,
             slippage_rate=slippage_rate,
         )
+        stop_execution_cost_r = stop_cost["total"] / risk_distance
+        max_stop_execution_cost_r = max(
+            0.0, float(getattr(Config, "MAX_STOP_EXECUTION_COST_R", 0.50))
+        )
+        risk["stop_execution_cost_r"] = round(stop_execution_cost_r, 4)
+        risk["max_stop_execution_cost_r"] = max_stop_execution_cost_r
+        if max_stop_execution_cost_r > 0 and stop_execution_cost_r > max_stop_execution_cost_r:
+            invalid = self._invalid_risk_setup(
+                entry_price, final_stop,
+                side=str(risk.get("side") or ("LONG" if entry_price > final_stop else "SHORT")),
+                reason="Execution cost exceeds stop-risk budget",
+                atr=float(risk.get("atr") or 0.0),
+                minimum_stop_distance=float(risk.get("minimum_stop_distance") or 0.0),
+                tick_size=float(risk.get("tick_size") or 0.0),
+                spread_buffer=float(risk.get("spread_buffer") or 0.0),
+                slippage_buffer=float(risk.get("slippage_buffer") or 0.0),
+                requested_risk=risk_distance,
+                execution_cost_r=stop_execution_cost_r,
+                max_execution_cost_r=max_stop_execution_cost_r,
+                stop_adjusted=bool(risk.get("stop_adjusted")),
+            )
+            risk.update(invalid)
+            return risk
         minimum_tick_distance = risk.get("minimum_tick_distance")
         try:
             minimum_tick_distance = float(minimum_tick_distance) if minimum_tick_distance is not None else 1e-12
@@ -208,6 +252,7 @@ class RiskEngine:
         capped_position_size = min(adjusted_position_size, max_position_size_limit)
 
         risk["risk"] = round(risk_distance, 8)
+        risk["stop_atr_ratio"] = round(risk_distance / float(risk.get("atr") or 0.0), 4) if float(risk.get("atr") or 0.0) > 0 else None
         risk["risk_percent"] = round(effective_risk_percent, 4)
         risk["risk_reduction_factor"] = round(risk_reduction_factor, 4)
         risk["capital_at_risk_target"] = round(target_capital_at_risk, 2)
@@ -366,6 +411,32 @@ class RiskEngine:
         if risk <= 0:
             return self._invalid_risk_setup(entry, adjusted_stop_loss, side=side, reason="Stop Loss invalid")
 
+        resolved_entry_type = str(entry_type or "LIMIT").upper()
+        stop_cost = estimate_stop_cost(
+            entry_price=entry,
+            stop_price=adjusted_stop_loss,
+            entry_type=resolved_entry_type,
+            maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002)),
+            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055)),
+            spread_rate=execution_spread_rate,
+            slippage_rate=execution_slippage_rate,
+        )
+        stop_execution_cost_r = stop_cost["total"] / risk
+        max_stop_execution_cost_r = max(
+            0.0, float(getattr(Config, "MAX_STOP_EXECUTION_COST_R", 0.50))
+        )
+        if max_stop_execution_cost_r > 0 and stop_execution_cost_r > max_stop_execution_cost_r:
+            return self._invalid_risk_setup(
+                entry, adjusted_stop_loss, side=side,
+                reason="Execution cost exceeds stop-risk budget",
+                atr=atr_snapshot, minimum_stop_distance=atr_floor_distance,
+                tick_size=resolved_tick_size, spread_buffer=spread_buffer,
+                slippage_buffer=slippage_buffer, requested_risk=requested_risk,
+                execution_cost_r=stop_execution_cost_r,
+                max_execution_cost_r=max_stop_execution_cost_r,
+                stop_adjusted=stop_adjusted,
+            )
+
         vp_factor = self._volume_profile_position_factor(volume_profile, side=side)
         institutional_factor = self._institutional_position_factor(institutional, side=side)
 
@@ -424,7 +495,15 @@ class RiskEngine:
                         slippage_rate=execution_slippage_rate,
                     )
                     fee_in_r = plan_cost["total"] / risk
-                    weighted_net_rr = round(weighted_rr - fee_in_r, 4)
+                    # Include stop-exit friction in the losing-risk denominator;
+                    # the entry fee is already charged by plan_cost.
+                    stop_exit_cost = max(0.0, stop_cost["total"] - stop_cost["entry_fee"])
+                    net_reward_quote = weighted_rr * risk - plan_cost["total"]
+                    net_risk_quote = risk + stop_exit_cost
+                    weighted_net_rr = (
+                        round(net_reward_quote / net_risk_quote, 4)
+                        if net_risk_quote > 0 else None
+                    )
                     net_rr = weighted_net_rr
 
         # Risk is scaled against the actual minimum NET-R requirement, not the
@@ -436,16 +515,7 @@ class RiskEngine:
         effective_risk_percent = max(0.0, base_risk_percent * risk_reduction_factor)
         target_capital_at_risk = account_balance * (effective_risk_percent / 100)
 
-        # Position sizing reserves the full worst-case stop execution cost.
-        stop_cost = estimate_stop_cost(
-            entry_price=entry,
-            stop_price=adjusted_stop_loss,
-            entry_type=resolved_entry_type,
-            maker_fee_rate=maker_fee_rate,
-            taker_fee_rate=taker_fee_rate,
-            spread_rate=execution_spread_rate,
-            slippage_rate=execution_slippage_rate,
-        )
+        # Position sizing reserves the same worst-case stop cost validated above.
         effective_risk_per_unit = max(risk + stop_cost["total"], minimum_tick_distance)
         position_size_raw = target_capital_at_risk / effective_risk_per_unit
 
@@ -486,6 +556,8 @@ class RiskEngine:
             "minimum_stop_distance": round(minimum_stop_distance, 8),
             "minimum_stop_cost_distance": round(minimum_stop_cost_distance, 8),
             "minimum_stop_cost_multiplier": stop_cost_floor_multiple,
+            "stop_execution_cost_r": round(stop_execution_cost_r, 4),
+            "max_stop_execution_cost_r": max_stop_execution_cost_r,
 
             "minimum_stop_percent": round(min_stop_percent, 8),
 
@@ -494,6 +566,7 @@ class RiskEngine:
             "slippage_buffer": round(slippage_buffer, 8),
 
             "risk": round(risk, 8),
+            "stop_atr_ratio": round(risk / atr_snapshot, 4) if atr_snapshot > 0 else None,
 
             "capital_at_risk": round(capped_capital_at_risk, 2),
 
@@ -616,15 +689,20 @@ class RiskEngine:
 
     def _resolve_buffer(self, buffer_value, entry, rate, minimum_tick_distance):
         if buffer_value is None:
+            # Configured percentage friction is already in price units.
+            # Do not inflate it to one whole tick: that makes small-price
+            # contracts pay an artificial spread/slippage premium.
             resolved = abs(entry) * rate
-        else:
-            try:
-                resolved = abs(float(buffer_value))
-            except (TypeError, ValueError, OverflowError):
-                resolved = abs(entry) * rate
-            if not math.isfinite(resolved):
-                resolved = abs(entry) * rate
+            return resolved if math.isfinite(resolved) else 0.0
 
+        try:
+            resolved = abs(float(buffer_value))
+        except (TypeError, ValueError, OverflowError):
+            resolved = abs(entry) * rate
+        if not math.isfinite(resolved):
+            resolved = abs(entry) * rate
+        # An explicitly supplied non-zero market quote cannot be smaller than
+        # one tick; zero remains a deliberate "no friction" test override.
         return max(resolved, minimum_tick_distance if resolved > 0 else 0.0)
 
     def _infer_tick_size(self, *prices):
@@ -680,10 +758,13 @@ class RiskEngine:
         slippage_buffer=0.0,
         requested_risk=0.0,
         stop_adjusted=False,
+        execution_cost_r=None,
+        max_execution_cost_r=None,
     ):
         reason_code = {
             "Stop Loss invalid": "INVALID_STOP",
             "Invalid Risk Setup": "TIGHT_STOP_BELOW_MINIMUM",
+            "Execution cost exceeds stop-risk budget": "STOP_EXECUTION_COST_TOO_HIGH",
         }.get(reason, "RISK_INVALID")
 
         self.logger.warning(
@@ -713,6 +794,7 @@ class RiskEngine:
             "risk_setup_reason": reason,
             "reason_code": reason_code,
             "atr": round(atr, 8),
+            "stop_atr_ratio": None,
             "tick_size": round(tick_size, 8),
             "minimum_tick_distance": round(max(tick_size, 0.0), 8),
             "minimum_stop_distance": round(minimum_stop_distance, 8),
@@ -745,6 +827,8 @@ class RiskEngine:
             "risk_reduction_factor": None,
             "requested_risk": round(requested_risk, 8),
             "effective_risk_per_unit": None,
+            "stop_execution_cost_r": round(execution_cost_r, 4) if execution_cost_r is not None else None,
+            "max_stop_execution_cost_r": max_execution_cost_r,
         }
 
     def _volume_profile_position_factor(self, volume_profile, side):

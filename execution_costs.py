@@ -46,7 +46,7 @@ def _weights(targets, weights):
 def _leg(price, order_type, maker_fee_rate, taker_fee_rate,
          spread_rate, slippage_rate):
     order = str(order_type or "MARKET").upper()
-    market = order in {"MARKET", "MARKET_FALLBACK", "TAKER", "STOP", "TRAILING_STOP"}
+    market = order in {"MARKET", "MARKET_FALLBACK", "MARKETABLE_LIMIT", "TAKER", "STOP", "TRAILING_STOP"}
     fee_rate = _rate(taker_fee_rate if market else maker_fee_rate)
     notional = _price(price)
     fee = notional * fee_rate

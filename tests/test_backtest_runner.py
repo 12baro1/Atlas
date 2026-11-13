@@ -1026,3 +1026,82 @@ def test_statistics_separate_gross_and_net_pf_and_direction_metrics():
     assert stats["direction_breakdown"]["LONG"]["net_rr"] == 1.5
     assert stats["direction_breakdown"]["SHORT"]["gross_rr"] == -1.0
     assert stats["direction_breakdown"]["SHORT"]["net_rr"] == -1.5
+
+
+
+def test_backtest_tracks_directional_decisions_and_blockers():
+    candles = _rising_series(302)
+
+    def fake_analyze(window):
+        return {
+            "decision": {
+                "action": "SKIP",
+                "critical_blockers": ["net_rr_below_minimum"],
+            },
+            "signal": {"signal": "LONG"},
+            "analysis": {"mtf": {"entry": "LONG", "weekly": "NEUTRAL", "daily": "BEARISH", "h4": "BULLISH"}},
+            "risk": {},
+        }
+
+    stats = BacktestRunner(analyze_fn=fake_analyze).run({"15m": candles})
+    assert stats["direction_action_counts"] == {"LONG|SKIP": 2}
+    assert stats["direction_blocker_counts"] == {"LONG|net_rr_below_minimum": 2}
+
+
+def test_runner_respects_unified_decision_entry_and_risk_validity():
+    runner = BacktestRunner(partial_exits=False)
+    candles = [_candle(1, 100.0, 101.0, 99.5, 100.5)]
+    result = {
+        "decision": {"action": "EXECUTE", "entry_valid": False, "risk_valid": True},
+        "signal": {"signal": "LONG"},
+        "risk": {"side": "LONG", "entry": 100.0, "stop_loss": 99.0, "tp1": 102.0},
+        "analysis": {"entry": {"entry_type": "MARKET"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=0) is None
+    assert runner.invalid_candidates == 1
+
+
+def test_runner_rejects_risk_payload_with_opposite_direction():
+    runner = BacktestRunner(partial_exits=False)
+    candles = [_candle(1, 100.0, 101.0, 99.5, 100.5)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"side": "SHORT", "entry": 100.0, "stop_loss": 101.0, "tp1": 98.0},
+        "analysis": {"entry": {"entry_type": "MARKET"}},
+    }
+    assert runner._to_trade(result, candles, entry_index=0) is None
+    assert runner.invalid_candidates == 1
+
+
+def test_limit_gap_fill_is_accounted_as_marketable_taker():
+    runner = BacktestRunner(partial_exits=False)
+    candles = [
+        _candle(1, 94.0, 96.0, 93.0, 95.0),  # Opens through 95 buy limit.
+        _candle(2, 95.0, 102.0, 94.5, 101.0),  # TP1.
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 95.0, "stop_loss": 90.0, "tp1": 101.0, "tp2": 105.0, "tp3": 110.0},
+        "analysis": {"entry": {"entry_type": "LIMIT"}},
+    }
+    trade = runner._to_trade(result, candles, entry_index=0)
+    assert trade is not None
+    assert trade["entry_type"] == "MARKETABLE_LIMIT"
+    assert trade["entry"] == pytest.approx(94.0)
+    assert trade["execution_cost_rr"] > 0
+
+
+def test_stop_atr_diagnostics_use_final_risk_distance():
+    candles = _rising_series(302)
+
+    def fake_analyze(window):
+        return {
+            "decision": {"action": "WAIT"},
+            "signal": {"signal": "WAIT"},
+            "risk": {"atr": 1.0, "risk": 0.8, "requested_risk": 0.2},
+        }
+
+    stats = BacktestRunner(analyze_fn=fake_analyze).run({"15m": candles})
+    assert stats["stop_atr_buckets"] == {">=0.50 ATR": 2}

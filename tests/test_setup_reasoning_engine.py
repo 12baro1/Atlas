@@ -378,10 +378,9 @@ def test_long_limit_rejects_targets_already_crossed_before_entry():
 
 
 
-def test_structural_stop_uses_structural_clearance_when_natural_risk_sufficient(monkeypatch):
-    # Doğal giriş-kenar riski zaten risk motorunun minimum ATR zeminini
-    # karşıliyorsa, sadece yapısal temizleme (0.10 × ATR) kullanılır; gereksiz
-    # stop genişlemesi yapılmaz.
+def test_structural_stop_widens_to_new_075_atr_floor_when_natural_risk_is_smaller(monkeypatch):
+    # Yeni 0.75 ATR tabanı, doğal POI riski daha küçükse stopu yalnızca
+    # gerekli miktarda genişletir; POI invalidation anchor korunur.
     monkeypatch.setattr("utils.atr.atr", lambda candles, period=14: 10.0)
     class C:
         def __init__(self, t, o, h, l, c):
@@ -399,8 +398,8 @@ def test_structural_stop_uses_structural_clearance_when_natural_risk_sufficient(
     )
     selected = result["selected"]
     if selected.get("valid"):
-        assert abs(selected["stop_buffer"] - 1.0) < 1e-9
-        assert selected["stop_loss"] <= selected["entry"] - 1.0
+        assert abs(selected["stop_buffer"] - 3.6) < 0.02
+        assert selected["entry"] - selected["stop_loss"] >= 7.5
 
 
 def test_structural_stop_widens_only_when_natural_risk_insufficient(monkeypatch):
@@ -423,7 +422,6 @@ def test_structural_stop_widens_only_when_natural_risk_insufficient(monkeypatch)
     if selected.get("valid"):
         # Evidence-weighted entry is close to stop_reference → buffer widens to meet floor
         assert selected["stop_buffer"] >= 1.0
-        assert selected["stop_buffer"] <= 3.6
 
 
 def test_structural_stop_widens_only_when_natural_risk_insufficient(monkeypatch):
@@ -449,7 +447,6 @@ def test_structural_stop_widens_only_when_natural_risk_insufficient(monkeypatch)
     if selected.get("valid"):
         # Natural risk is small; buffer should be widened to meet risk engine minimum
         assert selected["stop_buffer"] >= 1.0
-        assert selected["stop_buffer"] <= 3.6
     # If not valid (e.g., entry too far), that's also acceptable
 
 

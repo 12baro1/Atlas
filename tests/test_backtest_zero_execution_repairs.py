@@ -58,6 +58,8 @@ def test_transition_keeps_valid_poi_when_15m_confirmation_is_missing():
 def test_limit_percent_distance_is_advisory_when_atr_is_unavailable():
     payload = _quality_payload()
     payload["entry"]["entry"] = 106.0
+    # Keep POI geometry valid so this test isolates LIMIT distance behavior.
+    payload["entry"]["poi_zone"] = {"low": 105.0, "high": 106.0}
     payload["current_price"] = 100.0
     payload["dynamic_tp"].update({"tp1": 114.8, "tp2": 122.8, "tp3": 131.6})
     result = TradeQualityEngine().evaluate(**payload)
@@ -91,6 +93,7 @@ def test_structural_tp_selection_uses_risk_distance_not_atr_multiple():
 def test_stop_floor_does_not_add_spread_and_slippage_to_structural_distance(monkeypatch):
     monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.05)
     monkeypatch.setattr(Config, "MIN_STOP_PERCENT", 0.0001)
+    monkeypatch.setattr(Config, "MAX_STOP_EXECUTION_COST_R", 10.0)
     monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", False)
     monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
     result = RiskEngine().calculate(

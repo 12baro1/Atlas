@@ -108,9 +108,11 @@ class Config:
     ROUND_TRIP_COST_RATE = float(os.getenv("ATLAS_ROUND_TRIP_COST_RATE", "0.0020"))
     ATR_PERIOD = 14
     # Stops remain anchored beyond POI/OTE invalidation. A too-tight structure is rejected, never silently widened.
-    MIN_STOP_ATR_MULTIPLIER = float(_env_or_rc("ATLAS_MIN_STOP_ATR_MULTIPLIER", "0.25"))
+    MIN_STOP_ATR_MULTIPLIER = float(_env_or_rc("ATLAS_MIN_STOP_ATR_MULTIPLIER", "0.75"))
     # Require structural stop distance to exceed estimated round-trip friction.
     MIN_STOP_COST_MULTIPLIER = float(_env_or_rc("ATLAS_MIN_STOP_COST_MULTIPLIER", "2.0"))
+    # A stop whose modeled round-trip execution friction exceeds this share of 1R is not executable.
+    MAX_STOP_EXECUTION_COST_R = float(_env_or_rc("ATLAS_MAX_STOP_EXECUTION_COST_R", "0.50"))
     # Small clearance beyond the structural invalidation edge; ATR is not the stop anchor.
     # Main SetupReasoningEngine uses the tighter POI/OTE invalidation clearance.
     STOP_STRUCTURE_BUFFER_ATR = 0.10
@@ -206,8 +208,11 @@ class Config:
     QUALITY_HTF_STRONG_CONFLICT_BLOCK = True
     # Girişin güncel fiyattan ATR cinsinden mesafesi bu değeri aşarsa "geç giriş" engeli.
     QUALITY_MAX_ENTRY_DISTANCE_ATR = 2.0
+    QUALITY_MAX_ENTRY_DISTANCE_PCT = 0.02
     # Stop yapısal invalidasyon tarafında gerekli minimum ATR (RiskEngine zaten uygular).
-    QUALITY_MIN_STOP_ATR = 0.25
+    QUALITY_MIN_STOP_ATR = 0.75
+    # Minimum evidence score for an explicitly described FVG/OB POI.
+    QUALITY_MIN_POI_SCORE = 50
     # Stop bu ATR değerini aşarsa "anlamsız geniş stop" engeli. 3 ATR'nin üzeri
     # genellikle yapısal invalidasyon yerine volatilite şumu anlamına gelir; bu
     # seviyede stop, komisyon/spread oranını yükselecek kadar geniş ve tek bir

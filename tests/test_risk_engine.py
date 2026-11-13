@@ -23,7 +23,9 @@ def test_risk_engine_uses_config_balance_and_percent():
     assert risk is not None
     assert risk["capital_at_risk_target"] == pytest.approx(round(expected_target_capital, 2))
     assert risk["weighted_rr"] == pytest.approx(1.5 * 0.5 + 2.5 * 0.3 + 4.0 * 0.2, abs=1e-4)
-    assert risk["weighted_net_rr"] == pytest.approx(risk["weighted_rr"] - risk["cost_drag_rr"])
+    stop_exit_cost = risk["stop_cost_breakdown"]["total"] - risk["stop_cost_breakdown"]["entry_fee"]
+    expected_net_rr = (risk["weighted_rr"] * risk["risk"] - risk["plan_cost_quote_per_unit"]) / (risk["risk"] + stop_exit_cost)
+    assert risk["weighted_net_rr"] == pytest.approx(expected_net_rr, abs=1e-4)
     assert risk["execution_rr"] == pytest.approx(risk["weighted_net_rr"])
     assert risk["partial_exit_weights"] == pytest.approx({"tp1": 0.5, "tp2": 0.3, "tp3": 0.2})
     assert risk["position_size"] > 0
@@ -397,8 +399,9 @@ def test_risk_engine_calculates_weighted_rr_for_equal_partial_exits(monkeypatch)
     assert risk["rr"] == pytest.approx(3.0)  # highest single target stays explicit
     assert risk["target_max_rr"] == pytest.approx(3.0)
     assert risk["weighted_rr"] == pytest.approx(2.0)
-    assert risk["weighted_net_rr"] == pytest.approx(1.9596, abs=1e-4)
-    assert risk["net_rr"] == pytest.approx(1.9596, abs=1e-4)
+    assert risk["weighted_net_rr"] == pytest.approx(1.8584, abs=1e-4)
+    assert risk["net_rr"] == pytest.approx(risk["weighted_net_rr"], abs=1e-9)
+    assert risk["net_rr"] == pytest.approx(1.8584, abs=1e-4)
 
     report = RREngine().evaluate(risk)
     assert report["rr"] == pytest.approx(2.0)
@@ -423,7 +426,7 @@ def test_risk_engine_uses_configured_partial_weights(monkeypatch):
         "tp1": 0.5, "tp2": 0.3, "tp3": 0.2
     })
     assert risk["weighted_rr"] == pytest.approx(1.7)
-    assert risk["weighted_net_rr"] == pytest.approx(1.6597, abs=1e-4)
+    assert risk["weighted_net_rr"] == pytest.approx(1.5740, abs=1e-4)
 
 
 def test_risk_engine_normalizes_weights_only_over_valid_targets(monkeypatch):
@@ -494,3 +497,66 @@ def test_risk_engine_does_not_adjust_stop_that_already_clears_atr_floor(monkeypa
     assert risk["stop_adjusted"] is False
     assert risk["stop_loss"] == 99.6
     assert risk["risk"] == pytest.approx(0.4)
+
+
+
+def test_risk_engine_rejects_stop_when_execution_cost_exceeds_half_r(monkeypatch):
+    monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75)
+    monkeypatch.setattr(Config, "MAX_STOP_EXECUTION_COST_R", 0.50)
+    monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", False)
+    monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
+
+    risk = RiskEngine().calculate(
+        entry=100.0,
+        stop_loss=99.99,
+        dynamic_tp={"tp1": 101.0, "tp2": 102.0, "tp3": 103.0},
+        atr_value=0.0,
+        tick_size=0.001,
+    )
+
+    assert risk is not None
+    assert risk["risk_setup_valid"] is False
+    assert risk["reason_code"] == "STOP_EXECUTION_COST_TOO_HIGH"
+    assert risk["stop_execution_cost_r"] > 0.50
+
+
+def test_risk_engine_uses_final_stop_distance_for_atr_ratio(monkeypatch):
+    monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75)
+    monkeypatch.setattr(Config, "MAX_STOP_EXECUTION_COST_R", 10.0)
+    monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", True)
+
+    risk = RiskEngine().calculate(
+        entry=100.0,
+        stop_loss=99.9,
+        dynamic_tp={"tp1": 102.0, "tp2": 104.0, "tp3": 106.0},
+        atr_value=1.0,
+        tick_size=0.01,
+    )
+
+    assert risk is not None
+    assert risk["risk_setup_valid"] is True
+    assert risk["stop_adjusted"] is True
+    assert risk["risk"] == pytest.approx(0.75)
+
+
+
+def test_final_geometry_reconciliation_rechecks_stop_execution_cost(monkeypatch):
+    monkeypatch.setattr(Config, "MAX_STOP_EXECUTION_COST_R", 0.50)
+    initial = RiskEngine().calculate(
+        entry=100.0,
+        stop_loss=99.0,
+        dynamic_tp={"tp1": 102.0, "tp2": 104.0, "tp3": 106.0},
+        atr_value=0.0,
+        tick_size=0.01,
+    )
+    assert initial["risk_setup_valid"] is True
+
+    reconciled = RiskEngine().reconcile_final_geometry_payload(
+        initial,
+        entry=100.0,
+        stop_loss=99.99,
+        targets={"tp1": 102.0, "tp2": 104.0, "tp3": 106.0},
+    )
+
+    assert reconciled["risk_setup_valid"] is False
+    assert reconciled["reason_code"] == "STOP_EXECUTION_COST_TOO_HIGH"

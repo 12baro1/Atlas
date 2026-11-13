@@ -50,6 +50,7 @@ def test_structural_stop_inside_cost_adjusted_atr_floor_is_accepted_without_movi
 
     monkeypatch.setattr(risk_engine, "calculate_atr", lambda candles, period=14: 265.97142857)
     monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.05)
+    monkeypatch.setattr(Config, "MAX_STOP_EXECUTION_COST_R", 10.0)
     monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", False)
     monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
     entry = 77834.3
@@ -83,13 +84,12 @@ def test_structural_stop_that_cannot_cover_execution_costs_is_still_rejected(mon
         tick_size=0.1,
     )
 
-    # Execution costs are no longer misclassified as a structural stop
-    # distance requirement. The structural stop is preserved here; the
-    # downstream quality gate rejects the setup if weighted net RR is poor.
-    assert risk["risk_setup_valid"] is True
-    assert risk["stop_adjusted"] is False
+    # The structural stop remains untouched, but its modeled stop-exit
+    # friction is far above the configured 0.50R execution budget.
+    assert risk["risk_setup_valid"] is False
+    assert risk["reason_code"] == "STOP_EXECUTION_COST_TOO_HIGH"
     assert risk["stop_loss"] == pytest.approx(77520.72785714285)
-    assert risk["minimum_stop_distance"] < risk["requested_risk"]
+    assert risk["stop_execution_cost_r"] > risk["max_stop_execution_cost_r"]
     assert risk["spread_buffer"] > 0
     assert risk["slippage_buffer"] > 0
 
@@ -136,3 +136,61 @@ def test_pending_limit_is_rejected_when_tp1_was_already_reached(monkeypatch):
 
     assert result["allowed"] is False
     assert any("pending LIMIT entry" in item and "stale" in item for item in result["blockers"])
+
+
+
+def test_poi_quality_rejects_entry_outside_explicit_poi_zone(monkeypatch):
+    import utils.atr
+
+    monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 2.0)
+    payload = _quality_payload(100.0)
+    payload["entry"].update({
+        "poi_source": "FVG",
+        "poi_zone": {"low": 98.0, "high": 99.0},
+        "ote_confluence": True,
+        "structure_aligned": True,
+    })
+
+    result = TradeQualityEngine().evaluate(**payload)
+
+    assert result["allowed"] is False
+    assert any("POI quality: entry outside selected zone" in item for item in result["blockers"])
+
+
+def test_poi_quality_accepts_valid_confluent_fvg_zone(monkeypatch):
+    import utils.atr
+
+    monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 2.0)
+    payload = _quality_payload(100.0)
+    payload["entry"].update({
+        "poi_source": "FVG",
+        "poi_zone": {"low": 99.0, "high": 101.0},
+        "ote_confluence": True,
+        "structure_aligned": True,
+    })
+
+    result = TradeQualityEngine().evaluate(**payload)
+
+    assert result["allowed"] is True
+    assert not any("POI quality:" in item for item in result["blockers"])
+
+
+def test_stop_atr_quality_uses_final_structural_stop_floor(monkeypatch):
+    import utils.atr
+
+    monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 2.0)
+    monkeypatch.setattr(Config, "QUALITY_MIN_STOP_ATR", 0.25)
+    monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75)
+    payload = _quality_payload(100.0)
+    payload["entry"]["stop_loss"] = 99.2
+    payload["risk"]["stop_loss"] = 99.2
+    payload["dynamic_tp"].update({
+        "tp1": 100.88,
+        "tp2": 101.68,
+        "tp3": 102.56,
+    })
+
+    result = TradeQualityEngine().evaluate(**payload)
+
+    assert result["allowed"] is False
+    assert any("Stop too tight" in item for item in result["blockers"])

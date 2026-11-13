@@ -103,3 +103,20 @@ def test_position_manager_breakeven_stop_uses_per_leg_costs():
         slippage_rate=Config.STOP_SLIPPAGE_BUFFER_RATE,
     )["total"]
     assert position["stop_loss"] == pytest.approx(100.0 + expected)
+
+
+
+def test_marketable_limit_gap_fill_uses_taker_costs():
+    cost = estimate_plan_cost(
+        entry_price=100.0,
+        targets={"tp1": 102.0},
+        weights={"tp1": 1.0},
+        entry_type="MARKETABLE_LIMIT",
+        maker_fee_rate=0.0002,
+        taker_fee_rate=0.00055,
+        spread_rate=0.0002,
+        slippage_rate=0.0003,
+    )
+    assert cost["entry_fee"] == pytest.approx(0.055)
+    assert cost["spread"] == pytest.approx(0.02)
+    assert cost["slippage"] == pytest.approx(0.03)
