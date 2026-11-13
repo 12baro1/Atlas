@@ -571,9 +571,23 @@ class SetupReasoningEngine:
                     f"tp{index}": price
                     for index, price in enumerate(targets[:3], start=1)
                 }
-                cost_weights = getattr(Config, "PARTIAL_EXIT_WEIGHTS", None)
-                if not isinstance(cost_weights, dict):
-                    cost_weights = None
+                # Keep candidate net-RR estimates on the same TP allocation
+                # policy as RiskEngine and realized trade outcomes.
+                raw_cost_weights = getattr(
+                    Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2"
+                )
+                weight_names = ("tp1", "tp2", "tp3")
+                if isinstance(raw_cost_weights, dict):
+                    cost_weights = {
+                        name: raw_cost_weights.get(name, 1.0)
+                        for name in weight_names
+                    }
+                elif isinstance(raw_cost_weights, str):
+                    cost_weights = dict(zip(weight_names, raw_cost_weights.split(",")))
+                elif isinstance(raw_cost_weights, (list, tuple)):
+                    cost_weights = dict(zip(weight_names, raw_cost_weights))
+                else:
+                    cost_weights = {"tp1": 0.5, "tp2": 0.3, "tp3": 0.2}
                 maker_fee = getattr(Config, "MAKER_FEE_RATE", 0.0002)
                 taker_fee = getattr(Config, "TAKER_FEE_RATE", 0.00055)
                 spread_rate = getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002)
