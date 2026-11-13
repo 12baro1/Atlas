@@ -113,7 +113,6 @@ class BOSEngine:
             event["event_id"] = (
                 f"{str(timeframe or 'unknown').lower()}:structure:"
                 f"{identity_time}:{str(event.get('kind') or '').upper()}:"
-                f"{str(event.get('label') or '').upper()}:"
                 f"{price_key}:{event.get('break_index') is not None}"
             )
             structure.append(event)
