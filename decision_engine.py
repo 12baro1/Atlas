@@ -109,25 +109,11 @@ class DecisionEngine:
             if quality_gate_active and not trade_quality.get("allowed", False):
                 for blocker in trade_quality.get("blockers", []) or [trade_quality.get("reason", "Trade quality gate rejected setup")]:
                     self._append_unique(critical_blockers, f"Trade quality: {blocker}")
-            # Central decision authority: SHORT setups require a confirmed
-            # liquidity sweep reversal. Weak SHORT pullbacks without a
-            # confirmed post-sweep structure break are filtered here (single
-            # decision point), keeping weak counter-trend entries out.
-            if signal_dir == "SHORT":
-                sweep = liquidity_sweep if isinstance(liquidity_sweep, dict) else {}
-                post = sweep.get("post_structure") if isinstance(sweep.get("post_structure"), dict) else {}
-                expected_sweep = bool(sweep.get("buy_side"))
-                sweep_confirmed = bool(
-                    sweep.get("is_sweep")
-                    and expected_sweep
-                    and post.get("confirmed")
-                    and str(post.get("direction", "")).upper() == "BEARISH"
-                )
-                if not sweep_confirmed:
-                    self._append_unique(
-                        critical_blockers,
-                        "SHORT requires confirmed liquidity sweep reversal",
-                    )
+            # Directional sweep quality is evaluated symmetrically by
+            # TradeQualityEngine. Do not impose a second SHORT-only hard gate
+            # here: it suppresses valid trend-continuation shorts and has no
+            # equivalent LONG rule. The single quality gate owns reversal
+            # evidence and MTF alignment for both directions.
 
         adjustments = self._collect_adjustments(
             signal_grade=signal_grade,
