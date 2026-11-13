@@ -814,37 +814,6 @@ class AtlasEngine:
         }
         return trimmed
 
-    def _apply_external_risk_filters(self, decision, news_filter, correlation, cooldown):
-        """Apply true safety/duplicate-entry gates; keep correlation as entry evidence.
-
-        Correlation is a contextual motor, not proof that the proposed setup is
-        structurally invalid. Its conflict is exposed as a warning so the entry
-        optimizer can price the pressure instead of silently deleting the trade.
-        Macro-news protection and same-symbol/direction cooldown remain hard gates.
-        """
-        blockers = []
-        warnings = []
-        for name, payload in (("news_filter", news_filter), ("cooldown", cooldown)):
-            if payload and not bool(payload.get("active", True)):
-                continue
-            if payload and not payload.get("trade_allowed", True):
-                blockers.append(f"{name}: {payload.get('reason', 'blocked')}")
-
-        if correlation and bool(correlation.get("active", True)) and not correlation.get("trade_allowed", True):
-            warnings.append(f"correlation: {correlation.get('reason', 'counterpressure; entry optimized conservatively')}")
-
-        enriched = dict(decision or {})
-        if warnings:
-            enriched["external_warnings"] = list(enriched.get("external_warnings") or []) + warnings
-        if not blockers:
-            return enriched
-        enriched["action"] = "SKIP"
-        enriched["external_blockers"] = blockers
-        existing = enriched.get("critical_blockers") or []
-        enriched["critical_blockers"] = list(existing) + blockers
-        enriched["reason"] = "; ".join(blockers)
-        return enriched
-
     def _analyze_timeframe(self, candles, timeframe="unknown"):
         """Tek zaman dilimi için pivot, etiket, BOS ve CHoCH üretir."""
         engine = self.main_engine.attach_motor(
