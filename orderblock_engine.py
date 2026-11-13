@@ -119,7 +119,8 @@ class OrderBlockEngine:
 
                     blocks.append({
                         "type": "BEARISH",
-                        "index": idx - 1,
+                        "index": ob_index,
+                        "break_index": break_index,
                         "high": prev.high,
                         "low": prev.low,
                         "strength": strength,
