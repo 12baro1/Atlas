@@ -413,19 +413,19 @@ L9 Kontrollü Öğrenme (learning_engine + doğrulama hattı)
 
 | # | Değişiklik | Katman | Beklenen fayda | Risk | Doğrulama | PR |
 |---|---|---|---|---|---|---|
-| P0-0 | **Maliyet-farkındalıklı stop tabanı + tek maliyet birimi**: stop mesafesi ≥ k×(tüm bacak sürtünmesi) (örn. k=2) VE stop bacağı kabul kapısının `weighted_net_rr`'sine dahil (veya realized/sizing/kabul üçlüsü tek birimde birleşir) | L6/L7 | Stop-out'ları −1R civarına getirir; kabul-gerçekleşme uyumu; ölçümde başlıca negatif kaynağı hedefler (§3.1) | İşlem sayısı düşer; taban parametresi IS/OOS ile kalibre edilmeli | Mevcut ölçüm hattında öncesi/sonrası aynı pencere karşılaştırması + OOS | ayrı |
-| P0-1 | Gross 3.0 ↔ net 2.0 eşik birleşimi (tek eşik: net RR) | L6/L7 | Geçerli orta-RR kurulumların geri kazanımı; tutarlı politika | Zayıf kurulum sızıntısı | Mevcut veri setinde IS/OS karşılaştırma + blocker dağılımı | ayrı |
-| P0-2 | SHORT sweep gate'i simetrikleştirme (LONG karşılığı veya gate'i kanıt-teyit kapısına çevirme) | L7 | Yön dengesi; SHORT fırsat kaybının giderilmesi | Zayıf SHORT akışı artışı | Yön kırılımı ölçümü + PF/expectancy | ayrı |
-| P0-3 | F1 unblock koşulunun ulaşılamazlığı düzeltilmesi (entry_source üretimi veya koşul değişimi) | L4/L7 | Onaylı ters-trend dönüşlerinin kaybı | Ters-trend FP artışı | Reversal kategorisi ölçümü | ayrı |
-| P0-4 | TUI pending_limit `decision_action` kontrolü | UI | Karar otoritesi sızıntısı kapanır | Yok | Test | küçük PR |
-| P0-5 | Journal lean payload (trades/snapshot) + VACUUM/backup planı | L8 | 782MB → hedef <50MB; Android disk/I/O | Bilgi kaybı (önerilen: özet şema + tam veri ayrı arşiv) | Boyut ölçümü + outcome bütünlüğü testleri | ayrı |
-| P1-1 | Event-id tabanlı kanıt dedupe (confluence+decision+signal tek kanıt) | L3/L7 | Çift sayım biter; konfidence anlam kazanır | Yeniden kalibrasyon | Kanıt→işlem eşlemesi + OOS | ayrı |
+| P0-0 | **Maliyet-farkındalıklı stop tabanı + tek maliyet birimi** | L6/L7 | Ekonomik olarak aşırı dar stopları reddeder; stop maliyeti sizing'e dahil | İşlem sayısı düşer; 2x taban OOS ile kalibre edilmeli | Aynı pencere öncesi/sonrası + OOS | PR #111 uygulandı |
+| P0-1 | Gross 3.0 ↔ net 2.0 eşik birleşimi (tek eşik: net RR) | L6/L7 | Tek net-RR politikası | Zayıf kurulum sızıntısı | IS/OOS + blocker dağılımı | PR #111 uygulandı |
+| P0-2 | SHORT sweep gate'i simetrikleştirme | L7 | Yön asimetrisi azaltılır; kalite kanıtı ortak kapıda | Zayıf SHORT akışı artışı | Yön kırılımı + PF/expectancy | PR #111 uygulandı |
+| P0-3 | F1 reversal yolu ve sweep→CHoCH nedenselliği | L4/L7 | Onaylı ters-trend dönüşü doğru tanınır; eski CHoCH sızıntısı engellenir | Ters-trend FP artışı | Reversal kategorisi OOS ölçümü | PR #111 uygulandı |
+| P0-4 | TUI pending_limit `decision_action` kontrolü | UI | Karar otoritesi sızıntısı kapanır | Yok | Test | PR #111 uygulandı |
+| P0-5 | Yeni journal kayıtlarında lean payload + backup-first compaction | L8 | Yeni DB büyümesi azaltılır; mevcut DB güvenli yedek sonrası küçültülebilir | Eski DB kompaksiyonu kullanıcı onayı gerektirir | DB boyutu + outcome bütünlüğü | PR #111 uygulandı; mevcut DB'ye uygulanmadı |
+| P1-1 | Yapısal event-id tabanlı kanıt dedupe (kısmi) | L3/L7 | Aynı BOS/CHoCH/sweep olayının yinelenen yapısal kanıtı bastırılır | Tüm motorlara yayılınca yeniden kalibrasyon gerekir | Kanıt→işlem eşlemesi + OOS | PR #111 kısmi; global motor attribution açık |
 | P1-2 | Trade-quality veto SKIP olarak kalır (yeniden etiketleme kalkar) + blocker'lar WAIT kartına basılır | L7/UI | Şeffaf WAIT nedenleri | Davranış değişikliği | WAIT neden dağılımı | küçük PR |
-| P1-3 | SMT `_aligned` timeframe parametresi + bearish OB index düzeltmesi + CVD +12/reclaim düzeltmeleri | L3 | Yön simetrisi; konfidence bütünlüğü | Düşük | Birim testler | tek PR (bug-fix) |
+| P1-3 | SMT timeframe + bearish OB index + stop-hunt reclaim düzeltmeleri | L3 | Yön/zaman hizalaması ve reclaim doğruluğu | Düşük | Birim testler | PR #111 uygulandı |
 | P1-4 | Backtest LIMIT süre-bazlı expiry | L5 | Bayat tarihsel emirlerin iptali | Dolum oranı düşebilir | Runner `limit_expiry_bars` sayacı | Mevcut kodda var; CLI varsayılanı 8 bar |
-| P1-5 | Segmentasyon genişletme (entry_type P&L, rejim, volatilite, POI tipi, TP davranışı) + JSON/CSV rapor kancası | L8 | Ölçülebilir kalibrasyon temeli | Yok | Rapor diff | ayrı |
-| P2-1 | Walk-forward/OOS komutu (IS/OS işaretli, param-frozen) | L8/L9 | Param değişiklikleri kanıta bağlanır | Hesap maliyeti | OOS raporu | ayrı |
-| P2-2 | Öğrenme: OOS kapısı + rollback snapshot + CauseClassifier | L9 | Overfit koruması; neden-taksonomisi | Karmaşıklık | OOS A/B | ayrı |
+| P1-5 | Segmentasyon (entry type, phase/regime, volatility, POI, TP davranışı) | L8 | Ölçülebilir kalibrasyon temeli | Yanlış alan eşlemesi raporu bozabilir | Rapor diff | PR #111 uygulandı; regime alanları şemaya göre düzeltildi |
+| P2-1 | Walk-forward/OOS komutu (IS/OOS, param-frozen) + güvenli checkpoint resume | L8/L9 | Zaman çıpası ve config/kod fingerprint ile aynı pencere tekrar edilir | Hesap maliyeti | OOS raporu | PR #111 uygulandı; henüz çalıştırılmadı |
+| P2-2 | Öğrenme: OOS kapısı + rollback snapshot + cause taxonomy | L9 | Overfit koruması; neden-taksonomisi | Küçük örneklemde öğrenme nötr kalır | OOS A/B | PR #111 uygulandı |
 | P2-3 | Ölü kod temizliği (§D listesi) + `backtest/` paketi ad değişimi + "High probability setup" etiketi kaldırma | genel | Bakım yükü düşer | regresyon | Test süiti + import grafı | birden çok küçük PR |
 | P2-4 | Tek rejim sınıflandırıcısı birleşimi (regime+phase) | L2 | Çelişki biter | Kalibrasyon | Rejim uyum ölçümü | ayrı |
 
@@ -450,7 +450,7 @@ Bu bölüm aynı PR dalındaki kod değişikliklerini izler. Aşağıdaki maddel
 | Aday net-RR maliyet ağırlıkları | SetupReasoningEngine, RiskEngine ile aynı SIGNAL_OUTCOME_PARTIAL_WEIGHTS ayarını kullanıyor. |
 | Backtest journal izolasyonu bulgusu | Kod tekrar kontrol edildi: backtest tracking'i kapatıyor ve journal'ı db_path=None ile kuruyor; canlı DB'ye yazma iddiası bu akış için kaldırıldı. |
 
-**Açık kalan işler:** stop tabanının maliyetlerle birlikte yeniden tasarlanması; event-ID tabanlı kanıt deduplikasyonu; LIMIT expiry; gerçek walk-forward/OOS; öğrenme için OOS kapısı ve rollback; journal payload sadeleştirme; geniş dead-code temizliği ve rejim motorlarının birleştirilmesi.
+**Açık kalan işler:** tüm motorlardan ortak event identity üretip global attribution yapmak; WAIT/SKIP blocker'larını TUI'de açıklamak; gerçek fill/fee verisi olmayan manuel kayıtlar için net-R parity kurmamak; geniş dead-code temizliği ve rejim motorlarının birleştirilmesi. LIMIT expiry backtest runner'da zaten bulunuyor; walk-forward ve öğrenme OOS kapıları eklendi ancak henüz çalıştırılmadı.
 
 
 ---
@@ -460,7 +460,11 @@ Bu bölüm aynı PR dalındaki kod değişikliklerini izler. Aşağıdaki maddel
 ### Uygulanan
 - Maliyet farkındalıklı stop tabanı: yapısal stop, tahmini round-trip friction'ın varsayılan 2 katından dar ise reddedilir; stop yapısal seviyeden otomatik uzaklaştırılmaz. `ATLAS_MIN_STOP_COST_MULTIPLIER` ile ayarlanır.
 - Net RR tek kaynağa bağlandı: setup adayı, kalite filtresi, RiskEngine ve DecisionEngine `MINIMUM_NET_RR` kullanır; `MIN_SETUP_NET_RR` ve `QUALITY_MIN_NET_RR` geriye uyumluluk alias'ıdır. Brüt final-target RR ikinci veto değildir.
-- F1 reversal yolu düzeltildi: gerçek sweep + reclaim + kapanmış 15m CHoCH, 4H yönüne karşı da `CONFIRMED_15M_REVERSAL` üretebilir; downstream kalite filtresi teyit şartlarını korur.
+- F1 reversal yolu düzeltildi: gerçek sweep + reclaim + kapanmış 15m CHoCH, 4H yönüne karşı da `CONFIRMED_15M_REVERSAL` üretebilir. Artık genel yapı listesindeki eski/alakasız CHoCH yerine sweep motorunun nedensel `confirmation_index > sweep_index` kaydı esas alınır; F1 ayrıca yön ve sweep tarafı eşleşmesini ister.
+- Yapısal BOS/CHoCH olaylarına timeframe-aware `event_id`; sweep ve post-sweep CHoCH olaylarına da kimlik eklendi. SetupReasoning aynı event ID'li tekrar eden yapısal kanıtı bir kez sayar. Bu global tüm motorları kapsayan dedupe değildir.
+- Aynı mumda hem buy-side hem sell-side legacy wick sweep oluşursa olay `ambiguous_sweep` sayılır; rastgele tek yön atanmaz. Aynı yöne sweep olup henüz post-sweep onayı yoksa kanıt yanlışlıkla karşı-yön olarak yazılmaz.
+- Backtest resume checkpoint'i kaynak revision, config, ücretler, TP ağırlıkları, step ve expiry ayarlarıyla fingerprint edilir; ayrıca ilk çalıştırmanın zaman çıpası korunur. Uyumsuz/eski checkpoint parçaları yeniden kullanılmaz.
+- Backtest rejim segmentleri `market_regime.regime` ve `volatility_ratio` alanlarından doğru çıkarılır; market phase rapor çıktısına da eklendi.
 - Journal yeni kayıtları sadeleştirildi: tam motor/candle payload'ları yerine outcome attribution için gerekli alanlar tutulur. Eski veritabanını fiziksel küçültmek için backup-first `compact_database()` eklendi; bu metot otomatik çalıştırılmaz.
 - Learning: kronolojik 70/30 eğitim/OOS holdout, bucket bazlı OOS kabul kapısı, atomik önceki-sürüm yedeği ve `rollback_last_save()` eklendi.
 - Cause taxonomy: kapanan işlemlere cause code atanır ve öğrenme meta raporunda sayılır.
@@ -469,9 +473,10 @@ Bu bölüm aynı PR dalındaki kod değişikliklerini izler. Aşağıdaki maddel
 - LIMIT expiry backtest runner'da zaten mevcuttu; varsayılan 8 adet 15m bar.
 
 ### Bilinçli olarak açık bırakılanlar
-- Event-ID tabanlı kanıt deduplikasyonu: motorlar henüz ortak event identity üretmiyor. Farklı olayları yanlışlıkla birleştirmemek için yalnızca etiket benzerliğine göre dedupe uygulanmadı.
+- Global event attribution: BOS/CHoCH ve sweep olaylarında kimlik var; ancak SMT, FVG, OB, orderbook, CVD ve diğer motorların tamamı ortak event identity üretmiyor. Dedupe bu nedenle yalnızca kimliği kesin olan yapısal olaylarla sınırlı.
 - Rejim/phase motorlarının tek motora birleştirilmesi ve geniş dead-code temizliği: bağımlılık/import grafı ve davranış karşılaştırması olmadan dosya silmek karar mimarisini bozabilir. Bu turda güvenli, doğrulanabilir kapsamın dışındadır.
 - Eski journal DB'sinde bir defalık fiziksel küçültme: `compact_database()` backup oluşturup VACUUM çalıştırır; kullanıcı veritabanında otomatik çalıştırılmadı.
 - Manual/tracked ledger net fee parity ve gerçek fill tabanlı learning: kaynak kayıtlarda gerçek execution type/fee/fill verisi bulunmayan işlemler için maliyet uydurulmadı.
+- WAIT/SKIP nedenlerinin TUI'de açıklamalı gösterimi henüz eklenmedi; işlem listesinde yalnızca yürütülebilir sinyaller gösterilmeye devam ediyor.
 
 **Doğrulama:** Kullanıcı talimatı gereği testler çalıştırılmadı. Bu değişikliklerin performans etkisi henüz ölçülmedi; walk-forward/OOS komutu çalıştırılmadan kârlılık iddiası yapılamaz.
