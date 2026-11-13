@@ -450,7 +450,7 @@ Bu bölüm aynı PR dalındaki kod değişikliklerini izler. Aşağıdaki maddel
 | Aday net-RR maliyet ağırlıkları | SetupReasoningEngine, RiskEngine ile aynı SIGNAL_OUTCOME_PARTIAL_WEIGHTS ayarını kullanıyor. |
 | Backtest journal izolasyonu bulgusu | Kod tekrar kontrol edildi: backtest tracking'i kapatıyor ve journal'ı db_path=None ile kuruyor; canlı DB'ye yazma iddiası bu akış için kaldırıldı. |
 
-**Açık kalan işler:** event ID üretmeyen motorlara kimlik kazandırıp tam kapsamlı attribution yapmak; WAIT/SKIP blocker'larını TUI'de açıklamak; gerçek fill/fee verisi olmayan manuel kayıtlar için net-R parity kurmamak; geniş dead-code temizliği ve rejim motorlarının birleştirilmesi. LIMIT expiry backtest runner'da zaten bulunuyor; walk-forward ve öğrenme OOS kapıları eklendi ancak henüz çalıştırılmadı.
+**Güncel açık işler:** event ID üretmeyen kalan motorlara kimlik kazandırıp tam kapsamlı attribution yapmak; gerçek fill/fee verisi olmayan manuel kayıtlar için net-R parity kurmamak; geniş dead-code temizliği ve rejim motorlarının birleştirilmesi. Korelasyon snapshot kimliği ve TUI WAIT/SKIP blocker gösterimi eklendi. LIMIT expiry backtest runner'da zaten bulunuyor; walk-forward ve öğrenme OOS kapıları eklendi ancak henüz çalıştırılmadı.
 
 
 ---
@@ -473,10 +473,10 @@ Bu bölüm aynı PR dalındaki kod değişikliklerini izler. Aşağıdaki maddel
 - LIMIT expiry backtest runner'da zaten mevcuttu; varsayılan 8 adet 15m bar.
 
 ### Bilinçli olarak açık bırakılanlar
-- Global event attribution: ana motor artık BOS/CHoCH, sweep, SMT, FVG/IFVG, OB, breaker, Unicorn, CISD, volume profile, swing/internal liquidity pool, trendline/sweep, EQH/EQL, inducement, orderbook snapshot ve CVD kimliklerini toplar; SetupReasoning kimliği aynı olan modül kanıtını tek sayar. Henüz kimlik üretmeyen diğer motorlar ve event ID taşımayan kanıt yolları için tam kapsamlı tekilleştirme açık iştir; motor teşhisindeki tekrar raporu tek başına karar skorunu değiştirmez.
+- Global event attribution: ana motor artık BOS/CHoCH, sweep, SMT, FVG/IFVG, OB, breaker, Unicorn, CISD, volume profile, swing/internal liquidity pool, trendline/sweep, EQH/EQL, inducement, orderbook snapshot ve CVD kimliklerini toplar; SetupReasoning kimliği aynı olan modül kanıtını tek sayar. Korelasyon snapshot'ı da BTC/ETH kaynak mum zamanlarını bileşik kimliğe bağlar. Henüz kimlik üretmeyen diğer motorlar ve event ID taşımayan kanıt yolları için tam kapsamlı tekilleştirme açık iştir; motor teşhisindeki tekrar raporu tek başına karar skorunu değiştirmez.
 - Rejim/phase motorlarının tek motora birleştirilmesi ve geniş dead-code temizliği: bağımlılık/import grafı ve davranış karşılaştırması olmadan dosya silmek karar mimarisini bozabilir. Bu turda güvenli, doğrulanabilir kapsamın dışındadır.
 - Eski journal DB'sinde bir defalık fiziksel küçültme: `compact_database()` backup oluşturup VACUUM çalıştırır; kullanıcı veritabanında otomatik çalıştırılmadı.
 - Manual/tracked ledger net fee parity ve gerçek fill tabanlı learning: kaynak kayıtlarda gerçek execution type/fee/fill verisi bulunmayan işlemler için maliyet uydurulmadı.
-- WAIT/SKIP nedenlerinin TUI'de açıklamalı gösterimi henüz eklenmedi; işlem listesinde yalnızca yürütülebilir sinyaller gösterilmeye devam ediyor.
+- WAIT/SKIP nedenleri tekil sembol analiz kartında `Neden` ve `Engeller` satırlarında gösteriliyor; WAIT durumundaki LIMIT artık bekleyen emir gibi sunulmuyor. Toplu tarama yalnızca EXECUTE / EXECUTE_WITH_CAUTION adaylarını sıralıyor.
 
 **Doğrulama:** Nedensel sweep/CHoCH, eski CHoCH çakışması, no-pool wick, açık MTF yön çelişkisi, SMT/FVG/IFVG/OB/breaker/Unicorn/CISD/volume-profile/liquidity-pool/trendline/EQH-EQL/inducement/orderbook/CVD event ID ve modüller arası aynı event'in tek sayılması için regresyon testleri eklendi; kullanıcı talimatı gereği testler çalıştırılmadı. Bu değişikliklerin performans etkisi henüz ölçülmedi; walk-forward/OOS komutu çalıştırılmadan kârlılık iddiası yapılamaz.
