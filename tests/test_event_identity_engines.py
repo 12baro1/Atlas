@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.candle import Candle
+from breaker_block_engine import BreakerBlockEngine
 from fvg_engine import FVGEngine
 from orderblock_engine import OrderBlockEngine
 
@@ -47,3 +48,23 @@ def test_orderblock_event_identity_uses_origin_candle_timestamp():
     assert blocks
     assert blocks[0]["index"] == 1
     assert blocks[0]["event_id"].startswith("orderblock:BULLISH:1700000060000:")
+
+
+def test_breaker_event_identity_links_source_ob_and_break_candle():
+    candles = [
+        _candle(1_700_000_000_000, 100.0, 101.0, 99.0, 100.5),
+        _candle(1_700_000_060_000, 100.5, 100.8, 97.5, 98.0),
+    ]
+    orderblocks = [{
+        "type": "BULLISH",
+        "event_id": "orderblock:BULLISH:1700000000000:101:99",
+        "index": 0,
+        "low": 99.0,
+        "high": 101.0,
+        "strength": 80,
+    }]
+    breakers = BreakerBlockEngine().detect(candles, orderblocks)
+    assert breakers
+    assert breakers[0]["event_id"] == (
+        "breaker:orderblock:BULLISH:1700000000000:101:99:1700000060000"
+    )
