@@ -32,6 +32,7 @@ def test_market_regime_detects_uptrend():
     assert result["regime"] == "TRENDING_UP"
     assert result["directional_bias"] == "BULLISH"
     assert result["source"] == "bybit_ohlcv"
+    assert result["event_id"].startswith("market_regime:4h:")
 
 
 def test_market_regime_detects_range():
