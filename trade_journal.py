@@ -37,6 +37,61 @@ class TradeJournal:
         self._ensure_store()
         self._enforce_retention()
 
+    @staticmethod
+    def _compact_modules(modules):
+        """Persist only outcome-relevant module evidence, not full candle payloads."""
+        if not isinstance(modules, dict):
+            return {}
+        compact = {}
+        allowed = ("active", "direction", "signal", "trend", "confidence", "score", "grade", "reason")
+        for name, payload in modules.items():
+            if not isinstance(payload, dict):
+                continue
+            item = {key: copy.deepcopy(payload[key]) for key in allowed if key in payload}
+            best = payload.get("best")
+            if isinstance(best, dict):
+                item["best"] = {
+                    key: copy.deepcopy(best[key])
+                    for key in ("direction", "type", "confidence", "price", "level", "reason")
+                    if key in best
+                }
+            if item:
+                compact[str(name)] = item
+        return compact
+
+    @classmethod
+    def _compact_trade_analysis(cls, analysis):
+        """Keep the fields used by journal attribution and learning; drop raw modules/candles."""
+        if not isinstance(analysis, dict):
+            return {}
+        source = analysis.get("analysis") if isinstance(analysis.get("analysis"), dict) else analysis
+        compact = {
+            key: copy.deepcopy(source.get(key))
+            for key in ("signal", "confluence", "risk", "decision", "market_phase")
+            if key in source
+        }
+        setup = source.get("setup_quality")
+        if isinstance(setup, dict):
+            compact_setup = {
+                key: copy.deepcopy(setup[key])
+                for key in ("features", "setup_fingerprint", "score", "confidence", "trade_allowed")
+                if key in setup
+            }
+            scores = setup.get("module_scores")
+            if isinstance(scores, dict):
+                compact_setup["module_scores"] = {
+                    str(name): {
+                        key: copy.deepcopy(value[key])
+                        for key in ("score", "active", "reason")
+                        if key in value
+                    }
+                    for name, value in scores.items() if isinstance(value, dict)
+                }
+            compact["setup_quality"] = compact_setup
+        if source is not analysis:
+            return {"analysis": compact}
+        return compact
+
     def record_analysis(self, analysis, symbol=None, timeframe="multi", timestamp=None, metadata=None):
         """İşlem açılışındaki tüm analiz çıktısını snapshot olarak kaydeder."""
         snapshot = {
@@ -52,7 +107,7 @@ class TradeJournal:
             "market_phase": copy.deepcopy(analysis.get("market_phase") or {}),
             "session": self._extract_session(analysis),
             "killzone": self._extract_killzone(analysis),
-            "modules": copy.deepcopy(analysis.get("modules") or {}),
+            "modules": self._compact_modules(analysis.get("modules") or {}),
             "structure": self._compact_structure(analysis),
             "metadata": copy.deepcopy(metadata or {}),
         }
@@ -90,7 +145,7 @@ class TradeJournal:
             "session": self._snapshot_value(snapshot, "session", "session") or trade.get("session", "UNKNOWN"),
             "killzone": self._snapshot_value(snapshot, "killzone", "name") or trade.get("killzone", "UNKNOWN"),
             "analysis_snapshot_id": snapshot["id"] if snapshot else None,
-            "analysis": copy.deepcopy(analysis or {}),
+            "analysis": self._compact_trade_analysis(analysis or {}),
             "metadata": copy.deepcopy(metadata or {}),
             "closed_payload": None,
         }
