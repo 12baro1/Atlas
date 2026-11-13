@@ -89,9 +89,10 @@ class SignalEngine:
             direction = "WAIT"
             wait_reason = wait_reason or "setup_quality_blocked"
 
-        if quality_gate_active and not trade_quality.get("allowed", False):
-            direction = "WAIT"
-            wait_reason = trade_quality.get("reason") or "trade_quality_blocked"
+        # Keep the selected LONG/SHORT direction intact here. Trade-quality
+        # vetoes must reach DecisionEngine as structured blockers so the
+        # single decision authority can return SKIP with actionable reasons;
+        # converting the direction to WAIT here hides that veto and its cause.
 
         if confidence_adjusted >= 96:
             grade = "S+"
