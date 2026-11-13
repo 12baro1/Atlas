@@ -288,10 +288,9 @@ class RiskEngine:
         slippage_buffer = self._resolve_buffer(slippage, entry, slippage_rate, minimum_tick_distance)
         execution_spread_rate = spread_buffer / abs(entry) if entry else 0.0
         execution_slippage_rate = slippage_buffer / abs(entry) if entry else 0.0
-        # Stop geometry is structural and volatility-based. Spread/slippage are
-        # execution costs; adding them to the stop-distance floor can reject a
-        # valid structural stop for the wrong reason. They remain included in
-        # cost-adjusted RR and position sizing below.
+        # Keep the structural ATR/percent floor distinct from execution friction.
+        # A separate round-trip cost floor below rejects economically impossible
+        # tight stops without shifting the structural invalidation price.
         minimum_stop_distance = max(atr_floor_distance, minimum_tick_distance)
 
         # A structurally valid stop can still be economically untradeable when
