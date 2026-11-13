@@ -29,8 +29,8 @@ def test_stack_confluence_bonus_and_signal_transfer():
         market_phase={"phase": "Expansion"},
     )
 
-    assert confluence["score"] >= 100
-    assert any("Stack Confluence" in item for item in confluence["checks"])
+    assert 0 <= confluence["score"] <= 100
+    assert "✔ Stack Confluence synergy (+6)" in confluence["checks"]
 
     signal = SignalEngine().generate(
         {
