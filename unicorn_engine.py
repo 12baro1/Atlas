@@ -79,9 +79,16 @@ class UnicornEngine:
                 )
                 levels = self._trade_levels(direction, overlap)
 
+                breaker_event_id = breaker.get("event_id")
+                fvg_event_id = fvg.get("event_id")
+                setup_event_id = (
+                    f"unicorn:{timeframe}:{breaker_event_id}:{fvg_event_id}"
+                    if breaker_event_id and fvg_event_id else None
+                )
                 setups.append(
                     {
                         "pattern": "UNICORN",
+                        "event_id": setup_event_id,
                         "direction": direction,
                         "timeframe": timeframe,
                         "zone": overlap,
