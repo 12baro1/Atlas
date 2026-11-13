@@ -450,7 +450,7 @@ Bu bölüm aynı PR dalındaki kod değişikliklerini izler. Aşağıdaki maddel
 | Aday net-RR maliyet ağırlıkları | SetupReasoningEngine, RiskEngine ile aynı SIGNAL_OUTCOME_PARTIAL_WEIGHTS ayarını kullanıyor. |
 | Backtest journal izolasyonu bulgusu | Kod tekrar kontrol edildi: backtest tracking'i kapatıyor ve journal'ı db_path=None ile kuruyor; canlı DB'ye yazma iddiası bu akış için kaldırıldı. |
 
-**Açık kalan işler:** tüm motorlardan ortak event identity üretip global attribution yapmak; WAIT/SKIP blocker'larını TUI'de açıklamak; gerçek fill/fee verisi olmayan manuel kayıtlar için net-R parity kurmamak; geniş dead-code temizliği ve rejim motorlarının birleştirilmesi. LIMIT expiry backtest runner'da zaten bulunuyor; walk-forward ve öğrenme OOS kapıları eklendi ancak henüz çalıştırılmadı.
+**Açık kalan işler:** event ID üretmeyen motorlara kimlik kazandırıp tam kapsamlı attribution yapmak; WAIT/SKIP blocker'larını TUI'de açıklamak; gerçek fill/fee verisi olmayan manuel kayıtlar için net-R parity kurmamak; geniş dead-code temizliği ve rejim motorlarının birleştirilmesi. LIMIT expiry backtest runner'da zaten bulunuyor; walk-forward ve öğrenme OOS kapıları eklendi ancak henüz çalıştırılmadı.
 
 
 ---
@@ -479,4 +479,4 @@ Bu bölüm aynı PR dalındaki kod değişikliklerini izler. Aşağıdaki maddel
 - Manual/tracked ledger net fee parity ve gerçek fill tabanlı learning: kaynak kayıtlarda gerçek execution type/fee/fill verisi bulunmayan işlemler için maliyet uydurulmadı.
 - WAIT/SKIP nedenlerinin TUI'de açıklamalı gösterimi henüz eklenmedi; işlem listesinde yalnızca yürütülebilir sinyaller gösterilmeye devam ediyor.
 
-**Doğrulama:** Nedensel sweep/CHoCH, eski CHoCH çakışması, no-pool wick ve açık MTF yön çelişkisi için regresyon testleri eklendi; kullanıcı talimatı gereği testler çalıştırılmadı. Bu değişikliklerin performans etkisi henüz ölçülmedi; walk-forward/OOS komutu çalıştırılmadan kârlılık iddiası yapılamaz.
+**Doğrulama:** Nedensel sweep/CHoCH, eski CHoCH çakışması, no-pool wick, açık MTF yön çelişkisi, SMT/FVG/IFVG/OB/orderbook/CVD event ID ve modüller arası aynı event'in tek sayılması için regresyon testleri eklendi; kullanıcı talimatı gereği testler çalıştırılmadı. Bu değişikliklerin performans etkisi henüz ölçülmedi; walk-forward/OOS komutu çalıştırılmadan kârlılık iddiası yapılamaz.
