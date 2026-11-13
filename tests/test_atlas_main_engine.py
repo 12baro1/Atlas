@@ -128,6 +128,28 @@ def test_specialist_calls_are_executed_once_and_recorded_in_shared_evidence_pool
     assert main.evidence_snapshot()[0]["output"] == {"level": 14}
 
 
+def test_stable_event_ids_are_tracked_across_specialist_motors():
+    class _Motor:
+        def detect(self):
+            return {"events": [{"event_id": "15m:structure:t1700000000000:LOW:100:true"}]}
+
+    main = AtlasMainEngine(
+        motors={"structure": _Motor(), "liquidity": _Motor()},
+        setup_reasoner=_SetupReasoner(),
+        decision_engine=_Decision(),
+    )
+    main.motors["structure"].detect()
+    main.motors["liquidity"].detect()
+
+    diagnostics = main.motor_diagnostics()["event_identity"]
+    assert diagnostics["unique"] == 1
+    assert diagnostics["duplicate_ids"] == 1
+    assert diagnostics["cross_motor_duplicate_ids"] == 1
+    assert main.evidence_snapshot()[0]["event_ids"] == [
+        "15m:structure:t1700000000000:LOW:100:true"
+    ]
+
+
 def test_specialist_exception_is_recorded_and_not_silently_swallowed():
     class _BrokenMotor:
         def detect(self):
