@@ -429,3 +429,24 @@ L9 Kontrollü Öğrenme (learning_engine + doğrulama hattı)
 | P2-4 | Tek rejim sınıflandırıcısı birleşimi (regime+phase) | L2 | Çelişki biter | Kalibrasyon | Rejim uyum ölçümü | ayrı |
 
 Her değişiklik için: önce ölçüm (IS), sonra PR, sonra aynı ölçümün OOS doğrulaması; ölçüm şablonu §3.
+
+
+---
+
+## 9. PR #111 UYGULAMA DURUMU
+
+Bu bölüm aynı PR dalındaki kod değişikliklerini izler. Aşağıdaki maddeler kodda uygulanmıştır; testler kullanıcı talimatı doğrultusunda çalıştırılmamıştır. Kârlılık etkisi backtest/OOS ölçümü yapılmadan doğrulanmış sayılmaz.
+
+| Bulgu | Uygulama durumu |
+|---|---|
+| SHORT yönünde tek taraflı sweep zorunluluğu | DecisionEngine'den kaldırıldı; iki yönün kalite kanıtı ortak TradeQuality kapısına bırakıldı. |
+| Bearish Order Block indeks hatası | Aranan opposing candle indeksi kullanılıyor; break indeksi de payload'a eklendi. |
+| TradeQuality veto'sunun WAIT'e çevrilmesi | LONG/SHORT yönü korunuyor; nihai veto ve blocker DecisionEngine'e taşınıyor. |
+| TUI LIMIT adaylarında SKIP sızıntısı | Her iki TUI aday yolunda da yalnız EXECUTE / EXECUTE_WITH_CAUTION kabul ediliyor. |
+| SMT bullish pivot zaman hizalaması | _aligned çağrısına gerçek timeframe geçiriliyor. |
+| Stop-hunt reclaim kanıtı | Önceki kapanışın değişmesi yerine süpürülen seviyenin kapanışla geri alınması doğrulanıyor. |
+| Brüt RR ile net RR'nin çift veto üretmesi | TradeQualityEngine brüt final-target RR'yi veto olarak kullanmıyor; maliyet sonrası weighted net RR nihai DecisionEngine kapısında kontrol ediliyor. |
+| Aday net-RR maliyet ağırlıkları | SetupReasoningEngine, RiskEngine ile aynı SIGNAL_OUTCOME_PARTIAL_WEIGHTS ayarını kullanıyor. |
+| Backtest journal izolasyonu bulgusu | Kod tekrar kontrol edildi: backtest tracking'i kapatıyor ve journal'ı db_path=None ile kuruyor; canlı DB'ye yazma iddiası bu akış için kaldırıldı. |
+
+**Açık kalan işler:** stop tabanının maliyetlerle birlikte yeniden tasarlanması; event-ID tabanlı kanıt deduplikasyonu; LIMIT expiry; gerçek walk-forward/OOS; öğrenme için OOS kapısı ve rollback; journal payload sadeleştirme; geniş dead-code temizliği ve rejim motorlarının birleştirilmesi.
