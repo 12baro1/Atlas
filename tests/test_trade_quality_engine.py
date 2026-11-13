@@ -43,6 +43,19 @@ def test_valid_trend_pullback_passes_without_relying_on_score():
     assert result["blockers"] == []
 
 
+def test_explicit_mtf_entry_direction_conflict_is_blocked():
+    payload = base_payload()
+    payload["mtf"] = {
+        "valid": True,
+        "entry": "SHORT",
+        "h4": "BULLISH",
+        "entry_source": "H4_STRUCTURE",
+    }
+    result = evaluate(payload)
+    assert result["allowed"] is False
+    assert "Multi-timeframe direction is not aligned" in result["blockers"]
+
+
 def test_opposing_liquidity_sweep_is_counter_evidence_not_veto():
     payload = base_payload()
     payload["liquidity_sweep"] = {
