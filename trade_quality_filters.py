@@ -724,7 +724,10 @@ class TradeQualityFilters:
 
         entry_price = self._safe_float(entry.get("entry"))
         stop = self._safe_float(risk.get("stop_loss", entry.get("stop_loss")))
-        min_stop_atr = max(\n            float(getattr(Config, "QUALITY_MIN_STOP_ATR", 0.75)),\n            float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75)),\n        )
+        min_stop_atr = max(
+            float(getattr(Config, "QUALITY_MIN_STOP_ATR", 0.75)),
+            float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75)),
+        )
         max_stop_atr = float(getattr(Config, "QUALITY_MAX_STOP_ATR", 4.0))
 
         if entry_price is None or stop is None or atr <= 0:
