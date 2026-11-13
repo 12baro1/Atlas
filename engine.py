@@ -1044,6 +1044,7 @@ class AtlasEngine:
             premium_discount=premium_discount,
             mtf=mtf,
             candles=candles,
+            timeframe="15m",
         )
 
         return {
@@ -1856,7 +1857,7 @@ class AtlasEngine:
                 structure=structure, trend=local_trend, liquidity_sweep=liquidity_sweep,
                 fvg=local_fvg, orderblocks=local_orderblocks,
                 premium_discount=local_premium_discount,
-                mtf=local_mtf, candles=candles,
+                mtf=local_mtf, candles=candles, timeframe=timeframe,
             )
             payload[timeframe] = {
                 "candles": candles,
@@ -1913,7 +1914,7 @@ class AtlasEngine:
                 structure=structure, trend=local_trend, liquidity_sweep=liquidity_sweep,
                 fvg=fvg, orderblocks=orderblocks,
                 premium_discount=local_premium_discount,
-                mtf=local_mtf, candles=candles,
+                mtf=local_mtf, candles=candles, timeframe=timeframe,
             )
             ote = self.ote.detect(
                 swing_high=swing_high,
