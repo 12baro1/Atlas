@@ -881,6 +881,28 @@ def _save_checkpoint(path, payload):
         logging.warning("Checkpoint yazımı başarısız | %s: %s", path, exc)
 
 
+def _backtest_run_fingerprint(*, symbol, days, chunk_days, step, limit_expiry_bars, lenient, walk_forward):
+    """Inputs that make a resumed historical chunk result reusable."""
+    config_keys = (
+        "MAKER_FEE_RATE", "TAKER_FEE_RATE", "STOP_SPREAD_BUFFER_RATE",
+        "STOP_SLIPPAGE_BUFFER_RATE", "MINIMUM_RR", "MINIMUM_NET_RR",
+        "MIN_STOP_ATR_MULTIPLIER", "AUTO_EXPAND_TIGHT_STOPS",
+        "REJECT_TIGHT_STOPS", "INITIAL_BALANCE",
+    )
+    return {
+        "symbol": str(symbol),
+        "days": int(days),
+        "chunk_days": int(chunk_days),
+        "step": int(step),
+        "limit_expiry_bars": int(limit_expiry_bars),
+        "lenient": bool(lenient),
+        "walk_forward": bool(walk_forward),
+        "source_revision": _git_revision(),
+        "partial_tp_weights": _configured_partial_tp_weights(),
+        "config": {key: getattr(Config, key, None) for key in config_keys},
+    }
+
+
 def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                            resume, step, limit_expiry_bars, lenient, walk_forward=False):
     """Büyük backtesti tarih aralıklarına göre parçalara böler ve kalıcı checkpoint'ler yazar.
@@ -901,14 +923,33 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
         listing_time_ms = _market_listing_time_ms(symbol)
         checkpoint_path = _checkpoint_path(checkpoint_dir, symbol, days)
         checkpoint = _load_checkpoint(checkpoint_path) if resume else None
+        run_fingerprint = _backtest_run_fingerprint(
+            symbol=symbol, days=days, chunk_days=chunk_days, step=step,
+            limit_expiry_bars=limit_expiry_bars, lenient=lenient,
+            walk_forward=walk_forward,
+        )
 
         completed_chunks = set()
         chunk_results = {}
-        if checkpoint and checkpoint.get("symbol") == symbol:
-            completed_chunks = set(checkpoint.get("completed_chunks", []))
-            chunk_results = {
-                str(k): v for k, v in (checkpoint.get("results") or {}).items()
-            }
+        anchor_now_ms = time.time() * 1000
+        if checkpoint:
+            compatible = (
+                checkpoint.get("symbol") == symbol
+                and checkpoint.get("run_fingerprint") == run_fingerprint
+                and checkpoint.get("anchor_now_ms") is not None
+            )
+            if compatible:
+                completed_chunks = {
+                    int(index) for index in checkpoint.get("completed_chunks", [])
+                    if 0 <= int(index) < total_chunks
+                }
+                chunk_results = {
+                    str(k): v for k, v in (checkpoint.get("results") or {}).items()
+                    if str(k).isdigit() and 0 <= int(k) < total_chunks
+                }
+                anchor_now_ms = float(checkpoint["anchor_now_ms"])
+            else:
+                print("  [checkpoint] Ayarlar/kod/zaman çıpası uyuşmuyor; eski parçalar kullanılmayacak.")
 
         print(
             f"\n=== {symbol} | {days}g | parçalı backtest "
@@ -917,7 +958,7 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
 
         for chunk_index in range(total_chunks):
             # Parça 0 = en yeni (şuandan geriye chunk_days), parça N = daha eski.
-            chunk_now_ms = time.time() * 1000 - chunk_index * chunk_days * 86_400_000
+            chunk_now_ms = anchor_now_ms - chunk_index * chunk_days * 86_400_000
             chunk_label = f"{chunk_index + 1}/{total_chunks}"
 
             if chunk_index in completed_chunks:
@@ -963,6 +1004,8 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                     "days": days,
                     "chunk_days": chunk_days,
                     "total_chunks": total_chunks,
+                    "run_fingerprint": run_fingerprint,
+                    "anchor_now_ms": anchor_now_ms,
                     "completed_chunks": sorted(completed_chunks),
                     "results": chunk_results,
                     "status": "IN_PROGRESS",
@@ -978,6 +1021,8 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                     "days": days,
                     "chunk_days": chunk_days,
                     "total_chunks": total_chunks,
+                    "run_fingerprint": run_fingerprint,
+                    "anchor_now_ms": anchor_now_ms,
                     "completed_chunks": sorted(completed_chunks),
                     "results": chunk_results,
                     "status": "FAILED",
@@ -992,6 +1037,8 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                 "days": days,
                 "chunk_days": chunk_days,
                 "total_chunks": total_chunks,
+                "run_fingerprint": run_fingerprint,
+                "anchor_now_ms": anchor_now_ms,
                 "completed_chunks": sorted(completed_chunks),
                 "results": chunk_results,
                 "status": "SUCCESS",
