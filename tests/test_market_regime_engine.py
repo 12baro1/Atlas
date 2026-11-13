@@ -99,3 +99,27 @@ def test_unavailable_market_regime_does_not_change_score():
         "LONG",
     )
     assert adjustments == []
+
+
+def test_phase_and_regime_same_trend_are_not_scored_twice():
+    engine = DecisionEngine()
+    assert engine._regime_is_represented_by_phase(
+        {"phase": "Expansion", "trend": "BULLISH"},
+        {"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
+    ) is True
+
+
+def test_phase_and_regime_directional_conflict_remains_visible():
+    engine = DecisionEngine()
+    assert engine._regime_is_represented_by_phase(
+        {"phase": "Expansion", "trend": "BULLISH"},
+        {"active": True, "regime": "TRENDING_DOWN", "directional_bias": "BEARISH"},
+    ) is False
+
+
+def test_ranging_phase_and_compression_regime_are_not_double_penalized():
+    engine = DecisionEngine()
+    assert engine._regime_is_represented_by_phase(
+        {"phase": "Consolidation", "trend": "RANGE"},
+        {"active": True, "regime": "COMPRESSION", "directional_bias": "NEUTRAL"},
+    ) is True
