@@ -760,6 +760,7 @@ class RiskEngine:
             "risk_setup_reason": reason,
             "reason_code": reason_code,
             "atr": round(atr, 8),
+            "stop_atr_ratio": None,
             "tick_size": round(tick_size, 8),
             "minimum_tick_distance": round(max(tick_size, 0.0), 8),
             "minimum_stop_distance": round(minimum_stop_distance, 8),
