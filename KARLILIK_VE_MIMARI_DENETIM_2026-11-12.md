@@ -426,7 +426,7 @@ L9 Kontrollü Öğrenme (learning_engine + doğrulama hattı)
 | P1-5 | Segmentasyon (entry type, phase/regime, volatility, POI, TP davranışı) | L8 | Ölçülebilir kalibrasyon temeli | Yanlış alan eşlemesi raporu bozabilir | Rapor diff | PR #111 uygulandı; regime alanları şemaya göre düzeltildi |
 | P2-1 | Walk-forward/OOS komutu (IS/OOS, param-frozen) + güvenli checkpoint resume | L8/L9 | Zaman çıpası ve config/kod fingerprint ile aynı pencere tekrar edilir | Hesap maliyeti | OOS raporu | PR #111 uygulandı; henüz çalıştırılmadı |
 | P2-2 | Öğrenme: OOS kapısı + rollback snapshot + cause taxonomy | L9 | Overfit koruması; neden-taksonomisi | Küçük örneklemde öğrenme nötr kalır | OOS A/B | PR #111 uygulandı |
-| P2-3 | Ölü kod temizliği (§D listesi) + `backtest/` paketi ad değişimi + "High probability setup" etiketi kaldırma | genel | Bakım yükü düşer | regresyon | Test süiti + import grafı | birden çok küçük PR |
+| P2-3 | Ölü kod temizliği (§D listesi) + yanıltıcı "High probability setup" etiketi kaldırma | genel | Bakım yükü düşer | regresyon | Test süiti + import grafı | `backtest/__init__.py` gölgelemesi PR #111'de kaldırıldı; geniş temizlik açık |
 | P2-4 | Tek rejim sınıflandırıcısı birleşimi (regime+phase) | L2 | Çelişki biter | Kalibrasyon | Rejim uyum ölçümü | ayrı |
 
 Her değişiklik için: önce ölçüm (IS), sonra PR, sonra aynı ölçümün OOS doğrulaması; ölçüm şablonu §3.
