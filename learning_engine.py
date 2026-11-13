@@ -244,7 +244,7 @@ class LearningEngine:
         beta = float(getattr(Config, "LEARNING_BETA_PRIOR_BETA", 2.0))
         min_samples = int(getattr(Config, "LEARNING_MIN_SAMPLES", 20))
         oos_required = bool(getattr(Config, "LEARNING_OOS_REQUIRED", True))
-        split_at = int(len(records) * 0.70) if len(records) >= 10 else len(records)
+        split_at = int(len(records) * (2.0 / 3.0)) if len(records) >= 10 else len(records)
         training_records = records[:split_at]
         validation_records = records[split_at:]
         cause_counts = {}
@@ -350,11 +350,24 @@ class LearningEngine:
                 metrics["oos_validation"] = oos_metrics
                 min_oos = int(getattr(Config, "LEARNING_OOS_MIN_SAMPLES", 10))
                 min_wilson = float(getattr(Config, "LEARNING_OOS_MIN_WILSON_LOWER", 0.45)) * 100
-                passed = (
-                    oos_metrics["total"] >= min_oos
-                    and oos_metrics["average_r"] > 0
+                # OOS validation must recognize both edges: profitable
+                # histories may earn a bounded uplift, while consistently
+                # losing histories must remain eligible for a bounded penalty.
+                # Requiring positive expectancy for every match silently
+                # disables the learning system's most important loss feedback.
+                positive_edge_passed = (
+                    oos_metrics["average_r"] > 0
                     and oos_metrics["profit_factor"] > 1.0
                     and oos_metrics["wilson_lower"] >= min_wilson
+                )
+                negative_edge_passed = (
+                    oos_metrics["average_r"] < 0
+                    and oos_metrics["profit_factor"] < 1.0
+                    and oos_metrics["winrate"] < 50.0
+                )
+                passed = (
+                    oos_metrics["total"] >= min_oos
+                    and (positive_edge_passed or negative_edge_passed)
                 )
                 metrics["oos_passed"] = bool(passed)
                 if passed:
@@ -525,13 +538,24 @@ class LearningEngine:
         match = self._match(setup_quality, market_phase, timeframe)
 
         if not match:
+            # Report the available sample count even when the OOS gate rejects
+            # it. This keeps diagnostics honest without applying an unvalidated
+            # score adjustment.
+            available_samples = 0
+            index = self.stats.get("index", {})
+            for level, key in self._candidate_keys(ctx):
+                bucket = (index.get(level) or {}).get(key)
+                if isinstance(bucket, dict):
+                    available_samples = max(
+                        available_samples, int(bucket.get("total", 0) or 0)
+                    )
             adjusted["module_scores"] = module_scores
             adjusted["learning_adjustments"] = {name: 1.0 for name in CANONICAL_MODULES}
             adjusted["learning"] = {
                 "matched": False,
                 "level": None,
                 "score_delta": 0,
-                "sample_count": 0,
+                "sample_count": available_samples,
                 "historical_edge": 0.0,
                 "reliability": 0.0,
                 "expected_r": 0.0,
