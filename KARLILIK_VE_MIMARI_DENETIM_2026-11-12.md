@@ -474,7 +474,7 @@ Bu bölüm aynı PR dalındaki kod değişikliklerini izler. Aşağıdaki maddel
 
 ### Bilinçli olarak açık bırakılanlar
 - Global event attribution: ana motor BOS/CHoCH, sweep, SMT, FVG/IFVG, OB, breaker, Unicorn, CISD, volume profile, swing/internal liquidity pool, trendline/sweep, EQH/EQL, inducement, orderbook snapshot, CVD, BTC/ETH korelasyon, market phase ve 4H market regime snapshot kimliklerini toplar. SetupReasoning, ConfluenceEngine, SignalEngine ve DecisionEngine aynı event ID'li kanıtı/uzman puanını tek sayar; kimliksiz kanıtlar eski davranışı korur ve teşhis raporunda ayrı kalır. Kimlik taşımayan diğer kanıt yolları için tam kapsamlı tekilleştirme açık iştir.
-- Rejim/phase motorlarının tek motora birleştirilmesi ve geniş dead-code temizliği: bağımlılık/import grafı ve davranış karşılaştırması olmadan dosya silmek karar mimarisini bozabilir. Bu turda güvenli, doğrulanabilir kapsamın dışındadır.
+- MarketPhase ve MarketRegime ayrı tutuldu: biri SMC faz sınıflandırması, diğeri 4H OHLCV rejim ölçümü. Ortak karar skorunda yinelenen trend/range etkisi tekilleştirildi. Geniş dormant-sınıf temizliği, import/çağrı grafı ve davranış karşılaştırması gerektirdiğinden açık kaldı.
 - Eski journal DB'sinde bir defalık fiziksel küçültme: `compact_database()` backup oluşturup VACUUM çalıştırır; kullanıcı veritabanında otomatik çalıştırılmadı.
 - Manual/tracked ledger net fee parity ve gerçek fill tabanlı learning: kaynak kayıtlarda gerçek execution type/fee/fill verisi bulunmayan işlemler için maliyet uydurulmadı.
 - WAIT/SKIP nedenleri tekil sembol analiz kartında `Neden` ve `Engeller` satırlarında gösteriliyor; WAIT durumundaki LIMIT artık bekleyen emir gibi sunulmuyor. Toplu tarama yalnızca EXECUTE / EXECUTE_WITH_CAUTION adaylarını sıralıyor.
