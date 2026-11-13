@@ -240,6 +240,10 @@ class LearningEngine:
         split_at = int(len(records) * 0.70) if len(records) >= 10 else len(records)
         training_records = records[:split_at]
         validation_records = records[split_at:]
+        cause_counts = {}
+        for record in records:
+            cause = str(record.get("cause_code") or "UNKNOWN").upper()
+            cause_counts[cause] = cause_counts.get(cause, 0) + 1
 
         # Learn only on the earlier chronological partition. The later holdout
         # is never used to fit weights; it is used only to validate the learned edge.
@@ -354,6 +358,7 @@ class LearningEngine:
         self.stats["index"] = index
         self.stats["meta"] = {
             "records_fed": len(records),
+            "cause_counts": cause_counts,
             "training_records": len(training_records),
             "oos_records": len(validation_records),
             "oos_required": oos_required,
