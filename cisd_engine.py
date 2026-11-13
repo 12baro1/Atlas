@@ -78,7 +78,7 @@ class CISDEngine:
         try:
             last_candle = candles[-1]
             timestamp = last_candle.get("time", last_candle.get("timestamp")) if isinstance(last_candle, dict) else getattr(last_candle, "time", None)
-            if timestamp is not None:
+            if timestamp is not None and confidence >= 55:
                 event_id = f"{str(timeframe).lower()}:cisd:{int(timestamp)}:{direction}"
         except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
             event_id = None
