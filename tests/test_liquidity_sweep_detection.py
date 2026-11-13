@@ -439,6 +439,25 @@ def test_historical_breakout_is_not_kept_as_a_current_breakout():
 
 
 
+def test_legacy_wick_without_liquidity_pool_is_not_a_real_sweep():
+    engine = LiquiditySweepEngine()
+    candles = [
+        _candle(0, 100.0, 101.0, 99.0, 100.0),
+        _candle(1, 100.0, 101.0, 99.0, 100.0),
+        _candle(2, 100.0, 102.0, 99.5, 100.5),
+    ]
+    result = engine.detect(
+        candles=candles,
+        liquidity_layers={"swing": [], "internal": []},
+    )
+
+    assert result["is_sweep"] is False
+    assert result["legacy_wick_rejection"] is True
+    assert result["buy_side"] is False
+    assert result["sell_side"] is False
+    assert result["sweep_side"] is None
+
+
 def test_dual_sided_sweep_is_ambiguous_and_not_scored_as_directional():
     engine = LiquiditySweepEngine()
     candles = [
