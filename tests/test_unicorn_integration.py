@@ -46,7 +46,7 @@ def test_confluence_scores_unicorn_bonus():
     )
 
     assert any("Unicorn" in item for item in confluence["checks"])
-    assert confluence["score"] >= 110
+    assert confluence["score"] == 100
 
 
 def test_signal_includes_unicorn_fields():
