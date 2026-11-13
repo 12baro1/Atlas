@@ -195,7 +195,8 @@ def test_opposing_sweep_can_be_reclaimed_before_entry():
         "is_sweep": True,
         "buy_side": True,
         "sell_side": False,
-        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+        "post_structure": {"confirmed": True, "type": "CHOCH", "direction": "BULLISH", "sweep_index": 10, "confirmation_index": 12},
+        "sweep_index": 10,
     }
     result = evaluate(payload)
     assert result["allowed"] is True
