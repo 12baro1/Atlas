@@ -122,6 +122,7 @@ def test_htf_ltf_confirmed_reversal_is_not_blocked():
         liquidity_sweep={
             "is_sweep": True, "sell_side": True, "buy_side": False,
             "ambiguous_sweep": False,
+            "sweep_side": "SELL_SIDE",
             "post_structure": {"confirmed": True, "type": "CHOCH", "direction": "BULLISH", "sweep_index": 10, "confirmation_index": 12},
             "sweep_index": 10,
         },
