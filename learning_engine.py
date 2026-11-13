@@ -348,6 +348,9 @@ class LearningEngine:
                     )
                 )
                 metrics["oos_validation"] = oos_metrics
+                metrics["total_records"] = int(accum.get("total", 0)) + int(
+                    validation.get("total", 0) if validation else 0
+                )
                 min_oos = int(getattr(Config, "LEARNING_OOS_MIN_SAMPLES", 10))
                 min_wilson = float(getattr(Config, "LEARNING_OOS_MIN_WILSON_LOWER", 0.45)) * 100
                 # OOS validation must recognize both edges: profitable
@@ -494,15 +497,10 @@ class LearningEngine:
             if total <= 0:
                 continue
             if bool(getattr(Config, "LEARNING_OOS_REQUIRED", True)):
-                validation = bucket.get("oos_validation") or {}
-                min_oos = int(getattr(Config, "LEARNING_OOS_MIN_SAMPLES", 10))
-                min_wilson = float(getattr(Config, "LEARNING_OOS_MIN_WILSON_LOWER", 0.45)) * 100
-                if not (
-                    validation.get("total", 0) >= min_oos
-                    and validation.get("average_r", 0) > 0
-                    and validation.get("profit_factor", 0) > 1.0
-                    and validation.get("wilson_lower", 0) >= min_wilson
-                ):
+                # Reuse the exact bidirectional OOS decision made at rebuild
+                # time; duplicating a positive-only check here would discard
+                # every validated losing setup before its penalty is applied.
+                if not bool(bucket.get("oos_passed")):
                     continue
             matched = {"level": level, "key": key, "metrics": bucket}
             if total >= min_samples:
@@ -578,7 +576,7 @@ class LearningEngine:
 
         reliability = float(metrics.get("reliability", 0) or 0)
         expected_r = float(metrics.get("average_r", 0) or 0)
-        sample_count = int(metrics.get("total", 0) or 0)
+        sample_count = int(metrics.get("total_records", metrics.get("total", 0)) or 0)
         edge_score = round(self._edge_score(metrics), 4)
 
         adjusted["module_scores"] = module_scores
