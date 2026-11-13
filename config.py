@@ -424,6 +424,12 @@ class Config:
     def refresh_from_env(cls):
         """Runtime'da environment değişikliklerini Config sınıfına yeniden yükler."""
         cls.MIN_STOP_PERCENT = float(_env_or_rc("ATLAS_MIN_STOP_PERCENT", str(cls.MIN_STOP_PERCENT)))
+        cls.MINIMUM_NET_RR = float(_env_or_rc("ATLAS_MINIMUM_NET_RR", str(cls.MINIMUM_NET_RR)))
+        cls.MIN_SETUP_NET_RR = cls.MINIMUM_NET_RR
+        cls.QUALITY_MIN_NET_RR = cls.MINIMUM_NET_RR
+        cls.MIN_STOP_COST_MULTIPLIER = float(
+            _env_or_rc("ATLAS_MIN_STOP_COST_MULTIPLIER", str(cls.MIN_STOP_COST_MULTIPLIER))
+        )
         cls.MIN_TP1_RR = float(_env_or_rc("ATLAS_MIN_TP1_RR", str(cls.MIN_TP1_RR)))
         cls.MIN_TP_TARGET_SEPARATION_R = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_R", str(cls.MIN_TP_TARGET_SEPARATION_R)))
         cls.MIN_TP_TARGET_SEPARATION_ATR = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_ATR", str(cls.MIN_TP_TARGET_SEPARATION_ATR)))
