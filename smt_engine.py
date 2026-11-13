@@ -9,6 +9,21 @@ class SMTDivergenceEngine:
 
     SUPPORTED_TIMEFRAMES = ("15m", "1h", "4h", "1d")
 
+    @staticmethod
+    def _event_id(timeframe, primary_symbol, compare_symbol, divergence_type, pivot):
+        pivot_time = pivot.get("time")
+        if pivot_time is None:
+            return None
+        try:
+            timestamp = int(pivot_time)
+            price = format(float(pivot.get("price")), ".12g")
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return (
+            f"{str(timeframe).lower()}:smt:{primary_symbol}:{compare_symbol}:"
+            f"{divergence_type}:{timestamp}:{price}"
+        )
+
     def detect(
         self,
         primary_symbol,
@@ -151,6 +166,7 @@ class SMTDivergenceEngine:
 
         return {
             "type": "BEARISH",
+            "event_id": self._event_id(timeframe, primary_symbol, compare_symbol, "BEARISH", p_last),
             "timeframe": timeframe,
             "primary_symbol": primary_symbol,
             "compare_symbol": compare_symbol,
@@ -205,6 +221,7 @@ class SMTDivergenceEngine:
 
         return {
             "type": "BULLISH",
+            "event_id": self._event_id(timeframe, primary_symbol, compare_symbol, "BULLISH", p_last),
             "timeframe": timeframe,
             "primary_symbol": primary_symbol,
             "compare_symbol": compare_symbol,
