@@ -1704,6 +1704,9 @@ class TradeJournal:
         manual["closed_at"] = closed_at
         manual["actual_exit"] = exit_price
         manual["result"] = result
+        manual["net_result"] = (
+            "WIN" if pnl_rr > 0 else "LOSS" if pnl_rr < 0 else "BREAKEVEN"
+        ) if actual_costs_provided else None
         manual["gross_pnl_rr"] = gross_pnl_rr
         manual["execution_cost_quote"] = round(execution_cost_quote, 8) if actual_costs_provided else None
         manual["execution_cost_rr"] = round(execution_cost_rr, 6) if actual_costs_provided else None
@@ -1793,10 +1796,10 @@ class TradeJournal:
             payload["not_traded"] = not_traded_count
             payload["open"] = open_count
             return payload
-        wins = [m for m in closed if m.get("result") == "WIN"]
-        losses = [m for m in closed if m.get("result") == "LOSS"]
-        breakeven = [m for m in closed if m.get("result") == "BREAKEVEN"]
-        early_exit = [m for m in closed if m.get("result") == "EARLY_EXIT"]
+        wins = [m for m in closed if (m.get("net_result") or m.get("result")) == "WIN"]
+        losses = [m for m in closed if (m.get("net_result") or m.get("result")) == "LOSS"]
+        breakeven = [m for m in closed if (m.get("net_result") or m.get("result")) == "BREAKEVEN"]
+        early_exit = [m for m in closed if (m.get("net_result") or m.get("result")) == "EARLY_EXIT"]
         r_values = [self._num(m.get("pnl_rr"), 0.0) for m in closed]
         actual_cost_trades = [m for m in closed if m.get("pnl_rr_basis") == "net_actual_costs"]
         price_only_trades = [m for m in closed if m.get("pnl_rr_basis") != "net_actual_costs"]
@@ -1808,7 +1811,7 @@ class TradeJournal:
             "losses": len(losses),
             "breakeven": len(breakeven),
             "early_exit": len(early_exit),
-            "cancelled": len([m for m in closed if m.get("result") == "CANCELLED"]),
+            "cancelled": len([m for m in closed if (m.get("net_result") or m.get("result")) == "CANCELLED"]),
             "open": open_count,
             "not_traded": not_traded_count,
             "winrate": round(len(wins) / len(closed) * 100, 2) if closed else 0.0,
@@ -1910,7 +1913,7 @@ class TradeJournal:
 
     def _manual_to_learning_record(self, manual):
         r_value = self._num(manual.get("pnl_rr"), 0.0)
-        result = str(manual.get("result") or "").upper()
+        result = str(manual.get("net_result") or manual.get("result") or "").upper()
         if result == "WIN":
             wins = True
         elif result == "EARLY_EXIT":
@@ -1926,7 +1929,8 @@ class TradeJournal:
             "symbol": manual.get("symbol"),
             "closed_at": int(manual.get("closed_at") or manual.get("opened_at") or 0),
             "opened_at": int(manual.get("opened_at") or 0),
-            "result": manual.get("result"),
+            "result": result,
+            "reported_result": manual.get("result"),
             "win": wins,
             "r": r_value,
             "timeframe": self._manual_timeframe(manual),
