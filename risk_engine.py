@@ -320,6 +320,21 @@ class RiskEngine:
         )
 
         requested_risk = abs(entry - stop_loss)
+        cost_too_tight = requested_risk < minimum_stop_cost_distance
+        if cost_too_tight:
+            return self._invalid_risk_setup(
+                entry,
+                stop_loss,
+                side=side,
+                reason="Stop distance below execution-cost floor",
+                atr=atr_snapshot,
+                minimum_stop_distance=minimum_stop_distance,
+                tick_size=resolved_tick_size,
+                spread_buffer=spread_buffer,
+                slippage_buffer=slippage_buffer,
+                requested_risk=requested_risk,
+                stop_adjusted=False,
+            )
         stop_too_tight = requested_risk < minimum_stop_distance
         adjusted_stop_loss = stop_loss
         stop_adjusted = False
