@@ -968,6 +968,8 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                     }
                 try:
                     anchor_now_ms = float(checkpoint["anchor_now_ms"])
+                    if not math.isfinite(anchor_now_ms) or anchor_now_ms <= 0:
+                        raise ValueError("invalid checkpoint time anchor")
                 except (TypeError, ValueError, OverflowError):
                     completed_chunks.clear()
                     chunk_results.clear()
