@@ -105,9 +105,10 @@ def test_serialize_sweep():
     candles[9] = c(9, 103.5, 103.8, 102.0, 103.6)
 
     sweep = engine.detect_sweep(structure, candles, current_index=9)
-    payload = engine.serialize(sweep)
+    payload = engine.serialize(sweep, candles=candles)
 
     assert payload["active"] is True
+    assert payload["event_id"].startswith("trendline_sweep:trendline:SUPPORT:")
     assert payload["trendline"]["direction"] == "SUPPORT"
     assert payload["direction"] == "SELL_SIDE"
 
