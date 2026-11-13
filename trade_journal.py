@@ -644,6 +644,9 @@ class TradeJournal:
             source = sqlite3.connect(str(database_path), timeout=30.0)
             backup = sqlite3.connect(str(backup_path), timeout=30.0)
             source.backup(backup)
+            integrity = backup.execute("PRAGMA integrity_check").fetchone()
+            if not integrity or integrity[0] != "ok":
+                raise RuntimeError("SQLite backup integrity check failed")
             backup.close()
             backup = None
             if not backup_path.exists() or backup_path.stat().st_size <= 0:
