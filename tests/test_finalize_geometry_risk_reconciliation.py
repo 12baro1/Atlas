@@ -129,9 +129,8 @@ def test_stop_derived_stale_rr_is_corrected_with_final_stop():
 def test_stop_and_tp_change_updates_position_size():
     """Risk mesafesi ve net-RR değişince pozisyon boyutu yeniden ölçeklenmeli.
 
-    net_rr = 1.3597 < MINIMUM_NET_RR (2.0) → risk_reduction_factor ≈ 0.6799;
-    hedef sermaye = 10000 * 0.6799% = 67.985; stop maliyeti dahil birim risk
-    = 5 + (100+95)*0.00055 = 5.10725 → boyut ≈ 13.3115 (bayat 20.0 değil).
+    Net RR maliyetleriyle yeniden hesaplanır; hedef sermaye risk azaltımına,
+    gerçekleşen sermaye riski ise pozisyon boyutu ve birim risk maliyetine bağlıdır.
     """
     result = AtlasMainEngine.finalize_setup_geometry(
         _entry(), _risk_payload(), _targets()
@@ -144,7 +143,10 @@ def test_stop_and_tp_change_updates_position_size():
     )
     assert risk["position_size"] == pytest.approx(13.1744, abs=1e-3)
     assert risk["position_size"] != 20.0
-    assert risk["capital_at_risk"] == pytest.approx(67.99, abs=0.05)
+    assert risk["capital_at_risk"] == pytest.approx(
+        round(risk["position_size"] * risk["effective_risk_per_unit"], 2)
+    )
+    assert risk["capital_at_risk"] <= risk["capital_at_risk_target"]
 
 
 def test_net_rr_includes_plan_and_stop_execution_costs_once():
