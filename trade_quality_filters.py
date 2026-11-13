@@ -310,11 +310,26 @@ class TradeQualityFilters:
         # Ters dönüşler 4H karşıyınlılığına karşın geçerlidir; onaylı swept
         # reversal bir yorum yapısıdır, "terş yapı engeli" değil.
         post = liquidity_sweep.get("post_structure") if isinstance(liquidity_sweep.get("post_structure"), dict) else {}
+        sweep_side = str(liquidity_sweep.get("sweep_side") or "").upper()
+        expected_sweep_side = "SELL_SIDE" if direction == "LONG" else "BUY_SIDE"
+        post_type = str(post.get("type") or "").upper()
+        sweep_index = post.get("sweep_index", liquidity_sweep.get("sweep_index"))
+        confirmation_index = post.get("confirmation_index")
+        causal_confirmation = True
+        if sweep_index is not None and confirmation_index is not None:
+            try:
+                causal_confirmation = int(confirmation_index) > int(sweep_index)
+            except (TypeError, ValueError, OverflowError):
+                causal_confirmation = False
         confirmed_reversal = bool(
             entry_source == "CONFIRMED_15M_REVERSAL"
+            and entry_signal == direction
             and liquidity_sweep.get("is_sweep")
+            and sweep_side == expected_sweep_side
             and post.get("confirmed")
+            and (not post_type or post_type == "CHOCH")
             and self._match_direction(post.get("direction"), direction)
+            and causal_confirmation
         )
 
         if aligned:
