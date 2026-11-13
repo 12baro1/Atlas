@@ -523,6 +523,10 @@ def _combine_stats(all_stats):
         "gross_expectancy": 0,
         "gross_profit_factor": 0,
         "total_execution_cost_rr": 0,
+        "entry_fee_rr": 0,
+        "exit_fee_rr": 0,
+        "spread_rr": 0,
+        "slippage_rr": 0,
         "candidate_signals": 0,
         "analysis_calls": 0,
         "empty_results": 0,
@@ -600,6 +604,8 @@ def _combine_stats(all_stats):
         combined["gross_loss_rr"] += float(stats.get("gross_loss_rr", 0) or 0)
         combined["gross_rr"] += float(stats.get("gross_rr", 0) or 0)
         combined["total_execution_cost_rr"] += float(stats.get("total_execution_cost_rr", 0) or 0)
+        for cost_key in ("entry_fee_rr", "exit_fee_rr", "spread_rr", "slippage_rr"):
+            combined[cost_key] += float(stats.get(cost_key, 0) or 0)
         combined["trade_history"].extend(stats.get("trade_history") or [])
 
     # Rebuild combined direction and MTF outcome groups from the actual closed
@@ -771,6 +777,13 @@ def _report(stats, name):
     print(f"  TP1/2/3        : {stats['tp1']}/{stats['tp2']}/{stats['tp3']}")
     print(f"  BRÜT sonuç     : {stats.get('gross_rr', 0)}R | beklenti {stats.get('gross_expectancy', 0)}R/işlem | PF {stats.get('gross_profit_factor', 0)}")
     print(f"  MALİYET        : -{stats.get('total_execution_cost_rr', 0)}R")
+    print(
+        "    Maliyet dökümü (R): "
+        f"entry fee={stats.get('entry_fee_rr', 0)} | "
+        f"exit fee={stats.get('exit_fee_rr', 0)} | "
+        f"spread={stats.get('spread_rr', 0)} | "
+        f"slippage={stats.get('slippage_rr', 0)}"
+    )
     print(f"  NET sonuç      : {stats['net_rr']}R | beklenti {stats['expectancy']}R/işlem | PF {stats['profit_factor']}")
     if "max_drawdown" in stats:
         print(f"  Max Drawdown   : {stats['max_drawdown']} R")
