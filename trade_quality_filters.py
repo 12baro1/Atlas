@@ -331,7 +331,7 @@ class TradeQualityFilters:
         post_type = str(post.get("type") or "").upper()
         sweep_index = post.get("sweep_index", liquidity_sweep.get("sweep_index"))
         confirmation_index = post.get("confirmation_index")
-        causal_confirmation = True
+        causal_confirmation = False
         if sweep_index is not None and confirmation_index is not None:
             try:
                 causal_confirmation = int(confirmation_index) > int(sweep_index)
