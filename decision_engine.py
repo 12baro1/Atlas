@@ -515,6 +515,12 @@ class DecisionEngine:
         best = module.get("best")
         if not event_id and isinstance(best, dict):
             event_id = best.get("event_id")
+        if not event_id:
+            for nested_key in ("cvd", "volume_delta", "snapshot"):
+                nested = module.get(nested_key)
+                if isinstance(nested, dict) and nested.get("event_id"):
+                    event_id = nested["event_id"]
+                    break
         if event_id:
             identity = str(event_id).strip()
             if identity in seen_event_ids:
