@@ -44,7 +44,15 @@ class MarketPhaseEngine:
         )
         
         recent_structure = self._recent_structure(structure, candles)
+        timestamp = None
+        if candles:
+            value = candles[-1].get("time", candles[-1].get("timestamp")) if isinstance(candles[-1], dict) else getattr(candles[-1], "time", None)
+            try:
+                timestamp = int(value) if value is not None else None
+            except (TypeError, ValueError, OverflowError):
+                timestamp = None
         return {
+            "event_id": f"market_phase:snapshot:{timestamp}" if timestamp is not None else None,
             "phase": phase_info["phase"],
             "phase_confidence": phase_info["confidence"],
             "phase_strength": phase_info["strength"],
