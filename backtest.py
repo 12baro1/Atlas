@@ -964,8 +964,13 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                     chunk_results = {
                         str(key): value
                         for key, value in saved_results.items()
-                        if str(key).isdigit() and 0 <= int(key) < total_chunks
+                        if str(key).isdigit()
+                        and 0 <= int(key) < total_chunks
+                        and isinstance(value, dict)
                     }
+                completed_chunks.intersection_update(
+                    int(key) for key in chunk_results
+                )
                 try:
                     anchor_now_ms = float(checkpoint["anchor_now_ms"])
                     if not math.isfinite(anchor_now_ms) or anchor_now_ms <= 0:
