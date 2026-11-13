@@ -323,8 +323,8 @@ class TradeQualityFilters:
         )
         opposing = not aligned
 
-        # Ters dönüşler 4H karşıyınlılığına karşın geçerlidir; onaylı swept
-        # reversal bir yorum yapısıdır, "terş yapı engeli" değil.
+        # Ters dönüşler 4H karşıtlığına karşın geçerlidir; onaylı swept
+        # reversal bir yorum yapısıdır, otomatik veto değildir.
         post = liquidity_sweep.get("post_structure") if isinstance(liquidity_sweep.get("post_structure"), dict) else {}
         sweep_side = str(liquidity_sweep.get("sweep_side") or "").upper()
         expected_sweep_side = "SELL_SIDE" if direction == "LONG" else "BUY_SIDE"
