@@ -33,7 +33,7 @@ class LiquiditySweepEngine:
                     "is_sweep": False,
                     "is_breakout": False,
                     "ambiguous_sweep": True,
-                    "event_id": f"{str(timeframe or 'unknown').lower()}:sweep:DUAL:{candidate['sweep_index']}",
+                    "event_id": f"{str(timeframe or 'unknown').lower()}:sweep:DUAL:{self._event_time_key(candles, candidate['sweep_index'])}",
                     "strength_score": 0,
                     "swing": {
                         "buy_side": candidate.get("swing_buy"),
@@ -68,7 +68,7 @@ class LiquiditySweepEngine:
                     "is_sweep": False,
                     "is_breakout": True,
                     "ambiguous_sweep": False,
-                    "event_id": f"{str(timeframe or 'unknown').lower()}:breakout:{candidate['event_index']}:{candidate.get('side')}",
+                    "event_id": f"{str(timeframe or 'unknown').lower()}:breakout:{self._event_time_key(candles, candidate['event_index'])}:{candidate.get('side')}",
                     "strength_score": 0,
                     "swing": {
                         "buy_side": candidate.get("swing_buy"),
@@ -101,12 +101,13 @@ class LiquiditySweepEngine:
             )
             sweep_event_id = (
                 f"{str(timeframe or 'unknown').lower()}:sweep:"
-                f"{sweep_index}:{active_side}:{format(float(candidate.get('level') or 0.0), '.12g')}"
+                f"{self._event_time_key(candles, sweep_index)}:{active_side}:"
+                f"{format(float(candidate.get('level') or 0.0), '.12g')}"
             )
             if post_structure.get("confirmed"):
                 post_structure["event_id"] = (
                     f"{str(timeframe or 'unknown').lower()}:post_sweep_choch:"
-                    f"{sweep_index}:{post_structure.get('confirmation_index')}:"
+                    f"{self._event_time_key(candles, post_structure.get('confirmation_index'))}:"
                     f"{post_structure.get('direction')}:"
                     f"{format(float(post_structure.get('broken_level') or 0.0), '.12g')}"
                 )
@@ -211,6 +212,17 @@ class LiquiditySweepEngine:
                 }
 
         return self._empty_result(timeframe)
+
+    @staticmethod
+    def _event_time_key(candles, index):
+        try:
+            candle = candles[int(index)]
+            value = candle.get("time", candle.get("timestamp")) if isinstance(candle, dict) else getattr(candle, "time", None)
+            if value is not None:
+                return f"t{int(value)}"
+        except (IndexError, KeyError, TypeError, ValueError, OverflowError):
+            pass
+        return f"i{int(index)}"
 
     def _empty_result(self, timeframe):
         return {
