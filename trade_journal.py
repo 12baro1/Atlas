@@ -1768,6 +1768,31 @@ class TradeJournal:
             records.append(self._signal_to_learning_record(outcome))
         return records
 
+    @staticmethod
+    def _classify_trade_cause(reason, realized_r, payload=None):
+        """Stable outcome taxonomy for post-trade analysis; never changes trade result."""
+        text = str(reason or "").strip().upper()
+        payload = payload if isinstance(payload, dict) else {}
+        try:
+            r_value = float(realized_r or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            r_value = 0.0
+        if "TRAIL" in text:
+            return "TRAILING_STOP"
+        if "STOP" in text or text in {"SL", "LOSS"}:
+            if r_value > 0 or payload.get("tp_hits") or payload.get("reached_levels"):
+                return "PARTIAL_PROFIT_GIVEBACK"
+            return "STOP_OUT"
+        if "TP" in text or "TARGET" in text:
+            return "TARGET_EXIT" if r_value > 0 else "TARGET_EXIT_NET_LOSS"
+        if "TIME" in text or "EXPIRE" in text:
+            return "TIME_EXIT"
+        if r_value > 0:
+            return "PROFIT_OTHER"
+        if r_value < 0:
+            return "LOSS_OTHER"
+        return "UNKNOWN"
+
     def _manual_to_learning_record(self, manual):
         r_value = self._num(manual.get("pnl_rr"), 0.0)
         result = str(manual.get("result") or "").upper()
@@ -1795,6 +1820,7 @@ class TradeJournal:
             "regime": manual.get("regime"),
             "grade": manual.get("grade"),
             "confidence": manual.get("confidence"),
+            "cause_code": self._classify_trade_cause(manual.get("close_reason") or manual.get("exit_reason"), r_value, manual.get("payload")),
         }
 
     def find_manual_trade(self, *, signal_id=None, manual_id=None):
@@ -1867,6 +1893,7 @@ class TradeJournal:
             "regime": regime,
             "grade": signal.get("grade") or setup_quality.get("grade"),
             "confidence": self._num(signal.get("confidence") or trade.get("confidence"), 0),
+            "cause_code": self._classify_trade_cause(trade.get("close_reason"), r_value, trade.get("closed_payload")),
         }
 
     def _setup_quality_features(self, setup_quality):
@@ -1910,6 +1937,7 @@ class TradeJournal:
             "regime": outcome.get("regime") or outcome.get("market_phase"),
             "grade": outcome.get("grade"),
             "confidence": outcome.get("confidence"),
+            "cause_code": self._classify_trade_cause(outcome.get("exit_reason") or outcome.get("final_result"), r_value, payload),
         }
 
     def _manual_timeframe(self, manual):
