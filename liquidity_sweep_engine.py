@@ -96,6 +96,17 @@ class LiquiditySweepEngine:
                 sweep_index=sweep_index,
                 swept_side=active_side,
             )
+            sweep_event_id = (
+                f"{str(timeframe or 'unknown').lower()}:sweep:"
+                f"{sweep_index}:{active_side}:{format(float(candidate.get('level') or 0.0), '.12g')}"
+            )
+            if post_structure.get("confirmed"):
+                post_structure["event_id"] = (
+                    f"{str(timeframe or 'unknown').lower()}:post_sweep_choch:"
+                    f"{sweep_index}:{post_structure.get('confirmation_index')}:"
+                    f"{post_structure.get('direction')}:"
+                    f"{format(float(post_structure.get('broken_level') or 0.0), '.12g')}"
+                )
             strength = self._strength_score(
                 buy_event, sell_event, post_structure, timeframe
             )
@@ -123,6 +134,7 @@ class LiquiditySweepEngine:
                 "sweep_age_bars": len(candles) - 1 - sweep_index,
                 "sweep_level": candidate.get("level"),
                 "sweep_side": active_side,
+                "event_id": sweep_event_id,
             }
 
         # Legacy fallback is retained only if no actual liquidity references
