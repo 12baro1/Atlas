@@ -444,7 +444,7 @@ def test_filters_return_evidence_not_action():
     assert "adjustments" in result
     assert "filters" in result
     assert set(result["filters"]) == {
-        "htf_ltf_alignment", "liquidity_quality", "entry_distance",
+        "htf_ltf_alignment", "liquidity_quality", "poi_quality", "entry_distance",
         "stop_quality", "tp_rr_consistency", "motor_conflict",
     }
     # Her filtre ayrı ayrı geçti/geçmedi, ciddiyet ve neden bildirir.
