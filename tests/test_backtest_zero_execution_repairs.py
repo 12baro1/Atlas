@@ -91,6 +91,7 @@ def test_structural_tp_selection_uses_risk_distance_not_atr_multiple():
 def test_stop_floor_does_not_add_spread_and_slippage_to_structural_distance(monkeypatch):
     monkeypatch.setattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.05)
     monkeypatch.setattr(Config, "MIN_STOP_PERCENT", 0.0001)
+    monkeypatch.setattr(Config, "MAX_STOP_EXECUTION_COST_R", 10.0)
     monkeypatch.setattr(Config, "AUTO_EXPAND_TIGHT_STOPS", False)
     monkeypatch.setattr(Config, "REJECT_TIGHT_STOPS", True)
     result = RiskEngine().calculate(
