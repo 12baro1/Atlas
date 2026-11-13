@@ -207,11 +207,21 @@ class LearningEngine:
         """
         from config import Config
 
+        records = sorted(
+            [record for record in records if isinstance(record, dict)],
+            key=lambda record: int(record.get("closed_at") or 0),
+        )
         half_life_days = float(getattr(Config, "LEARNING_HALF_LIFE_DAYS", 45) or 0)
         alpha = float(getattr(Config, "LEARNING_BETA_PRIOR_ALPHA", 2.0))
         beta = float(getattr(Config, "LEARNING_BETA_PRIOR_BETA", 2.0))
         min_samples = int(getattr(Config, "LEARNING_MIN_SAMPLES", 20))
+        oos_required = bool(getattr(Config, "LEARNING_OOS_REQUIRED", True))
+        split_at = int(len(records) * 0.70) if len(records) >= 10 else len(records)
+        training_records = records[:split_at]
+        validation_records = records[split_at:]
 
+        # Learn only on the earlier chronological partition. The later holdout
+        # is never used to fit weights; it is used only to validate the learned edge.
         # Katmanlı ham sayaçlar.
         raw = {
             "exact": {},
@@ -219,9 +229,7 @@ class LearningEngine:
             "global": {},
         }
 
-        for record in records:
-            if not isinstance(record, dict):
-                continue
+        for record in training_records:
             direction = str(record.get("direction") or "UNKNOWN").upper()
             regime = str(record.get("regime") or "UNKNOWN").upper()
             timeframe = str(record.get("timeframe") or "UNKNOWN").upper()
@@ -262,17 +270,73 @@ class LearningEngine:
             for key, accum in raw[level].items():
                 setups[key] = self._compute_metrics(accum, counts=accum["total"], alpha=alpha, beta=beta)
 
-        index = {}
-        for level in raw:
-            index[level] = {
-                key: self._compute_metrics(accum, counts=accum["total"], alpha=alpha, beta=beta)
-                for key, accum in raw[level].items()
+        # Independent chronological holdout aggregation, using identical keys.
+        oos_raw = {"exact": {}, "family": {}, "global": {}}
+        for record in validation_records:
+            direction = str(record.get("direction") or "UNKNOWN").upper()
+            regime = str(record.get("regime") or "UNKNOWN").upper()
+            timeframe = str(record.get("timeframe") or "UNKNOWN").upper()
+            features = fingerprint_features(record)
+            feature_key = "|".join(normalize_features(features)) or "UNKNOWN"
+            r_value = self._safe_float(record.get("r"), 0.0)
+            confidence = self._safe_float(record.get("confidence"), 0.0)
+            win = bool(record.get("win"))
+            ctx = {
+                "direction": direction,
+                "regime": regime,
+                "timeframe": timeframe,
+                "feature_key": feature_key,
             }
+            for level, key in self._candidate_keys(ctx):
+                entry = oos_raw[level].setdefault(key, self._empty_raw())
+                entry["total"] += 1
+                entry["wins"] += 1 if win else 0
+                entry["r_sum"] += r_value
+                if r_value > 0:
+                    entry["pos_sum"] += r_value
+                elif r_value < 0:
+                    entry["neg_sum"] += r_value
+                entry["confidence_sum"] += confidence
+
+        index = {}
+        oos_passed_buckets = 0
+        for level in raw:
+            index[level] = {}
+            for key, accum in raw[level].items():
+                metrics = self._compute_metrics(
+                    accum, counts=accum["total"], alpha=alpha, beta=beta
+                )
+                validation = oos_raw[level].get(key)
+                oos_metrics = (
+                    self._compute_metrics(
+                        validation, counts=validation["total"], alpha=alpha, beta=beta
+                    )
+                    if validation else self._compute_metrics(
+                        self._empty_raw(), counts=0, alpha=alpha, beta=beta
+                    )
+                )
+                metrics["oos_validation"] = oos_metrics
+                min_oos = int(getattr(Config, "LEARNING_OOS_MIN_SAMPLES", 10))
+                min_wilson = float(getattr(Config, "LEARNING_OOS_MIN_WILSON_LOWER", 0.45)) * 100
+                passed = (
+                    oos_metrics["total"] >= min_oos
+                    and oos_metrics["average_r"] > 0
+                    and oos_metrics["profit_factor"] > 1.0
+                    and oos_metrics["wilson_lower"] >= min_wilson
+                )
+                metrics["oos_passed"] = bool(passed)
+                if passed:
+                    oos_passed_buckets += 1
+                index[level][key] = metrics
 
         self.stats["setups"] = setups
         self.stats["index"] = index
         self.stats["meta"] = {
             "records_fed": len(records),
+            "training_records": len(training_records),
+            "oos_records": len(validation_records),
+            "oos_required": oos_required,
+            "oos_passed_buckets": oos_passed_buckets,
             "buckets": len(setups),
             "half_life_days": half_life_days,
             "min_samples": min_samples,
@@ -383,6 +447,17 @@ class LearningEngine:
             total = bucket.get("total", 0)
             if total <= 0:
                 continue
+            if bool(getattr(Config, "LEARNING_OOS_REQUIRED", True)):
+                validation = bucket.get("oos_validation") or {}
+                min_oos = int(getattr(Config, "LEARNING_OOS_MIN_SAMPLES", 10))
+                min_wilson = float(getattr(Config, "LEARNING_OOS_MIN_WILSON_LOWER", 0.45)) * 100
+                if not (
+                    validation.get("total", 0) >= min_oos
+                    and validation.get("average_r", 0) > 0
+                    and validation.get("profit_factor", 0) > 1.0
+                    and validation.get("wilson_lower", 0) >= min_wilson
+                ):
+                    continue
             matched = {"level": level, "key": key, "metrics": bucket}
             if total >= min_samples:
                 return matched
