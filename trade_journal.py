@@ -1470,8 +1470,9 @@ class TradeJournal:
                           actual_entry_fee_quote=None):
         """Kullanıcının gerçek işlemini bir sinyale bağlar.
 
-        Sinyal bulunamazsa ya da aynı signal_id'ye ait açık manual trade
-        varsa hata döner (duplicate koruması).
+        actual_entry_fee_quote, varsa giriş komisyonunun settlement/quote para
+        birimindeki gerçek tutarıdır. Gerçek maliyetlerle net R hesaplamak için
+        pozisyon miktarı da kaydedilmelidir.
         """
         entry_fee = self._num(actual_entry_fee_quote) if actual_entry_fee_quote is not None else None
         if actual_entry_fee_quote is not None and (
@@ -1618,8 +1619,11 @@ class TradeJournal:
                            actual_slippage_cost_quote=None):
         """Kullanıcının gerçek işlemini kapatır.
 
+        Fee/spread/slippage alanları settlement/quote para birimindeki gerçek
+        tutarlardır. Net R, gerçek çıkış fiyatı ve pozisyon miktarı olmadan
+        hesaplanmaz; eksik veride kapanış reddedilir.
+
         result: WIN | LOSS | BREAKEVEN | EARLY_EXIT | MANUAL_CLOSE | CANCELLED.
-        Result bilinmiyorsa actual_exit/entry/stop bazında otomatik infer edilir.
         """
         manual = None
         for candidate in self._manual_trades:
