@@ -1676,6 +1676,10 @@ class TradeJournal:
             "actual_slippage_cost_quote": actual_slippage_cost_quote,
         }
         actual_costs_provided = any(value is not None for value in cost_inputs.values())
+        if actual_costs_provided and (
+            exit_price is None or not math.isfinite(exit_price)
+        ):
+            return None, "actual_costs_require_actual_exit_price"
         normalized_costs = {}
         for name, value in cost_inputs.items():
             normalized = self._num(value, 0.0) if value is not None else 0.0
