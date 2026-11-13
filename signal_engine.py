@@ -218,6 +218,9 @@ class SignalEngine:
             if not isinstance(module, dict):
                 unique_modules.append(module)
                 continue
+            if not (module.get("active") or module.get("is_sweep") or module.get("trade_flow_active")):
+                unique_modules.append(module)
+                continue
             event_id = module.get("event_id")
             if not event_id:
                 for nested_key in ("best", "cvd", "volume_delta", "snapshot"):
