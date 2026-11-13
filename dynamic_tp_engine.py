@@ -218,17 +218,6 @@ class DynamicTPEngine:
 
         return sorted(set(targets), reverse=(direction == "SHORT"))
 
-    def _select_target_for_rr(self, direction, entry, risk, targets, minimum_rr, previous_target=None, atr_snapshot=0.0):
-        for target in targets:
-            if previous_target is not None and (
-                (direction == "LONG" and target <= previous_target)
-                or (direction == "SHORT" and target >= previous_target)
-            ):
-                continue
-            if self._reward(entry, target, direction) / risk >= minimum_rr:
-                return target, "market_structure"
-        return None, None
-
     def _fallback_rr_level(self, entry, risk, direction, rr_multiple):
         level = entry + risk * rr_multiple if direction == "LONG" else entry - risk * rr_multiple
         return round(level, 8)
@@ -242,16 +231,6 @@ class DynamicTPEngine:
         candidates = candidates[:3]
         candidates.extend([None] * (3 - len(candidates)))
         return candidates[0], candidates[1], candidates[2]
-
-    def _nudge_level(self, entry, risk, direction, picked, used):
-        """Legacy helper retained for callers; new TP selection never nudges structure."""
-        step = max(risk * 0.1, 1e-12)
-        sign = 1.0 if direction == "LONG" else -1.0
-        guard = 0
-        while picked in used and guard < 500:
-            picked = round(picked + sign * step, 8)
-            guard += 1
-        return picked
 
     def _safe_float(self, value):
         try:

@@ -622,6 +622,32 @@ def _combine_stats(all_stats):
     for key, trades in list(combined["mtf_trade_breakdown"].items()):
         combined["mtf_trade_breakdown"][key] = _metrics_for_trades(trades)
 
+    segment_dimensions = {
+        "entry_type": lambda trade: trade.get("entry_type"),
+        "market_phase": lambda trade: trade.get("market_phase"),
+        "market_regime": lambda trade: trade.get("market_regime"),
+        "volatility": lambda trade: trade.get("volatility"),
+        "poi_type": lambda trade: trade.get("poi_type"),
+        "tp_behavior": lambda trade: (
+            "TP3" if 3 in (trade.get("_levels") or [])
+            else "TP2" if 2 in (trade.get("_levels") or [])
+            else "TP1_THEN_STOP" if 1 in (trade.get("_levels") or []) and "STOP" in str(trade.get("exit_reason", "")).upper()
+            else "TP1_THEN_EXIT" if 1 in (trade.get("_levels") or [])
+            else "STOP_BEFORE_TP1" if "STOP" in str(trade.get("exit_reason", "")).upper()
+            else str(trade.get("exit_reason") or "UNKNOWN").upper()
+        ),
+    }
+    combined["segment_breakdown"] = {}
+    for dimension, getter in segment_dimensions.items():
+        groups = {}
+        for trade in combined["trade_history"]:
+            label = str(getter(trade) or "UNKNOWN").upper()
+            groups.setdefault(label, []).append(trade)
+        combined["segment_breakdown"][dimension] = {
+            label: _metrics_for_trades(trades)
+            for label, trades in sorted(groups.items())
+        }
+
     combined["losses"] = combined["total"] - combined["wins"]
     if combined["total"]:
         combined["winrate"] = round(combined["wins"] / combined["total"] * 100, 2)
@@ -745,6 +771,11 @@ def _report(stats, name):
     mtf_breakdown = stats.get("mtf_trade_breakdown") or {}
     if mtf_breakdown:
         print(f"  Kapanan işlem MTF dağılımı: {mtf_breakdown}")
+    segment_breakdown = stats.get("segment_breakdown") or {}
+    for dimension in ("entry_type", "market_phase", "market_regime", "volatility", "poi_type", "tp_behavior"):
+        values = segment_breakdown.get(dimension) or {}
+        if values:
+            print(f"  Segment {dimension}: {values}")
     breakdown = stats.get("direction_breakdown") or {}
     for direction in ("LONG", "SHORT"):
         side = breakdown.get(direction)
@@ -835,23 +866,58 @@ def _checkpoint_path(checkpoint_dir, symbol, days):
 
 def _load_checkpoint(path):
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return payload if isinstance(payload, dict) else None
     except (OSError, ValueError, json.JSONDecodeError):
         return None
 
 
 def _save_checkpoint(path, payload):
+    """Atomically replace a checkpoint so an interrupted write keeps the last good copy."""
+    temporary_path = f"{path}.{os.getpid()}.tmp"
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-    except OSError as exc:
+        directory = os.path.dirname(path) or "."
+        os.makedirs(directory, exist_ok=True)
+        with open(temporary_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2, allow_nan=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    except (OSError, TypeError, ValueError) as exc:
         logging.warning("Checkpoint yazımı başarısız | %s: %s", path, exc)
+    finally:
+        try:
+            if os.path.exists(temporary_path):
+                os.remove(temporary_path)
+        except OSError:
+            pass
+
+
+def _backtest_run_fingerprint(*, symbol, days, chunk_days, step, limit_expiry_bars, lenient, walk_forward):
+    """Inputs that make a resumed historical chunk result reusable."""
+    config_keys = (
+        "MAKER_FEE_RATE", "TAKER_FEE_RATE", "STOP_SPREAD_BUFFER_RATE",
+        "STOP_SLIPPAGE_BUFFER_RATE", "MINIMUM_RR", "MINIMUM_NET_RR",
+        "MIN_STOP_ATR_MULTIPLIER", "MIN_STOP_COST_MULTIPLIER",
+        "AUTO_EXPAND_TIGHT_STOPS", "REJECT_TIGHT_STOPS", "INITIAL_BALANCE",
+    )
+    return {
+        "symbol": str(symbol),
+        "days": int(days),
+        "chunk_days": int(chunk_days),
+        "step": int(step),
+        "limit_expiry_bars": int(limit_expiry_bars),
+        "lenient": bool(lenient),
+        "walk_forward": bool(walk_forward),
+        "source_revision": _git_revision(),
+        "partial_tp_weights": _configured_partial_tp_weights(),
+        "config": {key: getattr(Config, key, None) for key in config_keys},
+    }
 
 
 def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
-                           resume, step, limit_expiry_bars, lenient):
+                           resume, step, limit_expiry_bars, lenient, walk_forward=False):
     """Büyük backtesti tarih aralıklarına göre parçalara böler ve kalıcı checkpoint'ler yazar.
 
     Her parça bağımsız veri indirir ve çalışır; bellekte tek parça kadar veri
@@ -862,19 +928,59 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
     total_chunks = max(1, math.ceil(float(days) / float(chunk_days)))
     overall_status = "SUCCESS"
     combined_all = []
+    is_results = []
+    oos_results = []
+    oos_chunk_count = max(1, math.ceil(total_chunks * 0.30))
 
     for symbol in symbols:
         listing_time_ms = _market_listing_time_ms(symbol)
         checkpoint_path = _checkpoint_path(checkpoint_dir, symbol, days)
         checkpoint = _load_checkpoint(checkpoint_path) if resume else None
+        run_fingerprint = _backtest_run_fingerprint(
+            symbol=symbol, days=days, chunk_days=chunk_days, step=step,
+            limit_expiry_bars=limit_expiry_bars, lenient=lenient,
+            walk_forward=walk_forward,
+        )
 
         completed_chunks = set()
         chunk_results = {}
-        if checkpoint and checkpoint.get("symbol") == symbol:
-            completed_chunks = set(checkpoint.get("completed_chunks", []))
-            chunk_results = {
-                str(k): v for k, v in (checkpoint.get("results") or {}).items()
-            }
+        anchor_now_ms = time.time() * 1000
+        if checkpoint:
+            compatible = (
+                checkpoint.get("symbol") == symbol
+                and checkpoint.get("run_fingerprint") == run_fingerprint
+                and checkpoint.get("anchor_now_ms") is not None
+            )
+            if compatible:
+                for raw_index in checkpoint.get("completed_chunks") or []:
+                    try:
+                        index = int(raw_index)
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if 0 <= index < total_chunks:
+                        completed_chunks.add(index)
+                saved_results = checkpoint.get("results")
+                if isinstance(saved_results, dict):
+                    chunk_results = {
+                        str(key): value
+                        for key, value in saved_results.items()
+                        if str(key).isdigit()
+                        and 0 <= int(key) < total_chunks
+                        and isinstance(value, dict)
+                    }
+                completed_chunks.intersection_update(
+                    int(key) for key in chunk_results
+                )
+                try:
+                    anchor_now_ms = float(checkpoint["anchor_now_ms"])
+                    if not math.isfinite(anchor_now_ms) or anchor_now_ms <= 0:
+                        raise ValueError("invalid checkpoint time anchor")
+                except (TypeError, ValueError, OverflowError):
+                    completed_chunks.clear()
+                    chunk_results.clear()
+                    anchor_now_ms = time.time() * 1000
+            else:
+                print("  [checkpoint] Ayarlar/kod/zaman çıpası uyuşmuyor; eski parçalar kullanılmayacak.")
 
         print(
             f"\n=== {symbol} | {days}g | parçalı backtest "
@@ -883,12 +989,15 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
 
         for chunk_index in range(total_chunks):
             # Parça 0 = en yeni (şuandan geriye chunk_days), parça N = daha eski.
-            chunk_now_ms = time.time() * 1000 - chunk_index * chunk_days * 86_400_000
+            chunk_now_ms = anchor_now_ms - chunk_index * chunk_days * 86_400_000
             chunk_label = f"{chunk_index + 1}/{total_chunks}"
 
             if chunk_index in completed_chunks:
                 print(f"  [atlandi] {chunk_label} (checkpoint'te tamamlanmis)")
-                combined_all.append((symbol, chunk_results[str(chunk_index)]))
+                restored_stats = chunk_results[str(chunk_index)]
+                combined_all.append((symbol, restored_stats))
+                if walk_forward:
+                    (oos_results if chunk_index < oos_chunk_count else is_results).append((symbol, restored_stats))
                 continue
 
             print(f"  [isleniyor] {chunk_label} ...", flush=True)
@@ -918,12 +1027,16 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                 chunk_results[str(chunk_index)] = stats
                 completed_chunks.add(chunk_index)
                 combined_all.append((symbol, stats))
+                if walk_forward:
+                    (oos_results if chunk_index < oos_chunk_count else is_results).append((symbol, stats))
 
                 _save_checkpoint(checkpoint_path, {
                     "symbol": symbol,
                     "days": days,
                     "chunk_days": chunk_days,
                     "total_chunks": total_chunks,
+                    "run_fingerprint": run_fingerprint,
+                    "anchor_now_ms": anchor_now_ms,
                     "completed_chunks": sorted(completed_chunks),
                     "results": chunk_results,
                     "status": "IN_PROGRESS",
@@ -939,6 +1052,8 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                     "days": days,
                     "chunk_days": chunk_days,
                     "total_chunks": total_chunks,
+                    "run_fingerprint": run_fingerprint,
+                    "anchor_now_ms": anchor_now_ms,
                     "completed_chunks": sorted(completed_chunks),
                     "results": chunk_results,
                     "status": "FAILED",
@@ -953,6 +1068,8 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                 "days": days,
                 "chunk_days": chunk_days,
                 "total_chunks": total_chunks,
+                "run_fingerprint": run_fingerprint,
+                "anchor_now_ms": anchor_now_ms,
                 "completed_chunks": sorted(completed_chunks),
                 "results": chunk_results,
                 "status": "SUCCESS",
@@ -960,6 +1077,18 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
             })
         elif completed_chunks:
             overall_status = "INCOMPLETE"
+
+    if walk_forward:
+        print("\n=== WALK-FORWARD | PARAMETRELER SABİT ===")
+        print(f"IS: eski dönem {len(is_results)} sembol/parça | OOS: en yeni dönem {len(oos_results)} sembol/parça")
+        if is_results:
+            _report(_combine_stats(is_results), "IS (ESKİ DÖNEM)")
+        else:
+            print("IS verisi yok; OOS karşılaştırması geçersiz.")
+        if oos_results:
+            _report(_combine_stats(oos_results), "OOS (EN YENİ DÖNEM)")
+        else:
+            print("OOS verisi yok.")
 
     if combined_all:
         combined = _combine_stats(combined_all)
@@ -1021,6 +1150,7 @@ def main():
         "--resume", action="store_true",
         help="Kaldığı yerden devam et (tamamlanmış parçaları atla)"
     )
+    parser.add_argument("--walk-forward", action="store_true", help="Parçalı backtestte eski IS / en yeni OOS performansını ayrı raporla; parametreleri sabit tut")
     args = parser.parse_args()
 
     if args.days <= 0:
@@ -1029,6 +1159,8 @@ def main():
         parser.error("--step must be greater than zero")
     if args.limit_expiry_bars <= 0:
         parser.error("--limit-expiry-bars must be greater than zero")
+    if args.walk_forward and (args.chunk_days <= 0 or math.ceil(args.days / args.chunk_days) < 2):
+        parser.error("--walk-forward için en az iki parça oluşturacak --chunk-days gerekli")
 
     # Config.refresh_from_env() runs again inside AtlasEngine.__init__, so
     # disable live-only features in the environment before constructing it.
@@ -1077,6 +1209,7 @@ def main():
             step=args.step,
             limit_expiry_bars=args.limit_expiry_bars,
             lenient=args.lenient,
+            walk_forward=args.walk_forward,
         )
         print(f"\nGENEL DURUM: {overall_status}")
         return

@@ -170,6 +170,16 @@ class SetupReasoningEngine:
                   ifvg=None, trendline_sweep=None, eqh_eql=None, inducement=None,
                   premium_discount=None, internal_structure=None):
         supporting, opposing = [], []
+        seen_event_ids = set()
+
+        def append_evidence(target, label, event_id=None):
+            identity = str(event_id or "").strip()
+            if identity:
+                if identity in seen_event_ids:
+                    return
+                seen_event_ids.add(identity)
+            target.append(label)
+
         expected = "BULLISH" if direction == "LONG" else "BEARISH"
         for label, module in (
             ("weekly", {"direction": (mtf or {}).get("weekly")}),
@@ -183,14 +193,32 @@ class SetupReasoningEngine:
             side = self._module_side(module)
             if side == "NONE":
                 continue
-            (supporting if side == direction else opposing).append(
-                f"{label} {side}"
+            event_id = None
+            if isinstance(module, dict):
+                event_id = module.get("event_id")
+                best = module.get("best")
+                if not event_id and isinstance(best, dict):
+                    event_id = best.get("event_id")
+                if not event_id:
+                    for nested_key in ("cvd", "volume_delta", "snapshot"):
+                        nested = module.get(nested_key)
+                        if isinstance(nested, dict) and nested.get("event_id"):
+                            event_id = nested["event_id"]
+                            break
+            append_evidence(
+                supporting if side == direction else opposing,
+                f"{label} {side}",
+                event_id,
             )
         for item in breaker or []:
             if isinstance(item, dict) and item.get("breaker"):
                 side = self._direction(item.get("direction") or item.get("type"))
                 if side != "NONE":
-                    (supporting if side == direction else opposing).append(f"Breaker block {side}")
+                    append_evidence(
+                        supporting if side == direction else opposing,
+                        f"Breaker block {side}",
+                        item.get("event_id"),
+                    )
 
         for item in ifvg or []:
             if not isinstance(item, dict) or not item.get("inverted"):
@@ -198,27 +226,39 @@ class SetupReasoningEngine:
             original_side = self._direction(item.get("type"))
             side = "SHORT" if original_side == "LONG" else "LONG" if original_side == "SHORT" else "NONE"
             if side != "NONE":
-                (supporting if side == direction else opposing).append(f"IFVG inversion {side}")
+                append_evidence(
+                    supporting if side == direction else opposing,
+                    f"IFVG inversion {side}",
+                    item.get("event_id"),
+                )
 
         if isinstance(trendline_sweep, dict) and trendline_sweep.get("active"):
             side = "LONG" if str(trendline_sweep.get("direction", "")).upper() == "SELL_SIDE" else (
                 "SHORT" if str(trendline_sweep.get("direction", "")).upper() == "BUY_SIDE" else "NONE"
             )
             if side != "NONE":
-                (supporting if side == direction else opposing).append(f"Trendline sweep {side}")
+                append_evidence(
+                    supporting if side == direction else opposing,
+                    f"Trendline sweep {side}",
+                    trendline_sweep.get("event_id"),
+                )
 
         if isinstance(inducement, dict) and inducement.get("active"):
             side = self._direction(inducement.get("direction"))
             if side != "NONE":
-                (supporting if side == direction else opposing).append(f"Inducement {side}")
+                append_evidence(
+                    supporting if side == direction else opposing,
+                    f"Inducement {side}",
+                    inducement.get("event_id"),
+                )
 
         if isinstance(premium_discount, dict) and premium_discount.get("valid"):
             favorable = bool(premium_discount.get("discount")) if direction == "LONG" else bool(premium_discount.get("premium"))
             unfavorable = bool(premium_discount.get("premium")) if direction == "LONG" else bool(premium_discount.get("discount"))
             if favorable:
-                supporting.append("Premium/Discount zone favorable")
+                append_evidence(supporting, "Premium/Discount zone favorable")
             elif unfavorable:
-                opposing.append("Premium/Discount zone unfavorable")
+                append_evidence(opposing, "Premium/Discount zone unfavorable")
 
         if isinstance(internal_structure, list):
             internal_events = [
@@ -228,7 +268,7 @@ class SetupReasoningEngine:
             if internal_events:
                 side = self._direction(internal_events[-1].get("direction"))
                 if side != "NONE":
-                    (supporting if side == direction else opposing).append(f"Internal structure {side}")
+                    append_evidence(supporting if side == direction else opposing, f"Internal structure {side}", internal_events[-1].get("event_id"))
 
         post = (sweep or {}).get("post_structure") or {}
         if (sweep or {}).get("is_sweep"):
@@ -236,17 +276,32 @@ class SetupReasoningEngine:
             sweep_direction = "LONG" if sweep_side == "SELL_SIDE" or (sweep or {}).get("sell_side") else (
                 "SHORT" if sweep_side == "BUY_SIDE" or (sweep or {}).get("buy_side") else "NONE"
             )
-            if sweep_direction == direction and post.get("confirmed"):
-                supporting.append("Liquidity sweep + confirmed post-sweep structure")
+            if bool((sweep or {}).get("ambiguous_sweep")) or (
+                (sweep or {}).get("buy_side") and (sweep or {}).get("sell_side")
+            ):
+                sweep_direction = "NONE"
+            if sweep_direction == direction:
+                if post.get("confirmed"):
+                    append_evidence(
+                        supporting, "Liquidity sweep + confirmed post-sweep structure",
+                        post.get("event_id") or (sweep or {}).get("event_id"),
+                    )
+                else:
+                    append_evidence(
+                        supporting, "Liquidity sweep without post-sweep confirmation",
+                        (sweep or {}).get("event_id"),
+                    )
             elif sweep_direction != "NONE":
-                opposing.append("Opposing liquidity sweep")
+                append_evidence(opposing, "Opposing liquidity sweep", (sweep or {}).get("event_id"))
         if isinstance(structure, list):
             events = [x for x in structure if isinstance(x, dict) and (x.get("choch") or x.get("bos"))]
             if events:
                 event_side = self._direction(events[-1].get("direction"))
                 if event_side != "NONE":
-                    (supporting if event_side == direction else opposing).append(
-                        f"15m {events[-1].get('label', 'structure break')} {event_side}"
+                    append_evidence(
+                        supporting if event_side == direction else opposing,
+                        f"15m {events[-1].get('label', 'structure break')} {event_side}",
+                        events[-1].get("event_id"),
                     )
         reference_side = self._direction((mtf or {}).get("entry"))
         if isinstance(orderbook, dict) and (orderbook.get("active") or orderbook.get("trade_flow_active")):
@@ -255,18 +310,24 @@ class SetupReasoningEngine:
             if reference_side != direction:
                 book_supportive, book_opposing = book_opposing, book_supportive
             if book_supportive:
-                supporting.append("Order flow supports entry")
+                append_evidence(supporting, "Order flow supports entry", orderbook.get("event_id"))
             if book_opposing:
-                opposing.append("Order flow counterpressure")
+                append_evidence(opposing, "Order flow counterpressure", orderbook.get("event_id"))
         if isinstance(correlation, dict) and correlation.get("active"):
             corr_supportive = bool(correlation.get("supportive"))
             corr_opposing = bool(correlation.get("counterpressure"))
             if reference_side != direction:
                 corr_supportive, corr_opposing = corr_opposing, corr_supportive
             if corr_supportive:
-                supporting.append("Cross-market correlation supports entry")
+                append_evidence(
+                    supporting, "Cross-market correlation supports entry",
+                    correlation.get("event_id"),
+                )
             if corr_opposing:
-                opposing.append("Cross-market counterpressure")
+                append_evidence(
+                    opposing, "Cross-market counterpressure",
+                    correlation.get("event_id"),
+                )
         return supporting, opposing
 
     def generate(self, *, base_entry, mtf, structure, fvg, orderblocks,
@@ -571,9 +632,23 @@ class SetupReasoningEngine:
                     f"tp{index}": price
                     for index, price in enumerate(targets[:3], start=1)
                 }
-                cost_weights = getattr(Config, "PARTIAL_EXIT_WEIGHTS", None)
-                if not isinstance(cost_weights, dict):
-                    cost_weights = None
+                # Keep candidate net-RR estimates on the same TP allocation
+                # policy as RiskEngine and realized trade outcomes.
+                raw_cost_weights = getattr(
+                    Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2"
+                )
+                weight_names = ("tp1", "tp2", "tp3")
+                if isinstance(raw_cost_weights, dict):
+                    cost_weights = {
+                        name: raw_cost_weights.get(name, 1.0)
+                        for name in weight_names
+                    }
+                elif isinstance(raw_cost_weights, str):
+                    cost_weights = dict(zip(weight_names, raw_cost_weights.split(",")))
+                elif isinstance(raw_cost_weights, (list, tuple)):
+                    cost_weights = dict(zip(weight_names, raw_cost_weights))
+                else:
+                    cost_weights = {"tp1": 0.5, "tp2": 0.3, "tp3": 0.2}
                 maker_fee = getattr(Config, "MAKER_FEE_RATE", 0.0002)
                 taker_fee = getattr(Config, "TAKER_FEE_RATE", 0.00055)
                 spread_rate = getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002)

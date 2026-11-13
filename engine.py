@@ -294,11 +294,11 @@ class AtlasEngine:
             data["1w"] = weekly
 
         tf_analysis = {
-            "entry": self._analyze_timeframe(candles),
-            "weekly": self._analyze_timeframe(weekly),
-            "daily": self._analyze_timeframe(daily),
-            "h4": self._analyze_timeframe(h4),
-            "h1": self._analyze_timeframe(h1) if h1 else {"pivots": [], "structure": []},
+            "entry": self._analyze_timeframe(candles, timeframe="15m"),
+            "weekly": self._analyze_timeframe(weekly, timeframe="1w"),
+            "daily": self._analyze_timeframe(daily, timeframe="1d"),
+            "h4": self._analyze_timeframe(h4, timeframe="4h"),
+            "h1": self._analyze_timeframe(h1, timeframe="1h") if h1 else {"pivots": [], "structure": []},
         }
 
         smt_state = self._build_smt_state(data)
@@ -814,38 +814,7 @@ class AtlasEngine:
         }
         return trimmed
 
-    def _apply_external_risk_filters(self, decision, news_filter, correlation, cooldown):
-        """Apply true safety/duplicate-entry gates; keep correlation as entry evidence.
-
-        Correlation is a contextual motor, not proof that the proposed setup is
-        structurally invalid. Its conflict is exposed as a warning so the entry
-        optimizer can price the pressure instead of silently deleting the trade.
-        Macro-news protection and same-symbol/direction cooldown remain hard gates.
-        """
-        blockers = []
-        warnings = []
-        for name, payload in (("news_filter", news_filter), ("cooldown", cooldown)):
-            if payload and not bool(payload.get("active", True)):
-                continue
-            if payload and not payload.get("trade_allowed", True):
-                blockers.append(f"{name}: {payload.get('reason', 'blocked')}")
-
-        if correlation and bool(correlation.get("active", True)) and not correlation.get("trade_allowed", True):
-            warnings.append(f"correlation: {correlation.get('reason', 'counterpressure; entry optimized conservatively')}")
-
-        enriched = dict(decision or {})
-        if warnings:
-            enriched["external_warnings"] = list(enriched.get("external_warnings") or []) + warnings
-        if not blockers:
-            return enriched
-        enriched["action"] = "SKIP"
-        enriched["external_blockers"] = blockers
-        existing = enriched.get("critical_blockers") or []
-        enriched["critical_blockers"] = list(existing) + blockers
-        enriched["reason"] = "; ".join(blockers)
-        return enriched
-
-    def _analyze_timeframe(self, candles):
+    def _analyze_timeframe(self, candles, timeframe="unknown"):
         """Tek zaman dilimi için pivot, etiket, BOS ve CHoCH üretir."""
         engine = self.main_engine.attach_motor(
             "market_structure", self.structure_engine_cls()
@@ -857,7 +826,7 @@ class AtlasEngine:
         engine.filter_noise()
 
         pivots = engine.validate_sequence()
-        structure = self.choch.detect(self.bos.detect(label_swings(pivots), candles=candles))
+        structure = self.choch.detect(self.bos.detect(label_swings(pivots), candles=candles, timeframe=timeframe))
 
         return {
             "pivots": pivots,
@@ -901,7 +870,7 @@ class AtlasEngine:
             current_price,
         )
         trendline_sweep = self.trendline.detect_sweep(structure, candles)
-        trendline_sweep_state = self.trendline.serialize(trendline_sweep)
+        trendline_sweep_state = self.trendline.serialize(trendline_sweep, candles=candles)
 
         ifvg = self.fvg.detect_inversion(candles)
 
@@ -960,6 +929,7 @@ class AtlasEngine:
                     "bos": item.get("bos", False),
                     "choch": item.get("choch", False),
                     "direction": item.get("direction"),
+                    "event_id": item.get("event_id"),
                 }
             )
 
@@ -972,6 +942,7 @@ class AtlasEngine:
                 "type": item.get("kind"),
                 "kind": item.get("kind"),
                 "label": item.get("label"),
+                "event_id": item.get("event_id"),
             }
             for item in structure
             if item.get("index") not in major_indices
@@ -1073,6 +1044,7 @@ class AtlasEngine:
             premium_discount=premium_discount,
             mtf=mtf,
             candles=candles,
+            timeframe="15m",
         )
 
         return {
@@ -1885,7 +1857,7 @@ class AtlasEngine:
                 structure=structure, trend=local_trend, liquidity_sweep=liquidity_sweep,
                 fvg=local_fvg, orderblocks=local_orderblocks,
                 premium_discount=local_premium_discount,
-                mtf=local_mtf, candles=candles,
+                mtf=local_mtf, candles=candles, timeframe=timeframe,
             )
             payload[timeframe] = {
                 "candles": candles,
@@ -1942,7 +1914,7 @@ class AtlasEngine:
                 structure=structure, trend=local_trend, liquidity_sweep=liquidity_sweep,
                 fvg=fvg, orderblocks=orderblocks,
                 premium_discount=local_premium_discount,
-                mtf=local_mtf, candles=candles,
+                mtf=local_mtf, candles=candles, timeframe=timeframe,
             )
             ote = self.ote.detect(
                 swing_high=swing_high,
@@ -2211,11 +2183,26 @@ class AtlasEngine:
                     continue
                 touches = sum(e.get("touches", 1) for e in entries)
                 price = sum(e["price"] for e in entries) / len(entries)
-                indices = [e["index"] for e in entries if e.get("index") is not None]
+                indices = sorted({
+                    int(index)
+                    for entry in entries
+                    for index in (entry.get("indices") or [])
+                    if index is not None
+                })
+                source_ids = sorted({
+                    str(entry["event_id"])
+                    for entry in entries
+                    if entry.get("event_id")
+                })
+                event_id = (
+                    f"{level_tag.lower()}:" + "|".join(source_ids)
+                    if source_ids else None
+                )
                 result.append(
                     {
                         "type": "SELL_SIDE" if level_tag == "EQL" else "BUY_SIDE",
                         "level": level_tag,
+                        "event_id": event_id,
                         "price": price,
                         "touches": touches,
                         "indices": indices,
@@ -2242,8 +2229,25 @@ class AtlasEngine:
         elif liquidity_sweep.get("buy_side"):
             direction = "SHORT"
 
+        active = direction is not None and eqh_eql.get("active", False)
+        relevant_pools = (
+            eqh_eql.get("eql", []) if direction == "LONG"
+            else eqh_eql.get("eqh", []) if direction == "SHORT"
+            else []
+        )
+        pool_ids = sorted({
+            str(item["event_id"])
+            for item in relevant_pools
+            if isinstance(item, dict) and item.get("event_id")
+        })
+        sweep_id = liquidity_sweep.get("event_id")
+        event_id = (
+            f"inducement:{sweep_id}:" + "|".join(pool_ids)
+            if active and sweep_id and pool_ids else None
+        )
         return {
-            "active": direction is not None and eqh_eql.get("active", False),
+            "active": active,
+            "event_id": event_id,
             "direction": direction,
             "reason": "Liquidity sweep after equal highs/lows" if direction else "No inducement",
             "recent_structure": structure[-3:] if structure else [],

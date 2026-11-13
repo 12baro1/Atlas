@@ -54,7 +54,7 @@ class DecisionEngine:
         # New risk payloads are gated on conservative net R; legacy payloads
         # retain the old target-RR threshold for backward compatibility.
         if weighted_net_rr is not None:
-            minimum_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
+            minimum_rr = float(getattr(Config, "MINIMUM_NET_RR", 2.0))
         minimum_confidence = float(getattr(Config, "MINIMUM_CONFIDENCE", 80))
         execute_threshold = float(getattr(Config, "DECISION_SCORE_EXECUTE", 90))
         caution_threshold = float(getattr(Config, "DECISION_SCORE_EXECUTE_WITH_CAUTION", 75))
@@ -109,25 +109,11 @@ class DecisionEngine:
             if quality_gate_active and not trade_quality.get("allowed", False):
                 for blocker in trade_quality.get("blockers", []) or [trade_quality.get("reason", "Trade quality gate rejected setup")]:
                     self._append_unique(critical_blockers, f"Trade quality: {blocker}")
-            # Central decision authority: SHORT setups require a confirmed
-            # liquidity sweep reversal. Weak SHORT pullbacks without a
-            # confirmed post-sweep structure break are filtered here (single
-            # decision point), keeping weak counter-trend entries out.
-            if signal_dir == "SHORT":
-                sweep = liquidity_sweep if isinstance(liquidity_sweep, dict) else {}
-                post = sweep.get("post_structure") if isinstance(sweep.get("post_structure"), dict) else {}
-                expected_sweep = bool(sweep.get("buy_side"))
-                sweep_confirmed = bool(
-                    sweep.get("is_sweep")
-                    and expected_sweep
-                    and post.get("confirmed")
-                    and str(post.get("direction", "")).upper() == "BEARISH"
-                )
-                if not sweep_confirmed:
-                    self._append_unique(
-                        critical_blockers,
-                        "SHORT requires confirmed liquidity sweep reversal",
-                    )
+            # Directional sweep quality is evaluated symmetrically by
+            # TradeQualityEngine. Do not impose a second SHORT-only hard gate
+            # here: it suppresses valid trend-continuation shorts and has no
+            # equivalent LONG rule. The single quality gate owns reversal
+            # evidence and MTF alignment for both directions.
 
         adjustments = self._collect_adjustments(
             signal_grade=signal_grade,
@@ -422,6 +408,7 @@ class DecisionEngine:
         market_regime=None,
     ):
         adjustments = []
+        seen_directional_event_ids = set()
 
         if signal_grade == "S+":
             self._add_adjustment(adjustments, Config.DECISION_BONUS_GRADE_S_PLUS, "Grade S+")
@@ -449,10 +436,10 @@ class DecisionEngine:
                 if bool(getattr(Config, "QUALITY_REQUIRE_MTF_ALIGNMENT", True)):
                     self._add_adjustment(adjustments, Config.DECISION_PENALTY_HTF_ALIGNMENT_MISSING, "HTF + LTF alignment missing")
 
-        self._apply_directional_adjustment(adjustments, unicorn, direction, "Unicorn", Config.DECISION_BONUS_UNICORN_ALIGNMENT, Config.DECISION_PENALTY_UNICORN_MISMATCH)
-        self._apply_directional_adjustment(adjustments, cisd, direction, "CISD", Config.DECISION_BONUS_CISD_ALIGNMENT, Config.DECISION_PENALTY_CISD_MISMATCH)
-        self._apply_directional_adjustment(adjustments, volume_profile, direction, "Volume Profile", Config.DECISION_BONUS_VOLUME_PROFILE_ALIGNMENT, Config.DECISION_PENALTY_VOLUME_PROFILE_MISMATCH)
-        self._apply_directional_adjustment(adjustments, institutional, direction, "Institutional", Config.DECISION_BONUS_INSTITUTIONAL_ALIGNMENT, Config.DECISION_PENALTY_INSTITUTIONAL_MISMATCH)
+        self._apply_directional_adjustment(adjustments, seen_directional_event_ids, unicorn, direction, "Unicorn", Config.DECISION_BONUS_UNICORN_ALIGNMENT, Config.DECISION_PENALTY_UNICORN_MISMATCH)
+        self._apply_directional_adjustment(adjustments, seen_directional_event_ids, cisd, direction, "CISD", Config.DECISION_BONUS_CISD_ALIGNMENT, Config.DECISION_PENALTY_CISD_MISMATCH)
+        self._apply_directional_adjustment(adjustments, seen_directional_event_ids, volume_profile, direction, "Volume Profile", Config.DECISION_BONUS_VOLUME_PROFILE_ALIGNMENT, Config.DECISION_PENALTY_VOLUME_PROFILE_MISMATCH)
+        self._apply_directional_adjustment(adjustments, seen_directional_event_ids, institutional, direction, "Institutional", Config.DECISION_BONUS_INSTITUTIONAL_ALIGNMENT, Config.DECISION_PENALTY_INSTITUTIONAL_MISMATCH)
 
         phase = str((market_phase or {}).get("phase", "")).strip()
         allowed_phases = set(getattr(Config, "QUALITY_ALLOWED_MARKET_PHASES", ("Expansion", "Trending", "Reversal")))
@@ -461,7 +448,7 @@ class DecisionEngine:
         else:
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_MARKET_PHASE_UNFRIENDLY, f"Market Phase {phase or 'Unknown'}")
 
-        self._apply_market_regime_adjustment(adjustments, market_regime or {}, direction)
+        self._apply_market_context_adjustment(adjustments, market_phase or {}, market_regime or {}, direction)
 
         if not ote or not ote.get("valid", False):
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_OTE_MISSING, "OTE missing")
@@ -479,6 +466,42 @@ class DecisionEngine:
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_STACK_CONFLUENCE_MISSING, "Stack Confluence missing")
 
         return adjustments
+
+    def _apply_market_context_adjustment(self, adjustments, phase, regime, direction):
+        """Combine overlapping SMC phase and OHLCV regime evidence once."""
+        phase_trend = str((phase or {}).get("trend", "")).upper()
+        regime_bias = str((regime or {}).get("directional_bias", "NEUTRAL")).upper()
+        phase_name = str((phase or {}).get("phase", "")).strip().lower()
+        regime_name = str((regime or {}).get("regime", "UNKNOWN")).upper()
+
+        if self._regime_is_represented_by_phase(phase, regime):
+            return
+        if (
+            phase_name in {"expansion", "trending"}
+            and regime_name in {"TRENDING_UP", "TRENDING_DOWN"}
+            and phase_trend in {"BULLISH", "BEARISH"}
+            and regime_bias in {"BULLISH", "BEARISH"}
+        ):
+            self._add_adjustment(adjustments, -8, "Market Phase/Regime directional conflict")
+            return
+        self._apply_market_regime_adjustment(adjustments, regime, direction)
+
+    def _regime_is_represented_by_phase(self, phase, regime):
+        """Avoid scoring the same trend/range state twice through two classifiers."""
+        if not isinstance(phase, dict) or not isinstance(regime, dict) or not regime.get("active"):
+            return False
+        phase_name = str(phase.get("phase", "")).strip().lower()
+        regime_name = str(regime.get("regime", "UNKNOWN")).upper()
+        phase_trend = str(phase.get("trend", "")).upper()
+        regime_bias = str(regime.get("directional_bias", "NEUTRAL")).upper()
+
+        if phase_name in {"expansion", "trending"} and regime_name in {"TRENDING_UP", "TRENDING_DOWN"}:
+            # The phase and regime both describe the same trend. A conflict
+            # remains visible through the regime adjustment instead of being hidden.
+            return phase_trend in {"BULLISH", "BEARISH"} and phase_trend == regime_bias
+        if phase_name in {"ranging", "consolidation"} and regime_name in {"RANGING", "COMPRESSION"}:
+            return True
+        return False
 
     def _apply_market_regime_adjustment(self, adjustments, regime, direction):
         """Use OHLCV regime as a modest score modifier, never as a standalone signal."""
@@ -502,9 +525,25 @@ class DecisionEngine:
         elif name == "TRANSITION":
             self._add_adjustment(adjustments, -2, "Market Regime transition")
 
-    def _apply_directional_adjustment(self, adjustments, module, direction, label, bonus, penalty):
+    def _apply_directional_adjustment(self, adjustments, seen_event_ids, module, direction, label, bonus, penalty):
         if not module or not isinstance(module, dict) or not module.get("active", False):
             return
+
+        event_id = module.get("event_id")
+        best = module.get("best")
+        if not event_id and isinstance(best, dict):
+            event_id = best.get("event_id")
+        if not event_id:
+            for nested_key in ("cvd", "volume_delta", "snapshot"):
+                nested = module.get(nested_key)
+                if isinstance(nested, dict) and nested.get("event_id"):
+                    event_id = nested["event_id"]
+                    break
+        if event_id:
+            identity = str(event_id).strip()
+            if identity in seen_event_ids:
+                return
+            seen_event_ids.add(identity)
 
         module_direction = self._extract_direction(module)
         if module_direction == "NONE":
@@ -719,24 +758,6 @@ class DecisionEngine:
                     return value
 
         return "NONE"
-
-    def _extract_confidence(self, module):
-        if not isinstance(module, dict):
-            return 0
-
-        for key in ("confidence", "score", "phase_score", "strength_score"):
-            value = module.get(key)
-            if isinstance(value, (int, float)):
-                return value
-
-        best = module.get("best")
-        if isinstance(best, dict):
-            for key in ("confidence", "score", "phase_score", "strength_score"):
-                value = best.get(key)
-                if isinstance(value, (int, float)):
-                    return value
-
-        return 0
 
     def _match_direction(self, module, direction):
         module_direction = self._extract_direction(module)

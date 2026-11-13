@@ -352,7 +352,7 @@ def test_decision_rejects_weighted_net_rr_below_central_threshold():
     assert any("RR below minimum" in item for item in result["critical_blockers"])
 
 
-def test_decision_rejects_short_without_confirmed_sweep():
+def test_decision_does_not_require_sweep_when_short_setup_is_otherwise_valid():
     result = DecisionEngine().decide(
         **_supportive_context(
             signal={"signal": "SHORT", "confidence": 96, "grade": "S+", "strength": "ELITE"},
@@ -370,8 +370,8 @@ def test_decision_rejects_short_without_confirmed_sweep():
             liquidity_sweep={"is_sweep": True, "buy_side": False, "post_structure": {"confirmed": False}},
         )
     )
-    assert result["action"] != "EXECUTE"
-    assert any("confirmed liquidity sweep" in item for item in result["critical_blockers"])
+    assert result["action"] == "EXECUTE"
+    assert not any("confirmed liquidity sweep" in item for item in result["critical_blockers"])
 
 
 def test_decision_accepts_short_with_confirmed_sweep():
@@ -444,3 +444,26 @@ def test_execution_quality_gate_not_confluence_score_decides_execution():
         )
     )
     assert result["action"] == "EXECUTE"
+
+
+def test_shared_specialist_event_is_only_scored_once():
+    shared_id = "shared-market-event:1700000000000"
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            unicorn={"active": True, "direction": "BULLISH", "confidence": 90, "event_id": shared_id},
+            cisd={"active": True, "direction": "BULLISH", "confidence": 90, "event_id": shared_id},
+            volume_profile={"active": True, "direction": "BULLISH", "confidence": 90, "event_id": shared_id},
+            institutional={"active": True, "direction": "BULLISH", "confidence": 90, "event_id": shared_id},
+        )
+    )
+    labels = [
+        item["label"]
+        for item in result["module_scores"]["decision_adjustments"]
+        if item["label"] in {
+            "Unicorn same direction",
+            "CISD same direction",
+            "Volume Profile same direction",
+            "Institutional same direction",
+        }
+    ]
+    assert len(labels) == 1

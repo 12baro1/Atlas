@@ -37,6 +37,7 @@ class CorrelationEngine:
                 "counterpressure_score": 0.0,
                 "supportive": False,
                 "markets": scores,
+                "event_id": self._correlation_event_id(scores),
                 "reason": "Correlation context unavailable or not applicable; no veto",
             }
 
@@ -75,6 +76,7 @@ class CorrelationEngine:
             "supportive_markets": supportive_markets,
             "opposing_markets": opposing_markets,
             "markets": scores,
+            "event_id": self._correlation_event_id(scores),
             "reason": reason,
         }
 
@@ -93,6 +95,22 @@ class CorrelationEngine:
             return float(getattr(Config, name, default))
         except Exception:
             return default
+
+    def _correlation_event_id(self, scores):
+        identities = []
+        for market, item in sorted(scores.items()):
+            event_id = item.get("event_id") if isinstance(item, dict) else None
+            if event_id:
+                identities.append(f"{market}:{event_id}")
+        return "correlation:" + "|".join(identities) if identities else None
+
+    @staticmethod
+    def _candle_timestamp(candle):
+        value = candle.get("time", candle.get("timestamp")) if isinstance(candle, dict) else getattr(candle, "time", None)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError, OverflowError):
+            return None
 
     def _market_bias(self, candles):
         """Trend guzun ATR-normalize edilmis fark ezeri ile olcer."""
@@ -117,7 +135,10 @@ class CorrelationEngine:
             direction = "NEUTRAL"
 
         confidence = min(95, 50 + trend_strength * 10)
+        timestamp = self._candle_timestamp(candles[-1])
+        event_id = f"correlation_market:{timestamp}" if timestamp is not None else None
         return {
+            "event_id": event_id,
             "direction": direction,
             "confidence": int(confidence),
             "trend_strength": round(trend_strength, 3),

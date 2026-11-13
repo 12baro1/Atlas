@@ -89,12 +89,13 @@ class Config:
     # When the risk engine provides a cost-adjusted partial-exit result, require
     # at least this many net R; max-target RR is not sufficient on its own.
     # Central decision threshold: weak setups are filtered before execution.
-    MINIMUM_NET_RR = float(os.getenv("ATLAS_MINIMUM_NET_RR", "2.0"))
+    MINIMUM_NET_RR = float(_env_or_rc("ATLAS_MINIMUM_NET_RR", "2.0"))
     # Setup selection requires net projected RR (after execution costs) to meet
     # this minimum. Marginal setups with insufficient edge after costs are
     # filtered out before reaching the quality gate. This is a risk/reward
     # quality filter, not an artificial trade-count reduction.
-    MIN_SETUP_NET_RR = float(os.getenv("ATLAS_MIN_SETUP_NET_RR", "2.0"))
+    # Backward-compatible alias; setup generation and final decision share one net-RR floor.
+    MIN_SETUP_NET_RR = MINIMUM_NET_RR
     # In live analysis, do not fabricate TP levels when structure has no valid targets.
     DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK = _env_or_rc("ATLAS_ALLOW_SYNTHETIC_TP_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
     # Require higher-timeframe direction by default; 15m-only direction is legacy opt-in.
@@ -107,7 +108,9 @@ class Config:
     ROUND_TRIP_COST_RATE = float(os.getenv("ATLAS_ROUND_TRIP_COST_RATE", "0.0020"))
     ATR_PERIOD = 14
     # Stops remain anchored beyond POI/OTE invalidation. A too-tight structure is rejected, never silently widened.
-    MIN_STOP_ATR_MULTIPLIER = 0.25
+    MIN_STOP_ATR_MULTIPLIER = float(_env_or_rc("ATLAS_MIN_STOP_ATR_MULTIPLIER", "0.25"))
+    # Require structural stop distance to exceed estimated round-trip friction.
+    MIN_STOP_COST_MULTIPLIER = float(_env_or_rc("ATLAS_MIN_STOP_COST_MULTIPLIER", "2.0"))
     # Small clearance beyond the structural invalidation edge; ATR is not the stop anchor.
     # Main SetupReasoningEngine uses the tighter POI/OTE invalidation clearance.
     STOP_STRUCTURE_BUFFER_ATR = 0.10
@@ -213,7 +216,8 @@ class Config:
     # TP/RR: net RR (komisyon+spread sonrası) bu değerin altındaysa engel.
     # 1.5R, típik комисyon/spread oranında minimal bir kâr marjı bırakır;
     # 2.0R, gerçek kâr/örneklem dengesi için daha güvenli bir zemindir.
-    QUALITY_MIN_NET_RR = 2.0
+    # Backward-compatible alias; the canonical execution threshold is MINIMUM_NET_RR.
+    QUALITY_MIN_NET_RR = MINIMUM_NET_RR
     # TP hedefleri sentetik değil gerçek likiditeden gelmelidir.
     QUALITY_REJECT_SYNTHETIC_TP = True
     # Motor çetelişi: bu güven üstündeki ve yönünde karşı olan motor "güçlü" sayılır.
@@ -360,6 +364,10 @@ class Config:
     LEARNING_BETA_PRIOR_BETA = float(os.getenv("ATLAS_LEARNING_BETA_PRIOR_BETA", "2.0"))
     # Güven aralığı (Wilson alt sınırı) güvenilirlik eşiği.
     LEARNING_MIN_RELIABILITY = float(os.getenv("ATLAS_LEARNING_MIN_RELIABILITY", "0.55"))
+    # Learning weights remain neutral unless a later chronological holdout confirms edge.
+    LEARNING_OOS_REQUIRED = os.getenv("ATLAS_LEARNING_OOS_REQUIRED", "1").strip().lower() in {"1", "true", "yes"}
+    LEARNING_OOS_MIN_SAMPLES = int(os.getenv("ATLAS_LEARNING_OOS_MIN_SAMPLES", "10"))
+    LEARNING_OOS_MIN_WILSON_LOWER = float(os.getenv("ATLAS_LEARNING_OOS_MIN_WILSON_LOWER", "0.45"))
     # Meta katmanı, SMC skorunu ne kadar aşağı/yukarı ayarlayabilir (puan).
     LEARNING_EDGE_UPLIFT_MAX = float(os.getenv("ATLAS_LEARNING_EDGE_UPLIFT_MAX", "6"))
     LEARNING_EDGE_PENALTY_MAX = float(os.getenv("ATLAS_LEARNING_EDGE_PENALTY_MAX", "10"))
@@ -416,6 +424,15 @@ class Config:
     def refresh_from_env(cls):
         """Runtime'da environment değişikliklerini Config sınıfına yeniden yükler."""
         cls.MIN_STOP_PERCENT = float(_env_or_rc("ATLAS_MIN_STOP_PERCENT", str(cls.MIN_STOP_PERCENT)))
+        cls.MIN_STOP_ATR_MULTIPLIER = float(
+            _env_or_rc("ATLAS_MIN_STOP_ATR_MULTIPLIER", str(cls.MIN_STOP_ATR_MULTIPLIER))
+        )
+        cls.MINIMUM_NET_RR = float(_env_or_rc("ATLAS_MINIMUM_NET_RR", str(cls.MINIMUM_NET_RR)))
+        cls.MIN_SETUP_NET_RR = cls.MINIMUM_NET_RR
+        cls.QUALITY_MIN_NET_RR = cls.MINIMUM_NET_RR
+        cls.MIN_STOP_COST_MULTIPLIER = float(
+            _env_or_rc("ATLAS_MIN_STOP_COST_MULTIPLIER", str(cls.MIN_STOP_COST_MULTIPLIER))
+        )
         cls.MIN_TP1_RR = float(_env_or_rc("ATLAS_MIN_TP1_RR", str(cls.MIN_TP1_RR)))
         cls.MIN_TP_TARGET_SEPARATION_R = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_R", str(cls.MIN_TP_TARGET_SEPARATION_R)))
         cls.MIN_TP_TARGET_SEPARATION_ATR = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_ATR", str(cls.MIN_TP_TARGET_SEPARATION_ATR)))

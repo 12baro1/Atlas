@@ -43,6 +43,19 @@ def test_valid_trend_pullback_passes_without_relying_on_score():
     assert result["blockers"] == []
 
 
+def test_explicit_mtf_entry_direction_conflict_is_blocked():
+    payload = base_payload()
+    payload["mtf"] = {
+        "valid": True,
+        "entry": "SHORT",
+        "h4": "BULLISH",
+        "entry_source": "H4_STRUCTURE",
+    }
+    result = evaluate(payload)
+    assert result["allowed"] is False
+    assert "Multi-timeframe direction is not aligned" in result["blockers"]
+
+
 def test_opposing_liquidity_sweep_is_counter_evidence_not_veto():
     payload = base_payload()
     payload["liquidity_sweep"] = {
@@ -63,7 +76,10 @@ def test_range_requires_sell_side_sweep_and_bullish_reclaim_for_long():
         "is_sweep": True,
         "buy_side": False,
         "sell_side": True,
-        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+        "post_structure": {
+            "confirmed": True, "type": "CHOCH", "direction": "BULLISH",
+            "sweep_index": 10, "confirmation_index": 12,
+        },
     }
     assert evaluate(payload)["allowed"] is True
 
@@ -93,7 +109,8 @@ def test_countertrend_regime_is_advisory_when_primary_mtf_and_poi_are_valid():
         "is_sweep": True,
         "buy_side": False,
         "sell_side": True,
-        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+        "post_structure": {"confirmed": True, "type": "CHOCH", "direction": "BULLISH", "sweep_index": 10, "confirmation_index": 12},
+        "sweep_index": 10,
     }
     assert evaluate(payload)["allowed"] is True
 
@@ -178,7 +195,8 @@ def test_opposing_sweep_can_be_reclaimed_before_entry():
         "is_sweep": True,
         "buy_side": True,
         "sell_side": False,
-        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+        "post_structure": {"confirmed": True, "type": "CHOCH", "direction": "BULLISH", "sweep_index": 10, "confirmation_index": 12},
+        "sweep_index": 10,
     }
     result = evaluate(payload)
     assert result["allowed"] is True
@@ -186,10 +204,13 @@ def test_opposing_sweep_can_be_reclaimed_before_entry():
 
 
 
-def test_confirmed_sweep_reversal_can_override_mtf_direction_conflict():
+def test_confirmed_sweep_reversal_can_override_h4_conflict_when_mtf_entry_matches():
     payload = base_payload()
     payload["entry"]["direction_source"] = "CONFIRMED_SWEEP_REVERSAL"
-    payload["mtf"] = {"valid": True, "entry": "SHORT"}
+    payload["mtf"] = {
+        "valid": True, "entry": "LONG", "h4": "BEARISH",
+        "entry_source": "CONFIRMED_15M_REVERSAL",
+    }
     payload["trend"] = {"trend": "BEARISH"}
     payload["market_regime"] = {
         "active": True, "regime": "TRENDING_DOWN", "directional_bias": "BEARISH"
@@ -197,7 +218,8 @@ def test_confirmed_sweep_reversal_can_override_mtf_direction_conflict():
     payload["liquidity_sweep"] = {
         "is_sweep": True, "sell_side": True, "buy_side": False,
         "sweep_side": "SELL_SIDE",
-        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+        "sweep_index": 10,
+        "post_structure": {"confirmed": True, "type": "CHOCH", "direction": "BULLISH", "sweep_index": 10, "confirmation_index": 12},
     }
     result = evaluate(payload)
     assert result["allowed"] is True

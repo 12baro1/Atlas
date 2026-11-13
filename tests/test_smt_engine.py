@@ -48,6 +48,7 @@ def test_detects_bearish_smt_divergence():
     assert result["active"] is True
     assert result["bearish"]
     assert result["best"]["type"] == "BEARISH"
+    assert result["best"]["event_id"].startswith("15m:smt:SOL/USDT:USDT:BTC/USDT:USDT:BEARISH:")
     assert 0 <= result["best"]["confidence"] <= 100
 
 
@@ -72,6 +73,7 @@ def test_detects_bullish_smt_divergence():
     assert result["active"] is True
     assert result["bullish"]
     assert result["best"]["type"] == "BULLISH"
+    assert result["best"]["event_id"].startswith("4h:smt:ETH/USDT:USDT:BTC/USDT:USDT:BULLISH:")
     assert 0 <= result["best"]["confidence"] <= 100
 
 

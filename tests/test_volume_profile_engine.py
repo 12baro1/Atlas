@@ -35,6 +35,7 @@ def test_detect_returns_key_levels():
     profile = engine.detect(_candles(), bins=30)
 
     assert profile["active"] is True
+    assert profile["event_id"].startswith("volume_profile:")
     assert profile["poc"] is not None
     assert profile["vah"] is not None
     assert profile["val"] is not None

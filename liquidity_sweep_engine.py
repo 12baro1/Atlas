@@ -33,6 +33,7 @@ class LiquiditySweepEngine:
                     "is_sweep": False,
                     "is_breakout": False,
                     "ambiguous_sweep": True,
+                    "event_id": f"{str(timeframe or 'unknown').lower()}:sweep:DUAL:{self._event_time_key(candles, candidate['sweep_index'])}",
                     "strength_score": 0,
                     "swing": {
                         "buy_side": candidate.get("swing_buy"),
@@ -66,6 +67,8 @@ class LiquiditySweepEngine:
                     "breakout_low": sell_event["level"] if sell_event else None,
                     "is_sweep": False,
                     "is_breakout": True,
+                    "ambiguous_sweep": False,
+                    "event_id": f"{str(timeframe or 'unknown').lower()}:breakout:{self._event_time_key(candles, candidate['event_index'])}:{candidate.get('side')}",
                     "strength_score": 0,
                     "swing": {
                         "buy_side": candidate.get("swing_buy"),
@@ -96,6 +99,18 @@ class LiquiditySweepEngine:
                 sweep_index=sweep_index,
                 swept_side=active_side,
             )
+            sweep_event_id = (
+                f"{str(timeframe or 'unknown').lower()}:sweep:"
+                f"{self._event_time_key(candles, sweep_index)}:{active_side}:"
+                f"{format(float(candidate.get('level') or 0.0), '.12g')}"
+            )
+            if post_structure.get("confirmed"):
+                post_structure["event_id"] = (
+                    f"{str(timeframe or 'unknown').lower()}:post_sweep_choch:"
+                    f"{self._event_time_key(candles, post_structure.get('confirmation_index'))}:"
+                    f"{post_structure.get('direction')}:"
+                    f"{format(float(post_structure.get('broken_level') or 0.0), '.12g')}"
+                )
             strength = self._strength_score(
                 buy_event, sell_event, post_structure, timeframe
             )
@@ -108,6 +123,7 @@ class LiquiditySweepEngine:
                 "breakout_low": None,
                 "is_sweep": True,
                 "is_breakout": False,
+                "ambiguous_sweep": False,
                 "strength_score": strength,
                 "swing": {
                     "buy_side": candidate.get("swing_buy"),
@@ -123,6 +139,7 @@ class LiquiditySweepEngine:
                 "sweep_age_bars": len(candles) - 1 - sweep_index,
                 "sweep_level": candidate.get("level"),
                 "sweep_side": active_side,
+                "event_id": sweep_event_id,
             }
 
         # Legacy fallback is retained only if no actual liquidity references
@@ -132,17 +149,52 @@ class LiquiditySweepEngine:
             prev, last = candles[-2], candles[-1]
             buy_side = last.high > prev.high and last.close < prev.high
             sell_side = last.low < prev.low and last.close > prev.low
-            if buy_side or sell_side:
+            if buy_side and sell_side:
                 return {
-                    "buy_side": buy_side,
-                    "sell_side": sell_side,
-                    "swept_high": prev.high if buy_side else None,
-                    "swept_low": prev.low if sell_side else None,
+                    "buy_side": False,
+                    "sell_side": False,
+                    "swept_high": None,
+                    "swept_low": None,
                     "breakout_high": None,
                     "breakout_low": None,
-                    "is_sweep": True,
+                    "is_sweep": False,
                     "is_breakout": False,
-                    "strength_score": 55,
+                    "ambiguous_sweep": True,
+                    "strength_score": 0,
+                    "swing": {"buy_side": None, "sell_side": None},
+                    "internal": {"buy_side": None, "sell_side": None},
+                    "post_structure": {
+                        "confirmed": False,
+                        "type": None,
+                        "direction": None,
+                        "reason": "legacy_dual_sided_sweep_ambiguous",
+                    },
+                    "timeframe": timeframe,
+                    "sweep_index": len(candles) - 1,
+                    "sweep_age_bars": 0,
+                    "sweep_level": None,
+                    "sweep_side": "DUAL",
+                    "event_id": f"{str(timeframe or 'unknown').lower()}:sweep:DUAL:{len(candles) - 1}",
+                }
+            if buy_side or sell_side:
+                wick_side = "BUY_SIDE" if buy_side else "SELL_SIDE"
+                wick_level = prev.high if buy_side else prev.low
+                return {
+                    # A two-candle wick rejection without a formed liquidity
+                    # pool is not a genuine sweep and must not feed setup votes.
+                    "buy_side": False,
+                    "sell_side": False,
+                    "swept_high": None,
+                    "swept_low": None,
+                    "breakout_high": None,
+                    "breakout_low": None,
+                    "is_sweep": False,
+                    "is_breakout": False,
+                    "ambiguous_sweep": False,
+                    "legacy_wick_rejection": True,
+                    "wick_side": wick_side,
+                    "wick_level": wick_level,
+                    "strength_score": 0,
                     "swing": {"buy_side": None, "sell_side": None},
                     "internal": {"buy_side": None, "sell_side": None},
                     "post_structure": {
@@ -154,11 +206,23 @@ class LiquiditySweepEngine:
                     "timeframe": timeframe,
                     "sweep_index": len(candles) - 1,
                     "sweep_age_bars": 0,
-                    "sweep_level": prev.high if buy_side else prev.low,
-                    "sweep_side": "BUY_SIDE" if buy_side else "SELL_SIDE",
+                    "sweep_level": None,
+                    "sweep_side": None,
+                    "event_id": None,
                 }
 
         return self._empty_result(timeframe)
+
+    @staticmethod
+    def _event_time_key(candles, index):
+        try:
+            candle = candles[int(index)]
+            value = candle.get("time", candle.get("timestamp")) if isinstance(candle, dict) else getattr(candle, "time", None)
+            if value is not None:
+                return f"t{int(value)}"
+        except (IndexError, KeyError, TypeError, ValueError, OverflowError):
+            pass
+        return f"i{int(index)}"
 
     def _empty_result(self, timeframe):
         return {
@@ -170,6 +234,8 @@ class LiquiditySweepEngine:
             "breakout_low": None,
             "is_sweep": False,
             "is_breakout": False,
+            "ambiguous_sweep": False,
+            "event_id": None,
             "strength_score": 0,
             "swing": {"buy_side": None, "sell_side": None},
             "internal": {"buy_side": None, "sell_side": None},

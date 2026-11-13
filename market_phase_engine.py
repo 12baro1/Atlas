@@ -28,7 +28,8 @@ class MarketPhaseEngine:
         orderblocks,
         premium_discount,
         mtf,
-        candles=None
+        candles=None,
+        timeframe="unknown",
     ):
         """Detect current market phase and calculate phase metrics."""
         
@@ -44,7 +45,15 @@ class MarketPhaseEngine:
         )
         
         recent_structure = self._recent_structure(structure, candles)
+        timestamp = None
+        if candles:
+            value = candles[-1].get("time", candles[-1].get("timestamp")) if isinstance(candles[-1], dict) else getattr(candles[-1], "time", None)
+            try:
+                timestamp = int(value) if value is not None else None
+            except (TypeError, ValueError, OverflowError):
+                timestamp = None
         return {
+            "event_id": f"market_phase:{str(timeframe).lower()}:snapshot:{timestamp}" if timestamp is not None else None,
             "phase": phase_info["phase"],
             "phase_confidence": phase_info["confidence"],
             "phase_strength": phase_info["strength"],
@@ -97,9 +106,6 @@ class MarketPhaseEngine:
         has_orderblocks = len(orderblocks) > 0
         premium = premium_discount.get("premium", False)
         discount = premium_discount.get("discount", False)
-        
-        # Volatility check (optional)
-        _volatility = self._calculate_volatility(candles) if candles else "NORMAL"
         
         # Phase determination logic
         phase = "RANGING"  # Default
@@ -243,21 +249,3 @@ class MarketPhaseEngine:
         
         score += phase_bonus.get(phase, 0)
         return min(100, score)
-
-    def _calculate_volatility(self, candles):
-        """Calculate volatility level from recent candles."""
-        if not candles or len(candles) < 10:
-            return "NORMAL"
-        
-        recent = candles[-10:]
-        avg_range = sum((c.high - c.low) for c in recent) / len(recent)
-        avg_close = sum(c.close for c in recent) / len(recent)
-        
-        volatility_percent = (avg_range / avg_close) * 100
-        
-        if volatility_percent > 2.0:
-            return "HIGH"
-        elif volatility_percent < 0.5:
-            return "LOW"
-        else:
-            return "NORMAL"

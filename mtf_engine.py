@@ -51,7 +51,7 @@ class MTFEngine:
         return "NEUTRAL"
 
     @staticmethod
-    def _confirmed_ltf_reversal(structure, liquidity_sweep):
+    def _confirmed_ltf_reversal(liquidity_sweep):
         """Require a directional sweep reclaim followed by a closed 15m CHoCH."""
         if not isinstance(liquidity_sweep, dict) or not liquidity_sweep.get("is_sweep"):
             return None
@@ -76,21 +76,22 @@ class MTFEngine:
         if str(post.get("direction", "")).upper() != expected:
             return None
 
-        events = [
-            item for item in (structure or [])
-            if isinstance(item, dict) and item.get("choch")
-        ]
-        if not events:
+        # The sweep engine's post_structure is the causal event ledger: it
+        # only emits confirmation after a pivot formed after the sweep and a
+        # later candle closed through it. Do not require the unrelated latest
+        # CHoCH label from the general structure list; that event may predate
+        # this sweep or refer to a different swing.
+        event_type = str(post.get("type") or "").upper()
+        if event_type and event_type != "CHOCH":
             return None
-
-        latest = events[-1]
-        label = str(latest.get("label", "")).upper()
-        event_direction = str(latest.get("direction", "")).upper()
-        if event_direction != expected:
+        sweep_index = post.get("sweep_index", liquidity_sweep.get("sweep_index"))
+        confirmation_index = post.get("confirmation_index")
+        if sweep_index is None or confirmation_index is None:
             return None
-        if direction == "LONG" and label != "HH":
-            return None
-        if direction == "SHORT" and label != "LL":
+        try:
+            if int(confirmation_index) <= int(sweep_index):
+                return None
+        except (TypeError, ValueError, OverflowError):
             return None
         return direction
 
@@ -117,10 +118,24 @@ class MTFEngine:
         entry_source = "NONE"
         direction_reason = "h4_structure_neutral"
 
-        # 4H confirmed structure determines the executable direction.
-        # Weekly/daily disagreement is context for entry placement and risk,
-        # not a second directional veto over a valid 4H BOS/CHoCH.
-        if h4_trend == "BULLISH":
+        # A fully confirmed 15m sweep/reclaim/CHoCH may reverse the 4H
+        # direction. The reversal exception is evaluated before the 4H trend
+        # fallback so the downstream HTF/LTF quality filter can recognize it.
+        reversal = self._confirmed_ltf_reversal(liquidity_sweep)
+        if reversal in {"LONG", "SHORT"}:
+            entry_signal = reversal
+            entry_source = "CONFIRMED_15M_REVERSAL"
+            direction_reason = (
+                "confirmed_15m_reversal_against_h4"
+                if h4_trend in {"BULLISH", "BEARISH"}
+                and reversal != ("LONG" if h4_trend == "BULLISH" else "SHORT")
+                else "confirmed_15m_reversal_weekly_countertrend"
+                if weekly_trend in {"BULLISH", "BEARISH"}
+                and reversal != ("LONG" if weekly_trend == "BULLISH" else "SHORT")
+                else "confirmed_15m_reversal"
+            )
+        elif h4_trend == "BULLISH":
+            # Weekly/daily disagreement is context, not a second directional veto.
             entry_signal = "LONG"
             entry_source = "H4_STRUCTURE"
             direction_reason = "h4_bullish_weekly_countertrend" if weekly_h4_conflict else "h4_bullish"
@@ -128,24 +143,6 @@ class MTFEngine:
             entry_signal = "SHORT"
             entry_source = "H4_STRUCTURE"
             direction_reason = "h4_bearish_weekly_countertrend" if weekly_h4_conflict else "h4_bearish"
-        else:
-            # 15m can establish direction only when 4H is neutral. It still
-            # requires a real liquidity sweep, post-sweep reclaim and CHoCH.
-            reversal = self._confirmed_ltf_reversal(entry, liquidity_sweep)
-            if reversal == "LONG":
-                entry_signal = reversal
-                entry_source = "CONFIRMED_15M_REVERSAL"
-                direction_reason = (
-                    "confirmed_15m_reversal_weekly_countertrend"
-                    if weekly_trend == "BEARISH" else "confirmed_15m_reversal"
-                )
-            elif reversal == "SHORT":
-                entry_signal = reversal
-                entry_source = "CONFIRMED_15M_REVERSAL"
-                direction_reason = (
-                    "confirmed_15m_reversal_weekly_countertrend"
-                    if weekly_trend == "BULLISH" else "confirmed_15m_reversal"
-                )
 
         return {
             "trend": weekly_trend,

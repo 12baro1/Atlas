@@ -32,6 +32,7 @@ def test_market_regime_detects_uptrend():
     assert result["regime"] == "TRENDING_UP"
     assert result["directional_bias"] == "BULLISH"
     assert result["source"] == "bybit_ohlcv"
+    assert result["event_id"].startswith("market_regime:4h:")
 
 
 def test_market_regime_detects_range():
@@ -98,3 +99,41 @@ def test_unavailable_market_regime_does_not_change_score():
         "LONG",
     )
     assert adjustments == []
+
+
+def test_phase_and_regime_same_trend_are_not_scored_twice():
+    engine = DecisionEngine()
+    assert engine._regime_is_represented_by_phase(
+        {"phase": "Expansion", "trend": "BULLISH"},
+        {"active": True, "regime": "TRENDING_UP", "directional_bias": "BULLISH"},
+    ) is True
+
+
+def test_phase_and_regime_directional_conflict_remains_visible():
+    engine = DecisionEngine()
+    assert engine._regime_is_represented_by_phase(
+        {"phase": "Expansion", "trend": "BULLISH"},
+        {"active": True, "regime": "TRENDING_DOWN", "directional_bias": "BEARISH"},
+    ) is False
+
+
+def test_ranging_phase_and_compression_regime_are_not_double_penalized():
+    engine = DecisionEngine()
+    assert engine._regime_is_represented_by_phase(
+        {"phase": "Consolidation", "trend": "RANGE"},
+        {"active": True, "regime": "COMPRESSION", "directional_bias": "NEUTRAL"},
+    ) is True
+
+
+def test_phase_regime_directional_conflict_is_a_single_penalty():
+    adjustments = []
+    DecisionEngine()._apply_market_context_adjustment(
+        adjustments,
+        {"phase": "Expansion", "trend": "BULLISH"},
+        {"active": True, "regime": "TRENDING_DOWN", "directional_bias": "BEARISH"},
+        "SHORT",
+    )
+    assert adjustments == [{
+        "delta": -8,
+        "label": "Market Phase/Regime directional conflict",
+    }]

@@ -89,6 +89,14 @@ Birden fazla sembol:
 python3 backtest.py --symbols "BTC/USDT:USDT,ETH/USDT:USDT" --days 30
 ```
 
+Daha büyük veri aralığını parçalara bölerek, eski dönem (IS) ile en yeni dönem (OOS) performansını ayrı ölç:
+
+```bash
+python3 backtest.py --symbols "BTC/USDT:USDT,ETH/USDT:USDT" --days 60 --chunk-days 10 --walk-forward
+```
+
+Walk-forward raporunda parametreler değiştirilmez. Eski parçalar eğitim/IS, en yeni parçalar dokunulmamış OOS kontrolüdür. Bu bir parametre optimizasyonu değildir. Küçük OOS örneklemi kârlılık kanıtı sayılmaz.
+
 Backtest geçmiş veriyi simüle eder; gerçek piyasa dolumunu veya gelecekteki performansı garanti etmez.
 
 ## Güncelleme

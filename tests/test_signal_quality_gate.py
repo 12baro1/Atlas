@@ -17,7 +17,7 @@ def test_signal_engine_uses_cross_motor_gate_instead_of_setup_score_blocker():
     assert result["signal"] == "LONG"
 
 
-def test_signal_engine_waits_when_cross_motor_gate_rejects_setup():
+def test_signal_engine_preserves_direction_for_single_decision_authority_veto():
     analysis = _analysis()
     analysis["trade_quality"] = {
         "allowed": False,
@@ -25,5 +25,5 @@ def test_signal_engine_waits_when_cross_motor_gate_rejects_setup():
         "reason": "Liquidity sweep direction conflicts with the trade",
     }
     result = SignalEngine().generate(analysis)
-    assert result["signal"] == "WAIT"
-    assert "Liquidity sweep direction conflicts" in result["wait_reason"]
+    assert result["signal"] == "LONG"
+    assert result["wait_reason"] is None

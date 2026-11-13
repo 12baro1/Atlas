@@ -5,6 +5,22 @@ Atlas Order Block Engine v4
 
 class OrderBlockEngine:
 
+    @staticmethod
+    def _event_id(candles, index, direction, high, low):
+        try:
+            candle = candles[int(index)]
+            timestamp = getattr(candle, "time", None)
+            if timestamp is None and isinstance(candle, dict):
+                timestamp = candle.get("time", candle.get("timestamp"))
+            if timestamp is None:
+                return None
+            return (
+                f"orderblock:{str(direction).upper()}:{int(timestamp)}:"
+                f"{format(float(high), '.12g')}:{format(float(low), '.12g')}"
+            )
+        except (IndexError, KeyError, TypeError, ValueError, OverflowError):
+            return None
+
     def detect(self, candles, structure):
 
         blocks = []
@@ -75,6 +91,7 @@ class OrderBlockEngine:
 
                     blocks.append({
                         "type": "BULLISH",
+                        "event_id": self._event_id(candles, ob_index, "BULLISH", prev.high, prev.low),
                         "index": ob_index,
                         "break_index": break_index,
                         "high": prev.high,
@@ -119,7 +136,9 @@ class OrderBlockEngine:
 
                     blocks.append({
                         "type": "BEARISH",
-                        "index": idx - 1,
+                        "event_id": self._event_id(candles, ob_index, "BEARISH", prev.high, prev.low),
+                        "index": ob_index,
+                        "break_index": break_index,
                         "high": prev.high,
                         "low": prev.low,
                         "strength": strength,

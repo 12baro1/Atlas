@@ -25,6 +25,7 @@ def _base_payload(direction, phase="Expansion"):
         "breaker": [
             {
                 "type": setup_direction,
+                "event_id": "orderblock:source:1700000000000",
                 "low": 100.0,
                 "high": 102.0,
                 "strength": 80,
@@ -33,6 +34,7 @@ def _base_payload(direction, phase="Expansion"):
         "fvg": [
             {
                 "type": setup_direction,
+                "event_id": "fvg:source:1700000000000",
                 "from": 101.0,
                 "to": 103.0,
                 "strength": 85,
@@ -70,6 +72,9 @@ def test_detects_bullish_unicorn_setup_with_levels():
 
     assert result["active"] is True
     assert result["best"]["direction"] == "BULLISH"
+    assert result["best"]["event_id"].startswith(
+        "unicorn:15m:orderblock:source:1700000000000:fvg:source:1700000000000"
+    )
     assert 0 <= result["best"]["confidence"] <= 100
     assert result["best"]["entry"] is not None
     assert result["best"]["tp1"] is not None

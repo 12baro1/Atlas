@@ -18,6 +18,7 @@ Tasarım ilkeleri:
 import json
 import math
 import os
+import shutil
 import threading
 from pathlib import Path
 
@@ -168,9 +169,36 @@ class LearningEngine:
             try:
                 with tmp_path.open("w", encoding="utf-8") as handle:
                     json.dump(self.stats, handle, ensure_ascii=False, indent=2, allow_nan=False)
+                backup_path = self.path.with_suffix(self.path.suffix + ".bak")
+                if self.path.exists():
+                    try:
+                        shutil.copyfile(self.path, backup_path)
+                    except OSError:
+                        # A failed optional backup must not prevent atomic state save.
+                        pass
                 os.replace(tmp_path, self.path)
             finally:
                 tmp_path.unlink(missing_ok=True)
+
+    def rollback_last_save(self):
+        """Restore the last atomically saved learning snapshot, if one exists."""
+        backup_path = self.path.with_suffix(self.path.suffix + ".bak")
+        if not backup_path.exists():
+            return False
+        try:
+            with backup_path.open("r", encoding="utf-8") as handle:
+                backup_state = json.load(handle)
+            if not isinstance(backup_state, dict) or not isinstance(backup_state.get("setups"), dict):
+                return False
+        except (OSError, ValueError, json.JSONDecodeError):
+            return False
+        with self._save_lock:
+            try:
+                os.replace(backup_path, self.path)
+            except OSError:
+                return False
+            self.load()
+        return True
 
     # ------------------------------------------------------------------
     # Besleme (backward-compatible popülasyon)
@@ -207,11 +235,25 @@ class LearningEngine:
         """
         from config import Config
 
+        records = sorted(
+            [record for record in records if isinstance(record, dict)],
+            key=lambda record: self._safe_int(record.get("closed_at"), 0),
+        )
         half_life_days = float(getattr(Config, "LEARNING_HALF_LIFE_DAYS", 45) or 0)
         alpha = float(getattr(Config, "LEARNING_BETA_PRIOR_ALPHA", 2.0))
         beta = float(getattr(Config, "LEARNING_BETA_PRIOR_BETA", 2.0))
         min_samples = int(getattr(Config, "LEARNING_MIN_SAMPLES", 20))
+        oos_required = bool(getattr(Config, "LEARNING_OOS_REQUIRED", True))
+        split_at = int(len(records) * (2.0 / 3.0)) if len(records) >= 10 else len(records)
+        training_records = records[:split_at]
+        validation_records = records[split_at:]
+        cause_counts = {}
+        for record in records:
+            cause = str(record.get("cause_code") or "UNKNOWN").upper()
+            cause_counts[cause] = cause_counts.get(cause, 0) + 1
 
+        # Learn only on the earlier chronological partition. The later holdout
+        # is never used to fit weights; it is used only to validate the learned edge.
         # Katmanlı ham sayaçlar.
         raw = {
             "exact": {},
@@ -219,9 +261,7 @@ class LearningEngine:
             "global": {},
         }
 
-        for record in records:
-            if not isinstance(record, dict):
-                continue
+        for record in training_records:
             direction = str(record.get("direction") or "UNKNOWN").upper()
             regime = str(record.get("regime") or "UNKNOWN").upper()
             timeframe = str(record.get("timeframe") or "UNKNOWN").upper()
@@ -262,17 +302,90 @@ class LearningEngine:
             for key, accum in raw[level].items():
                 setups[key] = self._compute_metrics(accum, counts=accum["total"], alpha=alpha, beta=beta)
 
-        index = {}
-        for level in raw:
-            index[level] = {
-                key: self._compute_metrics(accum, counts=accum["total"], alpha=alpha, beta=beta)
-                for key, accum in raw[level].items()
+        # Independent chronological holdout aggregation, using identical keys.
+        oos_raw = {"exact": {}, "family": {}, "global": {}}
+        for record in validation_records:
+            direction = str(record.get("direction") or "UNKNOWN").upper()
+            regime = str(record.get("regime") or "UNKNOWN").upper()
+            timeframe = str(record.get("timeframe") or "UNKNOWN").upper()
+            features = fingerprint_features(record)
+            feature_key = "|".join(normalize_features(features)) or "UNKNOWN"
+            r_value = self._safe_float(record.get("r"), 0.0)
+            confidence = self._safe_float(record.get("confidence"), 0.0)
+            win = bool(record.get("win"))
+            ctx = {
+                "direction": direction,
+                "regime": regime,
+                "timeframe": timeframe,
+                "feature_key": feature_key,
             }
+            for level, key in self._candidate_keys(ctx):
+                entry = oos_raw[level].setdefault(key, self._empty_raw())
+                entry["total"] += 1
+                entry["wins"] += 1 if win else 0
+                entry["r_sum"] += r_value
+                if r_value > 0:
+                    entry["pos_sum"] += r_value
+                elif r_value < 0:
+                    entry["neg_sum"] += r_value
+                entry["confidence_sum"] += confidence
+
+        index = {}
+        oos_passed_buckets = 0
+        for level in raw:
+            index[level] = {}
+            for key, accum in raw[level].items():
+                metrics = self._compute_metrics(
+                    accum, counts=accum["total"], alpha=alpha, beta=beta
+                )
+                validation = oos_raw[level].get(key)
+                oos_metrics = (
+                    self._compute_metrics(
+                        validation, counts=validation["total"], alpha=alpha, beta=beta
+                    )
+                    if validation else self._compute_metrics(
+                        self._empty_raw(), counts=0, alpha=alpha, beta=beta
+                    )
+                )
+                metrics["oos_validation"] = oos_metrics
+                metrics["total_records"] = int(accum.get("total", 0)) + int(
+                    validation.get("total", 0) if validation else 0
+                )
+                min_oos = int(getattr(Config, "LEARNING_OOS_MIN_SAMPLES", 10))
+                min_wilson = float(getattr(Config, "LEARNING_OOS_MIN_WILSON_LOWER", 0.45)) * 100
+                # OOS validation must recognize both edges: profitable
+                # histories may earn a bounded uplift, while consistently
+                # losing histories must remain eligible for a bounded penalty.
+                # Requiring positive expectancy for every match silently
+                # disables the learning system's most important loss feedback.
+                positive_edge_passed = (
+                    oos_metrics["average_r"] > 0
+                    and oos_metrics["profit_factor"] > 1.0
+                    and oos_metrics["wilson_lower"] >= min_wilson
+                )
+                negative_edge_passed = (
+                    oos_metrics["average_r"] < 0
+                    and oos_metrics["profit_factor"] < 1.0
+                    and oos_metrics["winrate"] < 50.0
+                )
+                passed = (
+                    oos_metrics["total"] >= min_oos
+                    and (positive_edge_passed or negative_edge_passed)
+                )
+                metrics["oos_passed"] = bool(passed)
+                if passed:
+                    oos_passed_buckets += 1
+                index[level][key] = metrics
 
         self.stats["setups"] = setups
         self.stats["index"] = index
         self.stats["meta"] = {
             "records_fed": len(records),
+            "cause_counts": cause_counts,
+            "training_records": len(training_records),
+            "oos_records": len(validation_records),
+            "oos_required": oos_required,
+            "oos_passed_buckets": oos_passed_buckets,
             "buckets": len(setups),
             "half_life_days": half_life_days,
             "min_samples": min_samples,
@@ -383,6 +496,12 @@ class LearningEngine:
             total = bucket.get("total", 0)
             if total <= 0:
                 continue
+            if bool(getattr(Config, "LEARNING_OOS_REQUIRED", True)):
+                # Reuse the exact bidirectional OOS decision made at rebuild
+                # time; duplicating a positive-only check here would discard
+                # every validated losing setup before its penalty is applied.
+                if not bool(bucket.get("oos_passed")):
+                    continue
             matched = {"level": level, "key": key, "metrics": bucket}
             if total >= min_samples:
                 return matched
@@ -417,13 +536,24 @@ class LearningEngine:
         match = self._match(setup_quality, market_phase, timeframe)
 
         if not match:
+            # Report the available sample count even when the OOS gate rejects
+            # it. This keeps diagnostics honest without applying an unvalidated
+            # score adjustment.
+            available_samples = 0
+            index = self.stats.get("index", {})
+            for level, key in self._candidate_keys(ctx):
+                bucket = (index.get(level) or {}).get(key)
+                if isinstance(bucket, dict):
+                    available_samples = max(
+                        available_samples, int(bucket.get("total", 0) or 0)
+                    )
             adjusted["module_scores"] = module_scores
             adjusted["learning_adjustments"] = {name: 1.0 for name in CANONICAL_MODULES}
             adjusted["learning"] = {
                 "matched": False,
                 "level": None,
                 "score_delta": 0,
-                "sample_count": 0,
+                "sample_count": available_samples,
                 "historical_edge": 0.0,
                 "reliability": 0.0,
                 "expected_r": 0.0,
@@ -446,7 +576,7 @@ class LearningEngine:
 
         reliability = float(metrics.get("reliability", 0) or 0)
         expected_r = float(metrics.get("average_r", 0) or 0)
-        sample_count = int(metrics.get("total", 0) or 0)
+        sample_count = int(metrics.get("total_records", metrics.get("total", 0)) or 0)
         edge_score = round(self._edge_score(metrics), 4)
 
         adjusted["module_scores"] = module_scores

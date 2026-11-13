@@ -228,10 +228,12 @@ def test_live_match_with_learned_fingerprint(tmp_path):
     setup = _setup_quality(features=FEATURES)
     adjusted = engine.learning.apply_to_setup_quality(setup, market_phase="Expansion", timeframe="15m")
 
-    assert adjusted["learning"]["matched"] is True
+    # Three records are visible in diagnostics but cannot pass the production
+    # OOS minimum-sample gate; no learned score adjustment is applied.
+    assert adjusted["learning"]["matched"] is False
     assert adjusted["learning"]["sample_count"] == 3
-    assert adjusted["learning"]["score_delta"] >= 0
-    assert adjusted["score"] >= setup["score"]
+    assert adjusted["learning"]["score_delta"] == 0
+    assert adjusted["score"] == setup["score"]
 
 
 def test_match_isolated_across_contexts(tmp_path):
@@ -392,8 +394,11 @@ def test_cache_hit_reapplies_learning(tmp_path):
     engine._reapply_learning_to_cached(cached_analysis)
 
     sq = cached_analysis["setup_quality"]
-    assert sq["learning"]["matched"] is True
-    assert cached_analysis["signal"]["learning"]["matched"] is True
+    assert sq["learning"]["matched"] is False
+    assert sq["learning"]["sample_count"] == 3
+    assert sq["learning"]["score_delta"] == 0
+    assert sq["score"] == 80
+    assert cached_analysis["signal"]["learning"]["matched"] is False
 
 
 def test_manual_score_perfect_inputs_never_100():

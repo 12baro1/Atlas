@@ -28,6 +28,30 @@ def _run(**overrides):
     return SetupReasoningEngine().generate(**payload)
 
 
+def test_same_event_id_is_counted_once_across_smt_poi_and_orderflow_modules():
+    event_id = "15m:shared-event:1700000000000"
+    supporting, opposing = SetupReasoningEngine()._evidence(
+        "LONG",
+        {"entry": "LONG", "weekly": "NEUTRAL", "daily": "NEUTRAL", "h4": "BULLISH"},
+        None,
+        [],
+        None,
+        {"type": "BULLISH", "event_id": event_id},
+        {"type": "BULLISH", "event_id": event_id},
+        {"active": True, "direction": "BULLISH", "best": {"event_id": event_id}},
+        {},
+        {},
+        {},
+        {},
+        {"active": True, "supportive": True, "event_id": event_id},
+        {},
+        {},
+        {},
+    )
+    assert supporting.count("SMT LONG") + supporting.count("HTF Order Block LONG") + supporting.count("HTF FVG LONG") + supporting.count("Order flow supports entry") == 1
+    assert opposing == []
+
+
 def test_confirmed_sell_side_sweep_can_create_countertrend_long_candidate():
     result = _run()
     selected = result["selected"]

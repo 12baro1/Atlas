@@ -62,8 +62,22 @@ class VolumeProfileEngine:
         confidence = self._confidence(histogram, poc_index, vah_index, val_index, current_price, vah, val)
         bias = self._direction_bias(profile_state)
 
+        event_id = None
+        try:
+            last_candle = candles[-1]
+            timestamp = last_candle.get("time", last_candle.get("timestamp")) if isinstance(last_candle, dict) else getattr(last_candle, "time", None)
+            if timestamp is not None:
+                event_id = (
+                    f"volume_profile:{int(timestamp)}:{int(bins)}:"
+                    f"{format(float(poc), '.12g')}:{format(float(vah), '.12g')}:"
+                    f"{format(float(val), '.12g')}"
+                )
+        except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+            event_id = None
+
         return {
             "active": True,
+            "event_id": event_id,
             "poc": round(poc, 8),
             "vah": round(vah, 8),
             "val": round(val, 8),

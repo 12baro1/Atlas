@@ -17,7 +17,8 @@ class ManualTradeService:
     def _guard(self):
         return self.lock if self.lock is not None else nullcontext()
 
-    def open_trade(self, *, signal_id, actual_entry=None, position_size=None, actual_stop=None, actual_tp=None):
+    def open_trade(self, *, signal_id, actual_entry=None, position_size=None, actual_stop=None, actual_tp=None,
+                   actual_entry_fee_quote=None):
         if self.journal is None:
             return None, "journal_unavailable"
         with self._guard():
@@ -27,6 +28,7 @@ class ManualTradeService:
                 actual_stop=actual_stop,
                 actual_tp=actual_tp,
                 position_size=position_size,
+                actual_entry_fee_quote=actual_entry_fee_quote,
             )
         return manual, code
 
@@ -37,7 +39,9 @@ class ManualTradeService:
             manual, code = self.journal.mark_manual_not_traded(signal_id=signal_id)
         return manual, code
 
-    def close_trade(self, *, signal_id, result, actual_exit=None):
+    def close_trade(self, *, signal_id, result, actual_exit=None,
+                    actual_exit_fee_quote=None, actual_spread_cost_quote=None,
+                    actual_slippage_cost_quote=None):
         if self.journal is None:
             return None, "journal_unavailable"
 
@@ -54,6 +58,9 @@ class ManualTradeService:
                 actual_exit=actual_exit,
                 result=normalized,
                 manual_exit_reason=str(result or normalized or "manual_close"),
+                actual_exit_fee_quote=actual_exit_fee_quote,
+                actual_spread_cost_quote=actual_spread_cost_quote,
+                actual_slippage_cost_quote=actual_slippage_cost_quote,
             )
         if code == "closed":
             self._refresh_learning_safe()

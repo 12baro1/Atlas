@@ -89,9 +89,10 @@ class SignalEngine:
             direction = "WAIT"
             wait_reason = wait_reason or "setup_quality_blocked"
 
-        if quality_gate_active and not trade_quality.get("allowed", False):
-            direction = "WAIT"
-            wait_reason = trade_quality.get("reason") or "trade_quality_blocked"
+        # Keep the selected LONG/SHORT direction intact here. Trade-quality
+        # vetoes must reach DecisionEngine as structured blockers so the
+        # single decision authority can return SKIP with actionable reasons;
+        # converting the direction to WAIT here hides that veto and its cause.
 
         if confidence_adjusted >= 96:
             grade = "S+"
@@ -211,31 +212,54 @@ class SignalEngine:
         """Sweep, SMT, Unicorn, CISD ve Volume Profile kalitesine göre güven puanını günceller."""
         adjusted = base_confidence
         active_modules = [liquidity_sweep, smt, unicorn, cisd, volume_profile, institutional]
+        seen_event_ids = set()
+        unique_modules = []
+        for module in active_modules:
+            if not isinstance(module, dict):
+                unique_modules.append(module)
+                continue
+            if not (module.get("active") or module.get("is_sweep") or module.get("trade_flow_active")):
+                unique_modules.append(module)
+                continue
+            event_id = module.get("event_id")
+            if not event_id:
+                for nested_key in ("best", "cvd", "volume_delta", "snapshot"):
+                    nested = module.get(nested_key)
+                    if isinstance(nested, dict) and nested.get("event_id"):
+                        event_id = nested["event_id"]
+                        break
+            identity = str(event_id or "").strip()
+            if identity and identity in seen_event_ids:
+                continue
+            if identity:
+                seen_event_ids.add(identity)
+            unique_modules.append(module)
+        unique_module_objects = {id(module) for module in unique_modules}
         raw_delta = 0.0
 
-        if liquidity_sweep.get("is_sweep"):
+        if id(liquidity_sweep) in unique_module_objects and liquidity_sweep.get("is_sweep"):
             raw_delta += min(5, liquidity_sweep.get("strength_score", 0) / 20)
             if liquidity_sweep.get("post_structure", {}).get("confirmed"):
                 raw_delta += 2
 
-        if is_active(smt):
+        if id(smt) in unique_module_objects and is_active(smt):
             raw_delta += min(4, extract_confidence(smt) / 25)
 
-        if is_active(unicorn):
+        if id(unicorn) in unique_module_objects and is_active(unicorn):
             raw_delta += min(5, extract_confidence(unicorn) / 20)
             best_direction = extract_direction(unicorn)
             if direction_matches(best_direction, signal_direction):
                 raw_delta += 1
 
-        if is_active(cisd):
+        if id(cisd) in unique_module_objects and is_active(cisd):
             raw_delta += min(4, extract_confidence(cisd) / 22)
             if direction_matches(extract_direction(cisd), signal_direction):
                 raw_delta += 1
 
-        if is_active(volume_profile):
+        if id(volume_profile) in unique_module_objects and is_active(volume_profile):
             raw_delta += min(3, extract_confidence(volume_profile) / 30)
 
-        if is_active(institutional):
+        if id(institutional) in unique_module_objects and is_active(institutional):
             raw_delta += min(6, extract_confidence(institutional) / 15)
             institutional_direction = extract_direction(institutional)
             if direction_matches(institutional_direction, signal_direction):
@@ -247,7 +271,7 @@ class SignalEngine:
             if institutional.get("news_filter", {}).get("active") and institutional.get("news_filter", {}).get("confidence", 100) < 50:
                 raw_delta -= 3
 
-        raw_delta -= self._alignment_conflicts(signal_direction, *active_modules)
+        raw_delta -= self._alignment_conflicts(signal_direction, *unique_modules)
 
         # Modül etkisini yarıya yakın ölçekleyerek grade enflasyonunu düşürür.
         adjusted += raw_delta * 0.6

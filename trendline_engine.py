@@ -182,6 +182,45 @@ class TrendlineEngine:
                     trendline.break_index = idx
                     break
 
+    @staticmethod
+    def _candle_timestamp(candle):
+        value = candle.get("time", candle.get("timestamp")) if isinstance(candle, dict) else getattr(candle, "time", None)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    @classmethod
+    def _trendline_event_id(cls, trendline, candles):
+        timestamps = []
+        for index in trendline.touch_indices:
+            if 0 <= int(index) < len(candles):
+                timestamp = cls._candle_timestamp(candles[int(index)])
+                if timestamp is not None:
+                    timestamps.append(timestamp)
+        if len(timestamps) < 2:
+            return None
+        return (
+            f"trendline:{trendline.direction}:{':'.join(map(str, sorted(set(timestamps))))}:"
+            f"{format(float(trendline.slope), '.12g')}:"
+            f"{format(float(trendline.intercept), '.12g')}"
+        )
+
+    @classmethod
+    def _sweep_event_id(cls, sweep, candles):
+        if not sweep.active or candles is None:
+            return None
+        index = sweep.sweep_index
+        if index is None or not 0 <= int(index) < len(candles):
+            return None
+        timestamp = cls._candle_timestamp(candles[int(index)])
+        if timestamp is None:
+            return None
+        trendline_id = cls._trendline_event_id(sweep.trendline, candles) if sweep.trendline else None
+        if not trendline_id:
+            return None
+        return f"trendline_sweep:{trendline_id}:{timestamp}:{sweep.direction}"
+
     def detect_liquidity(
         self,
         structure: List[dict],
@@ -195,6 +234,7 @@ class TrendlineEngine:
                 payload.append(
                     {
                         "type": "SELL_SIDE" if direction == "RESISTANCE" else "BUY_SIDE",
+                        "event_id": self._trendline_event_id(tl, candles),
                         "kind": "TRENDLINE",
                         "direction": direction,
                         "slope": round(tl.slope, 8),
@@ -259,9 +299,10 @@ class TrendlineEngine:
                     )
         return TrendlineSweep()
 
-    def serialize(self, sweep: TrendlineSweep) -> dict:
+    def serialize(self, sweep: TrendlineSweep, candles=None) -> dict:
         return {
             "active": sweep.active,
+            "event_id": self._sweep_event_id(sweep, candles),
             "direction": sweep.direction,
             "sweep_index": sweep.sweep_index,
             "close_index": sweep.close_index,
@@ -271,6 +312,7 @@ class TrendlineEngine:
             "trendline": (
                 {
                     "direction": sweep.trendline.direction,
+                    "event_id": self._trendline_event_id(sweep.trendline, candles) if candles is not None else None,
                     "slope": sweep.trendline.slope,
                     "intercept": sweep.trendline.intercept,
                     "touches": sweep.trendline.touches,

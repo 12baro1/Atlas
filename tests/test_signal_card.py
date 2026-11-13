@@ -101,6 +101,7 @@ def test_signal_card_labels_confidence_as_score_not_probability():
 
     assert "İŞLEME GİRME" in rendered
     assert "No confirmed setup" in rendered
+    assert "Engeller" in rendered or "Neden" in rendered
     assert "92%" not in rendered
 
 
@@ -247,3 +248,29 @@ def test_pending_limit_with_invalid_risk_is_not_shown_as_actionable():
     rendered = format_card_text(build_signal_card(result))
     assert "İŞLEME GİRME" in rendered
     assert "LIMIT BEKLE" not in rendered
+
+
+def test_wait_limit_is_not_presented_as_a_pending_order_and_shows_blockers():
+    result = _result()
+    result["decision"] = {
+        "action": "WAIT",
+        "reason": "Setup confirmation is incomplete",
+        "critical_blockers": [],
+        "quality_blockers": ["15m confirmation missing"],
+    }
+    result["signal"] = {"signal": "LONG", "wait_reason": "Waiting for closed 15m candle"}
+    result["analysis"]["entry"].update({
+        "entry_type": "LIMIT",
+        "valid": True,
+        "direction": "LONG",
+        "entry": 99.0,
+        "stop_loss": 98.0,
+        "entry_type_reason": "Waiting for POI retest",
+    })
+    result["risk"].update({"risk_setup_valid": True, "tp1": 102.0})
+    rendered = format_card_text(build_signal_card(result))
+    assert "LIMIT BEKLE" not in rendered
+    assert "İŞLEME GİRME" in rendered
+    assert "15m confirmation missing" in rendered
+    assert "Waiting for closed 15m candle" in rendered
+    assert "Giriş     :" not in rendered

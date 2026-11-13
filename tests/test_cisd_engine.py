@@ -39,6 +39,7 @@ def test_detects_bullish_cisd_change():
 
     assert result["active"] is True
     assert result["direction"] == "BULLISH"
+    assert result["event_id"].startswith("15m:cisd:")
     assert 0 <= result["confidence"] <= 100
 
 

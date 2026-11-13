@@ -301,20 +301,51 @@ class TradeQualityFilters:
             detail["reason"] = "HTF yönü tanımlı değil; 15M üzerinden değerlendirilir"
             return detail
 
+        if (
+            entry_signal in {"LONG", "SHORT"} and entry_signal != direction
+        ) or (
+            entry_source == "CONFIRMED_15M_REVERSAL" and entry_signal != direction
+        ):
+            detail["passed"] = False
+            detail["severity"] = "critical"
+            detail["reason"] = (
+                f"MTF entry direction conflicts with setup: "
+                f"15m={entry_signal}, setup={direction}"
+            )
+            detail["critical_blockers"].append(
+                f"MTF entry direction {entry_signal} conflicts with setup {direction}"
+            )
+            return detail
+
         aligned = (
             (direction == "LONG" and h4_trend == "BULLISH")
             or (direction == "SHORT" and h4_trend == "BEARISH")
         )
         opposing = not aligned
 
-        # Ters dönüşler 4H karşıyınlılığına karşın geçerlidir; onaylı swept
-        # reversal bir yorum yapısıdır, "terş yapı engeli" değil.
+        # Ters dönüşler 4H karşıtlığına karşın geçerlidir; onaylı swept
+        # reversal bir yorum yapısıdır, otomatik veto değildir.
         post = liquidity_sweep.get("post_structure") if isinstance(liquidity_sweep.get("post_structure"), dict) else {}
+        sweep_side = str(liquidity_sweep.get("sweep_side") or "").upper()
+        expected_sweep_side = "SELL_SIDE" if direction == "LONG" else "BUY_SIDE"
+        post_type = str(post.get("type") or "").upper()
+        sweep_index = post.get("sweep_index", liquidity_sweep.get("sweep_index"))
+        confirmation_index = post.get("confirmation_index")
+        causal_confirmation = False
+        if sweep_index is not None and confirmation_index is not None:
+            try:
+                causal_confirmation = int(confirmation_index) > int(sweep_index)
+            except (TypeError, ValueError, OverflowError):
+                causal_confirmation = False
         confirmed_reversal = bool(
             entry_source == "CONFIRMED_15M_REVERSAL"
+            and entry_signal == direction
             and liquidity_sweep.get("is_sweep")
+            and sweep_side == expected_sweep_side
             and post.get("confirmed")
+            and (not post_type or post_type == "CHOCH")
             and self._match_direction(post.get("direction"), direction)
+            and causal_confirmation
         )
 
         if aligned:
@@ -658,7 +689,7 @@ class TradeQualityFilters:
         except (TypeError, ValueError, OverflowError):
             execution_rr = None
         net_rr = weighted_net_rr if weighted_net_rr is not None else execution_rr
-        min_net_rr = float(getattr(Config, "QUALITY_MIN_NET_RR", 1.5))
+        min_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 2.0))
         min_tp1_rr = float(getattr(Config, "MIN_TP1_RR", 0.80))
 
         risk_distance = None

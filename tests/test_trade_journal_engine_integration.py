@@ -22,7 +22,7 @@ def test_engine_records_trade_journal_snapshot(monkeypatch):
     engine = AtlasEngine()
 
     monkeypatch.setattr(engine, "_validate_market_data", lambda data: None)
-    monkeypatch.setattr(engine, "_analyze_timeframe", lambda candles: {"pivots": [], "structure": [{"label": "HH", "bos": False, "choch": False, "direction": "BULLISH"}]})
+    monkeypatch.setattr(engine, "_analyze_timeframe", lambda candles, timeframe="unknown": {"pivots": [], "structure": [{"label": "HH", "bos": False, "choch": False, "direction": "BULLISH"}]})
     monkeypatch.setattr(engine, "_build_structure_state", lambda **kwargs: {"structure": [], "bos": [], "choch": [], "liquidity": [], "liquidity_layers": {"swing": [], "internal": [], "all": []}, "eqh_eql": {"eqh": [], "eql": [], "active": False}, "orderblocks": [], "fvg": [], "liquidity_sweep": {"buy_side": False, "sell_side": False, "strength_score": 0}, "inducement": {"active": False}, "breaker": []})
     monkeypatch.setattr(engine, "_build_context_state", lambda **kwargs: {"mtf": {"valid": True, "weekly": "BULLISH", "daily": "BULLISH", "h4": "BULLISH", "entry": "LONG"}, "trend": {"trend": "BULLISH", "strength": 2}, "premium_discount": {"valid": True}, "killzone": {"name": "LONDON"}, "session": {"session": "LONDON"}, "ote": {"valid": True}, "htf_orderblock": {"valid": True}, "htf_fvg": {"valid": True}, "market_phase": {"phase": "Expansion", "phase_confidence": 80, "phase_score": 90, "mtf_alignment": 100}})
     monkeypatch.setattr(engine, "_build_unicorn_state", lambda **kwargs: {"active": False, "direction": "NONE", "confidence": 0, "best": None, "setups": [], "timeframes": {}})

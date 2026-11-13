@@ -8,6 +8,17 @@ class BOSEngine:
             return float(candle[name])
         return float(getattr(candle, name))
 
+    @staticmethod
+    def _event_time_key(candles, index):
+        try:
+            candle = candles[int(index)]
+            value = candle.get("time", candle.get("timestamp")) if isinstance(candle, dict) else getattr(candle, "time", None)
+            if value is not None:
+                return f"t{int(value)}"
+        except (IndexError, KeyError, TypeError, ValueError, OverflowError):
+            pass
+        return f"i{int(index)}"
+
     def _close_break_index(self, candles, start, end, level, direction):
         if candles is None:
             return None
@@ -24,7 +35,7 @@ class BOSEngine:
                 return index
         return None
 
-    def detect(self, pivots, candles=None):
+    def detect(self, pivots, candles=None, timeframe="unknown"):
         structure = []
         if len(pivots) < 2:
             return structure
@@ -87,6 +98,23 @@ class BOSEngine:
                         event["break_index"] = break_index
                 last_low = pivot
 
+            # Stable identity for the same confirmed pivot/BOS across motors.
+            try:
+                event_price = float(event["price"])
+                price_key = format(event_price, ".12g")
+            except (TypeError, ValueError, OverflowError):
+                price_key = str(event.get("price"))
+            identity_index = (
+                event.get("break_index")
+                if event.get("break_index") is not None
+                else event.get("confirmation_index", pivot_index)
+            )
+            identity_time = self._event_time_key(candles, identity_index) if candles is not None else f"i{identity_index}"
+            event["event_id"] = (
+                f"{str(timeframe or 'unknown').lower()}:structure:"
+                f"{identity_time}:{str(event.get('kind') or '').upper()}:"
+                f"{price_key}:{event.get('break_index') is not None}"
+            )
             structure.append(event)
 
         return structure

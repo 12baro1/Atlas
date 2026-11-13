@@ -33,7 +33,18 @@ class BreakerBlockEngine:
 
                 if broken:
 
+                    break_event_id = None
+                    try:
+                        break_candle = candles[candle_index]
+                        break_time = break_candle.get("time", break_candle.get("timestamp")) if isinstance(break_candle, dict) else getattr(break_candle, "time", None)
+                        if ob.get("event_id") and break_time is not None:
+                            break_event_id = f"breaker:{ob['event_id']}:{int(break_time)}"
+                    except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+                        break_event_id = None
+
                     breakers.append({
+
+                        "event_id": break_event_id,
 
                         "type": "BEARISH" if ob["type"] == "BULLISH" else "BULLISH",
 

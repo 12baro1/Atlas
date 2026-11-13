@@ -37,6 +37,61 @@ class TradeJournal:
         self._ensure_store()
         self._enforce_retention()
 
+    @staticmethod
+    def _compact_modules(modules):
+        """Persist only outcome-relevant module evidence, not full candle payloads."""
+        if not isinstance(modules, dict):
+            return {}
+        compact = {}
+        allowed = ("active", "direction", "signal", "trend", "confidence", "score", "grade", "reason")
+        for name, payload in modules.items():
+            if not isinstance(payload, dict):
+                continue
+            item = {key: copy.deepcopy(payload[key]) for key in allowed if key in payload}
+            best = payload.get("best")
+            if isinstance(best, dict):
+                item["best"] = {
+                    key: copy.deepcopy(best[key])
+                    for key in ("direction", "type", "confidence", "price", "level", "reason")
+                    if key in best
+                }
+            if item:
+                compact[str(name)] = item
+        return compact
+
+    @classmethod
+    def _compact_trade_analysis(cls, analysis):
+        """Keep the fields used by journal attribution and learning; drop raw modules/candles."""
+        if not isinstance(analysis, dict):
+            return {}
+        source = analysis.get("analysis") if isinstance(analysis.get("analysis"), dict) else analysis
+        compact = {
+            key: copy.deepcopy(source.get(key))
+            for key in ("signal", "confluence", "risk", "decision", "market_phase")
+            if key in source
+        }
+        setup = source.get("setup_quality")
+        if isinstance(setup, dict):
+            compact_setup = {
+                key: copy.deepcopy(setup[key])
+                for key in ("features", "setup_fingerprint", "score", "confidence", "trade_allowed")
+                if key in setup
+            }
+            scores = setup.get("module_scores")
+            if isinstance(scores, dict):
+                compact_setup["module_scores"] = {
+                    str(name): {
+                        key: copy.deepcopy(value[key])
+                        for key in ("score", "active", "reason")
+                        if key in value
+                    }
+                    for name, value in scores.items() if isinstance(value, dict)
+                }
+            compact["setup_quality"] = compact_setup
+        if source is not analysis:
+            compact["analysis"] = copy.deepcopy(compact)
+        return compact
+
     def record_analysis(self, analysis, symbol=None, timeframe="multi", timestamp=None, metadata=None):
         """İşlem açılışındaki tüm analiz çıktısını snapshot olarak kaydeder."""
         snapshot = {
@@ -52,7 +107,7 @@ class TradeJournal:
             "market_phase": copy.deepcopy(analysis.get("market_phase") or {}),
             "session": self._extract_session(analysis),
             "killzone": self._extract_killzone(analysis),
-            "modules": copy.deepcopy(analysis.get("modules") or {}),
+            "modules": self._compact_modules(analysis.get("modules") or {}),
             "structure": self._compact_structure(analysis),
             "metadata": copy.deepcopy(metadata or {}),
         }
@@ -90,7 +145,7 @@ class TradeJournal:
             "session": self._snapshot_value(snapshot, "session", "session") or trade.get("session", "UNKNOWN"),
             "killzone": self._snapshot_value(snapshot, "killzone", "name") or trade.get("killzone", "UNKNOWN"),
             "analysis_snapshot_id": snapshot["id"] if snapshot else None,
-            "analysis": copy.deepcopy(analysis or {}),
+            "analysis": self._compact_trade_analysis(analysis or {}),
             "metadata": copy.deepcopy(metadata or {}),
             "closed_payload": None,
         }
@@ -572,6 +627,52 @@ class TradeJournal:
         self._snapshots = [s for s in self._snapshots if s.get("id") not in stale_ids]
         if archived:
             self._vacuum_if_large()
+
+    def compact_database(self):
+        """Create a verified SQLite backup, then reclaim free pages explicitly."""
+        if not self.db_path or not Path(self.db_path).exists():
+            return {"success": False, "reason": "journal database unavailable"}
+        database_path = Path(self.db_path)
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+        backup_path = database_path.with_name(
+            f"{database_path.name}.pre-vacuum-{stamp}.bak"
+        )
+        before_bytes = database_path.stat().st_size
+        source = None
+        backup = None
+        try:
+            source = sqlite3.connect(str(database_path), timeout=30.0)
+            backup = sqlite3.connect(str(backup_path), timeout=30.0)
+            source.backup(backup)
+            integrity = backup.execute("PRAGMA integrity_check").fetchone()
+            if not integrity or integrity[0] != "ok":
+                raise RuntimeError("SQLite backup integrity check failed")
+            backup.close()
+            backup = None
+            if not backup_path.exists() or backup_path.stat().st_size <= 0:
+                raise RuntimeError("SQLite backup was not created")
+            source.execute("VACUUM")
+            source.execute("PRAGMA optimize")
+            source.commit()
+            after_bytes = database_path.stat().st_size
+            return {
+                "success": True,
+                "backup_path": str(backup_path),
+                "before_bytes": before_bytes,
+                "after_bytes": after_bytes,
+                "reclaimed_bytes": max(0, before_bytes - after_bytes),
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "reason": f"{type(exc).__name__}: {exc}",
+                "backup_path": str(backup_path) if backup_path.exists() else None,
+            }
+        finally:
+            if backup is not None:
+                backup.close()
+            if source is not None:
+                source.close()
 
     def _vacuum_if_large(self):
         """Arşiv sonrası DB fiziksel olarak küçülür mü? (freepages isteğe bağlı)"""
@@ -1365,12 +1466,19 @@ class TradeJournal:
     # ------------------------------------------------------------------
 
     def open_manual_trade(self, *, signal_id, actual_entry=None, actual_stop=None, actual_tp=None,
-                          position_size=None, opened_at=None, exit=None):
+                          position_size=None, opened_at=None, exit=None,
+                          actual_entry_fee_quote=None):
         """Kullanıcının gerçek işlemini bir sinyale bağlar.
 
-        Sinyal bulunamazsa ya da aynı signal_id'ye ait açık manual trade
-        varsa hata döner (duplicate koruması).
+        actual_entry_fee_quote, varsa giriş komisyonunun settlement/quote para
+        birimindeki gerçek tutarıdır. Gerçek maliyetlerle net R hesaplamak için
+        pozisyon miktarı da kaydedilmelidir.
         """
+        entry_fee = self._num(actual_entry_fee_quote) if actual_entry_fee_quote is not None else None
+        if actual_entry_fee_quote is not None and (
+            entry_fee is None or not math.isfinite(entry_fee) or entry_fee < 0
+        ):
+            return None, "invalid_actual_execution_cost"
         outcome = self.find_signal_outcome(signal_id) if signal_id else None
         if outcome is None:
             return None, "signal_not_found"
@@ -1393,6 +1501,14 @@ class TradeJournal:
             "tp2": self._norm_price(outcome.get("tp2")),
             "tp3": self._norm_price(outcome.get("tp3")),
             "position_size": position_size,
+            "actual_entry_fee_quote": entry_fee,
+            "actual_exit_fee_quote": None,
+            "actual_spread_cost_quote": None,
+            "actual_slippage_cost_quote": None,
+            "execution_cost_quote": None,
+            "execution_cost_rr": None,
+            "gross_pnl_rr": None,
+            "pnl_rr_basis": None,
             "result": None,
             "pnl_rr": None,
             "pnl": None,
@@ -1498,11 +1614,16 @@ class TradeJournal:
         return manual, "not_traded"
 
     def close_manual_trade(self, manual_id=None, signal_id=None, *, actual_exit=None, result=None,
-                           pnl=None, closed_at=None, manual_exit_reason=None):
+                           pnl=None, closed_at=None, manual_exit_reason=None,
+                           actual_exit_fee_quote=None, actual_spread_cost_quote=None,
+                           actual_slippage_cost_quote=None):
         """Kullanıcının gerçek işlemini kapatır.
 
+        Fee/spread/slippage alanları settlement/quote para birimindeki gerçek
+        tutarlardır. Net R, gerçek çıkış fiyatı ve pozisyon miktarı olmadan
+        hesaplanmaz; eksik veride kapanış reddedilir.
+
         result: WIN | LOSS | BREAKEVEN | EARLY_EXIT | MANUAL_CLOSE | CANCELLED.
-        Result bilinmiyorsa actual_exit/entry/stop bazında otomatik infer edilir.
         """
         manual = None
         for candidate in self._manual_trades:
@@ -1539,24 +1660,64 @@ class TradeJournal:
         if result not in allowed:
             result = "MANUAL_CLOSE"
 
-        pnl_rr = 0.0
-        if entry is not None and stop_loss is not None and exit_price is not None:
-            risk = abs(entry - stop_loss)
-            if risk > 0:
-                if side == "LONG":
-                    pnl_rr = (exit_price - entry) / risk
-                else:
-                    pnl_rr = (entry - exit_price) / risk
-                if result == "LOSS":
-                    pnl_rr = -abs(pnl_rr)
-                elif result == "BREAKEVEN":
-                    pnl_rr = 0.0
-                pnl_rr = round(pnl_rr, 4)
+        gross_pnl_rr = 0.0
+        risk_distance = abs(entry - stop_loss) if entry is not None and stop_loss is not None else 0.0
+        if risk_distance > 0 and exit_price is not None:
+            if side == "LONG":
+                gross_pnl_rr = (exit_price - entry) / risk_distance
+            else:
+                gross_pnl_rr = (entry - exit_price) / risk_distance
+            if result == "LOSS":
+                gross_pnl_rr = -abs(gross_pnl_rr)
+            elif result == "BREAKEVEN":
+                gross_pnl_rr = 0.0
+        gross_pnl_rr = round(gross_pnl_rr, 4)
+
+        cost_inputs = {
+            "actual_entry_fee_quote": manual.get("actual_entry_fee_quote"),
+            "actual_exit_fee_quote": actual_exit_fee_quote,
+            "actual_spread_cost_quote": actual_spread_cost_quote,
+            "actual_slippage_cost_quote": actual_slippage_cost_quote,
+        }
+        actual_costs_provided = any(value is not None for value in cost_inputs.values())
+        if actual_costs_provided and (
+            exit_price is None or not math.isfinite(exit_price)
+        ):
+            return None, "actual_costs_require_actual_exit_price"
+        normalized_costs = {}
+        for name, value in cost_inputs.items():
+            normalized = self._num(value, 0.0) if value is not None else 0.0
+            if normalized is None or not math.isfinite(normalized) or normalized < 0:
+                return None, "invalid_actual_execution_cost"
+            normalized_costs[name] = normalized
+
+        execution_cost_quote = sum(normalized_costs.values())
+        execution_cost_rr = 0.0
+        pnl_rr = gross_pnl_rr
+        if actual_costs_provided:
+            quantity = self._num(manual.get("position_size"))
+            if quantity is None or not math.isfinite(quantity) or quantity <= 0 or risk_distance <= 0:
+                return None, "actual_costs_require_position_size_and_valid_risk"
+            risk_quote = risk_distance * quantity
+            if not math.isfinite(risk_quote) or risk_quote <= 0:
+                return None, "actual_costs_require_position_size_and_valid_risk"
+            execution_cost_rr = execution_cost_quote / risk_quote
+            pnl_rr = round(gross_pnl_rr - execution_cost_rr, 4)
 
         manual["status"] = "CLOSED"
         manual["closed_at"] = closed_at
         manual["actual_exit"] = exit_price
         manual["result"] = result
+        manual["net_result"] = (
+            "WIN" if pnl_rr > 0 else "LOSS" if pnl_rr < 0 else "BREAKEVEN"
+        ) if actual_costs_provided else None
+        manual["gross_pnl_rr"] = gross_pnl_rr
+        manual["execution_cost_quote"] = round(execution_cost_quote, 8) if actual_costs_provided else None
+        manual["execution_cost_rr"] = round(execution_cost_rr, 6) if actual_costs_provided else None
+        manual["actual_exit_fee_quote"] = normalized_costs["actual_exit_fee_quote"] if actual_costs_provided else None
+        manual["actual_spread_cost_quote"] = normalized_costs["actual_spread_cost_quote"] if actual_costs_provided else None
+        manual["actual_slippage_cost_quote"] = normalized_costs["actual_slippage_cost_quote"] if actual_costs_provided else None
+        manual["pnl_rr_basis"] = "net_actual_costs" if actual_costs_provided else "gross_price_only"
         manual["pnl_rr"] = pnl_rr
         manual["pnl"] = pnl
         manual["manual_exit_reason"] = manual_exit_reason
@@ -1639,24 +1800,40 @@ class TradeJournal:
             payload["not_traded"] = not_traded_count
             payload["open"] = open_count
             return payload
-        wins = [m for m in closed if m.get("result") == "WIN"]
-        losses = [m for m in closed if m.get("result") == "LOSS"]
-        breakeven = [m for m in closed if m.get("result") == "BREAKEVEN"]
-        early_exit = [m for m in closed if m.get("result") == "EARLY_EXIT"]
+        wins = [m for m in closed if (m.get("net_result") or m.get("result")) == "WIN"]
+        losses = [m for m in closed if (m.get("net_result") or m.get("result")) == "LOSS"]
+        breakeven = [m for m in closed if (m.get("net_result") or m.get("result")) == "BREAKEVEN"]
+        early_exit = [m for m in closed if (m.get("net_result") or m.get("result")) == "EARLY_EXIT"]
         r_values = [self._num(m.get("pnl_rr"), 0.0) for m in closed]
+        actual_cost_trades = [m for m in closed if m.get("pnl_rr_basis") == "net_actual_costs"]
+        price_only_trades = [m for m in closed if m.get("pnl_rr_basis") != "net_actual_costs"]
+        actual_cost_r = [self._num(m.get("pnl_rr"), 0.0) for m in actual_cost_trades]
+        price_only_r = [self._num(m.get("pnl_rr"), 0.0) for m in price_only_trades]
         return {
             "total": len(closed),
             "wins": len(wins),
             "losses": len(losses),
             "breakeven": len(breakeven),
             "early_exit": len(early_exit),
-            "cancelled": len([m for m in closed if m.get("result") == "CANCELLED"]),
+            "cancelled": len([m for m in closed if (m.get("net_result") or m.get("result")) == "CANCELLED"]),
             "open": open_count,
             "not_traded": not_traded_count,
             "winrate": round(len(wins) / len(closed) * 100, 2) if closed else 0.0,
             "expectancy": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
             "profit_factor": self._profit_factor(r_values),
             "average_r": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
+            "actual_cost_accounting": {
+                "net_actual_costs_count": len(actual_cost_trades),
+                "gross_price_only_count": len(price_only_trades),
+                "actual_cost_quote_total": round(sum(self._num(m.get("execution_cost_quote"), 0.0) for m in actual_cost_trades), 8),
+                "net_actual_costs_expectancy": round(sum(actual_cost_r) / len(actual_cost_r), 4) if actual_cost_r else None,
+                "net_actual_costs_profit_factor": self._profit_factor(actual_cost_r) if actual_cost_r else None,
+                "gross_price_only_expectancy": round(sum(price_only_r) / len(price_only_r), 4) if price_only_r else None,
+                "gross_price_only_profit_factor": self._profit_factor(price_only_r) if price_only_r else None,
+            },
+            "performance_basis": "mixed" if actual_cost_trades and price_only_trades else (
+                "net_actual_costs" if actual_cost_trades else "gross_price_only"
+            ),
         }
 
     # ------------------------------------------------------------------
@@ -1713,9 +1890,34 @@ class TradeJournal:
             records.append(self._signal_to_learning_record(outcome))
         return records
 
+    @staticmethod
+    def _classify_trade_cause(reason, realized_r, payload=None):
+        """Stable outcome taxonomy for post-trade analysis; never changes trade result."""
+        text = str(reason or "").strip().upper()
+        payload = payload if isinstance(payload, dict) else {}
+        try:
+            r_value = float(realized_r or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            r_value = 0.0
+        if "TRAIL" in text:
+            return "TRAILING_STOP"
+        if "STOP" in text or text in {"SL", "LOSS"}:
+            if r_value > 0 or payload.get("tp_hits") or payload.get("reached_levels"):
+                return "PARTIAL_PROFIT_GIVEBACK"
+            return "STOP_OUT"
+        if "TP" in text or "TARGET" in text:
+            return "TARGET_EXIT" if r_value > 0 else "TARGET_EXIT_NET_LOSS"
+        if "TIME" in text or "EXPIRE" in text:
+            return "TIME_EXIT"
+        if r_value > 0:
+            return "PROFIT_OTHER"
+        if r_value < 0:
+            return "LOSS_OTHER"
+        return "UNKNOWN"
+
     def _manual_to_learning_record(self, manual):
         r_value = self._num(manual.get("pnl_rr"), 0.0)
-        result = str(manual.get("result") or "").upper()
+        result = str(manual.get("net_result") or manual.get("result") or "").upper()
         if result == "WIN":
             wins = True
         elif result == "EARLY_EXIT":
@@ -1731,7 +1933,8 @@ class TradeJournal:
             "symbol": manual.get("symbol"),
             "closed_at": int(manual.get("closed_at") or manual.get("opened_at") or 0),
             "opened_at": int(manual.get("opened_at") or 0),
-            "result": manual.get("result"),
+            "result": result,
+            "reported_result": manual.get("result"),
             "win": wins,
             "r": r_value,
             "timeframe": self._manual_timeframe(manual),
@@ -1740,6 +1943,10 @@ class TradeJournal:
             "regime": manual.get("regime"),
             "grade": manual.get("grade"),
             "confidence": manual.get("confidence"),
+            "cause_code": self._classify_trade_cause(manual.get("manual_exit_reason") or manual.get("close_reason") or manual.get("exit_reason"), r_value, manual.get("payload")),
+            "pnl_rr_basis": manual.get("pnl_rr_basis") or "gross_price_only",
+            "execution_cost_rr": manual.get("execution_cost_rr"),
+            "execution_cost_quote": manual.get("execution_cost_quote"),
         }
 
     def find_manual_trade(self, *, signal_id=None, manual_id=None):
@@ -1812,6 +2019,7 @@ class TradeJournal:
             "regime": regime,
             "grade": signal.get("grade") or setup_quality.get("grade"),
             "confidence": self._num(signal.get("confidence") or trade.get("confidence"), 0),
+            "cause_code": self._classify_trade_cause(trade.get("close_reason"), r_value, trade.get("closed_payload")),
         }
 
     def _setup_quality_features(self, setup_quality):
@@ -1855,6 +2063,7 @@ class TradeJournal:
             "regime": outcome.get("regime") or outcome.get("market_phase"),
             "grade": outcome.get("grade"),
             "confidence": outcome.get("confidence"),
+            "cause_code": self._classify_trade_cause(outcome.get("exit_reason") or outcome.get("final_result"), r_value, payload),
         }
 
     def _manual_timeframe(self, manual):
@@ -1983,6 +2192,16 @@ class TradeJournal:
             "open": 0,
             "not_traded": 0,
             "winrate": 0, "expectancy": 0, "profit_factor": 0, "average_r": 0,
+            "actual_cost_accounting": {
+                "net_actual_costs_count": 0,
+                "gross_price_only_count": 0,
+                "actual_cost_quote_total": 0,
+                "net_actual_costs_expectancy": None,
+                "net_actual_costs_profit_factor": None,
+                "gross_price_only_expectancy": None,
+                "gross_price_only_profit_factor": None,
+            },
+            "performance_basis": "none",
         }
 
     # ------------------------------------------------------------------

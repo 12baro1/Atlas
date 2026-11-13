@@ -86,17 +86,7 @@ class TradeQualityEngine:
 
         expected_mtf = direction
         mtf_direction = str(mtf.get("entry", mtf.get("direction", ""))).upper()
-        confirmed_countertrend_reversal = bool(
-            entry.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL"
-            and mtf.get("valid")
-            and sweep_active
-            and expected_sweep
-            and post.get("confirmed")
-            and str(post.get("direction", "")).upper() == expected_trend
-        )
-        if not mtf.get("valid") or (
-            mtf_direction != expected_mtf and not confirmed_countertrend_reversal
-        ):
+        if not mtf.get("valid") or mtf_direction != expected_mtf:
             blockers.append("Multi-timeframe direction is not aligned")
 
         trend_direction = str(trend.get("trend", "NEUTRAL")).upper()
@@ -281,8 +271,10 @@ class TradeQualityEngine:
                 first_rr = abs(tp_prices[0] - entry_price) / risk_distance
                 if first_rr < float(getattr(Config, "MIN_TP1_RR", 0.80)):
                     blockers.append("TP1 is too close relative to structural risk")
-                if final_rr < float(minimum_rr):
-                    blockers.append("Final structural target does not meet minimum RR")
+                # Gross final-target RR is diagnostic only. Execution eligibility
+                # is decided once, by DecisionEngine, using weighted net RR after
+                # fees, spread and slippage. A second gross-RR veto here can reject
+                # a setup that passes the actual cost-adjusted execution threshold.
 
                 target_atr = 0.0
                 try:
