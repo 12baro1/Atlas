@@ -86,31 +86,7 @@ class TradeQualityEngine:
 
         expected_mtf = direction
         mtf_direction = str(mtf.get("entry", mtf.get("direction", ""))).upper()
-        sweep_side = str(sweep.get("sweep_side") or "").upper()
-        expected_sweep_side = "SELL_SIDE" if direction == "LONG" else "BUY_SIDE"
-        sweep_index = post.get("sweep_index", sweep.get("sweep_index"))
-        confirmation_index = post.get("confirmation_index")
-        causal_sweep_confirmation = False
-        if sweep_index is not None and confirmation_index is not None:
-            try:
-                causal_sweep_confirmation = int(confirmation_index) > int(sweep_index)
-            except (TypeError, ValueError, OverflowError):
-                causal_sweep_confirmation = False
-        confirmed_countertrend_reversal = bool(
-            entry.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL"
-            and mtf.get("valid")
-            and mtf_direction == direction
-            and sweep_active
-            and expected_sweep
-            and sweep_side == expected_sweep_side
-            and post.get("confirmed")
-            and str(post.get("type", "")).upper() == "CHOCH"
-            and str(post.get("direction", "")).upper() == expected_trend
-            and causal_sweep_confirmation
-        )
-        if not mtf.get("valid") or (
-            mtf_direction != expected_mtf and not confirmed_countertrend_reversal
-        ):
+        if not mtf.get("valid") or mtf_direction != expected_mtf:
             blockers.append("Multi-timeframe direction is not aligned")
 
         trend_direction = str(trend.get("trend", "NEUTRAL")).upper()
