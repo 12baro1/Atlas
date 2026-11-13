@@ -25,6 +25,7 @@ def _base_payload(direction, phase="Expansion"):
         "breaker": [
             {
                 "type": setup_direction,
+                "event_id": "orderblock:source:1700000000000",
                 "low": 100.0,
                 "high": 102.0,
                 "strength": 80,
@@ -33,6 +34,7 @@ def _base_payload(direction, phase="Expansion"):
         "fvg": [
             {
                 "type": setup_direction,
+                "event_id": "fvg:source:1700000000000",
                 "from": 101.0,
                 "to": 103.0,
                 "strength": 85,
