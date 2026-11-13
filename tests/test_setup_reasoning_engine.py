@@ -48,7 +48,7 @@ def test_same_event_id_is_counted_once_across_smt_poi_and_orderflow_modules():
         {},
         {},
     )
-    assert supporting.count("SMT BULLISH") + supporting.count("HTF Order Block BULLISH") + supporting.count("HTF FVG BULLISH") + supporting.count("Order flow supports entry") == 1
+    assert supporting.count("SMT LONG") + supporting.count("HTF Order Block LONG") + supporting.count("HTF FVG LONG") + supporting.count("Order flow supports entry") == 1
     assert opposing == []
 
 
