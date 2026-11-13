@@ -399,6 +399,8 @@ class BacktestRunner:
         self.entry_type_reason_counts = {}
         self.entry_validity_counts = {}
         self.decision_blocker_counts = {}
+        self.direction_action_counts = {}
+        self.direction_blocker_counts = {}
 
     @staticmethod
     def _safe_cost_rate(value):
@@ -458,6 +460,9 @@ class BacktestRunner:
             signal_dir = str(signal.get("signal", "")).upper()
             action = str(decision.get("action", "MISSING")).upper() or "MISSING"
             self.action_counts[action] = self.action_counts.get(action, 0) + 1
+            if signal_dir in {"LONG", "SHORT"}:
+                direction_action = f"{signal_dir}|{action}"
+                self.direction_action_counts[direction_action] = self.direction_action_counts.get(direction_action, 0) + 1
             if signal_dir not in {"LONG", "SHORT"}:
                 wait_reason = str(signal.get("wait_reason") or "unspecified")
                 self.wait_reason_counts[wait_reason] = self.wait_reason_counts.get(wait_reason, 0) + 1
@@ -530,15 +535,19 @@ class BacktestRunner:
                     key = str(blocker).strip()
                     if key:
                         self.decision_blocker_counts[key] = self.decision_blocker_counts.get(key, 0) + 1
+                        if signal_dir in {"LONG", "SHORT"}:
+                            side_key = f"{signal_dir}|{key}"
+                            self.direction_blocker_counts[side_key] = self.direction_blocker_counts.get(side_key, 0) + 1
             risk_meta = result.get("risk") if isinstance(result, dict) else {}
             if isinstance(risk_meta, dict) and risk_meta.get("risk_setup_valid") is False:
                 risk_reason = str(risk_meta.get("reason_code") or risk_meta.get("risk_setup_reason") or "unspecified")
                 self.risk_reason_counts[risk_reason] = self.risk_reason_counts.get(risk_reason, 0) + 1
             if isinstance(risk_meta, dict):
                 atr_value = _num(risk_meta.get("atr"))
-                stop_distance = _num(risk_meta.get("requested_risk"))
+                # Report the final executable stop, not the pre-expansion request.
+                stop_distance = _num(risk_meta.get("risk"))
                 if stop_distance is None:
-                    stop_distance = _num(risk_meta.get("risk"))
+                    stop_distance = _num(risk_meta.get("requested_risk"))
                 if atr_value and atr_value > 0 and stop_distance is not None:
                     ratio = stop_distance / atr_value
                     bucket = "<0.10 ATR" if ratio < 0.10 else "<0.25 ATR" if ratio < 0.25 else "<0.50 ATR" if ratio < 0.50 else ">=0.50 ATR"
@@ -728,10 +737,20 @@ class BacktestRunner:
             tradeable_dir = signal_dir in ("LONG", "SHORT") and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
         if not tradeable_dir:
             return None
+        if not lenient and (
+            decision.get("entry_valid") is False
+            or decision.get("risk_valid") is False
+        ):
+            self.invalid_candidates += 1
+            return None
         self.candidate_signals += 1
         self.candidate_direction_counts[signal_dir] = self.candidate_direction_counts.get(signal_dir, 0) + 1
 
         risk = dict((result or {}).get("risk") or {})
+        risk_side = str(risk.get("side") or "").upper()
+        if risk_side in {"LONG", "SHORT"} and risk_side != signal_dir:
+            self.invalid_candidates += 1
+            return None
         if isinstance(risk, dict) and risk.get("risk_setup_valid") is False:
             self.invalid_candidates += 1
             return None
@@ -844,6 +863,10 @@ class BacktestRunner:
                 if not touched:
                     continue
                 entry_price = min(limit_price, opened) if is_long else max(limit_price, opened)
+                if gap_fill:
+                    # A marketable resting LIMIT takes liquidity at the open;
+                    # charge taker fee and market friction, not maker pricing.
+                    entry_type = "MARKETABLE_LIMIT"
                 # If price opens through the limit, fill is at the open and
                 # the candle's later range can be simulated. Otherwise the
                 # intrabar path is unknown: do not count a TP touched before
@@ -1215,6 +1238,8 @@ class BacktestRunner:
                 "entry_type_reason_counts": dict(self.entry_type_reason_counts),
                 "entry_validity_counts": dict(self.entry_validity_counts),
                 "decision_blocker_counts": dict(self.decision_blocker_counts),
+                "direction_action_counts": dict(self.direction_action_counts),
+                "direction_blocker_counts": dict(self.direction_blocker_counts),
                 "unfilled_limits": self.unfilled_limits,
                 "expired_limits": self.expired_limits,
                 "stale_limits_cancelled": self.stale_limits_cancelled,
