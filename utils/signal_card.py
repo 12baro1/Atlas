@@ -278,7 +278,7 @@ def format_card_text(card):
         entry_type == "LIMIT"
         and card.get("entry_valid")
         and card.get("risk_setup_valid")
-        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION", "WAIT")
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
         and card.get("direction") in ("LONG", "SHORT")
         and card.get("entry") is not None
         and card.get("stop_loss") is not None
