@@ -218,7 +218,8 @@ def test_confirmed_sweep_reversal_can_override_h4_conflict_when_mtf_entry_matche
     payload["liquidity_sweep"] = {
         "is_sweep": True, "sell_side": True, "buy_side": False,
         "sweep_side": "SELL_SIDE",
-        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+        "sweep_index": 10,
+        "post_structure": {"confirmed": True, "type": "CHOCH", "direction": "BULLISH", "sweep_index": 10, "confirmation_index": 12},
     }
     result = evaluate(payload)
     assert result["allowed"] is True
