@@ -142,7 +142,7 @@ Her motor için: görev / veri / çıktı / final karara etki / çakışma / öl
 ### 1.18 BacktestRunner (`backtest.py`, `backtest_runner.py`, `backtest_engine.py`)
 - **Görev:** Tarihsel replay; closed-candle karar + next-open MARKET fill + LIMIT touch-fill (gap-düzeltmeli, intrabar-muhafazakâr) + stop-first + journal-parite (P0-2) + segmentli/checkpoint'li çalışma.
 - **Güçlü:** `timing.closed_htf_candles` tek kaynak (canlı+backtest); SMT peer re-align; listing-aware warmup; overlap dedup (`_setup_identity`); 200 işlem/PF≥1.5/≤%10 DD performans kapısı.
-- **Boşluklar:** (a) Walk-forward/OOS yok (eski `BacktestEngine.walk_forward` rolling-window istatistik, parametre-optimizasyonu değil, test-only); (b) segmentasyon yalnız yön + MTF bağlamı; (c) `BacktestEngine` üretimde write-only ledger (statistiği hiçbir ürüne çıkmıyor); (d) backtest canlı journal DB'ye analysis snapshot yazabiliyor (izolasyon eksik); (e) üretim CLI'si `partial_exits=False` yolunu hiç kullanmıyor (non-partial simülatör dormant); (f) funding maliyeti modellenmiyor (kasıtlı, belgelenmiş).
+- **Boşluklar:** (a) Walk-forward/OOS yok (eski `BacktestEngine.walk_forward` rolling-window istatistik, parametre-optimizasyonu değil, test-only); (b) segmentasyon yalnız yön + MTF bağlamı; (c) `BacktestEngine` üretimde write-only ledger (statistiği hiçbir ürüne çıkmıyor); (d) backtest analiz snapshot'larını bellekteki `TradeJournal` nesnesine ekler, ancak `_disable_backtest_live_features()` `SIGNAL_TRACKING_ENABLED=False` yaptığı için `AtlasEngine` journal'ı `db_path=None` ile kurar; mevcut kod akışında canlı journal DB'sine yazma bulgusu doğrulanmadı; (e) üretim CLI'si `partial_exits=False` yolunu hiç kullanmıyor (non-partial simülatör dormant); (f) funding maliyeti modellenmiyor (kasıtlı, belgelenmiş).
 - **Bulgu (araç uyumu):** `backtest/` adında neredeyse boş bir paket `backtest.py`'yi **gölgeliyor** (`import backtest` → boş paket); kafa karıştırıcı, silinmeli/ad değişmeli (ayrı PR).
 
 ---
@@ -306,7 +306,7 @@ ETH 12g + BTC 28g toplam **35 işlem, 4 kazanan** — **hiçbir segment için is
 
 ### 4.6 Canlı/backtest davranış farklılıkları
 - Ortak: karar zinciri, timing, maliyet modeli, BE/TP kuralları.
-- Farklı: (a) canlıda orderbook/correlation/economic-news/cooldown etkin, backtestte kapatılıyor (özellik, bilinçli); (b) canlıda learning durumu etki edebilir, backtestte kapalı; (c) **backtest analiz snapshot'larını canlı journal DB'sine yazabiliyor** (izolasyon eksiği); (d) canlı MARKET fill gerçek spread/slippage, backtest proxy.
+- Farklı: (a) canlıda orderbook/correlation/economic-news/cooldown etkin, backtestte kapatılıyor (özellik, bilinçli); (b) canlıda learning durumu etki edebilir, backtestte kapalı; (c) backtest analiz snapshot'ları bellekte tutulur; tracking kapatıldığı ve `TradeJournal(db_path=None)` kurulduğu için canlı journal DB'sine yazılmaz; (d) canlı MARKET fill gerçek spread/slippage, backtest proxy.
 
 ### 4.7 Walk-forward / OOS
 - Mevcut: YOK. `run_segmented_backtest` (chunk başına yeni runner + checkpoint + `_combine_stats`) doğal katman (train/verify dilimleri); `BacktestRunner.run` pencere-bağımsız stateless. Eklenmesi gereken: param-set frozen IS/OS işaretleme + raporlama (bkz. §7-F).
