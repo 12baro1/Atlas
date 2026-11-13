@@ -86,29 +86,13 @@ class MTFEngine:
             return None
         sweep_index = post.get("sweep_index", liquidity_sweep.get("sweep_index"))
         confirmation_index = post.get("confirmation_index")
-        if sweep_index is not None and confirmation_index is not None:
-            try:
-                if int(confirmation_index) <= int(sweep_index):
-                    return None
-            except (TypeError, ValueError, OverflowError):
+        if sweep_index is None or confirmation_index is None:
+            return None
+        try:
+            if int(confirmation_index) <= int(sweep_index):
                 return None
-        else:
-            # Compatibility for older serialized payloads without causal indices.
-            events = [
-                item for item in (structure or [])
-                if isinstance(item, dict) and item.get("choch")
-            ]
-            if not events:
-                return None
-            latest = events[-1]
-            label = str(latest.get("label", "")).upper()
-            event_direction = str(latest.get("direction", "")).upper()
-            if event_direction != expected:
-                return None
-            if direction == "LONG" and label != "HH":
-                return None
-            if direction == "SHORT" and label != "LL":
-                return None
+        except (TypeError, ValueError, OverflowError):
+            return None
         return direction
 
     def detect(self, weekly, daily, h4, entry, liquidity_sweep=None):
