@@ -76,22 +76,39 @@ class MTFEngine:
         if str(post.get("direction", "")).upper() != expected:
             return None
 
-        events = [
-            item for item in (structure or [])
-            if isinstance(item, dict) and item.get("choch")
-        ]
-        if not events:
+        # The sweep engine's post_structure is the causal event ledger: it
+        # only emits confirmation after a pivot formed after the sweep and a
+        # later candle closed through it. Do not require the unrelated latest
+        # CHoCH label from the general structure list; that event may predate
+        # this sweep or refer to a different swing.
+        event_type = str(post.get("type") or "").upper()
+        if event_type and event_type != "CHOCH":
             return None
-
-        latest = events[-1]
-        label = str(latest.get("label", "")).upper()
-        event_direction = str(latest.get("direction", "")).upper()
-        if event_direction != expected:
-            return None
-        if direction == "LONG" and label != "HH":
-            return None
-        if direction == "SHORT" and label != "LL":
-            return None
+        sweep_index = post.get("sweep_index", liquidity_sweep.get("sweep_index"))
+        confirmation_index = post.get("confirmation_index")
+        if sweep_index is not None and confirmation_index is not None:
+            try:
+                if int(confirmation_index) <= int(sweep_index):
+                    return None
+            except (TypeError, ValueError, OverflowError):
+                return None
+        else:
+            # Compatibility for older serialized payloads without causal indices.
+            events = [
+                item for item in (structure or [])
+                if isinstance(item, dict) and item.get("choch")
+            ]
+            if not events:
+                return None
+            latest = events[-1]
+            label = str(latest.get("label", "")).upper()
+            event_direction = str(latest.get("direction", "")).upper()
+            if event_direction != expected:
+                return None
+            if direction == "LONG" and label != "HH":
+                return None
+            if direction == "SHORT" and label != "LL":
+                return None
         return direction
 
     def detect(self, weekly, daily, h4, entry, liquidity_sweep=None):
