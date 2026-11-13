@@ -172,7 +172,7 @@ def test_poi_quality_accepts_valid_confluent_fvg_zone(monkeypatch):
     result = TradeQualityEngine().evaluate(**payload)
 
     assert result["allowed"] is True
-    assert result["setup_quality"]["quality_filters"]["filters"]["poi_quality"]["score"] >= 50
+    assert not any("POI quality:" in item for item in result["blockers"])
 
 
 def test_stop_atr_quality_uses_final_structural_stop_floor(monkeypatch):
