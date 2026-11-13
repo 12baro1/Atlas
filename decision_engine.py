@@ -706,24 +706,6 @@ class DecisionEngine:
 
         return "NONE"
 
-    def _extract_confidence(self, module):
-        if not isinstance(module, dict):
-            return 0
-
-        for key in ("confidence", "score", "phase_score", "strength_score"):
-            value = module.get(key)
-            if isinstance(value, (int, float)):
-                return value
-
-        best = module.get("best")
-        if isinstance(best, dict):
-            for key in ("confidence", "score", "phase_score", "strength_score"):
-                value = best.get(key)
-                if isinstance(value, (int, float)):
-                    return value
-
-        return 0
-
     def _match_direction(self, module, direction):
         module_direction = self._extract_direction(module)
         return self._match_direction_raw(module_direction, direction)
