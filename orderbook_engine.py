@@ -148,8 +148,18 @@ class OrderBookEngine:
             opposing = book_opposing or flow["trade_flow_opposing"]
             market_allowed = spread_pct <= self.MARKET_MAX_SPREAD_PCT and not opposing
 
+            event_id = None
+            if timestamp is not None:
+                try:
+                    event_id = (
+                        f"orderbook:snapshot:{int(timestamp)}:"
+                        f"{format(float(best_bid), '.12g')}:{format(float(best_ask), '.12g')}"
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    event_id = None
             result = {
                 "active": True, "source": "bybit_orderbook", "direction": side,
+                "event_id": event_id,
                 "imbalance": round(imbalance, 4),
                 "bid_notional": round(bid_notional, 2),
                 "ask_notional": round(ask_notional, 2),
