@@ -1866,7 +1866,7 @@ class TradeJournal:
             "regime": manual.get("regime"),
             "grade": manual.get("grade"),
             "confidence": manual.get("confidence"),
-            "cause_code": self._classify_trade_cause(manual.get("close_reason") or manual.get("exit_reason"), r_value, manual.get("payload")),
+            "cause_code": self._classify_trade_cause(manual.get("manual_exit_reason") or manual.get("close_reason") or manual.get("exit_reason"), r_value, manual.get("payload")),
         }
 
     def find_manual_trade(self, *, signal_id=None, manual_id=None):
