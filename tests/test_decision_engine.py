@@ -444,3 +444,26 @@ def test_execution_quality_gate_not_confluence_score_decides_execution():
         )
     )
     assert result["action"] == "EXECUTE"
+
+
+def test_shared_specialist_event_is_only_scored_once():
+    shared_id = "shared-market-event:1700000000000"
+    result = DecisionEngine().decide(
+        **_supportive_context(
+            unicorn={"active": True, "direction": "BULLISH", "confidence": 90, "event_id": shared_id},
+            cisd={"active": True, "direction": "BULLISH", "confidence": 90, "event_id": shared_id},
+            volume_profile={"active": True, "direction": "BULLISH", "confidence": 90, "event_id": shared_id},
+            institutional={"active": True, "direction": "BULLISH", "confidence": 90, "event_id": shared_id},
+        )
+    )
+    labels = [
+        item["label"]
+        for item in result["module_scores"]["decision_adjustments"]
+        if item["label"] in {
+            "Unicorn same direction",
+            "CISD same direction",
+            "Volume Profile same direction",
+            "Institutional same direction",
+        }
+    ]
+    assert len(labels) == 1
