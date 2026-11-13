@@ -890,6 +890,7 @@ def test_manual_trade_net_r_uses_explicit_actual_fees_and_fill_size(tmp_path):
     assert closed["execution_cost_rr"] == pytest.approx(0.06)
     assert closed["pnl_rr"] == pytest.approx(1.94)
     assert closed["pnl_rr_basis"] == "net_actual_costs"
+    assert closed["net_result"] == "WIN"
     performance = journal.manual_trade_performance()
     assert performance["actual_cost_accounting"]["net_actual_costs_count"] == 1
     assert performance["actual_cost_accounting"]["gross_price_only_count"] == 0
@@ -921,3 +922,39 @@ def test_manual_trade_refuses_actual_costs_without_position_size(tmp_path):
     assert closed is None
     assert code == "actual_costs_require_position_size_and_valid_risk"
     assert journal.open_manual_trades()[0]["status"] == "OPEN"
+
+
+def test_manual_actual_costs_can_turn_gross_win_into_net_loss(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "j.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT",
+        direction="LONG",
+        entry=100.0,
+        stop_loss=95.0,
+        tp1=105.0,
+        opened_at=1_700_000_000_000,
+    )
+    journal.open_manual_trade(
+        signal_id=outcome["signal_id"],
+        actual_entry=100.0,
+        actual_stop=95.0,
+        position_size=2.0,
+        actual_entry_fee_quote=0.2,
+    )
+    closed, code = journal.close_manual_trade(
+        signal_id=outcome["signal_id"],
+        actual_exit=101.0,
+        result="WIN",
+        actual_exit_fee_quote=1.0,
+        actual_spread_cost_quote=0.8,
+        actual_slippage_cost_quote=0.3,
+    )
+    assert code == "closed"
+    assert closed["gross_pnl_rr"] == pytest.approx(0.2)
+    assert closed["pnl_rr"] == pytest.approx(-0.03)
+    assert closed["result"] == "WIN"
+    assert closed["net_result"] == "LOSS"
+    assert journal.manual_trade_performance()["losses"] == 1
+    learning_record = journal.learning_records(source="manual")[0]
+    assert learning_record["result"] == "LOSS"
+    assert learning_record["win"] is False
