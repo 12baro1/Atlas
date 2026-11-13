@@ -73,6 +73,8 @@ class LiquidityEngine:
                         "liquidity_kind": liquidity_kind,
                         "indices": [],
                         "confirmation_indices": [],
+                        "source_event_ids": [],
+                        "source_timestamps": [],
                     }
                     self._record_cluster_touch(level, item)
                     highs.append(level)
@@ -101,12 +103,36 @@ class LiquidityEngine:
                     lows.append(level)
 
         for level in highs + lows:
+            source_ids = sorted(set(level.get("source_event_ids", [])))
+            source_times = sorted(set(level.get("source_timestamps", [])))
+            if source_ids:
+                identity = "|".join(source_ids)
+                level["event_id"] = (
+                    f"liquidity:{liquidity_kind}:{level['type']}:{identity}"
+                )
+            elif len(source_times) >= 2:
+                level["event_id"] = (
+                    f"liquidity:{liquidity_kind}:{level['type']}:"
+                    f"{':'.join(str(value) for value in source_times)}:"
+                    f"{format(float(level['price']), '.12g')}"
+                )
             zones.append(level)
 
         return zones
 
     def _record_cluster_touch(self, level, item):
         level["touches"] += 1
+        source_event_id = item.get("event_id")
+        if source_event_id:
+            level.setdefault("source_event_ids", []).append(str(source_event_id))
+        source_time = item.get("time", item.get("timestamp", item.get("pivot_time")))
+        if source_time is None:
+            source_time = item.get("timestamp_ms")
+        if source_time is not None:
+            try:
+                level.setdefault("source_timestamps", []).append(int(source_time))
+            except (TypeError, ValueError, OverflowError):
+                pass
         index = item.get("index")
         confirmation_index = item.get("confirmation_index", index)
         if index is not None:
@@ -152,6 +178,7 @@ class LiquidityEngine:
                         "price": center.high,
                         "index": index,
                         "confirmation_index": index + 1,
+                        "time": getattr(center, "time", None) if not isinstance(center, dict) else center.get("time", center.get("timestamp")),
                     }
                 )
 
