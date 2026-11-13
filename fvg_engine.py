@@ -5,6 +5,23 @@ Atlas FVG Engine v4
 
 class FVGEngine:
 
+    @staticmethod
+    def _event_id(candles, index, direction, zone_from, zone_to, event_type="FVG"):
+        try:
+            candle = candles[int(index)]
+            timestamp = getattr(candle, "time", None)
+            if timestamp is None and isinstance(candle, dict):
+                timestamp = candle.get("time", candle.get("timestamp"))
+            if timestamp is None:
+                return None
+            low, high = sorted((float(zone_from), float(zone_to)))
+            return (
+                f"fvg:{event_type}:{str(direction).upper()}:{int(timestamp)}:"
+                f"{format(low, '.12g')}:{format(high, '.12g')}"
+            )
+        except (IndexError, KeyError, TypeError, ValueError, OverflowError):
+            return None
+
     def detect(self, candles):
 
         gaps = []
@@ -42,6 +59,7 @@ class FVGEngine:
 
                 gaps.append({
                     "type": "BULLISH",
+                    "event_id": self._event_id(candles, i, "BULLISH", left.high, right.low),
                     "from": left.high,
                     "to": right.low,
                     "size": size,
@@ -74,6 +92,7 @@ class FVGEngine:
 
                 gaps.append({
                     "type": "BEARISH",
+                    "event_id": self._event_id(candles, i, "BEARISH", right.high, left.low),
                     "from": right.high,
                     "to": left.low,
                     "size": size,
@@ -184,6 +203,7 @@ class FVGEngine:
             if inverted:
                 inversions.append({
                     "type": direction,
+                    "event_id": self._event_id(candles, i, direction, zone_from, zone_to, "IFVG"),
                     "from": zone_from,
                     "to": zone_to,
                     "size": zone_to - zone_from,
