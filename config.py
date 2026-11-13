@@ -94,7 +94,8 @@ class Config:
     # this minimum. Marginal setups with insufficient edge after costs are
     # filtered out before reaching the quality gate. This is a risk/reward
     # quality filter, not an artificial trade-count reduction.
-    MIN_SETUP_NET_RR = float(os.getenv("ATLAS_MIN_SETUP_NET_RR", "2.0"))
+    # Backward-compatible alias; setup generation and final decision share one net-RR floor.
+    MIN_SETUP_NET_RR = MINIMUM_NET_RR
     # In live analysis, do not fabricate TP levels when structure has no valid targets.
     DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK = _env_or_rc("ATLAS_ALLOW_SYNTHETIC_TP_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
     # Require higher-timeframe direction by default; 15m-only direction is legacy opt-in.
