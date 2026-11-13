@@ -851,7 +851,7 @@ def _save_checkpoint(path, payload):
 
 
 def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
-                           resume, step, limit_expiry_bars, lenient):
+                           resume, step, limit_expiry_bars, lenient, walk_forward=False):
     """Büyük backtesti tarih aralıklarına göre parçalara böler ve kalıcı checkpoint'ler yazar.
 
     Her parça bağımsız veri indirir ve çalışır; bellekte tek parça kadar veri
@@ -862,6 +862,9 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
     total_chunks = max(1, math.ceil(float(days) / float(chunk_days)))
     overall_status = "SUCCESS"
     combined_all = []
+    is_results = []
+    oos_results = []
+    oos_chunk_count = max(1, math.ceil(total_chunks * 0.30))
 
     for symbol in symbols:
         listing_time_ms = _market_listing_time_ms(symbol)
@@ -888,7 +891,10 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
 
             if chunk_index in completed_chunks:
                 print(f"  [atlandi] {chunk_label} (checkpoint'te tamamlanmis)")
-                combined_all.append((symbol, chunk_results[str(chunk_index)]))
+                restored_stats = chunk_results[str(chunk_index)]
+                combined_all.append((symbol, restored_stats))
+                if walk_forward:
+                    (oos_results if chunk_index < oos_chunk_count else is_results).append((symbol, restored_stats))
                 continue
 
             print(f"  [isleniyor] {chunk_label} ...", flush=True)
@@ -918,6 +924,8 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                 chunk_results[str(chunk_index)] = stats
                 completed_chunks.add(chunk_index)
                 combined_all.append((symbol, stats))
+                if walk_forward:
+                    (oos_results if chunk_index < oos_chunk_count else is_results).append((symbol, stats))
 
                 _save_checkpoint(checkpoint_path, {
                     "symbol": symbol,
@@ -960,6 +968,18 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
             })
         elif completed_chunks:
             overall_status = "INCOMPLETE"
+
+    if walk_forward:
+        print("\\n=== WALK-FORWARD | PARAMETRELER SABİT ===")
+        print(f"IS: eski dönem {len(is_results)} sembol/parça | OOS: en yeni dönem {len(oos_results)} sembol/parça")
+        if is_results:
+            _report(_combine_stats(is_results), "IS (ESKİ DÖNEM)")
+        else:
+            print("IS verisi yok; OOS karşılaştırması geçersiz.")
+        if oos_results:
+            _report(_combine_stats(oos_results), "OOS (EN YENİ DÖNEM)")
+        else:
+            print("OOS verisi yok.")
 
     if combined_all:
         combined = _combine_stats(combined_all)
@@ -1021,6 +1041,7 @@ def main():
         "--resume", action="store_true",
         help="Kaldığı yerden devam et (tamamlanmış parçaları atla)"
     )
+    parser.add_argument("--walk-forward", action="store_true", help="Parçalı backtestte eski IS / en yeni OOS performansını ayrı raporla; parametreleri sabit tut")
     args = parser.parse_args()
 
     if args.days <= 0:
@@ -1029,6 +1050,8 @@ def main():
         parser.error("--step must be greater than zero")
     if args.limit_expiry_bars <= 0:
         parser.error("--limit-expiry-bars must be greater than zero")
+    if args.walk_forward and (args.chunk_days <= 0 or math.ceil(args.days / args.chunk_days) < 2):
+        parser.error("--walk-forward için en az iki parça oluşturacak --chunk-days gerekli")
 
     # Config.refresh_from_env() runs again inside AtlasEngine.__init__, so
     # disable live-only features in the environment before constructing it.
@@ -1077,6 +1100,7 @@ def main():
             step=args.step,
             limit_expiry_bars=args.limit_expiry_bars,
             lenient=args.lenient,
+            walk_forward=args.walk_forward,
         )
         print(f"\nGENEL DURUM: {overall_status}")
         return
