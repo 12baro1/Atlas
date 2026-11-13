@@ -338,9 +338,9 @@ class ConfluenceEngine:
         # Inverse FVG: the original gap direction flips after inversion.
         recent_ifvg = []
         for zone in (ifvg or []):
-            if not self._claim_event_id(zone, seen_event_ids):
-                continue
             if not isinstance(zone, dict) or not zone.get("inverted"):
+                continue
+            if not self._claim_event_id(zone, seen_event_ids):
                 continue
             try:
                 index = int(zone.get("index", current_index if current_index is not None else 0))
@@ -373,7 +373,9 @@ class ConfluenceEngine:
         # Internal Structure is directional evidence, not a presence-only bonus.
         recent_internal = []
         for item in (internal_structure or []):
-            if not isinstance(item, dict) or not self._claim_event_id(item, seen_event_ids):
+            if not isinstance(item, dict):
+                continue
+            if (item.get("choch") or item.get("bos")) and not self._claim_event_id(item, seen_event_ids):
                 continue
             try:
                 index = int(item.get("index", current_index if current_index is not None else 0))
