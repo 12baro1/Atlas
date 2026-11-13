@@ -215,7 +215,8 @@ class Config:
     # TP/RR: net RR (komisyon+spread sonrası) bu değerin altındaysa engel.
     # 1.5R, típik комисyon/spread oranında minimal bir kâr marjı bırakır;
     # 2.0R, gerçek kâr/örneklem dengesi için daha güvenli bir zemindir.
-    QUALITY_MIN_NET_RR = 2.0
+    # Backward-compatible alias; the canonical execution threshold is MINIMUM_NET_RR.
+    QUALITY_MIN_NET_RR = MINIMUM_NET_RR
     # TP hedefleri sentetik değil gerçek likiditeden gelmelidir.
     QUALITY_REJECT_SYNTHETIC_TP = True
     # Motor çetelişi: bu güven üstündeki ve yönünde karşı olan motor "güçlü" sayılır.
