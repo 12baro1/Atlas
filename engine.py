@@ -294,11 +294,11 @@ class AtlasEngine:
             data["1w"] = weekly
 
         tf_analysis = {
-            "entry": self._analyze_timeframe(candles),
-            "weekly": self._analyze_timeframe(weekly),
-            "daily": self._analyze_timeframe(daily),
-            "h4": self._analyze_timeframe(h4),
-            "h1": self._analyze_timeframe(h1) if h1 else {"pivots": [], "structure": []},
+            "entry": self._analyze_timeframe(candles, timeframe="15m"),
+            "weekly": self._analyze_timeframe(weekly, timeframe="1w"),
+            "daily": self._analyze_timeframe(daily, timeframe="1d"),
+            "h4": self._analyze_timeframe(h4, timeframe="4h"),
+            "h1": self._analyze_timeframe(h1, timeframe="1h") if h1 else {"pivots": [], "structure": []},
         }
 
         smt_state = self._build_smt_state(data)
@@ -845,7 +845,7 @@ class AtlasEngine:
         enriched["reason"] = "; ".join(blockers)
         return enriched
 
-    def _analyze_timeframe(self, candles):
+    def _analyze_timeframe(self, candles, timeframe="unknown"):
         """Tek zaman dilimi için pivot, etiket, BOS ve CHoCH üretir."""
         engine = self.main_engine.attach_motor(
             "market_structure", self.structure_engine_cls()
@@ -857,7 +857,7 @@ class AtlasEngine:
         engine.filter_noise()
 
         pivots = engine.validate_sequence()
-        structure = self.choch.detect(self.bos.detect(label_swings(pivots), candles=candles))
+        structure = self.choch.detect(self.bos.detect(label_swings(pivots), candles=candles, timeframe=timeframe))
 
         return {
             "pivots": pivots,
