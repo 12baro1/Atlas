@@ -658,7 +658,7 @@ class TradeQualityFilters:
         except (TypeError, ValueError, OverflowError):
             execution_rr = None
         net_rr = weighted_net_rr if weighted_net_rr is not None else execution_rr
-        min_net_rr = float(getattr(Config, "QUALITY_MIN_NET_RR", 1.5))
+        min_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 2.0))
         min_tp1_rr = float(getattr(Config, "MIN_TP1_RR", 0.80))
 
         risk_distance = None
