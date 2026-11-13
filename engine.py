@@ -2213,11 +2213,26 @@ class AtlasEngine:
                     continue
                 touches = sum(e.get("touches", 1) for e in entries)
                 price = sum(e["price"] for e in entries) / len(entries)
-                indices = [e["index"] for e in entries if e.get("index") is not None]
+                indices = sorted({
+                    int(index)
+                    for entry in entries
+                    for index in (entry.get("indices") or [])
+                    if index is not None
+                })
+                source_ids = sorted({
+                    str(entry["event_id"])
+                    for entry in entries
+                    if entry.get("event_id")
+                })
+                event_id = (
+                    f"{level_tag.lower()}:" + "|".join(source_ids)
+                    if source_ids else None
+                )
                 result.append(
                     {
                         "type": "SELL_SIDE" if level_tag == "EQL" else "BUY_SIDE",
                         "level": level_tag,
+                        "event_id": event_id,
                         "price": price,
                         "touches": touches,
                         "indices": indices,
@@ -2244,8 +2259,25 @@ class AtlasEngine:
         elif liquidity_sweep.get("buy_side"):
             direction = "SHORT"
 
+        active = direction is not None and eqh_eql.get("active", False)
+        relevant_pools = (
+            eqh_eql.get("eql", []) if direction == "LONG"
+            else eqh_eql.get("eqh", []) if direction == "SHORT"
+            else []
+        )
+        pool_ids = sorted({
+            str(item["event_id"])
+            for item in relevant_pools
+            if isinstance(item, dict) and item.get("event_id")
+        })
+        sweep_id = liquidity_sweep.get("event_id")
+        event_id = (
+            f"inducement:{sweep_id}:" + "|".join(pool_ids)
+            if active and sweep_id and pool_ids else None
+        )
         return {
-            "active": direction is not None and eqh_eql.get("active", False),
+            "active": active,
+            "event_id": event_id,
             "direction": direction,
             "reason": "Liquidity sweep after equal highs/lows" if direction else "No inducement",
             "recent_structure": structure[-3:] if structure else [],
