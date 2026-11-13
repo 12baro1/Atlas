@@ -394,8 +394,11 @@ def test_cache_hit_reapplies_learning(tmp_path):
     engine._reapply_learning_to_cached(cached_analysis)
 
     sq = cached_analysis["setup_quality"]
-    assert sq["learning"]["matched"] is True
-    assert cached_analysis["signal"]["learning"]["matched"] is True
+    assert sq["learning"]["matched"] is False
+    assert sq["learning"]["sample_count"] == 3
+    assert sq["learning"]["score_delta"] == 0
+    assert sq["score"] == 80
+    assert cached_analysis["signal"]["learning"]["matched"] is False
 
 
 def test_manual_score_perfect_inputs_never_100():
