@@ -398,7 +398,7 @@ def test_structural_stop_widens_to_new_075_atr_floor_when_natural_risk_is_smalle
     )
     selected = result["selected"]
     if selected.get("valid"):
-        assert selected["stop_buffer"] == pytest.approx(3.6, abs=0.02)
+        assert abs(selected["stop_buffer"] - 3.6) < 0.02
         assert selected["entry"] - selected["stop_loss"] >= 7.5
 
 
