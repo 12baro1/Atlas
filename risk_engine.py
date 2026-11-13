@@ -147,7 +147,28 @@ class RiskEngine:
                     slippage_rate=slippage_rate,
                 )
                 fee_in_r = plan_cost["total"] / risk_distance
-                weighted_net_rr = round(weighted_rr - fee_in_r, 4)
+                # Net R includes planned TP-path costs and worst-case stop-exit
+                # friction. estimate_stop_cost includes entry fees, already
+                # charged in plan_cost, so only its stop-exit portion is added
+                # to the losing-risk denominator.
+                stop_cost_for_rr = estimate_stop_cost(
+                    entry_price=entry_price,
+                    stop_price=final_stop,
+                    entry_type=resolved_entry_type,
+                    maker_fee_rate=maker_fee_rate,
+                    taker_fee_rate=taker_fee_rate,
+                    spread_rate=spread_rate,
+                    slippage_rate=slippage_rate,
+                )
+                stop_exit_cost = max(
+                    0.0, stop_cost_for_rr["total"] - stop_cost_for_rr["entry_fee"]
+                )
+                net_reward_quote = weighted_rr * risk_distance - plan_cost["total"]
+                net_risk_quote = risk_distance + stop_exit_cost
+                weighted_net_rr = (
+                    round(net_reward_quote / net_risk_quote, 4)
+                    if net_risk_quote > 0 else None
+                )
                 net_rr = weighted_net_rr
                 risk["weighted_rr"] = round(weighted_rr, 4)
                 risk["weighted_net_rr"] = weighted_net_rr
@@ -474,7 +495,15 @@ class RiskEngine:
                         slippage_rate=execution_slippage_rate,
                     )
                     fee_in_r = plan_cost["total"] / risk
-                    weighted_net_rr = round(weighted_rr - fee_in_r, 4)
+                    # Include stop-exit friction in the losing-risk denominator;
+                    # the entry fee is already charged by plan_cost.
+                    stop_exit_cost = max(0.0, stop_cost["total"] - stop_cost["entry_fee"])
+                    net_reward_quote = weighted_rr * risk - plan_cost["total"]
+                    net_risk_quote = risk + stop_exit_cost
+                    weighted_net_rr = (
+                        round(net_reward_quote / net_risk_quote, 4)
+                        if net_risk_quote > 0 else None
+                    )
                     net_rr = weighted_net_rr
 
         # Risk is scaled against the actual minimum NET-R requirement, not the
