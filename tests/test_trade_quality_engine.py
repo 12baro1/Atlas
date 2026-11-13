@@ -202,7 +202,7 @@ def test_opposing_sweep_can_be_reclaimed_before_entry():
 
 
 
-def test_confirmed_sweep_reversal_can_override_mtf_direction_conflict():
+def test_confirmed_sweep_reversal_can_override_h4_conflict_when_mtf_entry_matches():
     payload = base_payload()
     payload["entry"]["direction_source"] = "CONFIRMED_SWEEP_REVERSAL"
     payload["mtf"] = {
