@@ -28,7 +28,8 @@ class MarketPhaseEngine:
         orderblocks,
         premium_discount,
         mtf,
-        candles=None
+        candles=None,
+        timeframe="unknown",
     ):
         """Detect current market phase and calculate phase metrics."""
         
@@ -52,7 +53,7 @@ class MarketPhaseEngine:
             except (TypeError, ValueError, OverflowError):
                 timestamp = None
         return {
-            "event_id": f"market_phase:snapshot:{timestamp}" if timestamp is not None else None,
+            "event_id": f"market_phase:{str(timeframe).lower()}:snapshot:{timestamp}" if timestamp is not None else None,
             "phase": phase_info["phase"],
             "phase_confidence": phase_info["confidence"],
             "phase_strength": phase_info["strength"],
