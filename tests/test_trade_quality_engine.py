@@ -76,7 +76,10 @@ def test_range_requires_sell_side_sweep_and_bullish_reclaim_for_long():
         "is_sweep": True,
         "buy_side": False,
         "sell_side": True,
-        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+        "post_structure": {
+            "confirmed": True, "type": "CHOCH", "direction": "BULLISH",
+            "sweep_index": 10, "confirmation_index": 12,
+        },
     }
     assert evaluate(payload)["allowed"] is True
 
@@ -202,7 +205,10 @@ def test_opposing_sweep_can_be_reclaimed_before_entry():
 def test_confirmed_sweep_reversal_can_override_mtf_direction_conflict():
     payload = base_payload()
     payload["entry"]["direction_source"] = "CONFIRMED_SWEEP_REVERSAL"
-    payload["mtf"] = {"valid": True, "entry": "SHORT"}
+    payload["mtf"] = {
+        "valid": True, "entry": "LONG", "h4": "BEARISH",
+        "entry_source": "CONFIRMED_15M_REVERSAL",
+    }
     payload["trend"] = {"trend": "BEARISH"}
     payload["market_regime"] = {
         "active": True, "regime": "TRENDING_DOWN", "directional_bias": "BEARISH"
