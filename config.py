@@ -362,6 +362,10 @@ class Config:
     LEARNING_BETA_PRIOR_BETA = float(os.getenv("ATLAS_LEARNING_BETA_PRIOR_BETA", "2.0"))
     # Güven aralığı (Wilson alt sınırı) güvenilirlik eşiği.
     LEARNING_MIN_RELIABILITY = float(os.getenv("ATLAS_LEARNING_MIN_RELIABILITY", "0.55"))
+    # Learning weights remain neutral unless a later chronological holdout confirms edge.
+    LEARNING_OOS_REQUIRED = os.getenv("ATLAS_LEARNING_OOS_REQUIRED", "1").strip().lower() in {"1", "true", "yes"}
+    LEARNING_OOS_MIN_SAMPLES = int(os.getenv("ATLAS_LEARNING_OOS_MIN_SAMPLES", "10"))
+    LEARNING_OOS_MIN_WILSON_LOWER = float(os.getenv("ATLAS_LEARNING_OOS_MIN_WILSON_LOWER", "0.45"))
     # Meta katmanı, SMC skorunu ne kadar aşağı/yukarı ayarlayabilir (puan).
     LEARNING_EDGE_UPLIFT_MAX = float(os.getenv("ATLAS_LEARNING_EDGE_UPLIFT_MAX", "6"))
     LEARNING_EDGE_PENALTY_MAX = float(os.getenv("ATLAS_LEARNING_EDGE_PENALTY_MAX", "10"))
