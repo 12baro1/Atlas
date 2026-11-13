@@ -31,7 +31,14 @@ def _confirmed_sweep(side="SELL_SIDE"):
             "sell_side": side == "SELL_SIDE",
             "buy_side": side == "BUY_SIDE",
             "sweep_side": side,
-            "post_structure": {"confirmed": True, "direction": direction},
+            "sweep_index": 10,
+            "post_structure": {
+                "confirmed": True,
+                "type": "CHOCH",
+                "direction": direction,
+                "sweep_index": 10,
+                "confirmation_index": 12,
+            },
         },
     )
 
@@ -84,6 +91,23 @@ def test_neutral_h4_allows_only_sweep_and_choch_confirmed_reversal():
     assert result["entry"] == "LONG"
     assert result["entry_source"] == "CONFIRMED_15M_REVERSAL"
     assert result["valid"] is True
+
+
+def test_ltf_reversal_uses_causal_sweep_confirmation_not_stale_structure_choch():
+    structure = [{"label": "LL", "choch": True, "direction": "BEARISH"}]
+    _, sweep = _confirmed_sweep("SELL_SIDE")
+    result = MTFEngine().detect([], [], [], structure, liquidity_sweep=sweep)
+    assert result["entry"] == "LONG"
+    assert result["entry_source"] == "CONFIRMED_15M_REVERSAL"
+
+
+def test_ltf_reversal_without_causal_indices_is_rejected():
+    structure, sweep = _confirmed_sweep("SELL_SIDE")
+    sweep["post_structure"].pop("sweep_index")
+    sweep["post_structure"].pop("confirmation_index")
+    result = MTFEngine().detect([], [], [], structure, liquidity_sweep=sweep)
+    assert result["entry"] == "NONE"
+    assert result["valid"] is False
 
 
 def test_ltf_reversal_without_sweep_confirmation_does_not_create_direction():
