@@ -479,4 +479,4 @@ Bu bölüm aynı PR dalındaki kod değişikliklerini izler. Aşağıdaki maddel
 - Manual/tracked ledger net fee parity ve gerçek fill tabanlı learning: kaynak kayıtlarda gerçek execution type/fee/fill verisi bulunmayan işlemler için maliyet uydurulmadı.
 - WAIT/SKIP nedenlerinin TUI'de açıklamalı gösterimi henüz eklenmedi; işlem listesinde yalnızca yürütülebilir sinyaller gösterilmeye devam ediyor.
 
-**Doğrulama:** Kullanıcı talimatı gereği testler çalıştırılmadı. Bu değişikliklerin performans etkisi henüz ölçülmedi; walk-forward/OOS komutu çalıştırılmadan kârlılık iddiası yapılamaz.
+**Doğrulama:** Nedensel sweep/CHoCH, eski CHoCH çakışması, no-pool wick ve açık MTF yön çelişkisi için regresyon testleri eklendi; kullanıcı talimatı gereği testler çalıştırılmadı. Bu değişikliklerin performans etkisi henüz ölçülmedi; walk-forward/OOS komutu çalıştırılmadan kârlılık iddiası yapılamaz.
