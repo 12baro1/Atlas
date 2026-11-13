@@ -33,6 +33,7 @@ class LiquiditySweepEngine:
                     "is_sweep": False,
                     "is_breakout": False,
                     "ambiguous_sweep": True,
+                    "event_id": f"{str(timeframe or 'unknown').lower()}:sweep:DUAL:{candidate['sweep_index']}",
                     "strength_score": 0,
                     "swing": {
                         "buy_side": candidate.get("swing_buy"),
@@ -66,6 +67,8 @@ class LiquiditySweepEngine:
                     "breakout_low": sell_event["level"] if sell_event else None,
                     "is_sweep": False,
                     "is_breakout": True,
+                    "ambiguous_sweep": False,
+                    "event_id": f"{str(timeframe or 'unknown').lower()}:breakout:{candidate['event_index']}:{candidate.get('side')}",
                     "strength_score": 0,
                     "swing": {
                         "buy_side": candidate.get("swing_buy"),
@@ -119,6 +122,7 @@ class LiquiditySweepEngine:
                 "breakout_low": None,
                 "is_sweep": True,
                 "is_breakout": False,
+                "ambiguous_sweep": False,
                 "strength_score": strength,
                 "swing": {
                     "buy_side": candidate.get("swing_buy"),
@@ -144,6 +148,33 @@ class LiquiditySweepEngine:
             prev, last = candles[-2], candles[-1]
             buy_side = last.high > prev.high and last.close < prev.high
             sell_side = last.low < prev.low and last.close > prev.low
+            if buy_side and sell_side:
+                return {
+                    "buy_side": False,
+                    "sell_side": False,
+                    "swept_high": None,
+                    "swept_low": None,
+                    "breakout_high": None,
+                    "breakout_low": None,
+                    "is_sweep": False,
+                    "is_breakout": False,
+                    "ambiguous_sweep": True,
+                    "strength_score": 0,
+                    "swing": {"buy_side": None, "sell_side": None},
+                    "internal": {"buy_side": None, "sell_side": None},
+                    "post_structure": {
+                        "confirmed": False,
+                        "type": None,
+                        "direction": None,
+                        "reason": "legacy_dual_sided_sweep_ambiguous",
+                    },
+                    "timeframe": timeframe,
+                    "sweep_index": len(candles) - 1,
+                    "sweep_age_bars": 0,
+                    "sweep_level": None,
+                    "sweep_side": "DUAL",
+                    "event_id": f"{str(timeframe or 'unknown').lower()}:sweep:DUAL:{len(candles) - 1}",
+                }
             if buy_side or sell_side:
                 return {
                     "buy_side": buy_side,
@@ -154,6 +185,7 @@ class LiquiditySweepEngine:
                     "breakout_low": None,
                     "is_sweep": True,
                     "is_breakout": False,
+                    "ambiguous_sweep": False,
                     "strength_score": 55,
                     "swing": {"buy_side": None, "sell_side": None},
                     "internal": {"buy_side": None, "sell_side": None},
@@ -168,6 +200,11 @@ class LiquiditySweepEngine:
                     "sweep_age_bars": 0,
                     "sweep_level": prev.high if buy_side else prev.low,
                     "sweep_side": "BUY_SIDE" if buy_side else "SELL_SIDE",
+                    "event_id": (
+                        f"{str(timeframe or 'unknown').lower()}:sweep:"
+                        f"{len(candles) - 1}:{'BUY_SIDE' if buy_side else 'SELL_SIDE'}:"
+                        f"{format(float(prev.high if buy_side else prev.low), '.12g')}"
+                    ),
                 }
 
         return self._empty_result(timeframe)
@@ -182,6 +219,8 @@ class LiquiditySweepEngine:
             "breakout_low": None,
             "is_sweep": False,
             "is_breakout": False,
+            "ambiguous_sweep": False,
+            "event_id": None,
             "strength_score": 0,
             "swing": {"buy_side": None, "sell_side": None},
             "internal": {"buy_side": None, "sell_side": None},
