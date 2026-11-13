@@ -1473,6 +1473,11 @@ class TradeJournal:
         Sinyal bulunamazsa ya da aynı signal_id'ye ait açık manual trade
         varsa hata döner (duplicate koruması).
         """
+        entry_fee = self._num(actual_entry_fee_quote) if actual_entry_fee_quote is not None else None
+        if actual_entry_fee_quote is not None and (
+            entry_fee is None or not math.isfinite(entry_fee) or entry_fee < 0
+        ):
+            return None, "invalid_actual_execution_cost"
         outcome = self.find_signal_outcome(signal_id) if signal_id else None
         if outcome is None:
             return None, "signal_not_found"
@@ -1495,7 +1500,7 @@ class TradeJournal:
             "tp2": self._norm_price(outcome.get("tp2")),
             "tp3": self._norm_price(outcome.get("tp3")),
             "position_size": position_size,
-            "actual_entry_fee_quote": self._num(actual_entry_fee_quote),
+            "actual_entry_fee_quote": entry_fee,
             "actual_exit_fee_quote": None,
             "actual_spread_cost_quote": None,
             "actual_slippage_cost_quote": None,
@@ -1674,7 +1679,7 @@ class TradeJournal:
         normalized_costs = {}
         for name, value in cost_inputs.items():
             normalized = self._num(value, 0.0) if value is not None else 0.0
-            if normalized is None or normalized < 0:
+            if normalized is None or not math.isfinite(normalized) or normalized < 0:
                 return None, "invalid_actual_execution_cost"
             normalized_costs[name] = normalized
 
@@ -1683,9 +1688,11 @@ class TradeJournal:
         pnl_rr = gross_pnl_rr
         if actual_costs_provided:
             quantity = self._num(manual.get("position_size"))
-            if quantity is None or quantity <= 0 or risk_distance <= 0:
+            if quantity is None or not math.isfinite(quantity) or quantity <= 0 or risk_distance <= 0:
                 return None, "actual_costs_require_position_size_and_valid_risk"
             risk_quote = risk_distance * quantity
+            if not math.isfinite(risk_quote) or risk_quote <= 0:
+                return None, "actual_costs_require_position_size_and_valid_risk"
             execution_cost_rr = execution_cost_quote / risk_quote
             pnl_rr = round(gross_pnl_rr - execution_cost_rr, 4)
 
