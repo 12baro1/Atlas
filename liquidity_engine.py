@@ -5,12 +5,13 @@ Atlas SMC Engine
 
 class LiquidityEngine:
 
-    def detect(self, structure, tolerance=0.001):
+    def detect(self, structure, tolerance=0.001, candles=None):
 
         clusters = self._build_clusters(
             levels=structure,
             tolerance=tolerance,
             liquidity_kind="SWING",
+            candles=candles,
         )
 
         return [cluster for cluster in clusters if cluster["touches"] >= 2]
@@ -25,13 +26,14 @@ class LiquidityEngine:
             levels=points,
             tolerance=tolerance,
             liquidity_kind="INTERNAL",
+            candles=candles,
         )
 
         return [cluster for cluster in clusters if cluster["touches"] >= 2]
 
     def detect_layers(self, structure, candles, swing_tolerance=0.001, internal_tolerance=0.0008):
 
-        swing = self.detect(structure, tolerance=swing_tolerance)
+        swing = self.detect(structure, tolerance=swing_tolerance, candles=candles)
         internal = self.detect_internal(candles, tolerance=internal_tolerance)
         all_clusters = swing + internal
 
@@ -45,7 +47,7 @@ class LiquidityEngine:
             "eql": [item for item in all_clusters if item["eq"] == "EQL"],
         }
 
-    def _build_clusters(self, levels, tolerance, liquidity_kind):
+    def _build_clusters(self, levels, tolerance, liquidity_kind, candles=None):
 
         zones = []
 
@@ -60,7 +62,7 @@ class LiquidityEngine:
 
                 for level in highs:
                     if abs(level["price"] - item["price"]) / max(abs(level["price"]), 1e-9) <= tolerance:
-                        self._record_cluster_touch(level, item)
+                        self._record_cluster_touch(level, item, candles)
                         matched = True
                         break
 
@@ -76,7 +78,7 @@ class LiquidityEngine:
                         "source_event_ids": [],
                         "source_timestamps": [],
                     }
-                    self._record_cluster_touch(level, item)
+                    self._record_cluster_touch(level, item, candles)
                     highs.append(level)
 
             else:
@@ -120,7 +122,7 @@ class LiquidityEngine:
 
         return zones
 
-    def _record_cluster_touch(self, level, item):
+    def _record_cluster_touch(self, level, item, candles=None):
         level["touches"] += 1
         source_event_id = item.get("event_id")
         if source_event_id:
@@ -128,6 +130,13 @@ class LiquidityEngine:
         source_time = item.get("time", item.get("timestamp", item.get("pivot_time")))
         if source_time is None:
             source_time = item.get("timestamp_ms")
+        if source_time is None and candles is not None:
+            source_index = item.get("index")
+            try:
+                candle = candles[int(source_index)]
+                source_time = candle.get("time", candle.get("timestamp")) if isinstance(candle, dict) else getattr(candle, "time", None)
+            except (IndexError, KeyError, TypeError, ValueError):
+                source_time = None
         if source_time is not None:
             try:
                 level.setdefault("source_timestamps", []).append(int(source_time))
