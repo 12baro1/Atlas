@@ -54,7 +54,7 @@ def _verdict(decision, signal, entry, risk=None):
         entry_type == "LIMIT"
         and entry_is_valid
         and risk_is_valid
-        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION", "WAIT")
+        and action in ("EXECUTE", "EXECUTE_WITH_CAUTION")
     )
     if entry_type == "LIMIT":
         if pending_limit:
@@ -119,7 +119,7 @@ def build_signal_card(result):
         str(entry.get("entry_type") or "").upper() == "LIMIT"
         and entry_is_valid
         and risk_is_valid
-        and str(decision.get("action") or "").upper() in ("EXECUTE", "EXECUTE_WITH_CAUTION", "WAIT")
+        and str(decision.get("action") or "").upper() in ("EXECUTE", "EXECUTE_WITH_CAUTION")
     )
 
     card = {
@@ -216,6 +216,23 @@ def build_signal_card(result):
     card["capital_at_risk"] = _num(risk.get("capital_at_risk"))
 
     card["critical_blocks"] = list(decision.get("critical_blockers") or [])
+    for source in (
+        decision.get("quality_blockers"),
+        (decision.get("trade_quality") or {}).get("blockers") if isinstance(decision.get("trade_quality"), dict) else None,
+    ):
+        if isinstance(source, list):
+            for item in source:
+                if item and item not in card["critical_blocks"]:
+                    card["critical_blocks"].append(item)
+    if str(decision.get("action") or "").upper() == "WAIT":
+        wait_reasons = (
+            signal.get("wait_reason"),
+            entry.get("entry_type_reason"),
+            decision.get("reason"),
+        )
+        for item in wait_reasons:
+            if item and item not in card["critical_blocks"]:
+                card["critical_blocks"].append(str(item))
     if pending_pullback:
         # These are downstream consequences of a pending entry, not separate faults.
         pending_entry_blocks = {
@@ -289,6 +306,9 @@ def format_card_text(card):
     if no_trade:
         reason = card.get("reason") or "Giriş şartları oluşmadı."
         lines.append(f"  Neden     : {reason}")
+        blockers = [str(item) for item in card.get("critical_blocks") or [] if item and str(item) != str(reason)]
+        if blockers:
+            lines.append("  Engeller  : " + " | ".join(blockers[:4]))
         # No-trade output intentionally hides hypothetical prices and targets.
         # Only actionable MARKET/LIMIT setups may display executable levels.
         lines.append("  Not       : Geçerli MARKET/LIMIT girişi bulunmadı; emir açma.")
