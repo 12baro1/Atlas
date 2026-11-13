@@ -309,7 +309,7 @@ ETH 12g + BTC 28g toplam **35 işlem, 4 kazanan** — **hiçbir segment için is
 - Farklı: (a) canlıda orderbook/correlation/economic-news/cooldown etkin, backtestte kapatılıyor (özellik, bilinçli); (b) canlıda learning durumu etki edebilir, backtestte kapalı; (c) backtest analiz snapshot'ları bellekte tutulur; tracking kapatıldığı ve `TradeJournal(db_path=None)` kurulduğu için canlı journal DB'sine yazılmaz; (d) canlı MARKET fill gerçek spread/slippage, backtest proxy.
 
 ### 4.7 Walk-forward / OOS
-- Mevcut: YOK. `run_segmented_backtest` (chunk başına yeni runner + checkpoint + `_combine_stats`) doğal katman (train/verify dilimleri); `BacktestRunner.run` pencere-bağımsız stateless. Eklenmesi gereken: param-set frozen IS/OS işaretleme + raporlama (bkz. §7-F).
+- PR #111 ile `--walk-forward` eklendi: `--chunk-days` ile tarihsel parçalar ayrılır; daha eski %70 IS, en yeni %30 OOS olarak raporlanır. Parametreler iki dönemde de sabittir; bu komut otomatik optimizasyon yapmaz, dokunulmamış son dönemde performansı ölçer. En az iki parça zorunludur.
 
 ### 4.8 Ölçüm sırasında saptanan çalıştırma güvenilirliği sorunları (yeni bulgular)
 1. **Uzun tek-koşu backtest bellek baskısı:** 28-gün tek koşu ~47 dk sonra hata mesajı olmadan sonlandı (ortamda swap kullanımı, ~7.5GB RAM). Ürün CLI'sında `--chunk-days` segmented modu mevcut; **varsayılan davranış haline getirilmeli ve Android/UserLAnd için belgelenmeli.** Rapor çıktısı stdout-only; JSON/CSV kancası yok.
@@ -372,7 +372,8 @@ L9 Kontrollü Öğrenme (learning_engine + doğrulama hattı)
 
 - **Mevcut durum:** depo boş (records_fed=0) — öğrenme fiilen uyuyor; geçmiş besleme %100 teorik sinyal-sonucu (gerçek manuel/tracked fill: 0). Canlı etki yolu var ama sınırlı (rampalı ±6/±10, min 20 örnek, int-trunc) ve testli.
 - **Güçlü yönler:** min-örneklem rampası; Bayesian+Wilson; yön/rejim/TF izolasyonu; atomik yazım; bozulma toleransı; look-ahead `as_of_ms` filtresi testli.
-- **Eksikler:** (1) parametre değişikliği OOS doğrulaması yok; (2) rollback yok (yalnız yeniden türetme); (3) başarısız işlem neden-taksonomisi yok (yalnız `last_reason` string + MFE/MAE); (4) motor-performans ölçümü yok (hangi kanıt hangi işlemden sorumluydu kayıtsız — evidence_ids bunu mümkün kılar); (5) teorik outcomes gerçek fill'e eşit değil (sessiz sinyal: kayıt yok).
+- **PR #111 ile eklenen korumalar:** `rebuild_from_records` kronolojik kayıtları %70 eğitim / %30 holdout olarak böler; bucket etkisi yalnız OOS örneklemi yeterli, ortalama R pozitif, PF>1 ve Wilson alt sınırı eşiği geçerse kullanılabilir. Öğrenme dosyası atomik kaydedilir, önceki sürüm `.bak` olarak tutulur ve `rollback_last_save()` ile geri alınabilir. Journal öğrenme kayıtlarına `STOP_OUT`, `PARTIAL_PROFIT_GIVEBACK`, `TRAILING_STOP`, `TARGET_EXIT`, `TIME_EXIT` gibi cause code'lar eklenir; cause dağılımı öğrenme meta raporunda tutulur.
+- **Açık eksikler:** OOS kapısı küçük örneklemde öğrenmeyi bilinçli olarak nötr bırakır; parametre otomatik optimizasyonu/rollback kararı yoktur. Event-ID tabanlı motor attribution henüz yoktur; teorik signal outcome gerçek borsa fill'i değildir.
 
 ---
 
@@ -390,7 +391,7 @@ L9 Kontrollü Öğrenme (learning_engine + doğrulama hattı)
 5. **Gross 3.0 ↔ net 2.0 RR çelişkisi** — geçerli orta-RR kurulumların eelenmesi (kod-düzey kanıt §1.14; ölçüm etkisi ayrı ölçülmeli).
 6. **F1 ölü unblock** — onaylı ters-trend dönüşlerinin kaybı (kod-düzey; §2.2).
 7. **MARKET penceresinin darlığı** — sweep+yaş≤2+POI-içi şartı 12 günde 0 gerçek MARKET üretti (ölçüm: §3.1); dolum ekonomisi LIMIT'e ve MARKET_FALLBACK'e kalıyor.
-8. **Konfidence şişmesi** — sabit +10 confirmation, +2 killzone/session, CVD +12 çift-yön, always-true reclaim/confirmation (kod-düzey §1.6/§1.13) → TUI sıralaması gürültülü; IFVG (en kötü segment −2.04R) sıralamada öne çıkabiliyor.
+8. **Konfidence şişmesi** — sabit confirmation ve killzone/session bonusları hâlâ kalibrasyon gerektiriyor. Institutional CVD +12 puanı iki yönde de yalnız akış varlığını ölçüyor; yön ise ayrı LONG/SHORT oy sayımıyla belirleniyor, bu tek başına yön asimetrisi değil. Stop-hunt reclaim koşulu PR #111'de gerçek swept-level reclaim olarak düzeltildi.
 9. **Kısmi-dolum FVG "fresh" + legacy no-pool sweep FP** — zayıf POI girişleri (kod-düzey §1.11/§1.10).
 10. **Ölçüm/kalibrasyon döngüsünün kapalı olması** — segmentasyon, OOS, öğrenme (depo boş, records=0) yok; parametre kararları kanıtsız (§4.7, §6).
 
@@ -421,7 +422,7 @@ L9 Kontrollü Öğrenme (learning_engine + doğrulama hattı)
 | P1-1 | Event-id tabanlı kanıt dedupe (confluence+decision+signal tek kanıt) | L3/L7 | Çift sayım biter; konfidence anlam kazanır | Yeniden kalibrasyon | Kanıt→işlem eşlemesi + OOS | ayrı |
 | P1-2 | Trade-quality veto SKIP olarak kalır (yeniden etiketleme kalkar) + blocker'lar WAIT kartına basılır | L7/UI | Şeffaf WAIT nedenleri | Davranış değişikliği | WAIT neden dağılımı | küçük PR |
 | P1-3 | SMT `_aligned` timeframe parametresi + bearish OB index düzeltmesi + CVD +12/reclaim düzeltmeleri | L3 | Yön simetrisi; konfidence bütünlüğü | Düşük | Birim testler | tek PR (bug-fix) |
-| P1-4 | LIMIT süre-bazlı expiry + bakım parametresi | L5 | Bayat bekleyen limit kalkar; dolum kalitesi ölçülebilir | Dolum oranı düşebilir | Limit fill rate ölçümü | ayrı |
+| P1-4 | Backtest LIMIT süre-bazlı expiry | L5 | Bayat tarihsel emirlerin iptali | Dolum oranı düşebilir | Runner `limit_expiry_bars` sayacı | Mevcut kodda var; CLI varsayılanı 8 bar |
 | P1-5 | Segmentasyon genişletme (entry_type P&L, rejim, volatilite, POI tipi, TP davranışı) + JSON/CSV rapor kancası | L8 | Ölçülebilir kalibrasyon temeli | Yok | Rapor diff | ayrı |
 | P2-1 | Walk-forward/OOS komutu (IS/OS işaretli, param-frozen) | L8/L9 | Param değişiklikleri kanıta bağlanır | Hesap maliyeti | OOS raporu | ayrı |
 | P2-2 | Öğrenme: OOS kapısı + rollback snapshot + CauseClassifier | L9 | Overfit koruması; neden-taksonomisi | Karmaşıklık | OOS A/B | ayrı |
@@ -450,3 +451,27 @@ Bu bölüm aynı PR dalındaki kod değişikliklerini izler. Aşağıdaki maddel
 | Backtest journal izolasyonu bulgusu | Kod tekrar kontrol edildi: backtest tracking'i kapatıyor ve journal'ı db_path=None ile kuruyor; canlı DB'ye yazma iddiası bu akış için kaldırıldı. |
 
 **Açık kalan işler:** stop tabanının maliyetlerle birlikte yeniden tasarlanması; event-ID tabanlı kanıt deduplikasyonu; LIMIT expiry; gerçek walk-forward/OOS; öğrenme için OOS kapısı ve rollback; journal payload sadeleştirme; geniş dead-code temizliği ve rejim motorlarının birleştirilmesi.
+
+
+---
+
+## 10. PR #111 — KALAN UYGULAMA DURUMU (2026-11-13)
+
+### Uygulanan
+- Maliyet farkındalıklı stop tabanı: yapısal stop, tahmini round-trip friction'ın varsayılan 2 katından dar ise reddedilir; stop yapısal seviyeden otomatik uzaklaştırılmaz. `ATLAS_MIN_STOP_COST_MULTIPLIER` ile ayarlanır.
+- Net RR tek kaynağa bağlandı: setup adayı, kalite filtresi, RiskEngine ve DecisionEngine `MINIMUM_NET_RR` kullanır; `MIN_SETUP_NET_RR` ve `QUALITY_MIN_NET_RR` geriye uyumluluk alias'ıdır. Brüt final-target RR ikinci veto değildir.
+- F1 reversal yolu düzeltildi: gerçek sweep + reclaim + kapanmış 15m CHoCH, 4H yönüne karşı da `CONFIRMED_15M_REVERSAL` üretebilir; downstream kalite filtresi teyit şartlarını korur.
+- Journal yeni kayıtları sadeleştirildi: tam motor/candle payload'ları yerine outcome attribution için gerekli alanlar tutulur. Eski veritabanını fiziksel küçültmek için backup-first `compact_database()` eklendi; bu metot otomatik çalıştırılmaz.
+- Learning: kronolojik 70/30 eğitim/OOS holdout, bucket bazlı OOS kabul kapısı, atomik önceki-sürüm yedeği ve `rollback_last_save()` eklendi.
+- Cause taxonomy: kapanan işlemlere cause code atanır ve öğrenme meta raporunda sayılır.
+- Backtest: `--walk-forward` eski IS / yeni OOS raporu verir; parametreler sabittir. Entry type, market phase/regime, volatility, POI ve TP davranışı segmentleri net R/PF ile raporlanır.
+- `backtest/__init__.py` kaldırıldı; boş paket artık `backtest.py` CLI modülünü gölgelemiyor.
+- LIMIT expiry backtest runner'da zaten mevcuttu; varsayılan 8 adet 15m bar.
+
+### Bilinçli olarak açık bırakılanlar
+- Event-ID tabanlı kanıt deduplikasyonu: motorlar henüz ortak event identity üretmiyor. Farklı olayları yanlışlıkla birleştirmemek için yalnızca etiket benzerliğine göre dedupe uygulanmadı.
+- Rejim/phase motorlarının tek motora birleştirilmesi ve geniş dead-code temizliği: bağımlılık/import grafı ve davranış karşılaştırması olmadan dosya silmek karar mimarisini bozabilir. Bu turda güvenli, doğrulanabilir kapsamın dışındadır.
+- Eski journal DB'sinde bir defalık fiziksel küçültme: `compact_database()` backup oluşturup VACUUM çalıştırır; kullanıcı veritabanında otomatik çalıştırılmadı.
+- Manual/tracked ledger net fee parity ve gerçek fill tabanlı learning: kaynak kayıtlarda gerçek execution type/fee/fill verisi bulunmayan işlemler için maliyet uydurulmadı.
+
+**Doğrulama:** Kullanıcı talimatı gereği testler çalıştırılmadı. Bu değişikliklerin performans etkisi henüz ölçülmedi; walk-forward/OOS komutu çalıştırılmadan kârlılık iddiası yapılamaz.
