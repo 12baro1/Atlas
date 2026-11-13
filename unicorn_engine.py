@@ -83,7 +83,7 @@ class UnicornEngine:
                 fvg_event_id = fvg.get("event_id")
                 setup_event_id = (
                     f"unicorn:{timeframe}:{breaker_event_id}:{fvg_event_id}"
-                    if breaker_event_id and fvg_event_id else None
+                    if breaker_event_id and fvg_event_id and confidence >= 60 else None
                 )
                 setups.append(
                     {
