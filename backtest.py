@@ -970,7 +970,7 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
             overall_status = "INCOMPLETE"
 
     if walk_forward:
-        print("\\n=== WALK-FORWARD | PARAMETRELER SABİT ===")
+        print("\n=== WALK-FORWARD | PARAMETRELER SABİT ===")
         print(f"IS: eski dönem {len(is_results)} sembol/parça | OOS: en yeni dönem {len(oos_results)} sembol/parça")
         if is_results:
             _report(_combine_stats(is_results), "IS (ESKİ DÖNEM)")
