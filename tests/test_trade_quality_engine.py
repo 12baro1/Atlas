@@ -109,7 +109,8 @@ def test_countertrend_regime_is_advisory_when_primary_mtf_and_poi_are_valid():
         "is_sweep": True,
         "buy_side": False,
         "sell_side": True,
-        "post_structure": {"confirmed": True, "direction": "BULLISH"},
+        "post_structure": {"confirmed": True, "type": "CHOCH", "direction": "BULLISH", "sweep_index": 10, "confirmation_index": 12},
+        "sweep_index": 10,
     }
     assert evaluate(payload)["allowed"] is True
 
