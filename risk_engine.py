@@ -660,15 +660,20 @@ class RiskEngine:
 
     def _resolve_buffer(self, buffer_value, entry, rate, minimum_tick_distance):
         if buffer_value is None:
+            # Configured percentage friction is already in price units.
+            # Do not inflate it to one whole tick: that makes small-price
+            # contracts pay an artificial spread/slippage premium.
             resolved = abs(entry) * rate
-        else:
-            try:
-                resolved = abs(float(buffer_value))
-            except (TypeError, ValueError, OverflowError):
-                resolved = abs(entry) * rate
-            if not math.isfinite(resolved):
-                resolved = abs(entry) * rate
+            return resolved if math.isfinite(resolved) else 0.0
 
+        try:
+            resolved = abs(float(buffer_value))
+        except (TypeError, ValueError, OverflowError):
+            resolved = abs(entry) * rate
+        if not math.isfinite(resolved):
+            resolved = abs(entry) * rate
+        # An explicitly supplied non-zero market quote cannot be smaller than
+        # one tick; zero remains a deliberate "no friction" test override.
         return max(resolved, minimum_tick_distance if resolved > 0 else 0.0)
 
     def _infer_tick_size(self, *prices):
