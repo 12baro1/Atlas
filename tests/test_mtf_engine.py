@@ -126,8 +126,16 @@ def test_confirmed_ltf_reversal_remains_available_against_weekly_context():
     assert result["direction_reason"] == "confirmed_15m_reversal_weekly_countertrend"
 
 
-def test_ltf_reversal_does_not_override_directional_h4_structure():
+def test_causally_confirmed_ltf_reversal_overrides_directional_h4_structure():
     structure, sweep = _confirmed_sweep("SELL_SIDE")
+    result = MTFEngine().detect([], _bearish(), _bearish(), structure, liquidity_sweep=sweep)
+    assert result["entry"] == "LONG"
+    assert result["entry_source"] == "CONFIRMED_15M_REVERSAL"
+
+
+def test_ltf_reversal_without_causal_confirmation_does_not_override_h4():
+    structure, sweep = _confirmed_sweep("SELL_SIDE")
+    sweep["post_structure"].pop("confirmation_index")
     result = MTFEngine().detect([], _bearish(), _bearish(), structure, liquidity_sweep=sweep)
     assert result["entry"] == "SHORT"
     assert result["entry_source"] == "H4_STRUCTURE"
