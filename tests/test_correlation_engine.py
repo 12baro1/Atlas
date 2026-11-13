@@ -50,3 +50,31 @@ def test_strong_bullish_btc_is_counterpressure_for_short_without_blocking():
     assert r["trade_allowed"] is True
     assert r["counterpressure"] is True
     assert r["opposing_markets"] == ["BTC"]
+
+
+def test_correlation_event_identity_uses_latest_source_candle_timestamps():
+    btc = _uptrend()
+    eth = _downtrend()
+    btc[-1].time = 1_700_000_000_000
+    eth[-1].time = 1_700_000_060_000
+    result = CorrelationEngine().evaluate(
+        "SOL/USDT:USDT",
+        "LONG",
+        {"correlation_universe": {"BTC": btc, "ETH": eth}},
+    )
+    assert result["event_id"] == (
+        "correlation:BTC:correlation_market:1700000000000|"
+        "ETH:correlation_market:1700000060000"
+    )
+
+
+def test_correlation_event_identity_is_optional_without_source_timestamps():
+    candles = _uptrend()
+    for candle in candles:
+        candle.time = None
+    result = CorrelationEngine().evaluate(
+        "SOL/USDT:USDT",
+        "LONG",
+        {"correlation_universe": {"BTC": candles}},
+    )
+    assert result["event_id"] is None
