@@ -193,14 +193,26 @@ class SetupReasoningEngine:
             side = self._module_side(module)
             if side == "NONE":
                 continue
-            (supporting if side == direction else opposing).append(
-                f"{label} {side}"
+            event_id = None
+            if isinstance(module, dict):
+                event_id = module.get("event_id")
+                best = module.get("best")
+                if not event_id and isinstance(best, dict):
+                    event_id = best.get("event_id")
+            append_evidence(
+                supporting if side == direction else opposing,
+                f"{label} {side}",
+                event_id,
             )
         for item in breaker or []:
             if isinstance(item, dict) and item.get("breaker"):
                 side = self._direction(item.get("direction") or item.get("type"))
                 if side != "NONE":
-                    append_evidence(supporting if side == direction else opposing, f"Breaker block {side}")
+                    append_evidence(
+                        supporting if side == direction else opposing,
+                        f"Breaker block {side}",
+                        item.get("event_id"),
+                    )
 
         for item in ifvg or []:
             if not isinstance(item, dict) or not item.get("inverted"):
@@ -208,19 +220,31 @@ class SetupReasoningEngine:
             original_side = self._direction(item.get("type"))
             side = "SHORT" if original_side == "LONG" else "LONG" if original_side == "SHORT" else "NONE"
             if side != "NONE":
-                append_evidence(supporting if side == direction else opposing, f"IFVG inversion {side}")
+                append_evidence(
+                    supporting if side == direction else opposing,
+                    f"IFVG inversion {side}",
+                    item.get("event_id"),
+                )
 
         if isinstance(trendline_sweep, dict) and trendline_sweep.get("active"):
             side = "LONG" if str(trendline_sweep.get("direction", "")).upper() == "SELL_SIDE" else (
                 "SHORT" if str(trendline_sweep.get("direction", "")).upper() == "BUY_SIDE" else "NONE"
             )
             if side != "NONE":
-                append_evidence(supporting if side == direction else opposing, f"Trendline sweep {side}")
+                append_evidence(
+                    supporting if side == direction else opposing,
+                    f"Trendline sweep {side}",
+                    trendline_sweep.get("event_id"),
+                )
 
         if isinstance(inducement, dict) and inducement.get("active"):
             side = self._direction(inducement.get("direction"))
             if side != "NONE":
-                append_evidence(supporting if side == direction else opposing, f"Inducement {side}")
+                append_evidence(
+                    supporting if side == direction else opposing,
+                    f"Inducement {side}",
+                    inducement.get("event_id"),
+                )
 
         if isinstance(premium_discount, dict) and premium_discount.get("valid"):
             favorable = bool(premium_discount.get("discount")) if direction == "LONG" else bool(premium_discount.get("premium"))
@@ -280,9 +304,9 @@ class SetupReasoningEngine:
             if reference_side != direction:
                 book_supportive, book_opposing = book_opposing, book_supportive
             if book_supportive:
-                supporting.append("Order flow supports entry")
+                append_evidence(supporting, "Order flow supports entry", orderbook.get("event_id"))
             if book_opposing:
-                opposing.append("Order flow counterpressure")
+                append_evidence(opposing, "Order flow counterpressure", orderbook.get("event_id"))
         if isinstance(correlation, dict) and correlation.get("active"):
             corr_supportive = bool(correlation.get("supportive"))
             corr_opposing = bool(correlation.get("counterpressure"))
