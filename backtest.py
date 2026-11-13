@@ -622,6 +622,32 @@ def _combine_stats(all_stats):
     for key, trades in list(combined["mtf_trade_breakdown"].items()):
         combined["mtf_trade_breakdown"][key] = _metrics_for_trades(trades)
 
+    segment_dimensions = {
+        "entry_type": lambda trade: trade.get("entry_type"),
+        "market_phase": lambda trade: trade.get("market_phase"),
+        "market_regime": lambda trade: trade.get("market_regime"),
+        "volatility": lambda trade: trade.get("volatility"),
+        "poi_type": lambda trade: trade.get("poi_type"),
+        "tp_behavior": lambda trade: (
+            "TP3" if 3 in (trade.get("_levels") or [])
+            else "TP2" if 2 in (trade.get("_levels") or [])
+            else "TP1_THEN_STOP" if 1 in (trade.get("_levels") or []) and "STOP" in str(trade.get("exit_reason", "")).upper()
+            else "TP1_THEN_EXIT" if 1 in (trade.get("_levels") or [])
+            else "STOP_BEFORE_TP1" if "STOP" in str(trade.get("exit_reason", "")).upper()
+            else str(trade.get("exit_reason") or "UNKNOWN").upper()
+        ),
+    }
+    combined["segment_breakdown"] = {}
+    for dimension, getter in segment_dimensions.items():
+        groups = {}
+        for trade in combined["trade_history"]:
+            label = str(getter(trade) or "UNKNOWN").upper()
+            groups.setdefault(label, []).append(trade)
+        combined["segment_breakdown"][dimension] = {
+            label: _metrics_for_trades(trades)
+            for label, trades in sorted(groups.items())
+        }
+
     combined["losses"] = combined["total"] - combined["wins"]
     if combined["total"]:
         combined["winrate"] = round(combined["wins"] / combined["total"] * 100, 2)
@@ -745,6 +771,11 @@ def _report(stats, name):
     mtf_breakdown = stats.get("mtf_trade_breakdown") or {}
     if mtf_breakdown:
         print(f"  Kapanan işlem MTF dağılımı: {mtf_breakdown}")
+    segment_breakdown = stats.get("segment_breakdown") or {}
+    for dimension in ("entry_type", "market_regime", "volatility", "poi_type", "tp_behavior"):
+        values = segment_breakdown.get(dimension) or {}
+        if values:
+            print(f"  Segment {dimension}: {values}")
     breakdown = stats.get("direction_breakdown") or {}
     for direction in ("LONG", "SHORT"):
         side = breakdown.get(direction)
