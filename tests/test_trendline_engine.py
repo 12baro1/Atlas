@@ -111,6 +111,7 @@ def test_serialize_sweep():
     assert payload["event_id"].startswith("trendline_sweep:trendline:SUPPORT:")
     assert payload["trendline"]["direction"] == "SUPPORT"
     assert payload["direction"] == "SELL_SIDE"
+    assert payload["trendline"]["event_id"].startswith("trendline:SUPPORT:")
 
 
 
