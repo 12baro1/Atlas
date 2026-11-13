@@ -176,17 +176,24 @@ class LiquiditySweepEngine:
                     "event_id": f"{str(timeframe or 'unknown').lower()}:sweep:DUAL:{len(candles) - 1}",
                 }
             if buy_side or sell_side:
+                wick_side = "BUY_SIDE" if buy_side else "SELL_SIDE"
+                wick_level = prev.high if buy_side else prev.low
                 return {
-                    "buy_side": buy_side,
-                    "sell_side": sell_side,
-                    "swept_high": prev.high if buy_side else None,
-                    "swept_low": prev.low if sell_side else None,
+                    # A two-candle wick rejection without a formed liquidity
+                    # pool is not a genuine sweep and must not feed setup votes.
+                    "buy_side": False,
+                    "sell_side": False,
+                    "swept_high": None,
+                    "swept_low": None,
                     "breakout_high": None,
                     "breakout_low": None,
-                    "is_sweep": True,
+                    "is_sweep": False,
                     "is_breakout": False,
                     "ambiguous_sweep": False,
-                    "strength_score": 55,
+                    "legacy_wick_rejection": True,
+                    "wick_side": wick_side,
+                    "wick_level": wick_level,
+                    "strength_score": 0,
                     "swing": {"buy_side": None, "sell_side": None},
                     "internal": {"buy_side": None, "sell_side": None},
                     "post_structure": {
@@ -198,13 +205,9 @@ class LiquiditySweepEngine:
                     "timeframe": timeframe,
                     "sweep_index": len(candles) - 1,
                     "sweep_age_bars": 0,
-                    "sweep_level": prev.high if buy_side else prev.low,
-                    "sweep_side": "BUY_SIDE" if buy_side else "SELL_SIDE",
-                    "event_id": (
-                        f"{str(timeframe or 'unknown').lower()}:sweep:"
-                        f"{len(candles) - 1}:{'BUY_SIDE' if buy_side else 'SELL_SIDE'}:"
-                        f"{format(float(prev.high if buy_side else prev.low), '.12g')}"
-                    ),
+                    "sweep_level": None,
+                    "sweep_side": None,
+                    "event_id": None,
                 }
 
         return self._empty_result(timeframe)
