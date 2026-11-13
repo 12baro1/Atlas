@@ -873,12 +873,24 @@ def _load_checkpoint(path):
 
 
 def _save_checkpoint(path, payload):
+    """Atomically replace a checkpoint so an interrupted write keeps the last good copy."""
+    temporary_path = f"{path}.{os.getpid()}.tmp"
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-    except OSError as exc:
+        directory = os.path.dirname(path) or "."
+        os.makedirs(directory, exist_ok=True)
+        with open(temporary_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2, allow_nan=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    except (OSError, TypeError, ValueError) as exc:
         logging.warning("Checkpoint yazımı başarısız | %s: %s", path, exc)
+    finally:
+        try:
+            if os.path.exists(temporary_path):
+                os.remove(temporary_path)
+        except OSError:
+            pass
 
 
 def _backtest_run_fingerprint(*, symbol, days, chunk_days, step, limit_expiry_bars, lenient, walk_forward):
