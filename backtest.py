@@ -772,7 +772,7 @@ def _report(stats, name):
     if mtf_breakdown:
         print(f"  Kapanan işlem MTF dağılımı: {mtf_breakdown}")
     segment_breakdown = stats.get("segment_breakdown") or {}
-    for dimension in ("entry_type", "market_regime", "volatility", "poi_type", "tp_behavior"):
+    for dimension in ("entry_type", "market_phase", "market_regime", "volatility", "poi_type", "tp_behavior"):
         values = segment_breakdown.get(dimension) or {}
         if values:
             print(f"  Segment {dimension}: {values}")
