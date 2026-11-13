@@ -98,9 +98,6 @@ class MarketPhaseEngine:
         premium = premium_discount.get("premium", False)
         discount = premium_discount.get("discount", False)
         
-        # Volatility check (optional)
-        _volatility = self._calculate_volatility(candles) if candles else "NORMAL"
-        
         # Phase determination logic
         phase = "RANGING"  # Default
         confidence = 0
@@ -243,21 +240,3 @@ class MarketPhaseEngine:
         
         score += phase_bonus.get(phase, 0)
         return min(100, score)
-
-    def _calculate_volatility(self, candles):
-        """Calculate volatility level from recent candles."""
-        if not candles or len(candles) < 10:
-            return "NORMAL"
-        
-        recent = candles[-10:]
-        avg_range = sum((c.high - c.low) for c in recent) / len(recent)
-        avg_close = sum(c.close for c in recent) / len(recent)
-        
-        volatility_percent = (avg_range / avg_close) * 100
-        
-        if volatility_percent > 2.0:
-            return "HIGH"
-        elif volatility_percent < 0.5:
-            return "LOW"
-        else:
-            return "NORMAL"
