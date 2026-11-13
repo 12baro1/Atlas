@@ -23,7 +23,9 @@ def test_risk_engine_uses_config_balance_and_percent():
     assert risk is not None
     assert risk["capital_at_risk_target"] == pytest.approx(round(expected_target_capital, 2))
     assert risk["weighted_rr"] == pytest.approx(1.5 * 0.5 + 2.5 * 0.3 + 4.0 * 0.2, abs=1e-4)
-    assert risk["weighted_net_rr"] == pytest.approx(risk["weighted_rr"] - risk["cost_drag_rr"])
+    stop_exit_cost = risk["stop_cost_breakdown"]["total"] - risk["stop_cost_breakdown"]["entry_fee"]
+    expected_net_rr = (risk["weighted_rr"] * risk["risk"] - risk["plan_cost_quote_per_unit"]) / (risk["risk"] + stop_exit_cost)
+    assert risk["weighted_net_rr"] == pytest.approx(expected_net_rr, abs=1e-4)
     assert risk["execution_rr"] == pytest.approx(risk["weighted_net_rr"])
     assert risk["partial_exit_weights"] == pytest.approx({"tp1": 0.5, "tp2": 0.3, "tp3": 0.2})
     assert risk["position_size"] > 0
@@ -397,7 +399,7 @@ def test_risk_engine_calculates_weighted_rr_for_equal_partial_exits(monkeypatch)
     assert risk["rr"] == pytest.approx(3.0)  # highest single target stays explicit
     assert risk["target_max_rr"] == pytest.approx(3.0)
     assert risk["weighted_rr"] == pytest.approx(2.0)
-    assert risk["weighted_net_rr"] == pytest.approx(1.9596, abs=1e-4)
+    assert risk["weighted_net_rr"] == pytest.approx(1.8584, abs=1e-4)
     assert risk["net_rr"] == pytest.approx(1.9596, abs=1e-4)
 
     report = RREngine().evaluate(risk)
@@ -423,7 +425,7 @@ def test_risk_engine_uses_configured_partial_weights(monkeypatch):
         "tp1": 0.5, "tp2": 0.3, "tp3": 0.2
     })
     assert risk["weighted_rr"] == pytest.approx(1.7)
-    assert risk["weighted_net_rr"] == pytest.approx(1.6597, abs=1e-4)
+    assert risk["weighted_net_rr"] == pytest.approx(1.5740, abs=1e-4)
 
 
 def test_risk_engine_normalizes_weights_only_over_valid_targets(monkeypatch):
