@@ -448,7 +448,8 @@ class DecisionEngine:
         else:
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_MARKET_PHASE_UNFRIENDLY, f"Market Phase {phase or 'Unknown'}")
 
-        self._apply_market_regime_adjustment(adjustments, market_regime or {}, direction)
+        if not self._regime_is_represented_by_phase(market_phase or {}, market_regime or {}, direction):
+            self._apply_market_regime_adjustment(adjustments, market_regime or {}, direction)
 
         if not ote or not ote.get("valid", False):
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_OTE_MISSING, "OTE missing")
@@ -466,6 +467,27 @@ class DecisionEngine:
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_STACK_CONFLUENCE_MISSING, "Stack Confluence missing")
 
         return adjustments
+
+    def _regime_is_represented_by_phase(self, phase, regime, direction):
+        """Avoid scoring the same trend/range state twice through two classifiers."""
+        if not isinstance(phase, dict) or not isinstance(regime, dict) or not regime.get("active"):
+            return False
+        phase_name = str(phase.get("phase", "")).strip().lower()
+        regime_name = str(regime.get("regime", "UNKNOWN")).upper()
+        phase_trend = str(phase.get("trend", "")).upper()
+        regime_bias = str(regime.get("directional_bias", "NEUTRAL")).upper()
+
+        if phase_name in {"expansion", "trending"} and regime_name in {"TRENDING_UP", "TRENDING_DOWN"}:
+            expected_bias = "BULLISH" if direction == "LONG" else "BEARISH" if direction == "SHORT" else "NEUTRAL"
+            # The phase and regime both describe the same trend. Preserve a
+            # disagreement penalty only when their directional readings differ.
+            return phase_trend == regime_bias or (
+                phase_trend in {"BULLISH", "BEARISH"} and regime_bias in {"BULLISH", "BEARISH"}
+                and phase_trend == regime_bias
+            )
+        if phase_name in {"ranging", "consolidation"} and regime_name in {"RANGING", "COMPRESSION"}:
+            return True
+        return False
 
     def _apply_market_regime_adjustment(self, adjustments, regime, direction):
         """Use OHLCV regime as a modest score modifier, never as a standalone signal."""
