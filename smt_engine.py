@@ -185,7 +185,7 @@ class SMTDivergenceEngine:
         p_prev, p_last = primary_lows[-2], primary_lows[-1]
         c_prev, c_last = compare_lows[-2], compare_lows[-1]
 
-        if not self._aligned(p_last, c_last, max_time_delta_bars):
+        if not self._aligned(p_last, c_last, max_time_delta_bars, timeframe):
             return None
 
         primary_ll = p_last["price"] < p_prev["price"]
