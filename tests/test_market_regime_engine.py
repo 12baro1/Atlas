@@ -123,3 +123,17 @@ def test_ranging_phase_and_compression_regime_are_not_double_penalized():
         {"phase": "Consolidation", "trend": "RANGE"},
         {"active": True, "regime": "COMPRESSION", "directional_bias": "NEUTRAL"},
     ) is True
+
+
+def test_phase_regime_directional_conflict_is_a_single_penalty():
+    adjustments = []
+    DecisionEngine()._apply_market_context_adjustment(
+        adjustments,
+        {"phase": "Expansion", "trend": "BULLISH"},
+        {"active": True, "regime": "TRENDING_DOWN", "directional_bias": "BEARISH"},
+        "SHORT",
+    )
+    assert adjustments == [{
+        "delta": -8,
+        "label": "Market Phase/Regime directional conflict",
+    }]
