@@ -209,7 +209,9 @@ class Config:
     # Girişin güncel fiyattan ATR cinsinden mesafesi bu değeri aşarsa "geç giriş" engeli.
     QUALITY_MAX_ENTRY_DISTANCE_ATR = 2.0
     # Stop yapısal invalidasyon tarafında gerekli minimum ATR (RiskEngine zaten uygular).
-    QUALITY_MIN_STOP_ATR = 0.25
+    QUALITY_MIN_STOP_ATR = 0.75
+    # Minimum evidence score for an explicitly described FVG/OB POI.
+    QUALITY_MIN_POI_SCORE = 50
     # Stop bu ATR değerini aşarsa "anlamsız geniş stop" engeli. 3 ATR'nin üzeri
     # genellikle yapısal invalidasyon yerine volatilite şumu anlamına gelir; bu
     # seviyede stop, komisyon/spread oranını yükselecek kadar geniş ve tek bir
