@@ -375,6 +375,7 @@ class AtlasTUIApp(App):
             return "Uygun piyasa bulunamadı. Veri sağlayıcısını kontrol et."
         candidates = []
         errors = []
+        blocker_counts = {}
         diagnostics = {
             "long": 0, "short": 0, "execute": 0,
             "entry_too_far": 0, "entry_zone_crossed": 0,
@@ -411,6 +412,11 @@ class AtlasTUIApp(App):
             executable_market = card.get("decision_action") in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and card.get("entry_type") == "MARKET" and card.get("direction") in {"LONG", "SHORT"}
             if not (executable_market or pending_limit):
                 diagnostics["wait_or_skip"] += 1
+                reasons = card.get("critical_blocks") or [card.get("reason")]
+                for reason in reasons:
+                    label = str(reason or "").strip()
+                    if label:
+                        blocker_counts[label] = blocker_counts.get(label, 0) + 1
                 continue
             if executable_market:
                 diagnostics["execute"] += 1
@@ -443,6 +449,13 @@ class AtlasTUIApp(App):
                 f"\nGiriş seviyesi üretilemeyen: {diagnostics['no_entry']}"
                 f"\nKarar filtresinde kalan: {diagnostics['wait_or_skip']}"
             )
+            if blocker_counts:
+                top_blockers = sorted(
+                    blocker_counts.items(), key=lambda item: (-item[1], item[0])
+                )[:5]
+                message += "\n\nEN SIK ENGELLER"
+                for reason, count in top_blockers:
+                    message += f"\n{count}x {reason}"
             if errors:
                 message += "\n\nAnaliz edilemeyenler: " + "; ".join(errors[:3])
             return message
