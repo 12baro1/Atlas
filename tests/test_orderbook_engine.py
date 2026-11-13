@@ -29,6 +29,16 @@ class OrderBookEngineTests(unittest.TestCase):
         self.assertTrue(state["opposing"])
         self.assertFalse(state["market_entry_allowed"])
 
+    def test_timestamped_orderbook_snapshot_has_stable_event_id(self):
+        book = {
+            "timestamp": 1700000000000,
+            "bids": [[100, 100], [99.95, 80]],
+            "asks": [[100.05, 10], [100.10, 10]],
+        }
+        state = self.engine.analyze(book, "LONG", now_ms=1700000000000)
+        self.assertTrue(state["active"])
+        self.assertTrue(state["event_id"].startswith("orderbook:snapshot:1700000000000:"))
+
     def test_missing_book_is_neutral(self):
         state = self.engine.analyze(None, "LONG")
         self.assertFalse(state["active"])
