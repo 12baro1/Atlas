@@ -89,7 +89,7 @@ class TradeJournal:
                 }
             compact["setup_quality"] = compact_setup
         if source is not analysis:
-            return {"analysis": compact}
+            compact["analysis"] = copy.deepcopy(compact)
         return compact
 
     def record_analysis(self, analysis, symbol=None, timeframe="multi", timestamp=None, metadata=None):
