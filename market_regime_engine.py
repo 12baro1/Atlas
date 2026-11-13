@@ -88,8 +88,10 @@ class MarketRegimeEngine:
         if regime in ("RANGING", "COMPRESSION") and bias == "NEUTRAL":
             confidence = min(90, int(50 + (1 - efficiency) * 30))
 
+        timestamp = self._candle_timestamp(candles[-1])
         return {
             "active": True,
+            "event_id": f"market_regime:4h:{timestamp}" if timestamp is not None else None,
             "regime": regime,
             "directional_bias": bias,
             "confidence": confidence,
@@ -102,9 +104,18 @@ class MarketRegimeEngine:
             "reason": self._reason(regime, bias),
         }
 
+    @staticmethod
+    def _candle_timestamp(candle):
+        value = candle.get("time", candle.get("timestamp")) if isinstance(candle, dict) else getattr(candle, "time", None)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
     def _unknown(self, reason):
         return {
             "active": False,
+            "event_id": None,
             "regime": "UNKNOWN",
             "directional_bias": "NEUTRAL",
             "confidence": 0,
