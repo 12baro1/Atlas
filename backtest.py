@@ -899,8 +899,8 @@ def _backtest_run_fingerprint(*, symbol, days, chunk_days, step, limit_expiry_ba
     config_keys = (
         "MAKER_FEE_RATE", "TAKER_FEE_RATE", "STOP_SPREAD_BUFFER_RATE",
         "STOP_SLIPPAGE_BUFFER_RATE", "MINIMUM_RR", "MINIMUM_NET_RR",
-        "MIN_STOP_ATR_MULTIPLIER", "AUTO_EXPAND_TIGHT_STOPS",
-        "REJECT_TIGHT_STOPS", "INITIAL_BALANCE",
+        "MIN_STOP_ATR_MULTIPLIER", "MIN_STOP_COST_MULTIPLIER",
+        "AUTO_EXPAND_TIGHT_STOPS", "REJECT_TIGHT_STOPS", "INITIAL_BALANCE",
     )
     return {
         "symbol": str(symbol),
