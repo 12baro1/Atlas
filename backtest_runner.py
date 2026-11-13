@@ -1004,13 +1004,16 @@ class BacktestRunner:
                 else analysis.get("market_phase") or "UNKNOWN"
             ),
             "market_regime": (
-                (analysis.get("market_regime") or {}).get("name")
+                (analysis.get("market_regime") or {}).get("regime")
                 if isinstance(analysis.get("market_regime"), dict)
                 else analysis.get("market_regime") or "UNKNOWN"
             ),
             "volatility": (
-                (analysis.get("market_regime") or {}).get("volatility")
-                if isinstance(analysis.get("market_regime"), dict)
+                "HIGH" if _num((analysis.get("market_regime") or {}).get("volatility_ratio")) is not None
+                and _num((analysis.get("market_regime") or {}).get("volatility_ratio")) >= 1.65
+                else "LOW" if _num((analysis.get("market_regime") or {}).get("volatility_ratio")) is not None
+                and _num((analysis.get("market_regime") or {}).get("volatility_ratio")) <= 0.72
+                else "NORMAL" if _num((analysis.get("market_regime") or {}).get("volatility_ratio")) is not None
                 else "UNKNOWN"
             ),
             "poi_type": (
