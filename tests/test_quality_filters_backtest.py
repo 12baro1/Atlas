@@ -285,7 +285,7 @@ def test_filters_do_not_veto_independently_and_report_elimination():
     # Filtre bazlı kazanan/kaybeden çıkarma raporu.
     report = filters.elimination_report()
     assert set(report) == {
-        "htf_ltf_alignment", "liquidity_quality", "entry_distance",
+        "htf_ltf_alignment", "liquidity_quality", "poi_quality", "entry_distance",
         "stop_quality", "tp_rr_consistency", "motor_conflict",
     }
     for name, item in report.items():
