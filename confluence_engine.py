@@ -90,10 +90,10 @@ class ConfluenceEngine:
         else:
             checks.append("✘ Entry")
 
-        # Confirmation
+        # EntryConfirmation currently confirms MTF + POI availability; it is
+        # not an independent 15m market event and must not add another full vote.
         if confirmation["confirmed"]:
-            score += 10
-            checks.append("✔ Confirmation")
+            checks.append("◐ Confirmation (MTF/POI context; no additive score)")
         else:
             checks.append("✘ Confirmation")
 
@@ -167,19 +167,11 @@ class ConfluenceEngine:
         else:
             checks.append("✘ HTF FVG")
 
-        # Killzone
-        if killzone:
+        # Killzone and session describe the same clock context; award once.
+        if killzone or session:
             score += 2
-            checks.append("✔ Kill Zone")
-        else:
-            checks.append("✘ Kill Zone")
-
-        # Session
-        if session:
-            score += 2
-            checks.append("✔ Session")
-        else:
-            checks.append("✘ Session")
+        checks.append("✔ Kill Zone" if killzone else "✘ Kill Zone")
+        checks.append("✔ Session" if session else "✘ Session")
 
         # SMT Divergence
         if smt and smt.get("active") and self._claim_event_id(smt, seen_event_ids):
@@ -223,8 +215,10 @@ class ConfluenceEngine:
         )
 
         if stack_ok:
-            score += 18
-            checks.append("✔ Stack Confluence (Sweep+OB+FVG+SMT+Phase)")
+            # Synergy bonus only: the underlying sweep/POI/SMT/phase evidence
+            # already received its own component score above.
+            score += 6
+            checks.append("✔ Stack Confluence synergy (+6)")
         else:
             checks.append("✘ Stack Confluence")
 
