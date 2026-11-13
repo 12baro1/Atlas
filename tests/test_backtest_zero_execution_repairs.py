@@ -58,6 +58,8 @@ def test_transition_keeps_valid_poi_when_15m_confirmation_is_missing():
 def test_limit_percent_distance_is_advisory_when_atr_is_unavailable():
     payload = _quality_payload()
     payload["entry"]["entry"] = 106.0
+    # Keep POI geometry valid so this test isolates LIMIT distance behavior.
+    payload["entry"]["poi_zone"] = {"low": 105.0, "high": 106.0}
     payload["current_price"] = 100.0
     payload["dynamic_tp"].update({"tp1": 114.8, "tp2": 122.8, "tp3": 131.6})
     result = TradeQualityEngine().evaluate(**payload)
