@@ -530,6 +530,8 @@ def _combine_stats(all_stats):
         "raw_short_signals": 0,
         "non_directional_results": 0,
         "action_counts": {},
+        "direction_action_counts": {},
+        "direction_blocker_counts": {},
         "wait_reason_counts": {},
         "signal_reason_counts": {},
         "mtf_alignment_counts": {},
@@ -584,7 +586,7 @@ def _combine_stats(all_stats):
         ):
             combined[key] += int(stats.get(key, 0) or 0)
         for key in (
-            "action_counts", "wait_reason_counts", "signal_reason_counts", "mtf_alignment_counts",
+            "action_counts", "direction_action_counts", "direction_blocker_counts", "wait_reason_counts", "signal_reason_counts", "mtf_alignment_counts",
             "entry_reason_counts", "entry_type_counts", "risk_reason_counts", "target_reason_counts",
             "target_missing_rr_counts", "stop_atr_buckets", "confirmation_outcome_counts",
             "confirmation_reason_counts", "confirmation_requirement_counts", "entry_type_reason_counts",
@@ -696,6 +698,10 @@ def _report(stats, name):
     print(f"  Ham LONG/SHORT : {stats.get('raw_long_signals', 0)}/{stats.get('raw_short_signals', 0)}")
     print(f"  Yönsüz sonuç   : {stats.get('non_directional_results', 0)}")
     print(f"  Karar aksiyonları: {stats.get('action_counts', {})}")
+    if stats.get("direction_action_counts"):
+        print(f"  Yöne göre kararlar: {stats['direction_action_counts']}")
+    if stats.get("direction_blocker_counts"):
+        print(f"  Yöne göre karar engelleri: {stats['direction_blocker_counts']}")
     if stats.get("wait_reason_counts"):
         print(f"  WAIT nedenleri : {stats['wait_reason_counts']}")
     if stats.get("signal_reason_counts"):
@@ -899,7 +905,7 @@ def _backtest_run_fingerprint(*, symbol, days, chunk_days, step, limit_expiry_ba
     config_keys = (
         "MAKER_FEE_RATE", "TAKER_FEE_RATE", "STOP_SPREAD_BUFFER_RATE",
         "STOP_SLIPPAGE_BUFFER_RATE", "MINIMUM_RR", "MINIMUM_NET_RR",
-        "MIN_STOP_ATR_MULTIPLIER", "MIN_STOP_COST_MULTIPLIER",
+        "MIN_STOP_ATR_MULTIPLIER", "MIN_STOP_COST_MULTIPLIER", "MAX_STOP_EXECUTION_COST_R",
         "AUTO_EXPAND_TIGHT_STOPS", "REJECT_TIGHT_STOPS", "INITIAL_BALANCE",
     )
     return {
