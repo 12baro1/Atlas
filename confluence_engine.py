@@ -105,7 +105,8 @@ class ConfluenceEngine:
             checks.append("✘ Premium Zone")
 
         # Liquidity sweep must be on the correct side for the proposed reversal.
-        self._claim_event_id(liquidity_sweep, seen_event_ids)
+        if liquidity_sweep.get("is_sweep"):
+            self._claim_event_id(liquidity_sweep, seen_event_ids)
         expected_sweep = bool(liquidity_sweep.get("sell_side")) if entry_direction == "LONG" else bool(liquidity_sweep.get("buy_side"))
         opposing_sweep = bool(liquidity_sweep.get("buy_side")) if entry_direction == "LONG" else bool(liquidity_sweep.get("sell_side"))
         if liquidity_sweep.get("is_sweep") and expected_sweep and not opposing_sweep and not liquidity_sweep.get("ambiguous_sweep"):
@@ -319,12 +320,11 @@ class ConfluenceEngine:
             for item in ((eqh_eql or {}).get(key) or [])
             if isinstance(item, dict) and item.get("event_id")
         ]
-        eqh_eql_unique = True
+        eqh_eql_unique = not eqh_eql_event_ids
         for event_id in eqh_eql_event_ids:
-            if event_id in seen_event_ids:
-                eqh_eql_unique = False
-            else:
+            if event_id not in seen_event_ids:
                 seen_event_ids.add(event_id)
+                eqh_eql_unique = True
         if eqh_eql and eqh_eql.get("active") and eqh_eql_unique:
             if eqh_eql.get("eql") and entry_direction == "LONG":
                 score += 6
