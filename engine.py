@@ -901,7 +901,7 @@ class AtlasEngine:
             current_price,
         )
         trendline_sweep = self.trendline.detect_sweep(structure, candles)
-        trendline_sweep_state = self.trendline.serialize(trendline_sweep)
+        trendline_sweep_state = self.trendline.serialize(trendline_sweep, candles=candles)
 
         ifvg = self.fvg.detect_inversion(candles)
 
