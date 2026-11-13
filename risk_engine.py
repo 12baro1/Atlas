@@ -319,75 +319,66 @@ class RiskEngine:
         )
 
         requested_risk = abs(entry - stop_loss)
-        cost_too_tight = requested_risk < minimum_stop_cost_distance
-        if cost_too_tight:
-            return self._invalid_risk_setup(
-                entry,
-                stop_loss,
-                side=side,
-                reason="Stop distance below execution-cost floor",
-                atr=atr_snapshot,
-                minimum_stop_distance=minimum_stop_distance,
-                tick_size=resolved_tick_size,
-                spread_buffer=spread_buffer,
-                slippage_buffer=slippage_buffer,
-                requested_risk=requested_risk,
-                stop_adjusted=False,
-            )
-        stop_too_tight = requested_risk < minimum_stop_distance
+        # Structural invalidation distance is evaluated first. A deliberately
+        # tight proposed stop may be safely widened to the ATR floor; comparing
+        # its tiny pre-expansion distance with execution fees here would reject
+        # a setup before the configured auto-expansion can run.
+        stop_too_tight = requested_risk < atr_floor_distance
         adjusted_stop_loss = stop_loss
         stop_adjusted = False
 
         if stop_too_tight:
             if should_auto_expand:
-                # Sıkı stopu atlayın ve güvenli minimum uzaklığa genişlet.
-                adjusted_stop_loss = self._expand_stop(entry, side, minimum_stop_distance, resolved_tick_size)
+                adjusted_stop_loss = self._expand_stop(
+                    entry, side, atr_floor_distance, resolved_tick_size
+                )
                 stop_adjusted = True
                 self.logger.info(
                     "Risk: stop auto-expanded | entry=%s stop=%s adjusted_stop=%s requested=%s min=%s",
-                    entry,
-                    stop_loss,
-                    adjusted_stop_loss,
-                    requested_risk,
-                    minimum_stop_distance,
+                    entry, stop_loss, adjusted_stop_loss, requested_risk, atr_floor_distance,
                 )
             elif reject_tight_stops:
-                # Yapısal stop minimum ATR mesafesinin altında ve otomatik genişletme kapalı.
                 self.logger.info(
-                    "Risk skipped: stop below minimum and auto-expand disabled | entry=%s stop=%s requested=%s min=%s",
-                    entry,
-                    stop_loss,
-                    requested_risk,
-                    minimum_stop_distance,
+                    "Risk skipped: stop below structural ATR floor | entry=%s stop=%s requested=%s min=%s",
+                    entry, stop_loss, requested_risk, atr_floor_distance,
                 )
                 return self._invalid_risk_setup(
-                    entry,
-                    stop_loss,
-                    side=side,
-                    reason=(
-                        "Stop distance below execution-cost floor"
-                        if requested_risk < minimum_stop_cost_distance
-                        else "Invalid Risk Setup"
-                    ),
-                    atr=atr_snapshot,
-                    minimum_stop_distance=minimum_stop_distance,
-                    tick_size=resolved_tick_size,
-                    spread_buffer=spread_buffer,
-                    slippage_buffer=slippage_buffer,
-                    requested_risk=requested_risk,
+                    entry, stop_loss, side=side, reason="Invalid Risk Setup",
+                    atr=atr_snapshot, minimum_stop_distance=atr_floor_distance,
+                    tick_size=resolved_tick_size, spread_buffer=spread_buffer,
+                    slippage_buffer=slippage_buffer, requested_risk=requested_risk,
                     stop_adjusted=False,
                 )
-            else:
-                # Auto-genişletme kapalı ama sık stop reddi de kapalı: orijinal stop üzerinden ilerle.
-                self.logger.info(
-                    "Risk: tight stop accepted (reject off, no auto-expand) | entry=%s stop=%s requested=%s min=%s",
-                    entry,
-                    stop_loss,
-                    requested_risk,
-                    minimum_stop_distance,
-                )
 
-        risk = abs(entry - adjusted_stop_loss)
+        # Re-evaluate round-trip execution friction against the final stop.
+        # Fees/spread/slippage may reject the geometry, but never move a
+        # structurally valid stop or prevent an allowed ATR auto-expansion.
+        final_stop_cost = estimate_stop_cost(
+            entry_price=entry,
+            stop_price=adjusted_stop_loss,
+            entry_type=entry_type,
+            maker_fee_rate=maker_fee_rate,
+            taker_fee_rate=taker_fee_rate,
+            spread_rate=execution_spread_rate,
+            slippage_rate=execution_slippage_rate,
+        )
+        final_cost_floor = final_stop_cost["total"] * stop_cost_floor_multiple
+        final_risk_distance = abs(entry - adjusted_stop_loss)
+        if final_risk_distance < final_cost_floor:
+            return self._invalid_risk_setup(
+                entry, adjusted_stop_loss, side=side,
+                reason="Stop distance below execution-cost floor",
+                atr=atr_snapshot,
+                minimum_stop_distance=max(atr_floor_distance, final_cost_floor),
+                tick_size=resolved_tick_size,
+                spread_buffer=spread_buffer,
+                slippage_buffer=slippage_buffer,
+                requested_risk=requested_risk,
+                stop_adjusted=stop_adjusted,
+            )
+
+        minimum_stop_distance = max(atr_floor_distance, final_cost_floor)
+        risk = final_risk_distance
 
         if risk <= 0:
             return self._invalid_risk_setup(entry, adjusted_stop_loss, side=side, reason="Stop Loss invalid")
