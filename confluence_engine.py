@@ -6,6 +6,23 @@ Atlas Confluence Engine v2
 
 class ConfluenceEngine:
 
+    @staticmethod
+    def _claim_event_id(module, seen_event_ids):
+        if not isinstance(module, dict):
+            return True
+        event_id = module.get("event_id")
+        if not event_id and isinstance(module.get("best"), dict):
+            event_id = module["best"].get("event_id")
+        if not event_id:
+            return True
+        identity = str(event_id).strip()
+        if not identity:
+            return True
+        if identity in seen_event_ids:
+            return False
+        seen_event_ids.add(identity)
+        return True
+
     def evaluate(
         self,
         mtf,
@@ -38,6 +55,7 @@ class ConfluenceEngine:
         score = 0
         checks = []
         entry_direction = entry.get("direction", "WAIT")
+        seen_event_ids = set()
 
         # Multi Timeframe
         if mtf["valid"]:
@@ -81,6 +99,7 @@ class ConfluenceEngine:
             checks.append("✘ Premium Zone")
 
         # Liquidity sweep must be on the correct side for the proposed reversal.
+        self._claim_event_id(liquidity_sweep, seen_event_ids)
         expected_sweep = bool(liquidity_sweep.get("sell_side")) if entry_direction == "LONG" else bool(liquidity_sweep.get("buy_side"))
         opposing_sweep = bool(liquidity_sweep.get("buy_side")) if entry_direction == "LONG" else bool(liquidity_sweep.get("sell_side"))
         if liquidity_sweep.get("is_sweep") and expected_sweep and not opposing_sweep and not liquidity_sweep.get("ambiguous_sweep"):
@@ -112,7 +131,11 @@ class ConfluenceEngine:
         # A breaker is the inverse of the failed OB; only its new direction
         # should support confluence.
         expected_poi = "BULLISH" if entry_direction == "LONG" else "BEARISH"
-        breaker_items = [item for item in (breaker or []) if isinstance(item, dict) and item.get("breaker")]
+        breaker_items = [
+            item for item in (breaker or [])
+            if isinstance(item, dict) and item.get("breaker")
+            and self._claim_event_id(item, seen_event_ids)
+        ]
         matching_breaker = any(str(item.get("type", "")).upper() == expected_poi for item in breaker_items)
         opposing_breaker = any(str(item.get("type", "")).upper() != expected_poi for item in breaker_items)
         if matching_breaker:
@@ -153,7 +176,7 @@ class ConfluenceEngine:
             checks.append("✘ Session")
 
         # SMT Divergence
-        if smt and smt.get("active"):
+        if smt and smt.get("active") and self._claim_event_id(smt, seen_event_ids):
             smt_direction = smt.get("direction")
 
             if (smt_direction == "BULLISH" and entry_direction == "LONG") or (
@@ -164,6 +187,8 @@ class ConfluenceEngine:
             else:
                 score -= 4
                 checks.append(f"◐ SMT {smt_direction} ({smt.get('confidence', 0)}%)")
+        elif smt and smt.get("active"):
+            checks.append("◐ SMT duplicate event suppressed")
         else:
             checks.append("✘ SMT")
 
@@ -198,7 +223,7 @@ class ConfluenceEngine:
             checks.append("✘ Stack Confluence")
 
         # Unicorn Setup
-        if unicorn and unicorn.get("active"):
+        if unicorn and unicorn.get("active") and self._claim_event_id(unicorn, seen_event_ids):
             unicorn_confidence = unicorn.get("confidence", 0)
             score += min(20, int(unicorn_confidence / 5))
             checks.append(f"✔ Unicorn ({unicorn_confidence}%)")
@@ -213,11 +238,13 @@ class ConfluenceEngine:
             else:
                 score -= 6
                 checks.append("◐ Unicorn Direction Mismatch")
+        elif unicorn and unicorn.get("active"):
+            checks.append("◐ Unicorn duplicate event suppressed")
         else:
             checks.append("✘ Unicorn")
 
         # CISD
-        if cisd and cisd.get("active"):
+        if cisd and cisd.get("active") and self._claim_event_id(cisd, seen_event_ids):
             cisd_direction = cisd.get("direction")
             cisd_confidence = cisd.get("confidence", 0)
 
@@ -229,11 +256,13 @@ class ConfluenceEngine:
             else:
                 score -= 3
                 checks.append(f"◐ CISD {cisd_direction} ({cisd_confidence}%)")
+        elif cisd and cisd.get("active"):
+            checks.append("◐ CISD duplicate event suppressed")
         else:
             checks.append("✘ CISD")
 
         # Volume Profile
-        if volume_profile and volume_profile.get("active"):
+        if volume_profile and volume_profile.get("active") and self._claim_event_id(volume_profile, seen_event_ids):
             vp_direction = volume_profile.get("direction", "NONE")
             vp_confidence = volume_profile.get("confidence", 0)
 
@@ -245,11 +274,13 @@ class ConfluenceEngine:
             else:
                 score -= 5
                 checks.append(f"◐ Volume Profile {vp_direction} ({vp_confidence}%)")
+        elif volume_profile and volume_profile.get("active"):
+            checks.append("◐ Volume Profile duplicate event suppressed")
         else:
             checks.append("✘ Volume Profile")
 
         # Institutional Flow
-        if institutional and institutional.get("active"):
+        if institutional and institutional.get("active") and self._claim_event_id(institutional, seen_event_ids):
             institutional_direction = institutional.get("direction", "NONE")
             institutional_confidence = institutional.get("confidence", 0)
 
@@ -261,11 +292,13 @@ class ConfluenceEngine:
             else:
                 score -= 6
                 checks.append(f"◐ Institutional Flow {institutional_direction} ({institutional_confidence}%)")
+        elif institutional and institutional.get("active"):
+            checks.append("◐ Institutional Flow duplicate event suppressed")
         else:
             checks.append("✘ Institutional Flow")
 
         # Trendline Sweep
-        if trendline_sweep and trendline_sweep.get("active"):
+        if trendline_sweep and trendline_sweep.get("active") and self._claim_event_id(trendline_sweep, seen_event_ids):
             sweep_dir = trendline_sweep.get("direction")
             if (sweep_dir == "SELL_SIDE" and entry_direction == "LONG") or (
                 sweep_dir == "BUY_SIDE" and entry_direction == "SHORT"
@@ -275,11 +308,24 @@ class ConfluenceEngine:
             else:
                 score -= 2
                 checks.append("◐ Trendline Sweep (yön uyuşmaz)")
+        elif trendline_sweep and trendline_sweep.get("active"):
+            checks.append("◐ Trendline Sweep duplicate event suppressed")
         else:
             checks.append("✘ Trendline Sweep")
 
         # Equal High / Equal Low
-        if eqh_eql and eqh_eql.get("active"):
+        eqh_eql_event_ids = [
+            item.get("event_id") for key in ("eqh", "eql")
+            for item in (eqh_eql or {}).get(key, [])
+            if isinstance(item, dict) and item.get("event_id")
+        ]
+        eqh_eql_unique = True
+        for event_id in eqh_eql_event_ids:
+            if event_id in seen_event_ids:
+                eqh_eql_unique = False
+            else:
+                seen_event_ids.add(event_id)
+        if eqh_eql and eqh_eql.get("active") and eqh_eql_unique:
             if eqh_eql.get("eql") and entry_direction == "LONG":
                 score += 6
                 checks.append("✔ Equal Low (Sweep hedefi)")
@@ -292,6 +338,8 @@ class ConfluenceEngine:
         # Inverse FVG: the original gap direction flips after inversion.
         recent_ifvg = []
         for zone in (ifvg or []):
+            if not self._claim_event_id(zone, seen_event_ids):
+                continue
             if not isinstance(zone, dict) or not zone.get("inverted"):
                 continue
             try:
@@ -325,7 +373,7 @@ class ConfluenceEngine:
         # Internal Structure is directional evidence, not a presence-only bonus.
         recent_internal = []
         for item in (internal_structure or []):
-            if not isinstance(item, dict):
+            if not isinstance(item, dict) or not self._claim_event_id(item, seen_event_ids):
                 continue
             try:
                 index = int(item.get("index", current_index if current_index is not None else 0))
