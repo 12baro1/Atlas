@@ -628,6 +628,49 @@ class TradeJournal:
         if archived:
             self._vacuum_if_large()
 
+    def compact_database(self):
+        """Create a verified SQLite backup, then reclaim free pages explicitly."""
+        if not self.db_path or not Path(self.db_path).exists():
+            return {"success": False, "reason": "journal database unavailable"}
+        database_path = Path(self.db_path)
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+        backup_path = database_path.with_name(
+            f"{database_path.name}.pre-vacuum-{stamp}.bak"
+        )
+        before_bytes = database_path.stat().st_size
+        source = None
+        backup = None
+        try:
+            source = sqlite3.connect(str(database_path), timeout=30.0)
+            backup = sqlite3.connect(str(backup_path), timeout=30.0)
+            source.backup(backup)
+            backup.close()
+            backup = None
+            if not backup_path.exists() or backup_path.stat().st_size <= 0:
+                raise RuntimeError("SQLite backup was not created")
+            source.execute("VACUUM")
+            source.execute("PRAGMA optimize")
+            source.commit()
+            after_bytes = database_path.stat().st_size
+            return {
+                "success": True,
+                "backup_path": str(backup_path),
+                "before_bytes": before_bytes,
+                "after_bytes": after_bytes,
+                "reclaimed_bytes": max(0, before_bytes - after_bytes),
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "reason": f"{type(exc).__name__}: {exc}",
+                "backup_path": str(backup_path) if backup_path.exists() else None,
+            }
+        finally:
+            if backup is not None:
+                backup.close()
+            if source is not None:
+                source.close()
+
     def _vacuum_if_large(self):
         """Arşiv sonrası DB fiziksel olarak küçülür mü? (freepages isteğe bağlı)"""
         try:
