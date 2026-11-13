@@ -368,7 +368,13 @@ class InstitutionalAnalysisEngine:
             "confidence": int(clamp(confidence, 0, 100)),
             "swept_high": prior_high if swept_high else None,
             "swept_low": prior_low if swept_low else None,
-            "confirmed_by_reclaim": (self._price(last, "close") - self._price(prev, "close")) != 0,
+            # A reclaim is the close back inside the level that was swept; a
+            # candle merely closing differently from its predecessor is not evidence.
+            "confirmed_by_reclaim": bool(
+                (swept_high and self._price(last, "close") < prior_high)
+                or (swept_low and self._price(last, "close") > prior_low)
+            ),
+            "reclaim_level": prior_high if swept_high else prior_low if swept_low else None,
         }
 
     def _hunt_bonus(self, last, heatmap, level):
