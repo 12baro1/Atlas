@@ -90,7 +90,7 @@ def test_tp_change_recomputes_weighted_rr_and_net_rr():
     ağırlıklar 0.5/0.3 normalize → 0.625/0.375 → weighted_rr = 1.375.
     Maliyet (MARKET girişte taker + maker çıkışlar) bir kez dahil edilir:
     plan_cost = 100*0.00055 + (105*0.625 + 110*0.375)*0.0002 = 0.076375
-    fee_in_r = 0.076375 / 5 = 0.015275 → net = 1.375 - 0.015275 = 1.3597.
+    fee_in_r = 0.076375 / 5 = 0.015275. Stop-exit friction is included in the losing-risk denominator; net RR = 1.3457.
     """
     result = AtlasMainEngine.finalize_setup_geometry(
         _entry(), _risk_payload(), _targets()
@@ -99,7 +99,7 @@ def test_tp_change_recomputes_weighted_rr_and_net_rr():
     risk = result["risk"]
     assert risk["rr_by_tp"] == {"tp1": 1.0, "tp2": 2.0}
     assert risk["weighted_rr"] == pytest.approx(1.375, abs=1e-9)
-    assert risk["weighted_net_rr"] == pytest.approx(1.3597, abs=1e-4)
+    assert risk["weighted_net_rr"] == pytest.approx(1.3457, abs=1e-4)
     assert risk["execution_rr"] == pytest.approx(risk["weighted_net_rr"])
     # Bayat değerler artık yok
     assert risk["weighted_rr"] != 1.52
@@ -123,7 +123,7 @@ def test_stop_derived_stale_rr_is_corrected_with_final_stop():
     assert risk["risk"] == pytest.approx(5.0, abs=1e-9)
     assert risk["rr_by_tp"] == {"tp1": 1.0, "tp2": 2.0}
     assert risk["weighted_rr"] == pytest.approx(1.375, abs=1e-9)
-    assert risk["weighted_net_rr"] == pytest.approx(1.3597, abs=1e-4)
+    assert risk["weighted_net_rr"] == pytest.approx(1.3457, abs=1e-4)
 
 
 def test_stop_and_tp_change_updates_position_size():
@@ -142,13 +142,13 @@ def test_stop_and_tp_change_updates_position_size():
     assert risk["risk_reduction_factor"] == pytest.approx(
         round(risk["weighted_net_rr"] / 2.0, 4), abs=1e-9
     )
-    assert risk["position_size"] == pytest.approx(13.3115, abs=1e-3)
+    assert risk["position_size"] == pytest.approx(13.1744, abs=1e-3)
     assert risk["position_size"] != 20.0
     assert risk["capital_at_risk"] == pytest.approx(67.99, abs=0.05)
 
 
-def test_net_rr_includes_execution_costs_exactly_once():
-    """weighted_net_rr = weighted_rr − fee_in_r; maliyet iki kez düşülmez."""
+def test_net_rr_includes_plan_and_stop_execution_costs_once():
+    """TP maliyeti ödül tarafında, stop çıkış maliyeti risk tarafında bir kez yer alır."""
     result = AtlasMainEngine.finalize_setup_geometry(
         _entry(), _risk_payload(), _targets()
     )
@@ -157,11 +157,12 @@ def test_net_rr_includes_execution_costs_exactly_once():
     weighted_rr = risk["weighted_rr"]
     plan_cost = risk["plan_cost_quote_per_unit"]
     fee_in_r = plan_cost / risk["risk"]
-    assert risk["weighted_net_rr"] == pytest.approx(round(weighted_rr - fee_in_r, 4), abs=1e-6)
+    stop_cost = risk["stop_cost_breakdown"]
+    stop_exit_cost = stop_cost["total"] - stop_cost["entry_fee"]
+    expected = (weighted_rr * risk["risk"] - plan_cost) / (risk["risk"] + stop_exit_cost)
+    assert risk["weighted_net_rr"] == pytest.approx(round(expected, 4), abs=1e-6)
     assert risk["cost_drag_rr"] == pytest.approx(round(fee_in_r, 4), abs=1e-6)
-    # Çift sayım kontrolü: iki kez düşülmüş değer net_rr'ye eşit olamaz.
-    double_counted = round(weighted_rr - 2 * fee_in_r, 4)
-    assert risk["weighted_net_rr"] != pytest.approx(double_counted, abs=1e-3)
+    assert risk["weighted_net_rr"] < weighted_rr - fee_in_r
 
 
 def test_final_signal_geometry_and_rr_are_consistent():
