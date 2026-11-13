@@ -301,6 +301,22 @@ class TradeQualityFilters:
             detail["reason"] = "HTF yönü tanımlı değil; 15M üzerinden değerlendirilir"
             return detail
 
+        if (
+            entry_signal in {"LONG", "SHORT"} and entry_signal != direction
+        ) or (
+            entry_source == "CONFIRMED_15M_REVERSAL" and entry_signal != direction
+        ):
+            detail["passed"] = False
+            detail["severity"] = "critical"
+            detail["reason"] = (
+                f"MTF entry direction conflicts with setup: "
+                f"15m={entry_signal}, setup={direction}"
+            )
+            detail["critical_blockers"].append(
+                f"MTF entry direction {entry_signal} conflicts with setup {direction}"
+            )
+            return detail
+
         aligned = (
             (direction == "LONG" and h4_trend == "BULLISH")
             or (direction == "SHORT" and h4_trend == "BEARISH")
