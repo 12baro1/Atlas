@@ -1466,7 +1466,8 @@ class TradeJournal:
     # ------------------------------------------------------------------
 
     def open_manual_trade(self, *, signal_id, actual_entry=None, actual_stop=None, actual_tp=None,
-                          position_size=None, opened_at=None, exit=None):
+                          position_size=None, opened_at=None, exit=None,
+                          actual_entry_fee_quote=None):
         """Kullanıcının gerçek işlemini bir sinyale bağlar.
 
         Sinyal bulunamazsa ya da aynı signal_id'ye ait açık manual trade
@@ -1494,6 +1495,14 @@ class TradeJournal:
             "tp2": self._norm_price(outcome.get("tp2")),
             "tp3": self._norm_price(outcome.get("tp3")),
             "position_size": position_size,
+            "actual_entry_fee_quote": self._num(actual_entry_fee_quote),
+            "actual_exit_fee_quote": None,
+            "actual_spread_cost_quote": None,
+            "actual_slippage_cost_quote": None,
+            "execution_cost_quote": None,
+            "execution_cost_rr": None,
+            "gross_pnl_rr": None,
+            "pnl_rr_basis": None,
             "result": None,
             "pnl_rr": None,
             "pnl": None,
@@ -1599,7 +1608,9 @@ class TradeJournal:
         return manual, "not_traded"
 
     def close_manual_trade(self, manual_id=None, signal_id=None, *, actual_exit=None, result=None,
-                           pnl=None, closed_at=None, manual_exit_reason=None):
+                           pnl=None, closed_at=None, manual_exit_reason=None,
+                           actual_exit_fee_quote=None, actual_spread_cost_quote=None,
+                           actual_slippage_cost_quote=None):
         """Kullanıcının gerçek işlemini kapatır.
 
         result: WIN | LOSS | BREAKEVEN | EARLY_EXIT | MANUAL_CLOSE | CANCELLED.
@@ -1640,24 +1651,55 @@ class TradeJournal:
         if result not in allowed:
             result = "MANUAL_CLOSE"
 
-        pnl_rr = 0.0
-        if entry is not None and stop_loss is not None and exit_price is not None:
-            risk = abs(entry - stop_loss)
-            if risk > 0:
-                if side == "LONG":
-                    pnl_rr = (exit_price - entry) / risk
-                else:
-                    pnl_rr = (entry - exit_price) / risk
-                if result == "LOSS":
-                    pnl_rr = -abs(pnl_rr)
-                elif result == "BREAKEVEN":
-                    pnl_rr = 0.0
-                pnl_rr = round(pnl_rr, 4)
+        gross_pnl_rr = 0.0
+        risk_distance = abs(entry - stop_loss) if entry is not None and stop_loss is not None else 0.0
+        if risk_distance > 0 and exit_price is not None:
+            if side == "LONG":
+                gross_pnl_rr = (exit_price - entry) / risk_distance
+            else:
+                gross_pnl_rr = (entry - exit_price) / risk_distance
+            if result == "LOSS":
+                gross_pnl_rr = -abs(gross_pnl_rr)
+            elif result == "BREAKEVEN":
+                gross_pnl_rr = 0.0
+        gross_pnl_rr = round(gross_pnl_rr, 4)
+
+        cost_inputs = {
+            "actual_entry_fee_quote": manual.get("actual_entry_fee_quote"),
+            "actual_exit_fee_quote": actual_exit_fee_quote,
+            "actual_spread_cost_quote": actual_spread_cost_quote,
+            "actual_slippage_cost_quote": actual_slippage_cost_quote,
+        }
+        actual_costs_provided = any(value is not None for value in cost_inputs.values())
+        normalized_costs = {}
+        for name, value in cost_inputs.items():
+            normalized = self._num(value, 0.0) if value is not None else 0.0
+            if normalized is None or normalized < 0:
+                return None, "invalid_actual_execution_cost"
+            normalized_costs[name] = normalized
+
+        execution_cost_quote = sum(normalized_costs.values())
+        execution_cost_rr = 0.0
+        pnl_rr = gross_pnl_rr
+        if actual_costs_provided:
+            quantity = self._num(manual.get("position_size"))
+            if quantity is None or quantity <= 0 or risk_distance <= 0:
+                return None, "actual_costs_require_position_size_and_valid_risk"
+            risk_quote = risk_distance * quantity
+            execution_cost_rr = execution_cost_quote / risk_quote
+            pnl_rr = round(gross_pnl_rr - execution_cost_rr, 4)
 
         manual["status"] = "CLOSED"
         manual["closed_at"] = closed_at
         manual["actual_exit"] = exit_price
         manual["result"] = result
+        manual["gross_pnl_rr"] = gross_pnl_rr
+        manual["execution_cost_quote"] = round(execution_cost_quote, 8) if actual_costs_provided else None
+        manual["execution_cost_rr"] = round(execution_cost_rr, 6) if actual_costs_provided else None
+        manual["actual_exit_fee_quote"] = normalized_costs["actual_exit_fee_quote"] if actual_costs_provided else None
+        manual["actual_spread_cost_quote"] = normalized_costs["actual_spread_cost_quote"] if actual_costs_provided else None
+        manual["actual_slippage_cost_quote"] = normalized_costs["actual_slippage_cost_quote"] if actual_costs_provided else None
+        manual["pnl_rr_basis"] = "net_actual_costs" if actual_costs_provided else "gross_price_only"
         manual["pnl_rr"] = pnl_rr
         manual["pnl"] = pnl
         manual["manual_exit_reason"] = manual_exit_reason
