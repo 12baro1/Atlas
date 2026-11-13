@@ -364,20 +364,13 @@ class RiskEngine:
         )
         final_cost_floor = final_stop_cost["total"] * stop_cost_floor_multiple
         final_risk_distance = abs(entry - adjusted_stop_loss)
-        if final_risk_distance < final_cost_floor:
-            return self._invalid_risk_setup(
-                entry, adjusted_stop_loss, side=side,
-                reason="Stop distance below execution-cost floor",
-                atr=atr_snapshot,
-                minimum_stop_distance=max(atr_floor_distance, final_cost_floor),
-                tick_size=resolved_tick_size,
-                spread_buffer=spread_buffer,
-                slippage_buffer=slippage_buffer,
-                requested_risk=requested_risk,
-                stop_adjusted=stop_adjusted,
-            )
 
-        minimum_stop_distance = max(atr_floor_distance, final_cost_floor)
+        # Execution friction is not a structural invalidation distance. A
+        # valid swing/ATR stop must remain at its original price; fees, spread
+        # and slippage are accounted for in net RR and effective position risk.
+        # Rejecting here conflates market costs with chart structure and can
+        # discard otherwise valid setups before the net-RR decision gate.
+        minimum_stop_distance = atr_floor_distance
         risk = final_risk_distance
 
         if risk <= 0:
