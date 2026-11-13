@@ -657,14 +657,23 @@ class TradeQualityFilters:
         entry_type = str(entry.get("entry_type") or "").upper()
         max_distance_atr = float(getattr(Config, "QUALITY_MAX_ENTRY_DISTANCE_ATR", 2.0))
 
-        if entry_price is None or current is None or atr <= 0:
+        if entry_price is None or current is None:
             detail["passed"] = True
-            detail["reason"] = "ATR veya fiyat eksik; mesafe filtresi devre dışı"
+            detail["reason"] = "Giriş veya güncel fiyat eksik; mesafe filtresi devre dışı"
             return detail
 
         distance = abs(entry_price - current)
+        distance_pct = distance / abs(current) if current else 0.0
+        if atr <= 0:
+            detail["passed"] = True
+            detail["reason"] = "ATR yok; LIMIT mesafesi yüzde bazında yalnızca uyarılır"
+            if entry_type == "LIMIT" and distance_pct > float(getattr(Config, "QUALITY_MAX_ENTRY_DISTANCE_PCT", 0.02)):
+                detail["severity"] = "warning"
+                detail["distance_pct"] = round(distance_pct * 100, 4)
+                detail["warnings"].append(f"LIMIT entry is far: {distance_pct:.2%}; ATR unavailable, kept pending")
+            return detail
+
         distance_atr = distance / atr
-        distance_pct = distance / abs(current)
 
         detail["distance_atr"] = round(distance_atr, 3)
         detail["distance_pct"] = round(distance_pct * 100, 4)
