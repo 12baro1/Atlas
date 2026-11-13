@@ -408,6 +408,7 @@ class DecisionEngine:
         market_regime=None,
     ):
         adjustments = []
+        seen_directional_event_ids = set()
 
         if signal_grade == "S+":
             self._add_adjustment(adjustments, Config.DECISION_BONUS_GRADE_S_PLUS, "Grade S+")
@@ -435,10 +436,10 @@ class DecisionEngine:
                 if bool(getattr(Config, "QUALITY_REQUIRE_MTF_ALIGNMENT", True)):
                     self._add_adjustment(adjustments, Config.DECISION_PENALTY_HTF_ALIGNMENT_MISSING, "HTF + LTF alignment missing")
 
-        self._apply_directional_adjustment(adjustments, unicorn, direction, "Unicorn", Config.DECISION_BONUS_UNICORN_ALIGNMENT, Config.DECISION_PENALTY_UNICORN_MISMATCH)
-        self._apply_directional_adjustment(adjustments, cisd, direction, "CISD", Config.DECISION_BONUS_CISD_ALIGNMENT, Config.DECISION_PENALTY_CISD_MISMATCH)
-        self._apply_directional_adjustment(adjustments, volume_profile, direction, "Volume Profile", Config.DECISION_BONUS_VOLUME_PROFILE_ALIGNMENT, Config.DECISION_PENALTY_VOLUME_PROFILE_MISMATCH)
-        self._apply_directional_adjustment(adjustments, institutional, direction, "Institutional", Config.DECISION_BONUS_INSTITUTIONAL_ALIGNMENT, Config.DECISION_PENALTY_INSTITUTIONAL_MISMATCH)
+        self._apply_directional_adjustment(adjustments, seen_directional_event_ids, unicorn, direction, "Unicorn", Config.DECISION_BONUS_UNICORN_ALIGNMENT, Config.DECISION_PENALTY_UNICORN_MISMATCH)
+        self._apply_directional_adjustment(adjustments, seen_directional_event_ids, cisd, direction, "CISD", Config.DECISION_BONUS_CISD_ALIGNMENT, Config.DECISION_PENALTY_CISD_MISMATCH)
+        self._apply_directional_adjustment(adjustments, seen_directional_event_ids, volume_profile, direction, "Volume Profile", Config.DECISION_BONUS_VOLUME_PROFILE_ALIGNMENT, Config.DECISION_PENALTY_VOLUME_PROFILE_MISMATCH)
+        self._apply_directional_adjustment(adjustments, seen_directional_event_ids, institutional, direction, "Institutional", Config.DECISION_BONUS_INSTITUTIONAL_ALIGNMENT, Config.DECISION_PENALTY_INSTITUTIONAL_MISMATCH)
 
         phase = str((market_phase or {}).get("phase", "")).strip()
         allowed_phases = set(getattr(Config, "QUALITY_ALLOWED_MARKET_PHASES", ("Expansion", "Trending", "Reversal")))
@@ -488,9 +489,19 @@ class DecisionEngine:
         elif name == "TRANSITION":
             self._add_adjustment(adjustments, -2, "Market Regime transition")
 
-    def _apply_directional_adjustment(self, adjustments, module, direction, label, bonus, penalty):
+    def _apply_directional_adjustment(self, adjustments, seen_event_ids, module, direction, label, bonus, penalty):
         if not module or not isinstance(module, dict) or not module.get("active", False):
             return
+
+        event_id = module.get("event_id")
+        best = module.get("best")
+        if not event_id and isinstance(best, dict):
+            event_id = best.get("event_id")
+        if event_id:
+            identity = str(event_id).strip()
+            if identity in seen_event_ids:
+                return
+            seen_event_ids.add(identity)
 
         module_direction = self._extract_direction(module)
         if module_direction == "NONE":
