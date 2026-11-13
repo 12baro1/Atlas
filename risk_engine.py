@@ -191,6 +191,29 @@ class RiskEngine:
             spread_rate=spread_rate,
             slippage_rate=slippage_rate,
         )
+        stop_execution_cost_r = stop_cost["total"] / risk_distance
+        max_stop_execution_cost_r = max(
+            0.0, float(getattr(Config, "MAX_STOP_EXECUTION_COST_R", 0.50))
+        )
+        risk["stop_execution_cost_r"] = round(stop_execution_cost_r, 4)
+        risk["max_stop_execution_cost_r"] = max_stop_execution_cost_r
+        if max_stop_execution_cost_r > 0 and stop_execution_cost_r > max_stop_execution_cost_r:
+            invalid = self._invalid_risk_setup(
+                entry_price, final_stop,
+                side=str(risk.get("side") or ("LONG" if entry_price > final_stop else "SHORT")),
+                reason="Execution cost exceeds stop-risk budget",
+                atr=float(risk.get("atr") or 0.0),
+                minimum_stop_distance=float(risk.get("minimum_stop_distance") or 0.0),
+                tick_size=float(risk.get("tick_size") or 0.0),
+                spread_buffer=float(risk.get("spread_buffer") or 0.0),
+                slippage_buffer=float(risk.get("slippage_buffer") or 0.0),
+                requested_risk=risk_distance,
+                execution_cost_r=stop_execution_cost_r,
+                max_execution_cost_r=max_stop_execution_cost_r,
+                stop_adjusted=bool(risk.get("stop_adjusted")),
+            )
+            risk.update(invalid)
+            return risk
         minimum_tick_distance = risk.get("minimum_tick_distance")
         try:
             minimum_tick_distance = float(minimum_tick_distance) if minimum_tick_distance is not None else 1e-12
@@ -208,6 +231,7 @@ class RiskEngine:
         capped_position_size = min(adjusted_position_size, max_position_size_limit)
 
         risk["risk"] = round(risk_distance, 8)
+        risk["stop_atr_ratio"] = round(risk_distance / float(risk.get("atr") or 0.0), 4) if float(risk.get("atr") or 0.0) > 0 else None
         risk["risk_percent"] = round(effective_risk_percent, 4)
         risk["risk_reduction_factor"] = round(risk_reduction_factor, 4)
         risk["capital_at_risk_target"] = round(target_capital_at_risk, 2)
@@ -513,6 +537,7 @@ class RiskEngine:
             "slippage_buffer": round(slippage_buffer, 8),
 
             "risk": round(risk, 8),
+            "stop_atr_ratio": round(risk / atr_snapshot, 4) if atr_snapshot > 0 else None,
 
             "capital_at_risk": round(capped_capital_at_risk, 2),
 
