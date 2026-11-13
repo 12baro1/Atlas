@@ -366,6 +366,32 @@ class RiskEngine:
         if risk <= 0:
             return self._invalid_risk_setup(entry, adjusted_stop_loss, side=side, reason="Stop Loss invalid")
 
+        resolved_entry_type = str(entry_type or "LIMIT").upper()
+        stop_cost = estimate_stop_cost(
+            entry_price=entry,
+            stop_price=adjusted_stop_loss,
+            entry_type=resolved_entry_type,
+            maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002)),
+            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055)),
+            spread_rate=execution_spread_rate,
+            slippage_rate=execution_slippage_rate,
+        )
+        stop_execution_cost_r = stop_cost["total"] / risk
+        max_stop_execution_cost_r = max(
+            0.0, float(getattr(Config, "MAX_STOP_EXECUTION_COST_R", 0.50))
+        )
+        if max_stop_execution_cost_r > 0 and stop_execution_cost_r > max_stop_execution_cost_r:
+            return self._invalid_risk_setup(
+                entry, adjusted_stop_loss, side=side,
+                reason="Execution cost exceeds stop-risk budget",
+                atr=atr_snapshot, minimum_stop_distance=atr_floor_distance,
+                tick_size=resolved_tick_size, spread_buffer=spread_buffer,
+                slippage_buffer=slippage_buffer, requested_risk=requested_risk,
+                execution_cost_r=stop_execution_cost_r,
+                max_execution_cost_r=max_stop_execution_cost_r,
+                stop_adjusted=stop_adjusted,
+            )
+
         vp_factor = self._volume_profile_position_factor(volume_profile, side=side)
         institutional_factor = self._institutional_position_factor(institutional, side=side)
 
@@ -436,16 +462,7 @@ class RiskEngine:
         effective_risk_percent = max(0.0, base_risk_percent * risk_reduction_factor)
         target_capital_at_risk = account_balance * (effective_risk_percent / 100)
 
-        # Position sizing reserves the full worst-case stop execution cost.
-        stop_cost = estimate_stop_cost(
-            entry_price=entry,
-            stop_price=adjusted_stop_loss,
-            entry_type=resolved_entry_type,
-            maker_fee_rate=maker_fee_rate,
-            taker_fee_rate=taker_fee_rate,
-            spread_rate=execution_spread_rate,
-            slippage_rate=execution_slippage_rate,
-        )
+        # Position sizing reserves the same worst-case stop cost validated above.
         effective_risk_per_unit = max(risk + stop_cost["total"], minimum_tick_distance)
         position_size_raw = target_capital_at_risk / effective_risk_per_unit
 
@@ -486,6 +503,8 @@ class RiskEngine:
             "minimum_stop_distance": round(minimum_stop_distance, 8),
             "minimum_stop_cost_distance": round(minimum_stop_cost_distance, 8),
             "minimum_stop_cost_multiplier": stop_cost_floor_multiple,
+            "stop_execution_cost_r": round(stop_execution_cost_r, 4),
+            "max_stop_execution_cost_r": max_stop_execution_cost_r,
 
             "minimum_stop_percent": round(min_stop_percent, 8),
 
@@ -680,10 +699,13 @@ class RiskEngine:
         slippage_buffer=0.0,
         requested_risk=0.0,
         stop_adjusted=False,
+        execution_cost_r=None,
+        max_execution_cost_r=None,
     ):
         reason_code = {
             "Stop Loss invalid": "INVALID_STOP",
             "Invalid Risk Setup": "TIGHT_STOP_BELOW_MINIMUM",
+            "Execution cost exceeds stop-risk budget": "STOP_EXECUTION_COST_TOO_HIGH",
         }.get(reason, "RISK_INVALID")
 
         self.logger.warning(
@@ -745,6 +767,8 @@ class RiskEngine:
             "risk_reduction_factor": None,
             "requested_risk": round(requested_risk, 8),
             "effective_risk_per_unit": None,
+            "stop_execution_cost_r": round(execution_cost_r, 4) if execution_cost_r is not None else None,
+            "max_stop_execution_cost_r": max_execution_cost_r,
         }
 
     def _volume_profile_position_factor(self, volume_profile, side):
