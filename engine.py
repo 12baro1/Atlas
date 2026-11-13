@@ -960,6 +960,7 @@ class AtlasEngine:
                     "bos": item.get("bos", False),
                     "choch": item.get("choch", False),
                     "direction": item.get("direction"),
+                    "event_id": item.get("event_id"),
                 }
             )
 
@@ -972,6 +973,7 @@ class AtlasEngine:
                 "type": item.get("kind"),
                 "kind": item.get("kind"),
                 "label": item.get("label"),
+                "event_id": item.get("event_id"),
             }
             for item in structure
             if item.get("index") not in major_indices
