@@ -2180,6 +2180,16 @@ class TradeJournal:
             "open": 0,
             "not_traded": 0,
             "winrate": 0, "expectancy": 0, "profit_factor": 0, "average_r": 0,
+            "actual_cost_accounting": {
+                "net_actual_costs_count": 0,
+                "gross_price_only_count": 0,
+                "actual_cost_quote_total": 0,
+                "net_actual_costs_expectancy": None,
+                "net_actual_costs_profit_factor": None,
+                "gross_price_only_expectancy": None,
+                "gross_price_only_profit_factor": None,
+            },
+            "performance_basis": "none",
         }
 
     # ------------------------------------------------------------------
