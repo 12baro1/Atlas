@@ -162,9 +162,12 @@ class InstitutionalAnalysisEngine:
         delta_value = deltas[-1] if deltas else 0.0
         event_id = None
         if candles:
-            timestamp = self._price(candles[-1], "time")
-            if timestamp > 0:
-                event_id = f"cvd:candle_proxy:{int(timestamp)}"
+            try:
+                timestamp = self._price(candles[-1], "time")
+                if timestamp > 0:
+                    event_id = f"cvd:candle_proxy:{int(timestamp)}"
+            except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+                event_id = None
         return {
             "event_id": event_id,
             "value": round(cumulative, 8),
@@ -192,9 +195,12 @@ class InstitutionalAnalysisEngine:
 
         event_id = None
         if candles:
-            timestamp = self._price(candles[-1], "time")
-            if timestamp > 0:
-                event_id = f"cvd:candle_proxy:{int(timestamp)}"
+            try:
+                timestamp = self._price(candles[-1], "time")
+                if timestamp > 0:
+                    event_id = f"cvd:candle_proxy:{int(timestamp)}"
+            except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+                event_id = None
         return {
             "event_id": event_id,
             "bullish": round(bullish, 8),
