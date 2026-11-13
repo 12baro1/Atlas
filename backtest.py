@@ -952,15 +952,26 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                 and checkpoint.get("anchor_now_ms") is not None
             )
             if compatible:
-                completed_chunks = {
-                    int(index) for index in checkpoint.get("completed_chunks", [])
-                    if 0 <= int(index) < total_chunks
-                }
-                chunk_results = {
-                    str(k): v for k, v in (checkpoint.get("results") or {}).items()
-                    if str(k).isdigit() and 0 <= int(k) < total_chunks
-                }
-                anchor_now_ms = float(checkpoint["anchor_now_ms"])
+                for raw_index in checkpoint.get("completed_chunks") or []:
+                    try:
+                        index = int(raw_index)
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if 0 <= index < total_chunks:
+                        completed_chunks.add(index)
+                saved_results = checkpoint.get("results")
+                if isinstance(saved_results, dict):
+                    chunk_results = {
+                        str(key): value
+                        for key, value in saved_results.items()
+                        if str(key).isdigit() and 0 <= int(key) < total_chunks
+                    }
+                try:
+                    anchor_now_ms = float(checkpoint["anchor_now_ms"])
+                except (TypeError, ValueError, OverflowError):
+                    completed_chunks.clear()
+                    chunk_results.clear()
+                    anchor_now_ms = time.time() * 1000
             else:
                 print("  [checkpoint] Ayarlar/kod/zaman çıpası uyuşmuyor; eski parçalar kullanılmayacak.")
 
