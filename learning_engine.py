@@ -185,6 +185,13 @@ class LearningEngine:
         backup_path = self.path.with_suffix(self.path.suffix + ".bak")
         if not backup_path.exists():
             return False
+        try:
+            with backup_path.open("r", encoding="utf-8") as handle:
+                backup_state = json.load(handle)
+            if not isinstance(backup_state, dict) or not isinstance(backup_state.get("setups"), dict):
+                return False
+        except (OSError, ValueError, json.JSONDecodeError):
+            return False
         with self._save_lock:
             try:
                 os.replace(backup_path, self.path)
