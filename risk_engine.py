@@ -353,16 +353,6 @@ class RiskEngine:
         # Re-evaluate round-trip execution friction against the final stop.
         # Fees/spread/slippage may reject the geometry, but never move a
         # structurally valid stop or prevent an allowed ATR auto-expansion.
-        final_stop_cost = estimate_stop_cost(
-            entry_price=entry,
-            stop_price=adjusted_stop_loss,
-            entry_type=entry_type,
-            maker_fee_rate=maker_fee_rate,
-            taker_fee_rate=taker_fee_rate,
-            spread_rate=execution_spread_rate,
-            slippage_rate=execution_slippage_rate,
-        )
-        final_cost_floor = final_stop_cost["total"] * stop_cost_floor_multiple
         final_risk_distance = abs(entry - adjusted_stop_loss)
 
         # Execution friction is not a structural invalidation distance. A
