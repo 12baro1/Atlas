@@ -407,7 +407,7 @@ class AtlasTUIApp(App):
             if not entry_data.get("entry"):
                 diagnostics["no_entry"] += 1
             card = build_signal_card(raw)
-            pending_limit = card.get("entry_type") == "LIMIT" and card.get("direction") in {"LONG", "SHORT"} and bool(card.get("entry")) and bool(card.get("stop_loss")) and bool(card.get("tp_levels"))
+            pending_limit = card.get("decision_action") in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and card.get("entry_type") == "LIMIT" and card.get("direction") in {"LONG", "SHORT"} and bool(card.get("entry")) and bool(card.get("stop_loss")) and bool(card.get("tp_levels"))
             executable_market = card.get("decision_action") in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and card.get("entry_type") == "MARKET" and card.get("direction") in {"LONG", "SHORT"}
             if not (executable_market or pending_limit):
                 diagnostics["wait_or_skip"] += 1
