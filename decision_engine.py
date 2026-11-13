@@ -54,7 +54,7 @@ class DecisionEngine:
         # New risk payloads are gated on conservative net R; legacy payloads
         # retain the old target-RR threshold for backward compatibility.
         if weighted_net_rr is not None:
-            minimum_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
+            minimum_rr = float(getattr(Config, "MINIMUM_NET_RR", 2.0))
         minimum_confidence = float(getattr(Config, "MINIMUM_CONFIDENCE", 80))
         execute_threshold = float(getattr(Config, "DECISION_SCORE_EXECUTE", 90))
         caution_threshold = float(getattr(Config, "DECISION_SCORE_EXECUTE_WITH_CAUTION", 75))
