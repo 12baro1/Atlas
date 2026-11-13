@@ -51,7 +51,7 @@ class MTFEngine:
         return "NEUTRAL"
 
     @staticmethod
-    def _confirmed_ltf_reversal(structure, liquidity_sweep):
+    def _confirmed_ltf_reversal(liquidity_sweep):
         """Require a directional sweep reclaim followed by a closed 15m CHoCH."""
         if not isinstance(liquidity_sweep, dict) or not liquidity_sweep.get("is_sweep"):
             return None
@@ -121,7 +121,7 @@ class MTFEngine:
         # A fully confirmed 15m sweep/reclaim/CHoCH may reverse the 4H
         # direction. The reversal exception is evaluated before the 4H trend
         # fallback so the downstream HTF/LTF quality filter can recognize it.
-        reversal = self._confirmed_ltf_reversal(entry, liquidity_sweep)
+        reversal = self._confirmed_ltf_reversal(liquidity_sweep)
         if reversal in {"LONG", "SHORT"}:
             entry_signal = reversal
             entry_source = "CONFIRMED_15M_REVERSAL"
