@@ -208,6 +208,7 @@ class Config:
     QUALITY_HTF_STRONG_CONFLICT_BLOCK = True
     # Girişin güncel fiyattan ATR cinsinden mesafesi bu değeri aşarsa "geç giriş" engeli.
     QUALITY_MAX_ENTRY_DISTANCE_ATR = 2.0
+    QUALITY_MAX_ENTRY_DISTANCE_PCT = 0.02
     # Stop yapısal invalidasyon tarafında gerekli minimum ATR (RiskEngine zaten uygular).
     QUALITY_MIN_STOP_ATR = 0.75
     # Minimum evidence score for an explicitly described FVG/OB POI.
