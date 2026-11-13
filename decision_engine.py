@@ -448,8 +448,7 @@ class DecisionEngine:
         else:
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_MARKET_PHASE_UNFRIENDLY, f"Market Phase {phase or 'Unknown'}")
 
-        if not self._regime_is_represented_by_phase(market_phase or {}, market_regime or {}):
-            self._apply_market_regime_adjustment(adjustments, market_regime or {}, direction)
+        self._apply_market_context_adjustment(adjustments, market_phase or {}, market_regime or {}, direction)
 
         if not ote or not ote.get("valid", False):
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_OTE_MISSING, "OTE missing")
@@ -467,6 +466,25 @@ class DecisionEngine:
             self._add_adjustment(adjustments, Config.DECISION_PENALTY_STACK_CONFLUENCE_MISSING, "Stack Confluence missing")
 
         return adjustments
+
+    def _apply_market_context_adjustment(self, adjustments, phase, regime, direction):
+        """Combine overlapping SMC phase and OHLCV regime evidence once."""
+        phase_trend = str((phase or {}).get("trend", "")).upper()
+        regime_bias = str((regime or {}).get("directional_bias", "NEUTRAL")).upper()
+        phase_name = str((phase or {}).get("phase", "")).strip().lower()
+        regime_name = str((regime or {}).get("regime", "UNKNOWN")).upper()
+
+        if self._regime_is_represented_by_phase(phase, regime):
+            return
+        if (
+            phase_name in {"expansion", "trending"}
+            and regime_name in {"TRENDING_UP", "TRENDING_DOWN"}
+            and phase_trend in {"BULLISH", "BEARISH"}
+            and regime_bias in {"BULLISH", "BEARISH"}
+        ):
+            self._add_adjustment(adjustments, -8, "Market Phase/Regime directional conflict")
+            return
+        self._apply_market_regime_adjustment(adjustments, regime, direction)
 
     def _regime_is_represented_by_phase(self, phase, regime):
         """Avoid scoring the same trend/range state twice through two classifiers."""
