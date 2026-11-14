@@ -456,7 +456,19 @@ class AtlasEngine:
                 "stop_loss": selected["stop_loss"],
                 "reason": "Selected by the shared seven-strategy decision",
                 "entry_reason_code": "SHARED_STRATEGY_SELECTION",
+                "setup_reasoning": {
+                    "selected_id": selected.get("strategy_id"),
+                    "candidate_count": strategy_report.get("candidate_count", 0),
+                    "thesis": selected.get("strategy") or selected.get("strategy_id"),
+                    "supporting_evidence": list(selected.get("reasons") or []),
+                    "opposing_evidence": [],
+                    "supporting_event_ids": [],
+                    "opposing_event_ids": [],
+                    "market_context": [strategy_report.get("regime", {}).get("label", "UNKNOWN")],
+                },
             })
+            if selected.get("strategy_id") != "smc":
+                selected_entry.pop("poi_zone", None)
             selected_risk.update({
                 "entry": selected["entry"], "stop_loss": selected["stop_loss"],
                 "tp1": selected["tp1"], "tp2": selected["tp2"], "tp3": selected["tp3"],
