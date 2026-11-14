@@ -160,7 +160,7 @@ class AtlasTUIApp(App):
         height: auto;
     }
     #dashboard.compact > Static { height: 14; }
-    #dashboard.compact > #chart { height: 20; min-height: 20; }
+    #dashboard.compact > #chart { height: 26; min-height: 26; }
     #dashboard.compact > RichLog { height: 14; }
     #motors, #chart, #details, #pipeline, #events, #output {
         height: 1fr;
@@ -297,7 +297,7 @@ class AtlasTUIApp(App):
         return Panel(table, title="[bold]MARKET DETAILS[/bold]", border_style="bright_black")
 
     @staticmethod
-    def _chart_renderable(ohlcv, symbol="BTC/USDT:USDT", max_bars=30, plot_height=9):
+    def _chart_renderable(ohlcv, symbol="BTC/USDT:USDT", max_bars=30, plot_height=16):
         header = Text(
             f"LIVE CANDLES  |  {symbol}  |  5m",
             style="bold bright_green",
@@ -314,8 +314,9 @@ class AtlasTUIApp(App):
         highs = [float(row[2]) for row in candles]
         low, high = min(lows), max(highs)
         span = max(high - low, 1e-12)
-        height = max(7, min(int(plot_height), 12))
-        grid = [[" " for _ in candles] for _ in range(height)]
+        height = max(7, min(int(plot_height), 32))
+        # Two terminal columns per candle make the plot use the chart frame width.
+        grid = [[" " for _ in candles for _ in range(2)] for _ in range(height)]
 
         for x, row in enumerate(candles):
             opened, top, bottom, close = map(float, (row[1], row[2], row[3], row[4]))
@@ -326,10 +327,13 @@ class AtlasTUIApp(App):
             bullish = close >= opened
             wick_style = "green" if bullish else "red"
             body_style = "bold bright_green" if bullish else "bold bright_red"
+            left = x * 2
             for y in range(min(y_high, y_low), max(y_high, y_low) + 1):
-                grid[y][x] = ("│", wick_style)
+                grid[y][left] = ("│", wick_style)
+                grid[y][left + 1] = ("│", wick_style)
             for y in range(min(y_open, y_close), max(y_open, y_close) + 1):
-                grid[y][x] = ("█", body_style)
+                grid[y][left] = ("█", body_style)
+                grid[y][left + 1] = ("█", body_style)
 
         lines = []
         for row in grid:
@@ -346,7 +350,7 @@ class AtlasTUIApp(App):
         volume_chars = "▁▂▃▄▅▆▇█"
         for row in candles:
             level = min(7, int(float(row[5]) / max_volume * 7))
-            volume.append(volume_chars[level], style="bright_cyan")
+            volume.append(volume_chars[level] * 2, style="bright_cyan")
 
         last = candles[-1]
         footer = Text(
@@ -470,8 +474,9 @@ class AtlasTUIApp(App):
         chart_widget = self.query_one("#chart", Static)
         chart_width = max(16, chart_widget.size.width - 4)
         chart_height = max(10, chart_widget.size.height - 3)
-        max_bars = max(8, min(48, chart_width))
-        plot_height = max(7, min(12, chart_height - 5))
+        # Each candle occupies two terminal columns; use the available plot area.
+        max_bars = max(8, min(48, chart_width // 2))
+        plot_height = max(7, min(32, chart_height - 4))
         chart_widget.update(
             self._chart_renderable(
                 payload.get("candles") or [],
