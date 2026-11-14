@@ -1,8 +1,8 @@
 """Historical replay for all seven independent Atlas strategies.
 
 Signals are evaluated only on closed candles. Market candidates enter at the
-next 15m open; limits must actually trade through the limit price. Intrabar
-stop/target ambiguity is resolved conservatively in favor of the stop.
+next 15m open; limits fill only on touch, with gap-through fills treated as
+marketable limits. Intrabar stop/target ambiguity is resolved stop-first.
 """
 from __future__ import annotations
 
@@ -325,8 +325,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
         decision_ms = _closed_at(candles[index], "15m")
         if decision_ms < evaluation_start:
             continue
-        next_open = float(candles[index + 1].open)
-        snapshot = _snapshot_at(history, index, next_open)
+        snapshot = _snapshot_at(history, index)
         try:
             smc_result = engine.analyze(snapshot)
         except Exception:
