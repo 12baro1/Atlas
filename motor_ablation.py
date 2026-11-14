@@ -196,9 +196,13 @@ def main():
     motors = [item.strip() for item in args.motors.split(",") if item.strip()] if args.motors else None
     report = run_ablation(args.symbol, days=args.days, samples=args.samples, step=args.step,
                           motors=motors, output_path=args.output, include_derivatives=not args.no_derivatives)
-    print(f"Motor ablation | {report[chr(115)+chr(121)+chr(109)+chr(98)+chr(111)+chr(108)]} | {report[chr(115)+chr(97)+chr(109)+chr(112)+chr(108)+chr(101)+chr(115)]} samples")
+    print(f"Motor ablation | {report['symbol']} | {report['samples']} samples")
     for name, metrics in sorted(report["motor_summary"].items()):
-        print(f"{name:24} decision={metrics[chr(100)+chr(101)+chr(99)+chr(105)+chr(115)+chr(105)+chr(111)+chr(110)+chr(95)+chr(99)+chr(104)+chr(97)+chr(110)+chr(103)+chr(101)+chr(100)]}/{metrics[chr(99)+chr(111)+chr(109)+chr(112)+chr(108)+chr(101)+chr(116)+chr(101)+chr(100)]}  plan={metrics[chr(112)+chr(108)+chr(97)+chr(110)+chr(95)+chr(99)+chr(104)+chr(97)+chr(110)+chr(103)+chr(101)+chr(100)]}/{metrics[chr(99)+chr(111)+chr(109)+chr(112)+chr(108)+chr(101)+chr(116)+chr(101)+chr(100)]}  errors={metrics[chr(101)+chr(114)+chr(114)+chr(111)+chr(114)+chr(115)]}")
+        decision_changed = metrics["decision_changed"]
+        plan_changed = metrics["plan_changed"]
+        completed = metrics["completed"]
+        errors = metrics["errors"]
+        print(f"{name:24} decision={decision_changed}/{completed}  plan={plan_changed}/{completed}  errors={errors}")
     print(f"Report: {args.output}")
 
 
