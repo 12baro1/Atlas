@@ -1178,3 +1178,49 @@ def test_smc_replay_uses_same_max_holding_time_exit_as_strategy_replay():
     assert trade["exit_reason"] == "TIME_EXIT"
     assert trade["gross_rr"] == 0.5
     assert trade["net_rr"] == 0.5
+
+def test_production_backtest_reports_selected_strategy_and_realized_performance():
+    runner = BacktestRunner(
+        partial_exits=False, maker_fee_rate=0.0, taker_fee_rate=0.0,
+        spread_rate=0.0, slippage_rate=0.0,
+    )
+    result = {
+        "decision": {"action": "EXECUTE", "selected_strategy_id": "trend_pullback"},
+        "signal": {"signal": "LONG", "strategy_id": "trend_pullback"},
+        "risk": {
+            "entry": 100.0, "stop_loss": 99.0,
+            "tp1": 101.0, "tp2": 102.0, "tp3": 103.0,
+        },
+        "analysis": {"entry": {"entry_type": "MARKET"}},
+        "strategy_lab": {
+            "diagnostics": {
+                "selected_strategy_id": "trend_pullback",
+                "strategies": [
+                    {"strategy_id": "trend_pullback", "status": "SELECTED",
+                     "direction": "LONG", "selected": True},
+                    {"strategy_id": "smc", "status": "NO_SETUP",
+                     "direction": None, "selected": False},
+                ],
+            },
+        },
+    }
+    runner._record_strategy_diagnostics(result)
+    trade = runner._to_trade(
+        result, [_candle(1, 100.0, 101.5, 99.5, 101.0)], entry_index=0,
+    )
+    assert trade is not None
+    assert trade["strategy_id"] == "trend_pullback"
+    runner._record(trade)
+
+    breakdown = runner.statistics()["strategy_performance_breakdown"]
+    assert breakdown["trend_pullback"]["evaluations"] == 1
+    assert breakdown["trend_pullback"]["raw_setups"] == 1
+    assert breakdown["trend_pullback"]["common_filter_passed"] == 1
+    assert breakdown["trend_pullback"]["selected"] == 1
+    assert breakdown["trend_pullback"]["filled_trades"] == 1
+    assert breakdown["trend_pullback"]["wins"] == 1
+    assert breakdown["trend_pullback"]["net_rr"] == 1.0
+    assert breakdown["smc"]["evaluations"] == 1
+    assert breakdown["smc"]["no_setup"] == 1
+    assert breakdown["smc"]["filled_trades"] == 0
+
