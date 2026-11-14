@@ -479,36 +479,54 @@ def _volatility_breakout(data):
     if not bandwidths or prior_band is None:
         return None
     prior_width = (prior_band[2] - prior_band[0]) / max(prior_band[1], 1e-12)
-    if prior_width > sorted(bandwidths)[max(0, int((len(bandwidths) - 1) * 0.50))]:
+    compression_threshold = sorted(bandwidths)[max(0, int((len(bandwidths) - 1) * 0.35))]
+    if prior_width > compression_threshold:
         return None
     previous = candles[-21:-1]
     last = candles[-1]
     prior_highs = [_value(item, "high") for item in previous]
     prior_lows = [_value(item, "low") for item in previous]
-    volumes = [_value(item, "volume") for item in candles[-21:-1]]
-    close, volume = _value(last, "close"), _value(last, "volume")
-    if close is None or volume is None or any(item is None for item in prior_highs + prior_lows + volumes):
+    close = _value(last, "close")
+    quality = _candle_quality(last)
+    volume_ratio = _relative_volume(candles, 20)
+    if close is None or quality is None or volume_ratio is None or any(item is None for item in prior_highs + prior_lows):
         return None
-    average_volume = sum(volumes) / len(volumes)
     entry = _current_price(data)
     if entry is None:
         return None
+    upper_boundary, lower_boundary = max(prior_highs), min(prior_lows)
     direction = None
-    if close > max(prior_highs) and entry >= close and entry <= max(prior_highs) + atr and volume >= average_volume * 1.2:
+    if (close > upper_boundary and entry >= close and entry <= upper_boundary + atr
+            and volume_ratio >= 1.30 and quality["direction"] == "BULLISH"
+            and quality["body_ratio"] >= 0.50 and quality["close_location"] >= 0.75
+            and quality["range"] >= 0.75 * atr):
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif close < min(prior_lows) and entry <= close and entry >= min(prior_lows) - atr and volume >= average_volume * 1.2:
+    elif (close < lower_boundary and entry <= close and entry >= lower_boundary - atr
+            and volume_ratio >= 1.30 and quality["direction"] == "BEARISH"
+            and quality["body_ratio"] >= 0.50 and quality["close_location"] <= 0.25
+            and quality["range"] >= 0.75 * atr):
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
         return None
-    boundary = max(prior_highs) if direction == "LONG" else min(prior_lows)
-    volume_ratio = volume / average_volume if average_volume > 0 else 0.0
+    boundary = upper_boundary if direction == "LONG" else lower_boundary
     breakout_distance = abs(entry - boundary) / atr
-    strength = min(92.0, 65.0 + min(max(0.0, volume_ratio - 1.2) * 12.0, 15.0) + min(breakout_distance * 8.0, 10.0))
+    strength = min(93.0, 61.0 + min(max(0.0, volume_ratio - 1.30) * 10.0, 15.0)
+                   + min(quality["body_ratio"] * 10.0, 8.0)
+                   + min(quality["range"] / atr * 5.0, 7.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "volatility_breakout", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
-        plan["reasons"] = ["1H 20-candle closed breakout after volatility compression", "Volume at least 1.2x prior 20-candle average"]
+        plan["reasons"] = [
+            f"1H 20-candle close breakout after volatility compression (bandwidth={prior_width:.4f})",
+            f"Relative volume={volume_ratio:.2f}x median of prior 20 bars",
+            f"Breakout candle body={quality['body_ratio']:.2f}; close-location={quality['close_location']:.2f}; range={quality['range'] / atr:.2f} ATR",
+        ]
+        plan["breakout_metrics"] = {"compression_bandwidth": round(prior_width, 6),
+                                    "relative_volume": round(volume_ratio, 3),
+                                    "candle_body_ratio": round(quality["body_ratio"], 3),
+                                    "candle_range_atr": round(quality["range"] / atr, 3),
+                                    "breakout_distance_atr": round(breakout_distance, 3)}
     return plan
 
 
@@ -521,19 +539,25 @@ def _mean_reversion(data, regime):
     if regime["label"] != "RANGE" or len(candles) < 25 or atr is None or bands is None or rsi is None:
         return None
     previous_bands = _bollinger(closes[:-1])
-    if previous_bands is None:
+    previous_rsi = _rsi(closes[:-1])
+    if previous_bands is None or previous_rsi is None:
         return None
     lower, _, upper = bands
     prev_lower, _, prev_upper = previous_bands
     previous, last = candles[-2], candles[-1]
     prev_close, close = _value(previous, "close"), _value(last, "close")
-    if None in (prev_close, close):
+    quality = _candle_quality(last)
+    if None in (prev_close, close) or quality is None:
         return None
     direction = None
-    if prev_close < prev_lower and close > lower and rsi <= 42:
+    if (prev_close < prev_lower and close > lower and rsi <= 42
+            and rsi > previous_rsi and quality["direction"] == "BULLISH"
+            and quality["lower_wick_ratio"] >= 0.20 and quality["close_location"] >= 0.60):
         direction = "LONG"
         stop = min(_value(item, "low") for item in candles[-5:] if _value(item, "low") is not None) - 0.15 * atr
-    elif prev_close > prev_upper and close < upper and rsi >= 58:
+    elif (prev_close > prev_upper and close < upper and rsi >= 58
+            and rsi < previous_rsi and quality["direction"] == "BEARISH"
+            and quality["upper_wick_ratio"] >= 0.20 and quality["close_location"] <= 0.40):
         direction = "SHORT"
         stop = max(_value(item, "high") for item in candles[-5:] if _value(item, "high") is not None) + 0.15 * atr
     else:
@@ -554,7 +578,16 @@ def _mean_reversion(data, regime):
     strength = min(88.0, 65.0 + min(extremity * 0.5, 12.0) + min(abs(close - prev_close) / atr * 4.0, 8.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "mean_reversion", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
-        plan["reasons"] = ["15m Bollinger re-entry after outside close", f"RSI14={rsi:.1f}", f"VWAP deviation={vwap_distance_atr:.2f} ATR with mean-side confirmation", "Range regime"]
+        rejection_wick = quality["lower_wick_ratio"] if direction == "LONG" else quality["upper_wick_ratio"]
+        plan["reasons"] = [
+            "15m Bollinger outside-close re-entry in a classified range regime",
+            f"RSI14={rsi:.1f} turning from {previous_rsi:.1f}",
+            f"VWAP deviation={vwap_distance_atr:.2f} ATR with mean-side confirmation",
+            f"Rejection wick={rejection_wick:.2f}; close-location={quality['close_location']:.2f}",
+        ]
+        plan["mean_reversion_metrics"] = {"rsi": round(rsi, 2), "prior_rsi": round(previous_rsi, 2),
+                                          "vwap_distance_atr": round(vwap_distance_atr, 3),
+                                          "rejection_wick_ratio": round(rejection_wick, 3)}
     return plan
 
 
