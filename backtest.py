@@ -1280,7 +1280,7 @@ def main():
             step=args.step,
             limit_expiry_bars=args.limit_expiry_bars,
             lenient=args.lenient,
-            walk_forward=args.walk_forward,
+            walk_forward=args.walk_forward, max_holding_bars=args.max_holding_bars,
         )
         print(f"\nGENEL DURUM: {overall_status}")
         return
@@ -1308,6 +1308,7 @@ def main():
             slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)),
             tp_weights=_configured_partial_tp_weights(),
             limit_expiry_bars=args.limit_expiry_bars,
+            max_holding_bars=args.max_holding_bars,
         )
         stats = runner.run(data, step=args.step, lenient=args.lenient)
         _report(stats, symbol)
