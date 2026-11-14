@@ -9,7 +9,7 @@ import threading
 import traceback
 
 from textual.app import App, ComposeResult
-from textual.containers import Vertical
+from textual.containers import Grid, Vertical
 from textual.widgets import Footer, Header, Input, RichLog, Static
 from rich import box
 from rich.console import Group
@@ -138,19 +138,40 @@ class AtlasTUIApp(App):
     SUB_TITLE = "7-strategy terminal | local-only | no AI | no Telegram"
 
     CSS = """
-    Screen { background: #050a12; color: #e5edf7; }
-    Header { background: #0d1a2a; color: #e5edf7; }
-    Footer { background: #0d1a2a; color: #9eb4ca; }
+    Screen { background: #05080d; color: #dce6ef; }
+    Header { background: #101820; color: #dce6ef; }
+    Footer { background: #101820; color: #9eb4ca; }
     #main { height: 1fr; padding: 0 1; }
-    #brand { height: 4; margin-bottom: 1; }
-    #market { height: 6; margin-bottom: 1; }
-    #overview { height: 11; margin-bottom: 1; }
-    #pipeline { height: 9; margin-bottom: 1; }
-    #status { height: 1; color: #5edcff; text-style: bold; }
-    #output {
-        height: 1fr; margin-top: 1; padding: 1;
-        background: #080f19; border: round #35536b; color: #dce7f2; overflow-y: auto;
+    #brand { height: 3; }
+    #market { height: 5; margin-top: 1; }
+    #dashboard {
+        height: 1fr;
+        margin-top: 1;
+        grid-size: 3 2;
+        grid-columns: 1fr 2fr 1fr;
+        grid-rows: 1fr 1fr;
+        grid-gutter: 1 1;
     }
+    #dashboard.compact {
+        grid-size: 1 6;
+        grid-columns: 1fr;
+        grid-rows: auto;
+        height: auto;
+    }
+    #dashboard.compact > Static { height: 14; }
+    #motors, #chart, #details, #pipeline, #events, #output {
+        height: 1fr;
+        border: round #34495a;
+        background: #080e14;
+        padding: 0 1;
+    }
+    #chart { border: round #1c7652; }
+    #motors { border: round #286b53; }
+    #details { border: round #53677c; }
+    #pipeline { border: round #395d88; }
+    #events { border: round #46535f; }
+    #output { overflow-y: auto; }
+    #status { height: 1; color: #65d7ff; text-style: bold; margin-top: 1; }
     #command {
         dock: bottom; height: 3; margin: 1 0 0 0;
         border: round #55c8ff; background: #101c2b;
@@ -178,88 +199,148 @@ class AtlasTUIApp(App):
         with Vertical(id="main"):
             yield Static(
                 Panel(
-                    Text("A T L A S   /   PROFESSIONAL TRADING TERMINAL", style="bold bright_cyan"),
-                    subtitle="7 STRATEGIES  •  ONE DECISION  •  LOCAL",
+                    Text("ATLAS  /  LIVE MARKET & STRATEGY TERMINAL", style="bold bright_cyan"),
+                    subtitle="BYBIT PUBLIC DATA  •  7 STRATEGIES  •  ONE DECISION",
                     border_style="bright_cyan",
                     box=box.DOUBLE,
                     padding=(0, 1),
                 ),
                 id="brand",
             )
-            yield Static(
-                Panel(
-                    Group(
-                        Text("MARKET WATCH", style="bold bright_white"),
-                        Text("BTC/USDT     ETH/USDT     TOTAL MARKET", style="cyan"),
-                        Text("PRICE   ─────       ─────       ─────", style="dim"),
-                        Text("CHANGE  ─────       ─────       ─────", style="dim"),
-                    ),
-                    border_style="steel_blue",
-                    box=box.ROUNDED,
-                    padding=(0, 1),
-                ),
-                id="market",
-            )
-            yield Static(
-                self._strategy_overview_renderable(),
-                id="overview",
-            )
-            yield Static(
-                Panel(
-                    Group(
-                        Text("DECISION PIPELINE", style="bold bright_white"),
-                        Text("7 STRATEGY ENGINES", style="cyan"),
-                        Text("          ▼", style="dim"),
-                        Text("SHARED ELIGIBILITY / RISK FILTER", style="yellow"),
-                        Text("          ▼", style="dim"),
-                        Text("SINGLE FINAL SELECTOR", style="bright_magenta"),
-                    ),
-                    border_style="bright_blue",
-                    box=box.ROUNDED,
-                    padding=(0, 1),
-                ),
-                id="pipeline",
-            )
-            yield Static("● SYSTEM READY   |   WAITING FOR COMMAND", id="status")
-            yield RichLog(
-                id="output",
-                wrap=True,
-                markup=False,
-                auto_scroll=True,
-                max_lines=5000,
-            )
-            yield Input(placeholder="⌕  Coin / command  •  Enter to analyze", id="command")
+            yield Static(self._market_renderable(None), id="market")
+            with Grid(id="dashboard"):
+                yield Static(self._motors_renderable("STANDBY"), id="motors")
+                yield Static(self._chart_renderable([]), id="chart")
+                yield Static(self._details_renderable(None), id="details")
+                yield Static(self._pipeline_renderable("READY"), id="pipeline")
+                yield RichLog(id="events", wrap=True, markup=False, auto_scroll=True, max_lines=300)
+                yield RichLog(id="output", wrap=True, markup=False, auto_scroll=True, max_lines=3000)
+            yield Static("● CONNECTING TO BYBIT PUBLIC MARKET DATA", id="status")
+            yield Input(placeholder="Coin / command  •  Enter to analyze", id="command")
         yield Footer()
 
     @staticmethod
-    def _strategy_overview_renderable():
-        table = Table(
-            title="STRATEGY ENGINES",
-            box=box.SIMPLE_HEAVY,
-            expand=True,
-            show_header=False,
-            pad_edge=False,
-        )
-        table.add_column("Engine", style="white", ratio=4)
-        table.add_column("State", justify="right", style="dim", ratio=2)
+    def _market_renderable(data):
+        table = Table(box=box.SIMPLE, expand=True, show_header=True, pad_edge=False)
+        table.add_column("MARKET", style="bold white")
+        table.add_column("LAST", justify="right")
+        table.add_column("24H", justify="right")
+        for symbol in ("BTC/USDT:USDT", "ETH/USDT:USDT"):
+            ticker = (data or {}).get(symbol) or {}
+            last = ticker.get("last")
+            change = ticker.get("percentage")
+            last_text = f"{last:,.2f}" if isinstance(last, (int, float)) else "—"
+            change_text = f"{change:+.2f}%" if isinstance(change, (int, float)) else "—"
+            style = "green" if isinstance(change, (int, float)) and change >= 0 else "red"
+            table.add_row(symbol.split("/")[0], last_text, f"[{style}]{change_text}[/{style}]")
+        return Panel(table, title="[bold bright_cyan]LIVE MARKET WATCH[/bold bright_cyan]",
+                     subtitle="Refresh: 5s  |  Bybit", border_style="cyan", box=box.ROUNDED)
+
+    @staticmethod
+    def _motors_renderable(state):
         names = (
-            "01  Trend Pullback",
-            "02  Volatility Breakout",
-            "03  Mean Reversion",
-            "04  Order-flow Momentum",
-            "05  Liquidation Cascade",
-            "06  Relative Strength",
-            "07  Integrated SMC",
+            "Trend Pullback", "Volatility Breakout", "Mean Reversion",
+            "Order-flow Momentum", "Liquidation Cascade",
+            "Relative Strength", "Integrated SMC",
         )
+        table = Table(box=box.SIMPLE, expand=True, show_header=False, pad_edge=False)
+        table.add_column("ENGINE", ratio=4)
+        table.add_column("LED", justify="right", ratio=2)
         for name in names:
-            table.add_row(name, "[dim]○ STANDBY[/dim]")
+            if state == "RUNNING":
+                led = "[bold bright_green]● RUN[/bold bright_green]"
+            elif state == "DONE":
+                led = "[bright_cyan]● DONE[/bright_cyan]"
+            else:
+                led = "[dim]○ IDLE[/dim]"
+            table.add_row(name, led)
+        return Panel(table, title="[bold bright_green]7 STRATEGY MOTORS[/bold bright_green]",
+                     subtitle="Green LED = analysis active", border_style="green", box=box.ROUNDED)
+
+    @staticmethod
+    def _pipeline_renderable(state):
+        active = state == "RUNNING"
+        color = "bright_green" if active else "bright_cyan"
         return Panel(
-            table,
-            title="[bold bright_cyan]MOTOR STATUS[/bold bright_cyan]",
-            border_style="cyan",
-            box=box.ROUNDED,
-            padding=(0, 1),
+            Group(
+                Text("01  SEVEN SETUP GENERATORS", style=f"bold {color}"),
+                Text("             ↓", style="dim"),
+                Text("02  SHARED FILTER / RISK GATE", style="bold yellow"),
+                Text("             ↓", style="dim"),
+                Text("03  SINGLE FINAL SELECTOR", style="bold bright_magenta"),
+                Text("             ↓", style="dim"),
+                Text("04  EXECUTABLE SETUP / NO TRADE", style="bold white"),
+            ),
+            title="[bold bright_blue]DECISION PIPELINE[/bold bright_blue]",
+            border_style="blue", box=box.ROUNDED,
         )
+
+    @staticmethod
+    def _details_renderable(data):
+        data = data or {}
+        rows = [
+            ("SYMBOL", data.get("symbol", "BTC/USDT")),
+            ("TIMEFRAME", "5m"),
+            ("LAST", data.get("last", "—")),
+            ("24H CHANGE", data.get("change", "—")),
+            ("HIGH / LOW", data.get("range", "—")),
+            ("VOLUME", data.get("volume", "—")),
+        ]
+        table = Table(box=box.SIMPLE, expand=True, show_header=False)
+        table.add_column("FIELD", style="dim")
+        table.add_column("VALUE", justify="right", style="bold white")
+        for key, value in rows:
+            table.add_row(key, str(value))
+        return Panel(table, title="[bold]MARKET DETAILS[/bold]", border_style="bright_black")
+
+    @staticmethod
+    def _chart_renderable(ohlcv, symbol="BTC/USDT:USDT"):
+        if not ohlcv:
+            return Panel(
+                Text("Waiting for live OHLCV candles…", style="dim"),
+                title=f"[bold bright_green]LIVE CANDLE CHART  |  {symbol}  5m[/bold bright_green]",
+                border_style="green",
+            )
+        candles = ohlcv[-48:]
+        lows = [float(row[3]) for row in candles]
+        highs = [float(row[2]) for row in candles]
+        low, high = min(lows), max(highs)
+        span = max(high - low, 1e-12)
+        height = 12
+        grid = [[" " for _ in candles] for _ in range(height)]
+        for x, row in enumerate(candles):
+            opened, top, bottom, close = map(float, (row[1], row[2], row[3], row[4]))
+            y_high = max(0, min(height - 1, int((high - top) / span * (height - 1))))
+            y_low = max(0, min(height - 1, int((high - bottom) / span * (height - 1))))
+            y_open = max(0, min(height - 1, int((high - opened) / span * (height - 1))))
+            y_close = max(0, min(height - 1, int((high - close) / span * (height - 1))))
+            up = close >= opened
+            for y in range(min(y_high, y_low), max(y_high, y_low) + 1):
+                grid[y][x] = ("│", "green" if up else "red")
+            for y in range(min(y_open, y_close), max(y_open, y_close) + 1):
+                grid[y][x] = ("█", "bright_green" if up else "bright_red")
+        lines = []
+        for row in grid:
+            line = Text()
+            for cell in row:
+                if isinstance(cell, tuple):
+                    line.append(cell[0], style=cell[1])
+                else:
+                    line.append(cell)
+            lines.append(line)
+        volume = Text("VOL ", style="dim")
+        max_volume = max(float(row[5]) for row in candles) or 1.0
+        for row in candles:
+            level = int(float(row[5]) / max_volume * 4)
+            volume.append("▁▃▅▇█"[level], style="bright_cyan")
+        content = Group(
+            Text(f"H {high:,.4f}     L {low:,.4f}", style="dim"),
+            *lines,
+            volume,
+            Text(f"O {float(candles[-1][1]):,.4f}  C {float(candles[-1][4]):,.4f}  |  LIVE", style="bold"),
+        )
+        return Panel(content, title=f"[bold bright_green]LIVE CANDLE CHART  |  {symbol}  5m[/bold bright_green]",
+                     subtitle="Green = bullish  |  Red = bearish", border_style="green", box=box.ROUNDED)
 
     def on_mount(self) -> None:
         self._set_status("SYSTEM READY  |  COMMAND INPUT ACTIVE")
