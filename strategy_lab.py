@@ -62,6 +62,38 @@ def _atr(candles, period=14):
     return value if value and math.isfinite(value) and value > 0 else None
 
 
+
+
+def _adx(candles, period=14):
+    if len(candles) < period * 2 + 1:
+        return None
+    plus_dm = []
+    minus_dm = []
+    true_ranges = []
+    for previous, current in zip(candles[-(period * 2 + 1):-1], candles[-(period * 2):]):
+        high = _value(current, "high")
+        low = _value(current, "low")
+        prev_high = _value(previous, "high")
+        prev_low = _value(previous, "low")
+        prev_close = _value(previous, "close")
+        if None in (high, low, prev_high, prev_low, prev_close):
+            return None
+        up = high - prev_high
+        down = prev_low - low
+        plus_dm.append(up if up > down and up > 0 else 0.0)
+        minus_dm.append(down if down > up and down > 0 else 0.0)
+        true_ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+    dx_values = []
+    for index in range(len(true_ranges) - period + 1):
+        tr = sum(true_ranges[index:index + period])
+        if tr <= 0:
+            continue
+        plus = 100.0 * sum(plus_dm[index:index + period]) / tr
+        minus = 100.0 * sum(minus_dm[index:index + period]) / tr
+        denominator = plus + minus
+        dx_values.append(100.0 * abs(plus - minus) / denominator if denominator > 0 else 0.0)
+    return sum(dx_values[-period:]) / min(period, len(dx_values)) if dx_values else None
+
 def _rsi(values, period=14):
     if len(values) < period + 1:
         return None
@@ -195,8 +227,11 @@ def _trend_pullback(data):
     if len(c4) < 60 or len(c1) < 30 or atr is None:
         return None
     e20, e50, e1 = _ema(c4, 20), _ema(c4, 50), _ema(c1, 20)
-    if None in (e20, e50, e1):
+    adx_value = _adx(h4)
+    e20_previous = _ema(c4[:-5], 20)
+    if None in (e20, e50, e1, adx_value, e20_previous) or adx_value < 18:
         return None
+    trend_slope = (e20 - e20_previous) / atr
     last, previous = h1[-1], h1[-2]
     close = _value(last, "close")
     prev_close = _value(previous, "close")
@@ -220,10 +255,12 @@ def _trend_pullback(data):
         return None
     trend_separation = abs(e20 - e50) / atr
     pullback_distance = abs(entry - e1) / atr
-    strength = min(92.0, 65.0 + min(trend_separation * 5.0, 15.0) + max(0.0, 10.0 - pullback_distance * 8.0))
+    if (direction == "LONG" and trend_slope <= 0) or (direction == "SHORT" and trend_slope >= 0):
+        return None
+    strength = min(92.0, 62.0 + min(trend_separation * 5.0, 12.0) + min((adx_value - 18.0) * 0.5, 10.0) + max(0.0, 8.0 - pullback_distance * 6.0))
     plan = _valid_plan(direction, entry, stop, atr, h1, "trend_pullback", strength, entry_reference=_entry_reference(data))
     if plan:
-        plan["reasons"] = ["4H EMA20/EMA50 trend alignment", "1H EMA20 pullback and candle reclaim"]
+        plan["reasons"] = ["4H EMA20/EMA50 alignment and positive EMA20 slope", f"4H ADX={adx_value:.1f}", "1H EMA20 pullback and candle reclaim"]
     return plan
 
 
@@ -231,7 +268,20 @@ def _volatility_breakout(data):
     candles = data.get("1h") or []
     closes = _series(candles)
     atr = _atr(candles)
-    if len(candles) < 30 or atr is None:
+    if len(candles) < 45 or atr is None:
+        return None
+    # Require pre-breakout volatility compression; the current breakout bar
+    # must close outside the prior range, not merely wick through it.
+    bandwidths = []
+    for end in range(max(20, len(closes) - 41), len(closes) - 1):
+        band = _bollinger(closes[end - 20:end])
+        if band:
+            bandwidths.append((band[2] - band[0]) / max(band[1], 1e-12))
+    prior_band = _bollinger(closes[-21:-1])
+    if not bandwidths or prior_band is None:
+        return None
+    prior_width = (prior_band[2] - prior_band[0]) / max(prior_band[1], 1e-12)
+    if prior_width > sorted(bandwidths)[max(0, int((len(bandwidths) - 1) * 0.50))]:
         return None
     previous = candles[-21:-1]
     last = candles[-1]
@@ -246,10 +296,10 @@ def _volatility_breakout(data):
     if entry is None:
         return None
     direction = None
-    if entry > max(prior_highs) and entry <= max(prior_highs) + atr and volume >= average_volume * 1.2:
+    if close > max(prior_highs) and entry >= close and entry <= max(prior_highs) + atr and volume >= average_volume * 1.2:
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif entry < min(prior_lows) and entry >= min(prior_lows) - atr and volume >= average_volume * 1.2:
+    elif close < min(prior_lows) and entry <= close and entry >= min(prior_lows) - atr and volume >= average_volume * 1.2:
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
@@ -260,7 +310,7 @@ def _volatility_breakout(data):
     strength = min(92.0, 65.0 + min(max(0.0, volume_ratio - 1.2) * 12.0, 15.0) + min(breakout_distance * 8.0, 10.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "volatility_breakout", strength, entry_reference=_entry_reference(data))
     if plan:
-        plan["reasons"] = ["1H 20-candle Donchian breakout", "Volume at least 1.2x prior 20-candle average"]
+        plan["reasons"] = ["1H 20-candle closed breakout after volatility compression", "Volume at least 1.2x prior 20-candle average"]
     return plan
 
 
