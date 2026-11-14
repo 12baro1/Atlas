@@ -12,6 +12,7 @@ from collections import deque
 from config import Config
 from data_engine import exchange, get_correlation_universe, get_market_data, get_smt_universe
 from engine import AtlasEngine
+from strategy_lab import SevenStrategyLab
 from manual_trade_service import ManualTradeService
 
 def _is_fresh_15m_data(candles, now_ms, max_age_seconds):
@@ -36,6 +37,7 @@ class AtlasRuntime:
         self.full_scan = bool(full_scan)
         self.logger = logger or logging.getLogger("atlas.runtime")
         self.engine = AtlasEngine()
+        self.strategy_lab = SevenStrategyLab()
         self._stop_event = threading.Event()
         self._thread = None
         self._analysis_lock = threading.Lock()
@@ -410,6 +412,10 @@ class AtlasRuntime:
 
                 with self._journal_lock:
                     result = self.engine.analyze(data)
+                    if result is not None:
+                        # Seven independent strategy evaluations share the same closed market snapshot.
+                        # The existing SMC result is preserved as strategy 7, never rewritten.
+                        result["strategy_lab"] = self.strategy_lab.analyze(data, smc_result=result)
                     if result is None:
                         self._inc("skipped")
                         return {"ok": False, "symbol": symbol, "error": "no_result"}
