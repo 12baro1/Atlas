@@ -11,6 +11,8 @@ from statistics import median
 
 from strategy_performance import evaluate_strategy_edge, rank_validated_candidate
 from orderbook_engine import OrderBookEngine
+from risk_engine import RiskEngine
+from config import Config
 
 _ORDERBOOK_ENGINE = OrderBookEngine()
 
@@ -132,17 +134,51 @@ def _bollinger(values, period=20, deviations=2.0):
     return mean - deviations * sigma, mean, mean + deviations * sigma
 
 
+def _risk_validate_candidate(candidate):
+    """Apply the same final RR and execution-friction model used by SMC risk."""
+    try:
+        entry = float(candidate.get("entry"))
+        stop = float(candidate.get("stop_loss"))
+        targets = {key: float(candidate.get(key)) for key in ("tp1", "tp2", "tp3")}
+        risk = {
+            "entry_type": str(candidate.get("entry_type") or "MARKET").upper(),
+            "side": str(candidate.get("direction") or "").upper(),
+            "risk_setup_valid": True,
+            "minimum_net_rr": float(Config.MINIMUM_NET_RR),
+            "risk_percent_base": float(Config.RISK_PERCENT),
+            "position_size_limit": float(Config.MAX_POSITION_SIZE),
+        }
+        reconciled = RiskEngine().reconcile_final_geometry_payload(risk, entry, stop, targets)
+        net_rr = reconciled.get("weighted_net_rr")
+        net_rr = float(net_rr) if net_rr is not None else None
+        eligible = (
+            reconciled.get("risk_setup_valid") is True
+            and net_rr is not None and math.isfinite(net_rr)
+            and net_rr >= float(Config.MINIMUM_NET_RR)
+            and reconciled.get("final_geometry_reconciled") is True
+        )
+        return {
+            "eligible": bool(eligible),
+            "reason": None if eligible else (
+                reconciled.get("risk_setup_reason")
+                or f"Common net-RR/stop-cost gate failed (net RR={net_rr})"
+            ),
+            "weighted_net_rr": net_rr,
+            "risk_plan": reconciled,
+        }
+    except Exception as exc:
+        return {"eligible": False, "reason": f"risk validation error: {type(exc).__name__}: {exc}", "weighted_net_rr": None, "risk_plan": None}
+
+
 def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_type="MARKET", entry_reference="LAST_CLOSED_15M_FALLBACK"):
     if direction not in {"LONG", "SHORT"} or not all(
         isinstance(value, (int, float)) and math.isfinite(value) and value > 0
         for value in (entry, stop, atr)
     ):
         return None
-    risk = entry - stop if direction == "LONG" else stop - entry
-    if risk <= 0 or risk < 0.75 * atr or risk > 3.0 * atr:
+    risk_distance = entry - stop if direction == "LONG" else stop - entry
+    if risk_distance <= 0 or risk_distance < 0.75 * atr or risk_distance > 3.0 * atr:
         return None
-    # Prefer actual opposing swing-liquidity levels. Use transparent R-multiple
-    # fallback only when the supplied history does not contain three valid levels.
     pivots = []
     sample = list(candles or [])[-120:]
     for index in range(2, len(sample) - 2):
@@ -155,49 +191,39 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
         left_lows = [_value(item, "low") for item in sample[index - 2:index]]
         right_lows = [_value(item, "low") for item in sample[index + 1:index + 3]]
         if all(value is not None for value in left_highs + right_highs) and all(high > value for value in left_highs + right_highs):
-            if direction == "LONG" and high > entry and (high - entry) / risk >= 1.25:
+            if direction == "LONG" and high > entry and (high - entry) / risk_distance >= 1.25:
                 pivots.append(high)
         if all(value is not None for value in left_lows + right_lows) and all(low < value for value in left_lows + right_lows):
-            if direction == "SHORT" and low < entry and (entry - low) / risk >= 1.25:
+            if direction == "SHORT" and low < entry and (entry - low) / risk_distance >= 1.25:
                 pivots.append(low)
     if direction == "LONG":
         structural = sorted(set(value for value in pivots if value > entry))
-        targets = structural[:3] if len(structural) >= 3 else [entry + risk * multiple for multiple in (1.25, 2.0, 3.0)]
+        targets = structural[:3] if len(structural) >= 3 else [entry + risk_distance * multiple for multiple in (2.0, 3.0, 4.0)]
     else:
         structural = sorted(set((value for value in pivots if value < entry)), reverse=True)
-        targets = structural[:3] if len(structural) >= 3 else [entry - risk * multiple for multiple in (1.25, 2.0, 3.0)]
+        targets = structural[:3] if len(structural) >= 3 else [entry - risk_distance * multiple for multiple in (2.0, 3.0, 4.0)]
     target_model = "SWING_LIQUIDITY" if len(structural) >= 3 else "R_MULTIPLE_FALLBACK"
     if any(value <= 0 for value in targets):
         return None
-    # Bybit public-market fee proxy only; spread/slippage are not known here.
-    fee_rate = 0.00055
-    fee_r = (2.0 * fee_rate * entry) / risk
-    if 1.25 - fee_r < 0.80:
-        return None
-    return {
-        "status": "CANDIDATE",
-        "strategy_id": source,
-        "strategy": STRATEGY_NAMES[source],
-        "direction": direction,
-        "entry_type": entry_type,
-        "entry_reference": entry_reference,
-        "entry": round(entry, 10),
-        "stop_loss": round(stop, 10),
-        "tp1": round(targets[0], 10),
-        "tp2": round(targets[1], 10),
-        "tp3": round(targets[2], 10),
-        "rr_tp1": 1.25,
-        "rr_tp2": 2.0,
-        "rr_tp3": 3.0,
-        "estimated_fee_r": round(fee_r, 4),
-        "estimated_net_rr_tp1": round(1.25 - fee_r, 4),
-        "estimated_net_rr_tp3": round(3.0 - fee_r, 4),
-        "strength": round(float(strength), 2),
-        "target_model": target_model,
-        "experimental": source != "smc",
-        "reasons": [],
+    rr_values = [abs(value - entry) / risk_distance for value in targets]
+    plan = {
+        "status": "CANDIDATE", "strategy_id": source, "strategy": STRATEGY_NAMES[source],
+        "direction": direction, "entry_type": str(entry_type or "MARKET").upper(),
+        "entry_reference": entry_reference, "entry": round(entry, 10),
+        "stop_loss": round(stop, 10), "tp1": round(targets[0], 10),
+        "tp2": round(targets[1], 10), "tp3": round(targets[2], 10),
+        "rr_tp1": round(rr_values[0], 4), "rr_tp2": round(rr_values[1], 4),
+        "rr_tp3": round(rr_values[2], 4), "strength": round(float(strength), 2),
+        "target_model": target_model, "experimental": source != "smc", "reasons": [],
     }
-
+    validation = _risk_validate_candidate(plan)
+    plan["risk_validation"] = {key: value for key, value in validation.items() if key != "risk_plan"}
+    if not validation["eligible"]:
+        return None
+    plan["risk_plan"] = validation["risk_plan"]
+    plan["estimated_net_rr_tp1"] = validation["weighted_net_rr"]
+    plan["estimated_net_rr"] = validation["weighted_net_rr"]
+    return plan
 
 def _current_price(data):
     try:
@@ -802,6 +828,12 @@ class SevenStrategyLab:
                 }
             candidate["edge_validation"] = edge
             if edge["eligible"]:
+                risk_validation = _risk_validate_candidate(candidate)
+                candidate["risk_validation"] = {key: value for key, value in risk_validation.items() if key != "risk_plan"}
+                if not risk_validation["eligible"]:
+                    continue
+                candidate["risk_plan"] = risk_validation["risk_plan"]
+                candidate["estimated_net_rr"] = risk_validation["weighted_net_rr"]
                 ranked = rank_validated_candidate(candidate, stats, candidate.get("regime_fit", 1.0))
                 if ranked:
                     candidate["validated_selection_score"] = ranked["score"]
