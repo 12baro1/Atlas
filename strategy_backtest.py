@@ -7,6 +7,7 @@ stop/target ambiguity is resolved conservatively in favor of the stop.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import time
 from collections import defaultdict
@@ -268,6 +269,12 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     lab = SevenStrategyLab()
     journal = StrategyOutcomeJournal()
     revision = journal.current_revision()
+    replay_fingerprint = "|".join(map(str, (
+        symbol, days, step, max_holding_bars, maker_fee, taker_fee,
+        spread_rate, slippage_rate, revision, evaluation_start, is_cutoff,
+    )))
+    run_id = hashlib.sha256(replay_fingerprint.encode("utf-8")).hexdigest()
+    run_created_at_ms = int(time.time() * 1000)
     all_outcomes = defaultdict(list)
     active_until = {}
     calls = 0
@@ -308,10 +315,12 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
             }
             all_outcomes[strategy_id].append(record)
             if persist_outcomes:
-                trade_id = f"{symbol}|{strategy_id}|{fill_time}|{outcome['cost_model_id']}|{revision}"
+                trade_id = f"{run_id}|{strategy_id}|{fill_time}"
                 journal.record_outcome(
                     strategy_id=strategy_id,
                     trade_id=trade_id,
+                    run_id=run_id,
+                    run_created_at_ms=run_created_at_ms,
                     split=split,
                     net_r=outcome["net_r"],
                     gross_r=outcome["gross_r"],
@@ -346,6 +355,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
         "performance_records": journal.performance_snapshot(
             symbol=symbol,
             source_revision=revision,
+            run_id=run_id,
         ),
         "historical_data_limitations": [
             "Order-flow engine is not evaluated: historical OHLCV does not contain timestamped historical order-book snapshots or taker trades.",
