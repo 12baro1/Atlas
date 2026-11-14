@@ -29,16 +29,10 @@ def test_plan_rejects_wrong_side_or_non_finite_geometry():
     assert _valid_plan("LONG", float("nan"), 98, 1, candles, "trend_pullback", 70) is None
 
 
-def test_plan_contains_consistent_directional_targets_and_r_multiples():
+def test_plan_does_not_invent_targets_when_structure_is_missing():
     candles = [Candle(100, 101, 99, 100)]
-    long_plan = _valid_plan("LONG", 100, 98, 1, candles, "trend_pullback", 70)
-    short_plan = _valid_plan("SHORT", 100, 102, 1, candles, "trend_pullback", 70)
-
-    assert long_plan["stop_loss"] < long_plan["entry"] < long_plan["tp1"] < long_plan["tp2"] < long_plan["tp3"]
-    assert short_plan["tp3"] < short_plan["tp2"] < short_plan["tp1"] < short_plan["entry"] < short_plan["stop_loss"]
-    assert long_plan["rr_tp1"] == 2.0
-    assert short_plan["rr_tp3"] == 4.0
-    assert long_plan["experimental"] is True
+    assert _valid_plan("LONG", 100, 98, 1, candles, "trend_pullback", 70) is None
+    assert _valid_plan("SHORT", 100, 102, 1, candles, "trend_pullback", 70) is None
 
 
 def test_lab_isolates_strategy_errors_and_keeps_full_registry(monkeypatch):
@@ -116,7 +110,7 @@ def test_selector_returns_one_original_candidate_without_mixing_levels(monkeypat
 def test_plan_rejects_fee_drag_that_erases_tp1_reward():
     candles = [Candle(100, 101, 99, 100)]
     # 0.01 price risk on a 100 price creates fees larger than the 1.25R target.
-    assert _valid_plan("LONG", 100, 99.99, 0.01, candles, "trend_pullback", 70) is not None
+    assert _valid_plan("LONG", 100, 99.99, 0.01, candles, "trend_pullback", 70) is None
 
 
 def test_current_price_prefers_fresh_ticker_over_last_closed_candle():
@@ -156,15 +150,64 @@ def test_experimental_candidate_is_not_selected_without_validated_performance(mo
 
 
 
-def test_plan_uses_opposing_swing_liquidity_when_three_levels_exist():
+def test_plan_uses_real_swing_invalidation_and_three_opposing_liquidity_levels():
     highs = [101, 102, 103, 105, 103, 102, 104, 105, 108, 106, 105, 107, 108, 111, 109, 108, 107]
-    candles = [Candle(100, high, 99, 101) for high in highs]
+    lows = [99, 98, 99, 99, 97, 99, 99, 98, 99, 99, 98, 99, 99, 98, 99, 99, 98]
+    candles = [Candle(100, high, low, 101) for high, low in zip(highs, lows)]
     plan = _valid_plan("LONG", 100, 98, 1, candles, "trend_pullback", 70)
 
-    assert plan["target_model"] == "SWING_LIQUIDITY"
+    assert plan is not None
+    assert plan["stop_model"] == "CONFIRMED_SWING_INVALIDATION_ATR_BUFFER"
+    assert plan["target_model"] == "CONFIRMED_OPPOSING_SWING_LIQUIDITY"
+    assert plan["stop_loss"] < 97
     assert plan["tp1"] == 105
     assert plan["tp2"] == 108
     assert plan["tp3"] == 111
+    assert plan["rr_tp1"] > 1.25
+
+    short_highs = [201, 202, 203, 205, 203, 202, 204, 205, 208, 206, 205, 207, 208, 211, 209, 208, 207]
+    short_lows = [199, 198, 199, 190, 197, 198, 196, 195, 185, 194, 195, 193, 192, 180, 193, 194, 195]
+    short_candles = [Candle(200, high, low, 199) for high, low in zip(short_highs, short_lows)]
+    short_plan = _valid_plan("SHORT", 200, 202, 1, short_candles, "trend_pullback", 70)
+
+    assert short_plan is not None
+    assert short_plan["tp3"] < short_plan["tp2"] < short_plan["tp1"] < 200 < short_plan["stop_loss"]
+    assert short_plan["stop_model"] == "CONFIRMED_SWING_INVALIDATION_ATR_BUFFER"
+    assert short_plan["target_model"] == "CONFIRMED_OPPOSING_SWING_LIQUIDITY"
+
+
+def test_structural_plan_ignores_synthetic_stop_distance_and_uses_higher_timeframe_levels():
+    from strategy_lab import _structure_candle_sets
+
+    local = [
+        Candle(100, high, low, 100)
+        for high, low in zip(
+            [101, 102, 103, 105, 103, 102, 104, 105, 108, 106, 105, 107, 108, 109, 109, 108, 107],
+            [99, 98, 99, 99, 97, 99, 99, 98, 99, 99, 98, 99, 99, 98, 99, 99, 98],
+        )
+    ]
+    higher = [
+        Candle(100, high, low, 100)
+        for high, low in zip(
+            [112, 113, 114, 118, 114, 113, 115, 116, 121, 117, 116, 119, 120, 125, 122, 121, 120],
+            [99, 98, 99, 99, 97, 99, 99, 98, 99, 99, 98, 99, 99, 98, 99, 99, 98],
+        )
+    ]
+    structure = _structure_candle_sets({"15m": local, "4h": higher})
+    assert structure == [local, higher]
+
+    near_stop = _valid_plan("LONG", 100, 98, 1, local, "trend_pullback", 70, structure_candles=structure)
+    far_stop = _valid_plan("LONG", 100, 90, 1, local, "trend_pullback", 70, structure_candles=structure)
+    assert near_stop is not None and far_stop is not None
+    assert near_stop["stop_loss"] == far_stop["stop_loss"]
+    assert near_stop["tp3"] == 118
+
+
+def test_plan_requires_three_real_levels_and_never_falls_back_to_r_multiples():
+    highs = [101, 102, 103, 105, 103, 102, 104, 105, 108, 106, 105]
+    lows = [99, 98, 99, 99, 97, 99, 99, 98, 99, 99, 98]
+    candles = [Candle(100, high, low, 100) for high, low in zip(highs, lows)]
+    assert _valid_plan("LONG", 100, 98, 1, candles, "trend_pullback", 70) is None
 
 
 
