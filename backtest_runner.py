@@ -192,10 +192,7 @@ def simulate_trade_partial(
             stop_touched = high >= trailing_stop
             stop_fill = opened if stop_gap else trailing_stop
 
-        target_touched_same_bar = any(
-            (high >= target if is_long else low <= target)
-            for _, target in levels
-        )
+
         if stop_touched:
             remaining = 1.0 - closed_frac
             if remaining > 0.0:
