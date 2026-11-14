@@ -66,6 +66,15 @@ def _snapshot_at(history, index, entry_price):
         }
         for full_symbol, frames in (history.get("smt_universe") or {}).items()
     }
+    snapshot["sector_peer_universe"] = {
+        peer_symbol: {
+            "4h": [
+                item for item in (frames.get("4h") or [])
+                if item.time + TIMEFRAME_DURATION_MS["4h"] <= decision_ms
+            ]
+        }
+        for peer_symbol, frames in (history.get("sector_peer_universe") or {}).items()
+    }
     # This is the next bar's open, not a future candle close. It is the
     # executable reference for a signal confirmed at decision_ms.
     snapshot["current_price"] = float(entry_price)
