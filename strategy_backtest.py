@@ -201,6 +201,14 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
             )
             if fallback_ok:
                 fill_index = candidate_index
+                fill_candle = candidate_candle
+                fill_open = candidate_open
+                entry = fill_open
+                entry_type = "MARKET_FALLBACK"
+                simulation_start_offset = candidate_index
+                simulation_candles = future_candles[candidate_index:candidate_index + max_bars]
+                simulation_horizon = max_bars
+                break
             target_already_hit = any(
                 (float(candidate_candle.high) >= target if direction == "LONG" else float(candidate_candle.low) <= target)
                 for target in targets
@@ -217,15 +225,6 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
                 tp_weights = plan_state["target_rebased_weights"]
                 if not targets:
                     return None
-
-                fill_candle = candidate_candle
-                fill_open = candidate_open
-                entry = fill_open
-                entry_type = "MARKET_FALLBACK"
-                simulation_start_offset = candidate_index
-                simulation_candles = future_candles[candidate_index:candidate_index + max_bars]
-                simulation_horizon = max_bars
-                break
         if fill_index is None:
             return None
     elif planned_type == "MARKET":
