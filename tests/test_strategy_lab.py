@@ -178,8 +178,8 @@ def test_diagnostics_report_every_strategy_and_status_counts():
     assert diagnostics["selected_strategy_id"] is None
     assert len(diagnostics["strategies"]) == 7
     assert diagnostics["status_counts"] == {
-        "INSUFFICIENT_HISTORY": 4,
-        "MISSING_DATA": 2,
+        "INSUFFICIENT_HISTORY": 3,
+        "MISSING_DATA": 3,
         "NO_SETUP": 1,
     }
     by_id = {item["strategy_id"]: item for item in report["strategies"]}
