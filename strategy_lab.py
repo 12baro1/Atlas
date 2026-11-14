@@ -1,8 +1,8 @@
-"""Independent seven-strategy analysis and selection for Atlas.
+"""Seven raw setup generators, one shared eligibility filter, one final selector.
 
-The lab is advisory: it never mutates the SMC result or sends exchange orders.
-New strategy candidates are explicitly marked experimental until strategy-specific
-backtests and outcome samples establish a reliable edge.
+The seven sources include one integrated SMC setup assembled by Atlas's SMC
+specialist world. Specialist motors are evidence producers inside that SMC world,
+not additional strategy candidates or independent trade-decision authorities.
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ STRATEGY_NAMES = {
     "liquidation_cascade": "Liquidation Cascade (OI proxy)",
     "orderflow_momentum": "Order Flow Momentum",
     "relative_strength": "Relative Strength",
-    "smc": "SMC (mevcut Atlas)",
+    "smc": "SMC (bütünleşik uzman motorları)",
 }
 
 
@@ -812,7 +812,7 @@ def _regime_fit(strategy_id, regime):
 
 
 class SevenStrategyLab:
-    """Run six independent experimental strategies plus the existing SMC plan."""
+    """Run six independent generators plus one integrated SMC setup generator."""
 
     def classify_regime(self, data):
         """Expose the same regime classifier used by analyze for scoped statistics."""
