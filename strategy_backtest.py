@@ -426,33 +426,33 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
         split = "is" if fill_time < is_cutoff else "oos"
         active_until = index + outcome["bars_until_exit"]
         record = {
-                **outcome,
-                "strategy_id": strategy_id,
-                "symbol": symbol,
-                "split": split,
-                "signal_time_ms": decision_ms,
-                "regime": (report.get("regime") or {}).get("label", "UNKNOWN"),
-            }
-            all_outcomes[strategy_id].append(record)
-            if persistence_enabled:
-                trade_id = f"{run_id}|{strategy_id}|{fill_time}"
-                journal.record_outcome(
-                    strategy_id=strategy_id,
-                    trade_id=trade_id,
-                    run_id=run_id,
-                    run_created_at_ms=run_created_at_ms,
-                    split=split,
-                    net_r=outcome["net_r"],
-                    gross_r=outcome["gross_r"],
-                    cost_r=outcome["cost_r"],
-                    funding_pnl_r=outcome["funding_pnl_r"],
-                    cost_model_id=outcome["cost_model_id"],
-                    closed_at_ms=outcome["closed_at_ms"],
-                    costs_included=True,
-                    symbol=symbol,
-                    source_revision=revision,
-                    regime=record["regime"],
-                )
+            **outcome,
+            "strategy_id": strategy_id,
+            "symbol": symbol,
+            "split": split,
+            "signal_time_ms": decision_ms,
+            "regime": (report.get("regime") or {}).get("label", "UNKNOWN"),
+        }
+        all_outcomes[strategy_id].append(record)
+        if persistence_enabled:
+            trade_id = f"{run_id}|{strategy_id}|{fill_time}"
+            journal.record_outcome(
+                strategy_id=strategy_id,
+                trade_id=trade_id,
+                run_id=run_id,
+                run_created_at_ms=run_created_at_ms,
+                split=split,
+                net_r=outcome["net_r"],
+                gross_r=outcome["gross_r"],
+                cost_r=outcome["cost_r"],
+                funding_pnl_r=outcome["funding_pnl_r"],
+                cost_model_id=outcome["cost_model_id"],
+                closed_at_ms=outcome["closed_at_ms"],
+                costs_included=True,
+                symbol=symbol,
+                source_revision=revision,
+                regime=record["regime"],
+            )
 
     results = {}
     for strategy_id in (
