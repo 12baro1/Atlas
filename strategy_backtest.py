@@ -242,30 +242,21 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
     closed_candle = future_candles[exit_index or 0]
     entry_time_ms = int(fill_candle.time)
     exit_time_ms = _closed_at(closed_candle, "15m")
-    funding_pnl = 0.0
-    for event in funding_events or ():
-        try:
-            event_ms = int(event.get("timestamp") or 0)
-            rate = float(event.get("value"))
-        except (TypeError, ValueError, OverflowError, AttributeError):
-            continue
-        if not (entry_time_ms < event_ms <= exit_time_ms) or not math.isfinite(rate):
-            continue
-        mark = entry
-        for candle in future_candles[:(exit_index or 0) + 1]:
-            if int(candle.time) <= event_ms <= _closed_at(candle, "15m"):
-                mark = float(candle.close)
-                break
-        # Count only funding cash outflows. Credits are ignored because
-        # intrabar position size at settlement is ambiguous in OHLCV replay.
-        cashflow_r = (-1.0 if direction == "LONG" else 1.0) * rate * mark / risk
-        funding_pnl += min(0.0, cashflow_r)
-    cost_r = trading_cost_r - funding_pnl
+    from execution_costs import adverse_funding_cost_r
+    funding = adverse_funding_cost_r(
+        direction, entry, risk, entry_time_ms, exit_time_ms,
+        candles=future_candles[:(exit_index or 0) + 1],
+        funding_records=funding_events, timeframe_ms=15 * 60 * 1000,
+    )
+    funding_pnl = funding["funding_pnl_r"]
+    cost_r = trading_cost_r + funding["funding_cost_r"]
     net_r = gross_r - cost_r
     return {
         "gross_r": round(gross_r, 8),
         "trading_cost_r": round(trading_cost_r, 8),
         "funding_pnl_r": round(funding_pnl, 8),
+        "funding_cost_r": funding["funding_cost_r"],
+        "funding_events_charged": funding["charged_events"],
         "cost_r": round(cost_r, 8),
         "net_r": round(net_r, 8),
         "entry": round(entry, 10),

@@ -510,6 +510,8 @@ def _metrics_for_trades(trades):
         "expectancy": round(sum(net) / count, 4) if count else 0.0,
         "profit_factor": pf(net),
         "execution_cost_rr": round(sum(float(item.get("execution_cost_rr", 0.0) or 0.0) for item in trades), 4),
+        "funding_cost_r": round(sum(float(item.get("funding_cost_r", 0.0) or 0.0) for item in trades), 4),
+        "total_cost_rr": round(sum(float(item.get("execution_cost_rr", 0.0) or 0.0) + float(item.get("funding_cost_r", 0.0) or 0.0) for item in trades), 4),
     }
 
 
@@ -529,6 +531,10 @@ def _combine_stats(all_stats):
         "gross_expectancy": 0,
         "gross_profit_factor": 0,
         "total_execution_cost_rr": 0,
+        "total_funding_cost_r": 0,
+        "funding_events_charged": 0,
+        "funding_data_quality": {},
+        "microstructure_data_quality": {"analysis_samples": 0, "archived_snapshots": 0, "orderbook_snapshots": 0, "trade_snapshots": 0, "snapshot_coverage_pct": 0.0},
         "entry_fee_rr": 0,
         "exit_fee_rr": 0,
         "spread_rr": 0,
@@ -610,10 +616,20 @@ def _combine_stats(all_stats):
         combined["gross_loss_rr"] += float(stats.get("gross_loss_rr", 0) or 0)
         combined["gross_rr"] += float(stats.get("gross_rr", 0) or 0)
         combined["total_execution_cost_rr"] += float(stats.get("total_execution_cost_rr", 0) or 0)
+        combined["total_funding_cost_r"] += float(stats.get("total_funding_cost_r", 0) or 0)
+        combined["funding_events_charged"] += int(stats.get("funding_events_charged", 0) or 0)
+        for key, value in (stats.get("funding_data_quality") or {}).items():
+            combined["funding_data_quality"].setdefault(key, set()).add(str(value))
+        for key in ("analysis_samples", "archived_snapshots", "orderbook_snapshots", "trade_snapshots"):
+            combined["microstructure_data_quality"][key] += int((stats.get("microstructure_data_quality") or {}).get(key, 0) or 0)
         for cost_key in ("entry_fee_rr", "exit_fee_rr", "spread_rr", "slippage_rr"):
             combined[cost_key] += float(stats.get(cost_key, 0) or 0)
         combined["trade_history"].extend(stats.get("trade_history") or [])
 
+    combined["funding_data_quality"] = {
+        key: (next(iter(values)) if len(values) == 1 else "MIXED:" + ",".join(sorted(values)))
+        for key, values in combined["funding_data_quality"].items()
+    }
     # Rebuild combined direction and MTF outcome groups from the actual closed
     # trades; summing per-symbol percentages would distort the pooled sample.
     combined["direction_breakdown"] = {}
@@ -662,6 +678,11 @@ def _combine_stats(all_stats):
             for label, trades in sorted(groups.items())
         }
 
+    micro_quality = combined["microstructure_data_quality"]
+    micro_quality["snapshot_coverage_pct"] = round(micro_quality["archived_snapshots"] / max(1, micro_quality["analysis_samples"]) * 100.0, 2)
+    combined["total_execution_cost_rr"] = round(combined["total_execution_cost_rr"], 4)
+    combined["total_funding_cost_r"] = round(combined["total_funding_cost_r"], 4)
+    combined["total_cost_rr"] = round(combined["total_execution_cost_rr"] + combined["total_funding_cost_r"], 4)
     combined["losses"] = combined["total"] - combined["wins"]
     if combined["total"]:
         combined["winrate"] = round(combined["wins"] / combined["total"] * 100, 2)
@@ -700,10 +721,15 @@ def _combine_stats(all_stats):
 def _report(stats, name):
     print("=" * 52)
     print(f"SONUÇ | {name}")
-    print(f"  Maliyet varsayımları: maker={getattr(Config, 'MAKER_FEE_RATE', 0.0002):.4%}/leg | "
-          f"taker={getattr(Config, 'TAKER_FEE_RATE', 0.00055):.4%}/leg | "
-          f"spread={getattr(Config, 'STOP_SPREAD_BUFFER_RATE', 0.0002):.4%}/market leg | "
-          f"slippage={getattr(Config, 'STOP_SLIPPAGE_BUFFER_RATE', 0.0003):.4%}/market leg")
+    print(
+        f"  Maliyet varsayımları: maker={getattr(Config, 'MAKER_FEE_RATE', 0.0002):.4%}/leg | "
+        f"taker={getattr(Config, 'TAKER_FEE_RATE', 0.00055):.4%}/leg | "
+        f"spread={getattr(Config, 'STOP_SPREAD_BUFFER_RATE', 0.0002):.4%}/market leg | "
+        f"slippage={getattr(Config, 'STOP_SLIPPAGE_BUFFER_RATE', 0.0003):.4%}/market leg"
+    )
+    print(f"  Funding veri kalitesi: {stats.get('funding_data_quality', {})}")
+    print(f"  Funding maliyeti: {stats.get('total_funding_cost_r', 0)}R | settlement: {stats.get('funding_events_charged', 0)}")
+    print(f"  Mikro yapı arşiv kapsamı: {stats.get('microstructure_data_quality', {})}")
     print("=" * 52)
     print(f"  Analiz çağrısı : {stats.get('analysis_calls', 0)}")
     print(f"  Boş sonuç      : {stats.get('empty_results', 0)}")
@@ -1031,6 +1057,22 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                     symbol, days=chunk_days, now_ms=chunk_now_ms,
                     listing_time_ms=listing_time_ms,
                 )
+                # Historical derivatives are loaded independently. Missing
+                # endpoints stay unavailable; never substitute live values.
+                from historical_derivatives import load_historical_derivatives
+                history_15m = data.get("15m") or []
+                if history_15m:
+                    derivative_start = int(history_15m[0].time)
+                    derivative_end = int(history_15m[-1].time) + TIMEFRAME_DURATION_MS["15m"]
+                    data.update(load_historical_derivatives(symbol, derivative_start, derivative_end))
+                else:
+                    data.update({
+                        "open_interest_records": [], "funding_records": [],
+                        "derivatives_data_quality": {
+                            "open_interest": "UNAVAILABLE_NO_OHLCV",
+                            "funding": "UNAVAILABLE_NO_OHLCV",
+                        },
+                    })
                 attach_historical_smt_universe(data, chunk_days, chunk_now_ms)
                 _validate_backtest_history(data, symbol)
                 effective_now_ms = _effective_now_ms(data)

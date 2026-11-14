@@ -2,7 +2,8 @@
 
 Rates are fractions of executed notional and apply per filled leg. LIMIT fills
 are modeled as maker; MARKET and stop exits are taker. Spread/slippage proxies
-are charged only on market-executed legs. Funding is intentionally not modeled.
+are charged only on market-executed legs. Adverse historical funding is modeled
+separately and conservatively; funding credits are ignored.
 """
 import math
 
@@ -159,4 +160,56 @@ def realized_trade_cost(entry_price, exit_price, entry_type, exit_reason,
         "slippage": entry["slippage"] + exit_slippage,
         "entry_execution_type": entry["execution_type"],
         "exit_execution_type": "TAKER" if exit_spread or exit_slippage or reason in {"STOP", "TRAILING_STOP"} else "MAKER",
+    }
+
+
+def adverse_funding_cost_r(direction, entry_price, risk_distance, entry_time_ms, exit_time_ms,
+                           candles=(), funding_records=(), timeframe_ms=900_000):
+    """Return conservative adverse funding cash flow in initial-risk R units.
+
+    Positive funding is paid by longs; negative funding is paid by shorts.
+    Funding credits are ignored. Settlement mark uses the close of the candle
+    containing the settlement timestamp, matching the strategy replay model.
+    """
+    side = str(direction or "").upper()
+    entry = _price(entry_price)
+    risk = _price(risk_distance)
+    try:
+        start_ms = int(entry_time_ms)
+        end_ms = int(exit_time_ms)
+        duration = max(1, int(timeframe_ms))
+    except (TypeError, ValueError, OverflowError):
+        return {"funding_pnl_r": 0.0, "funding_cost_r": 0.0, "charged_events": 0}
+    if side not in {"LONG", "SHORT"} or entry <= 0 or risk <= 0 or end_ms <= start_ms:
+        return {"funding_pnl_r": 0.0, "funding_cost_r": 0.0, "charged_events": 0}
+    funding_pnl_r = 0.0
+    charged_events = 0
+    for event in funding_records or ():
+        if not isinstance(event, dict):
+            continue
+        try:
+            timestamp = int(event.get("timestamp") or 0)
+            rate = float(event.get("value"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if timestamp <= start_ms or timestamp > end_ms or not math.isfinite(rate):
+            continue
+        mark = entry
+        for candle in candles or ():
+            try:
+                candle_start = int(candle.time)
+                candle_close = float(candle.close)
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                continue
+            if candle_start <= timestamp <= candle_start + duration and math.isfinite(candle_close) and candle_close > 0:
+                mark = candle_close
+                break
+        cashflow_r = (-1.0 if side == "LONG" else 1.0) * rate * mark / risk
+        if cashflow_r < 0:
+            funding_pnl_r += cashflow_r
+            charged_events += 1
+    return {
+        "funding_pnl_r": round(funding_pnl_r, 8),
+        "funding_cost_r": round(-funding_pnl_r, 8),
+        "charged_events": charged_events,
     }
