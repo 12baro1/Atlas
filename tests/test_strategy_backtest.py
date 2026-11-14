@@ -209,3 +209,35 @@ def test_smc_and_strategy_replays_share_marketable_limit_fill_cost_and_funding()
     assert abs(strategy["trading_cost_r"] - smc["execution_cost_rr"]) < 1e-4
     assert strategy["funding_cost_r"] == smc["funding_cost_r"]
     assert abs(strategy["net_r"] - smc["net_rr"]) < 1e-4
+
+
+def test_smc_and_strategy_replays_share_bounded_market_fallback():
+    bar_time = 1_700_100_000_000
+    bars = [
+        Bar(100.1, 100.5, 100.2, 100.3, time=bar_time),
+        Bar(100.3, 106.5, 100.2, 105.0, time=bar_time + 900_000),
+        Bar(105.0, 105.5, 99.9, 101.0, time=bar_time + 1_800_000),
+    ]
+    plan = candidate(entry_type="LIMIT")
+    plan.update({"tp1": 106.0, "tp2": 108.0, "tp3": 110.0, "atr": 1.0})
+    strategy = simulate_candidate(
+        plan, bars, maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0, max_bars=3
+    )
+    runner = BacktestRunner(
+        maker_fee_rate=0, taker_fee_rate=0, spread_rate=0, slippage_rate=0,
+        tp_weights=_configured_partial_tp_weights(),
+    )
+    smc = runner._to_trade(
+        {
+            "decision": {"action": "EXECUTE"},
+            "signal": {"signal": "LONG"},
+            "risk": {"entry": 100.0, "stop_loss": 98.0, "tp1": 106.0, "tp2": 108.0, "tp3": 110.0, "atr": 1.0},
+            "analysis": {"entry": {"entry_type": "LIMIT"}},
+        },
+        bars, entry_index=0,
+    )
+    assert strategy is not None and smc is not None
+    assert strategy["entry_type"] == smc["entry_type"] == "MARKET_FALLBACK"
+    assert strategy["entry"] == smc["entry"] == 100.1
+    assert strategy["gross_r"] == smc["gross_rr"]
+    assert abs(strategy["net_r"] - smc["net_rr"]) < 1e-4
