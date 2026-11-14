@@ -740,8 +740,14 @@ def _smc_candidate(result):
     signal = result.get("signal") if isinstance(result.get("signal"), dict) else {}
     direction = str(entry_state.get("direction") or signal.get("signal") or "").upper()
     try:
-        entry = float(entry_state.get("entry", source_risk.get("entry")))
-        stop = float(source_risk.get("stop_loss", entry_state.get("stop_loss")))
+        entry_value = entry_state.get("entry")
+        if entry_value is None:
+            entry_value = source_risk.get("entry")
+        stop_value = source_risk.get("stop_loss")
+        if stop_value is None:
+            stop_value = entry_state.get("stop_loss")
+        entry = float(entry_value)
+        stop = float(stop_value)
         target_values = [
             float(source_risk.get(key) if source_risk.get(key) is not None else dynamic_tp.get(key))
             for key in ("tp1", "tp2", "tp3")
