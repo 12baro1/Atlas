@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import subprocess
 import time
 from collections import defaultdict
@@ -33,7 +34,9 @@ TP_WEIGHTS = (0.5, 0.3, 0.2)
 def _revision():
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+            ["git", "rev-parse", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True, text=True, check=True
         )
         return result.stdout.strip()
     except (OSError, subprocess.SubprocessError):
