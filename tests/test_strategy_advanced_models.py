@@ -39,9 +39,19 @@ def test_relative_strength_uses_beta_adjusted_sector_peer_residual():
     eth = _price_series(market_returns)
     peer_a = _price_series(market_returns)
     peer_b = _price_series(market_returns)
+    # Relative-strength signals must also supply genuine structural exits.
+    # This daily series contributes a protected swing low and three opposing
+    # swing-high liquidity levels above the current 4H price.
+    daily_highs = [110, 111, 112, 115, 112, 111, 113, 114, 118, 115, 114, 116, 117, 121, 119, 118, 117]
+    daily_lows = [108, 107, 108, 108, 106, 108, 108, 107, 108, 108, 107, 108, 108, 107, 108, 108, 107]
+    daily_structure = [
+        TimedCandle(1_700_000_000_000 + index * 24 * 60 * 60 * 1000, 109, high, low, 109)
+        for index, (high, low) in enumerate(zip(daily_highs, daily_lows))
+    ]
     plan = strategy_lab._relative_strength({
         "symbol": "SOL/USDT:USDT",
         "4h": own,
+        "1d": daily_structure,
         "current_price": own[-1].close,
         "correlation_universe": {"BTC": btc, "ETH": eth},
         "sector_peer_universe": {
