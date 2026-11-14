@@ -145,6 +145,9 @@ def build_signal_card(result):
         "entry_distance_atr": _num(entry.get("entry_distance_atr"), 2),
         "requires_pullback": str(entry.get("entry_type") or "").upper() == "LIMIT",
         "setup_thesis": setup_reasoning.get("thesis") or "",
+        "strategy_id": setup_reasoning.get("selected_id") or (result.get("strategy_lab") or {}).get("selected_strategy_id"),
+        "strategy": (((result.get("strategy_lab") or {}).get("selected") or {}).get("strategy") or setup_reasoning.get("thesis") or setup_reasoning.get("selected_id")),
+        "strategy_count": (result.get("strategy_lab") or {}).get("diagnostics", {}).get("strategy_count", 0),
         "supporting_evidence": list(setup_reasoning.get("supporting_evidence") or []),
         "opposing_evidence": list(setup_reasoning.get("opposing_evidence") or []),
         "market_context": list(setup_reasoning.get("market_context") or []),
@@ -436,6 +439,10 @@ def format_card_text(card):
         headline = "İŞLEME GİRME"
 
     lines = [line, f"  {card['symbol']}  |  {headline}", line]
+    if card.get("strategy"):
+        lines.append(f"  Strateji  : {card['strategy']}")
+    elif card.get("strategy_count"):
+        lines.append(f"  Strateji  : Seçilmedi ({card['strategy_count']} strateji değerlendirildi)")
     if card.get("direction") in ("LONG", "SHORT"):
         lines.append(f"  Yön       : {card['direction']}")
 
