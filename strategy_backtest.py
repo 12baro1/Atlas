@@ -27,7 +27,7 @@ from strategy_lab import SevenStrategyLab
 from strategy_outcome_journal import StrategyOutcomeJournal
 from historical_derivatives import load_historical_derivatives
 from microstructure_archive import snapshot_at as archived_microstructure_at
-from backtest_runner import simulate_trade_partial
+from backtest_runner import simulate_trade_partial, market_fallback_check
 from execution_costs import realized_trade_cost, adverse_funding_cost_r
 
 
@@ -144,15 +144,13 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
     if planned_type == "LIMIT":
         marketable = (direction == "LONG" and fill_open <= planned_entry) or (direction == "SHORT" and fill_open >= planned_entry)
         touched = (float(fill_candle.low) <= planned_entry) if direction == "LONG" else (float(fill_candle.high) >= planned_entry)
-        if not marketable and not touched:
-            return None
         if marketable:
             # Gap-through limits fill at the open and incur taker costs.
             entry = fill_open
             entry_type = "MARKETABLE_LIMIT"
             simulation_candles = future_candles[:max_bars]
             simulation_horizon = max_bars
-        else:
+        elif touched:
             entry = planned_entry
             entry_type = "LIMIT"
             fill_stop_hit = (float(fill_candle.low) <= stop) if direction == "LONG" else (float(fill_candle.high) >= stop)
@@ -166,6 +164,19 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
                 simulation_candles = future_candles[1:max_bars]
                 simulation_horizon = max(1, max_bars - 1)
                 simulation_start_offset = 1
+        else:
+            fallback_ok, _, _ = market_fallback_check(
+                fill_open, planned_entry, stop, targets[0], direction,
+                {"atr": candidate.get("atr")}, maker_fee_rate=maker_fee,
+                taker_fee_rate=taker_fee, spread_rate=spread_rate, slippage_rate=slippage_rate,
+            )
+            if not fallback_ok:
+                return None
+            # Same bounded next-open MARKET fallback as the SMC replay.
+            entry = fill_open
+            entry_type = "MARKET_FALLBACK"
+            simulation_candles = future_candles[:max_bars]
+            simulation_horizon = max_bars
     elif planned_type == "MARKET":
         entry = fill_open
         entry_type = "MARKET"
