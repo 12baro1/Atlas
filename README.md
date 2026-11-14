@@ -79,7 +79,7 @@ Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Ge
 
 Tek coin komutunda Atlas aynı kapanmış piyasa verisi üzerinde 6 yeni stratejiyi ve mevcut SMC kararını bağımsız değerlendirir. Her stratejinin giriş/stop/hedef geometrisi ayrı tutulur. Yeni motorların adayları yalnızca setup gücü puanıyla seçilmez: stratejiye özel, maliyet sonrası IS/OOS performansı, minimum örneklem ve expectancy güven sınırı doğrulanmadan SMC'nin önüne geçemez. Doğrulanmış deneysel edge yoksa SMC adayı varsa o gösterilir; SMC de yoksa seçilmiş plan üretilmez. Yeni motorların hedefleri yeterli swing likiditesi varsa yapısal seviyelerden, yoksa açıkça etiketlenmiş R-katı fallback ile hesaplanır.
 
-**Önemli doğrulama sınırı:** 6 yeni strateji deneysel aday üreticilerdir. Strateji bazlı kalıcı sonuç günlüğü ve tek kronolojik IS/OOS replay eklendi; ancak tam walk-forward test matrisi, gerçek fill verisi ve her stratejinin tüm gerekli tarihsel veri kaynakları henüz tamamlanmadı. Bu nedenle yalnızca replay'de gerçekten ölçülebilen motorlar, aynı kod revizyonu/sembol/rejim için yeterli IS/OOS örneklemi ve güven sınırı geçerse seçime terfi edebilir. `strategy_performance.py` eksik performans verisinde kapalı-kapı (fail-closed) davranır. Strateji bazında aynı-veri backtesti, komisyon/spread/slippage/funding modellemesi ve out-of-sample örneklem tamamlanmadan kârlılık veya geçmiş performans üstünlüğü iddia edilmez. Liquidation Cascade motoru gerçek likidasyon akışı yerine açık pozisyon (OI) daralmasını ve işlem akışını proxy olarak kullanır; gerçek likidasyon verisi olarak yorumlanmamalıdır. Atlas emir göndermez.
+**Önemli doğrulama sınırı:** 6 yeni strateji deneysel aday üreticilerdir. Strateji replay'i kronolojik IS/OOS ayrımı ve 5 anchored walk-forward penceresi kullanır; maliyetler ve tarihsel funding verisi mevcut olduğunda aynı yürütme simülatöründen geçirilir. Bunlar gerçek borsa dolumu değildir. Eksik veya kısmi OI/funding verisi açıkça raporlanır; funding geçmişi tam kapsama sahip değilse --persist performans günlüğüne sonuç yazmaz. Order Flow Momentum yalnızca karar zamanından önce arşivlenmiş, taze order-book/trade örnekleri varsa tarihsel olarak ölçülebilir. Liquidation Cascade gerçek likidasyon akışı değil, OI/funding/işlem akışı proxy'sidir. Hiçbir motorun kârlılığı kanıtlanmış değildir; terfi için aynı kod revizyonu/sembol/rejim altında minimum IS/OOS örneklemi, PF ve expectancy eşikleri geçilmelidir. Atlas emir göndermez.
 
 ## Backtest
 
@@ -113,7 +113,7 @@ Yedi motoru ayrı ayrı tarihsel replay ile ölçmek için:
 python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
 ```
 
-Bu replay yalnızca kapanmış mumlarla karar verir; MARKET girişini sonraki 15m mum açılışında, LIMIT girişini fiyat gerçekten limit seviyesine dokunursa doldurur. Aynı mumda SL ve TP birlikte görülürse SL önce kabul edilir. Komisyon, spread ve slippage varsayımları net R'den düşülür.
+Bu replay yalnızca kapanmış mumlarla karar verir; MARKET girişini sonraki 15m açılışında, LIMIT emrini en fazla 8 bar boyunca bekleterek doldurur. Gap-through LIMIT açılışta marketable limit olarak, sınırları içindeki yakın kaçırılmış LIMIT ise aynı kontrollü MARKET fallback kuralıyla ele alınır. Emir dolmadan hedef seviyesi aşılırsa kalan yapısal hedefler yeniden hesaplanır. Dolumdan sonra varsayılan maksimum tutma süresi 32 adet 15m bardır (8 saat); süre dolarsa pozisyon son kapanışta kapatılır. Kısmi TP ağırlıkları yapılandırılabilir; aynı mumda SL ve TP birlikte görülürse SL önce kabul edilir. Komisyon, spread, slippage ve mevcut tarihsel funding maliyeti net R'den düşülür.
 
 Maliyet modeli ve IS/OOS kayıtlarını yerel performans günlüğüne yazmak için açıkça `--persist` ekle:
 
@@ -123,7 +123,18 @@ python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30 --persist
 
 Performans kayıtları sembol, rejim ve kod revizyonuna göre ayrılır. Kod revizyonu değiştiğinde eski sonuçlar yeni sürümün seçiminde kullanılmaz. Minimum örneklem ve güven sınırı geçilmeden deneysel strateji seçime terfi etmez.
 
-**Tarihsel veri sınırı:** Bybit OHLCV arşivinde geçmiş order-book/taker-trade snapshot'ı bulunmadığı için Order Flow Momentum motoru bu replay'de ölçülmez. Aynı şekilde geçmiş OI/funding serileri bu replay'e henüz bağlanmadığından Liquidation Cascade motoru ölçülmez. Bu iki motor için "işlem yok" sonucu başarısız strateji anlamına gelmez; gerekli tarihsel veri mevcut değildir. Funding maliyeti de replay'de henüz modellenmez. Maliyet varsayımları gerçek dolum garantisi değildir.
+**Tarihsel veri sınırı:** OI ve funding geçmişi Bybit'in tarihsel uç noktalarından zaman damgasıyla alınır. Veri kapsaması HISTORICAL, PARTIAL veya UNAVAILABLE olarak raporlanır. Funding ödemeleri pozisyon yönüne göre modellenir; olumsuz debiler maliyete yazılır, olumlu krediler muhafazakâr biçimde kazanç sayılmaz. Kısmi funding geçmişiyle sonuç üretilebilir ancak bu sonuç strateji terfisi için kalıcı performans günlüğüne yazılmaz. Geçmiş order-book/taker-trade snapshot'ları geriye dönük üretilemez; Order Flow Momentum yalnızca yerel arşivde karar anından önce mevcut olan taze örneklerle ölçülür.
+
+
+## Motor katkısı (ablation)
+
+Uzman motorların kararı ve örneklenmiş tek işlem sonucunu nasıl etkilediğini ölçmek için:
+
+```bash
+python3 motor_ablation.py --symbol BTC/USDT:USDT --days 14 --samples 3
+```
+
+Rapor her motoru aynı karar anlarında tek tek devre dışı bırakır; karar/plan değişimini ve ortak SMC yürütme simülatörüyle hesaplanan örnek net-R farkını gösterir. Bu, tam portföy backtesti veya nedensel kârlılık kanıtı değildir. Varsayılan örnekler yüklenen tarih aralığına eşit yayılır. Sabit aralık istersen --step 96 kullan.
 
 ## Güncelleme
 
@@ -174,6 +185,7 @@ python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
 - Relative Strength, BTC/ETH beta-adjusted residual alpha kullanır. İsteğe bağlı sektör/peer grubu `ATLAS_SECTOR_PEERS_JSON` ile tanımlanır; örnek: `{"SOL":["AVAX/USDT:USDT","ADA/USDT:USDT"]}`. Bilinmeyen coinlere otomatik sektör etiketi uydurulmaz.
 - Order Flow Momentum, agresif alış/satış akışı fiyatı ilerletemediğinde ve karşı tarafta derinlik varsa absorption proxy üretir. Bu, gerçek kuyruk yenilenmesi veya gizli emir kanıtı değildir. Kapatmak için `ATLAS_MICROSTRUCTURE_ARCHIVE_ENABLED=0` ayarlayın.
 - Geçmiş order-book verisi geriye dönük üretilemez. Order-flow replay yalnızca karar zamanından önce arşivlenmiş ve tazeliği doğrulanmış örnekleri kullanır. Arşiv oluşana kadar bu motorun tarihsel performansı ölçülmüş sayılmaz.
+- Arşiv her sembol için varsayılan 5 MiB ve 7 gün ile sınırlandırılır. İhtiyaca göre ATLAS_MICROSTRUCTURE_ARCHIVE_MAX_BYTES ve ATLAS_MICROSTRUCTURE_ARCHIVE_RETENTION_DAYS ayarlanabilir.
 - Liquidation Cascade, gerçek liquidation-event akışı değildir; tarihsel OI/funding ve varsa arşivlenmiş trade-flow ile sınırlı bir proxy'dir.
 
 Komisyon, spread ve slippage hâlâ parametreli yürütme varsayımlarıdır; gerçek emir gerçekleşme fiyatı değildir. Walk-forward çıktısı kârlılık garantisi veya parametre optimizasyonu anlamına gelmez.
