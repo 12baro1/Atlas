@@ -158,3 +158,20 @@ python -m pip install -r requirements.txt
 - Gerçek API anahtarı, parola veya kişisel erişim bilgilerini depoya yükleme.
 - Sinyaller yatırım tavsiyesi değildir ve kâr garantisi vermez.
 - Önce demo ortamında doğrula. Kaldıraçlı işlemlerde sermayenin tamamı kaybedilebilir.
+
+## Tarihsel doğrulama, funding ve mikro yapı arşivi
+
+Yedi stratejinin tarihsel karşılaştırması:
+
+```bash
+python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
+```
+
+- Rapor, 5 ardışık test pencereli anchored walk-forward sonuçlarını IS/OOS sonuçlarından ayrı gösterir.
+- Bybit'in tarihsel OI ve funding uç noktaları destekleniyorsa zaman damgalı seriler yüklenir. Funding ödemesi pozisyon yönüne göre net R'ye yansıtılır.
+- Funding geçmişi alınamazsa `--persist` sonuçları performans günlüğüne yazmaz. Eksik maliyetli örnekler strateji seçiminde kullanılamaz.
+- Canlı order-book ve recent-trade örnekleri yerel olarak `data/microstructure/` altında JSONL arşivine kaydedilir. Kapatmak için `ATLAS_MICROSTRUCTURE_ARCHIVE_ENABLED=0` ayarlayın.
+- Geçmiş order-book verisi geriye dönük üretilemez. Order-flow replay yalnızca karar zamanından önce arşivlenmiş ve tazeliği doğrulanmış örnekleri kullanır. Arşiv oluşana kadar bu motorun tarihsel performansı ölçülmüş sayılmaz.
+- Liquidation Cascade, gerçek liquidation-event akışı değildir; tarihsel OI/funding ve varsa arşivlenmiş trade-flow ile sınırlı bir proxy'dir.
+
+Komisyon, spread ve slippage hâlâ parametreli yürütme varsayımlarıdır; gerçek emir gerçekleşme fiyatı değildir. Walk-forward çıktısı kârlılık garantisi veya parametre optimizasyonu anlamına gelmez.
