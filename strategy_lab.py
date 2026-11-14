@@ -105,6 +105,23 @@ def _rsi(values, period=14):
     return 100.0 - 100.0 / (1.0 + gains / losses)
 
 
+
+
+def _vwap(candles):
+    numerator = denominator = 0.0
+    for candle in candles or []:
+        high, low, close = (_value(candle, key) for key in ("high", "low", "close"))
+        volume = _value(candle, "volume")
+        if None in (high, low, close, volume) or volume < 0:
+            return None
+        typical = (high + low + close) / 3.0
+        numerator += typical * volume
+        denominator += volume
+    if denominator <= 0:
+        return None
+    value = numerator / denominator
+    return value if math.isfinite(value) and value > 0 else None
+
 def _bollinger(values, period=20, deviations=2.0):
     if len(values) < period:
         return None
@@ -341,16 +358,22 @@ def _mean_reversion(data, regime):
     else:
         return None
     entry = _current_price(data)
-    if entry is None:
+    vwap = _vwap(candles[-20:])
+    if entry is None or vwap is None:
         return None
     middle = bands[1]
-    if (direction == "LONG" and not lower <= entry <= middle) or (direction == "SHORT" and not middle <= entry <= upper):
-        return None
+    vwap_distance_atr = abs(entry - vwap) / atr
+    if direction == "LONG":
+        if not lower <= entry <= middle or entry >= vwap or not 0.25 <= vwap_distance_atr <= 2.5:
+            return None
+    else:
+        if not middle <= entry <= upper or entry <= vwap or not 0.25 <= vwap_distance_atr <= 2.5:
+            return None
     extremity = max(0.0, 42.0 - rsi) if direction == "LONG" else max(0.0, rsi - 58.0)
     strength = min(88.0, 65.0 + min(extremity * 0.5, 12.0) + min(abs(close - prev_close) / atr * 4.0, 8.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "mean_reversion", strength, entry_reference=_entry_reference(data))
     if plan:
-        plan["reasons"] = ["15m Bollinger re-entry after outside close", f"RSI14={rsi:.1f}", "Range regime"]
+        plan["reasons"] = ["15m Bollinger re-entry after outside close", f"RSI14={rsi:.1f}", f"VWAP deviation={vwap_distance_atr:.2f} ATR with mean-side confirmation", "Range regime"]
     return plan
 
 
