@@ -10,6 +10,8 @@ def test_journal_persists_and_aggregates_is_oos_separately(tmp_path):
         result = journal.record_outcome(
             strategy_id="trend_pullback",
             trade_id=f"is-{index}",
+            run_id="run-1",
+            run_created_at_ms=1_700_200_000_000,
             split="is",
             net_r=value,
             gross_r=value + 0.1,
@@ -26,6 +28,8 @@ def test_journal_persists_and_aggregates_is_oos_separately(tmp_path):
         journal.record_outcome(
             strategy_id="trend_pullback",
             trade_id=f"oos-{index}",
+            run_id="run-1",
+            run_created_at_ms=1_700_200_000_000,
             split="oos",
             net_r=value,
             gross_r=value + 0.1,
@@ -49,7 +53,8 @@ def test_journal_persists_and_aggregates_is_oos_separately(tmp_path):
 def test_journal_rejects_outcomes_without_reconciled_costs_and_duplicate_ids(tmp_path):
     journal = StrategyOutcomeJournal(str(tmp_path / "outcomes.jsonl"))
     payload = dict(
-        strategy_id="smc", trade_id="same", split="is", net_r=0.9,
+        strategy_id="smc", trade_id="same", run_id="run-1",
+        run_created_at_ms=1000, split="is", net_r=0.9,
         gross_r=1.0, cost_r=0.1, cost_model_id="maker-taker-v1",
         closed_at_ms=1000, symbol="BTC/USDT:USDT", source_revision="test",
     )
@@ -63,7 +68,8 @@ def test_journal_rejects_outcomes_without_reconciled_costs_and_duplicate_ids(tmp
 def test_journal_rejects_unknown_strategy_and_non_finite_r(tmp_path):
     journal = StrategyOutcomeJournal(str(tmp_path / "outcomes.jsonl"))
     common = dict(
-        trade_id="x", split="is", closed_at_ms=1000, costs_included=True,
+        trade_id="x", run_id="run-1", run_created_at_ms=1000,
+        split="is", closed_at_ms=1000, costs_included=True,
         gross_r=1.1, cost_r=0.1, cost_model_id="cost-v1",
     )
     assert journal.record_outcome(strategy_id="made_up", net_r=1, **common)["accepted"] is False
