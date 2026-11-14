@@ -110,7 +110,7 @@ Backtest geçmiş veriyi simüle eder; gerçek piyasa dolumunu veya gelecekteki 
 Yedi motoru ayrı ayrı tarihsel replay ile ölçmek için:
 
 ```bash
-python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
+python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30 --max-holding-bars 32 --limit-expiry-bars 8
 ```
 
 Bu replay yalnızca kapanmış mumlarla karar verir; MARKET girişini sonraki 15m açılışında, LIMIT emrini en fazla 8 bar boyunca bekleterek doldurur. Gap-through LIMIT açılışta marketable limit olarak, sınırları içindeki yakın kaçırılmış LIMIT ise aynı kontrollü MARKET fallback kuralıyla ele alınır. Emir dolmadan hedef seviyesi aşılırsa kalan yapısal hedefler yeniden hesaplanır. Dolumdan sonra varsayılan maksimum tutma süresi 32 adet 15m bardır (8 saat); süre dolarsa pozisyon son kapanışta kapatılır. Kısmi TP ağırlıkları yapılandırılabilir; aynı mumda SL ve TP birlikte görülürse SL önce kabul edilir. Komisyon, spread, slippage ve mevcut tarihsel funding maliyeti net R'den düşülür.
@@ -162,6 +162,11 @@ cd ~/Atlas
 source venv/bin/activate
 python -m pip install -r requirements.txt
 ```
+
+
+## Demo forward doğrulaması
+
+Backtest ve motor ablation raporları gerçek zamanlı forward test yerine geçmez. Atlas otomatik emir göndermez; bu nedenle canlı/demoda gerçekleşen dolum, spread, kayma ve funding sonuçları henüz otomatik olarak doğrulanmış sayılmaz. Mikro yapı arşivi yalnızca Atlas çalışırken yeni snapshot biriktirir; geçmiş L2 verisini geriye dönük oluşturmaz. Strateji terfisi veya gerçek sermaye kullanımı öncesinde demo ortamında yeterli sayıda kapanmış sinyalin gerçek zamanlı takibi ve sonuçlarının maliyet sonrası karşılaştırılması gerekir.
 
 ## Güvenlik
 
