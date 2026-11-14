@@ -77,9 +77,9 @@ Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Ge
 
 ## 7 strateji analizi
 
-Tek coin komutunda Atlas aynı kapanmış piyasa verisi üzerinde 6 yeni stratejiyi ve mevcut SMC kararını bağımsız değerlendirir. Her stratejinin giriş/stop/hedef geometrisi ayrı tutulur; seçim motoru yalnızca tek bir stratejinin planını gösterir. Strateji koşulları oluşmazsa zorla işlem üretilmez.
+Tek coin komutunda Atlas aynı kapanmış piyasa verisi üzerinde 6 yeni stratejiyi ve mevcut SMC kararını bağımsız değerlendirir. Her stratejinin giriş/stop/hedef geometrisi ayrı tutulur. Yeni motorların adayları yalnızca setup gücü puanıyla seçilmez: stratejiye özel, maliyet sonrası IS/OOS performansı, minimum örneklem ve expectancy güven sınırı doğrulanmadan SMC'nin önüne geçemez. Doğrulanmış deneysel edge yoksa SMC adayı varsa o gösterilir; SMC de yoksa seçilmiş plan üretilmez. Yeni motorların hedefleri yeterli swing likiditesi varsa yapısal seviyelerden, yoksa açıkça etiketlenmiş R-katı fallback ile hesaplanır.
 
-**Önemli doğrulama sınırı:** İlk sürümde 6 yeni strateji deneysel aday üreticilerdir. Strateji bazında aynı-veri backtesti, komisyon/spread/slippage modellemesi ve out-of-sample örneklem tamamlanmadan kârlılık veya geçmiş performans üstünlüğü iddia edilmez. Liquidation Cascade motoru gerçek likidasyon akışı yerine açık pozisyon (OI) daralmasını ve işlem akışını proxy olarak kullanır; gerçek likidasyon verisi olarak yorumlanmamalıdır. Atlas emir göndermez.
+**Önemli doğrulama sınırı:** 6 yeni strateji deneysel aday üreticilerdir. Henüz strateji bazlı kalıcı sonuç günlüğü ve tam maliyetli walk-forward/OOS performans beslemesi tamamlanmış değildir; bu nedenle deneysel motorlar otomatik olarak seçime terfi etmez. `strategy_performance.py` eksik performans verisinde kapalı-kapı (fail-closed) davranır. Strateji bazında aynı-veri backtesti, komisyon/spread/slippage/funding modellemesi ve out-of-sample örneklem tamamlanmadan kârlılık veya geçmiş performans üstünlüğü iddia edilmez. Liquidation Cascade motoru gerçek likidasyon akışı yerine açık pozisyon (OI) daralmasını ve işlem akışını proxy olarak kullanır; gerçek likidasyon verisi olarak yorumlanmamalıdır. Atlas emir göndermez.
 
 ## Backtest
 
