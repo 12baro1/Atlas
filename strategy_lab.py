@@ -1058,6 +1058,7 @@ class SevenStrategyLab:
                 "direction": item.get("direction"),
                 "entry_type": item.get("entry_type"),
                 "rejection_stage": stage,
+                "reason": item.get("reason"),
                 "rejection_reasons": list(item.get("rejection_reasons") or []),
                 "selected": item is selected,
             })
