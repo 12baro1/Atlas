@@ -310,8 +310,10 @@ def build_selected_strategy_card(result):
     elif valid_numbers and direction == "SHORT":
         geometry_valid = stop > entry > targets[0] > targets[1] > targets[2]
     risk_distance = abs(entry - stop) if valid_numbers else 0.0
+    risk_validation = selected.get("risk_validation") or {}
     executable = (
-        geometry_valid and risk_distance > 0
+        risk_validation.get("eligible") is True
+        and geometry_valid and risk_distance > 0
         and entry_type in {"MARKET", "LIMIT"}
         and selected.get("status") == "CANDIDATE"
     )
