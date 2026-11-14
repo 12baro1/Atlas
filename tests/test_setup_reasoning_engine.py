@@ -468,3 +468,13 @@ def test_far_poi_is_kept_for_diagnostics_but_never_selected_as_actionable_setup(
     assert result["candidates"][0]["execution_eligible"] is False
     assert result["selected"]["valid"] is False
     assert result["selected"]["entry_reason_code"] == "ENTRY_TOO_FAR"
+
+
+def test_selected_setup_preserves_supporting_and_opposing_event_ids():
+    result = _run(smt={
+        "active": True, "direction": "BEARISH", "confidence": 80,
+        "event_id": "4h:smt:1700000000000",
+    })
+    selected = result["selected"]
+    assert selected["opposing_event_ids"] == ["4h:smt:1700000000000"]
+    assert any("SMT SHORT" in item for item in selected["opposing_evidence"])
