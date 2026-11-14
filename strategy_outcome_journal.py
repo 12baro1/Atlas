@@ -65,7 +65,6 @@ class StrategyOutcomeJournal:
             or run_created <= 0
             or costs_included is not True
             or not model_id
-            or cost_result_r < 0
             or abs(result_r - (gross_result_r - cost_result_r)) > 1e-5
         ):
             return {"accepted": False, "reason": "outcome_requires_reconciled_gross_cost_net_r_and_cost_model"}
