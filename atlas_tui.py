@@ -7,6 +7,7 @@ import os
 import re
 import threading
 import traceback
+from collections import deque
 
 from textual.app import App, ComposeResult
 from textual.containers import Grid, Vertical
@@ -159,6 +160,7 @@ class AtlasTUIApp(App):
         height: auto;
     }
     #dashboard.compact > Static { height: 14; }
+    #dashboard.compact > RichLog { height: 14; }
     #motors, #chart, #details, #pipeline, #events, #output {
         height: 1fr;
         border: round #34495a;
@@ -213,8 +215,8 @@ class AtlasTUIApp(App):
                 yield Static(self._chart_renderable([]), id="chart")
                 yield Static(self._details_renderable(None), id="details")
                 yield Static(self._pipeline_renderable("READY"), id="pipeline")
-                yield RichLog(id="events", wrap=True, markup=False, auto_scroll=True, max_lines=300)
                 yield RichLog(id="output", wrap=True, markup=False, auto_scroll=True, max_lines=3000)
+                yield RichLog(id="events", wrap=True, markup=False, auto_scroll=True, max_lines=120)
             yield Static("● CONNECTING TO BYBIT PUBLIC MARKET DATA", id="status")
             yield Input(placeholder="Coin / command  •  Enter to analyze", id="command")
         yield Footer()
@@ -345,8 +347,25 @@ class AtlasTUIApp(App):
     def on_mount(self) -> None:
         self._active_symbol = "BTC/USDT:USDT"
         self._market_refresh_busy = False
+        self._code_frames = deque([
+            "atlas.engine.dispatch(symbol, timeframe='5m')",
+            "strategy_lab.generate_candidates(context)",
+            "filter_gate.validate(setups, risk_profile)",
+            "selector.rank(valid_candidates, net_rr=True)",
+            "market_data.refresh(exchange='bybit')",
+            "ohlcv = feed.fetch(symbol, limit=48)",
+            "risk_engine.check(stop, targets, fees)",
+            "decision = selector.single_best(candidates)",
+            "smc_context.update(structure, liquidity, fvg)",
+            "render.dashboard(market, candles, decision)",
+            "for motor in strategy_engines: motor.evaluate()",
+            "execution_model.validate(entry, stop, targets)",
+        ])
+        self._code_frame_index = 0
         self._set_status("BYBIT PUBLIC FEED  |  CONNECTING")
-        self._log_event("Atlas dashboard initialized; connecting to Bybit public market data.")
+        self._log_event("DECORATIVE SYSTEM TRACE  |  VISUAL ONLY — NOT EXECUTED LOGS")
+        self._log_event("Connecting to public market feed…")
+        self.set_interval(0.22, self._animate_code_panel)
         self.query_one("#command", Input).focus()
         self._on_resize()
         self.set_interval(5.0, self._request_market_refresh)
@@ -370,6 +389,15 @@ class AtlasTUIApp(App):
     def _log_event(self, message: str) -> None:
         try:
             self.query_one("#events", RichLog).write(message)
+        except Exception:
+            pass
+
+    def _animate_code_panel(self) -> None:
+        try:
+            panel = self.query_one("#events", RichLog)
+            line = self._code_frames[self._code_frame_index % len(self._code_frames)]
+            self._code_frame_index += 1
+            panel.write(Text(f">> {line}", style="green"))
         except Exception:
             pass
 
@@ -445,7 +473,16 @@ class AtlasTUIApp(App):
     def _show(self, message) -> None:
         output = self.query_one("#output", RichLog)
         output.clear()
-        output.write(message, scroll_end=True)
+        output.write(
+            Panel(
+                Text(str(message), style="white"),
+                title="[bold bright_cyan]FINAL DECISION / ATLAS RESULT[/bold bright_cyan]",
+                border_style="bright_cyan",
+                box=box.ROUNDED,
+                padding=(1, 1),
+            ),
+            scroll_end=True,
+        )
 
     def _set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(
@@ -493,7 +530,10 @@ class AtlasTUIApp(App):
         if _is_symbol_input(command):
             symbol = command.strip().upper()
             self._active_symbol = symbol if "/" in symbol else f"{symbol}/USDT:USDT"
+            self.query_one("#chart", Static).update(self._chart_renderable([], self._active_symbol))
+            self._log_event(f"CHART SYMBOL CHANGED  |  {self._active_symbol}")
             self._log_event(f"ANALYSIS START  |  {self._active_symbol}")
+            self._request_market_refresh()
         elif _parse_scan_command(command) is not None:
             self._log_event(f"MARKET SCAN START  |  {command.upper()}")
         if not _is_report_command(command):
