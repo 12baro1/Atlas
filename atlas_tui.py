@@ -691,7 +691,7 @@ class AtlasTUIApp(App):
                 "Geçerli setup seçilmedi.",
                 "Ret ayrıntıları çıktı panelinde.",
             ])
-        return "\\n".join(rows), "\\n".join(decision_lines)
+        return "\n".join(rows), "\n".join(decision_lines)
 
     def _finish(self, message: str, dashboard=None) -> None:
         self._show(message)
