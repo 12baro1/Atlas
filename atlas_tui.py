@@ -232,7 +232,7 @@ class AtlasTUIApp(App):
             last_text = f"{last:,.2f}" if isinstance(last, (int, float)) else "—"
             change_text = f"{change:+.2f}%" if isinstance(change, (int, float)) else "—"
             style = "green" if isinstance(change, (int, float)) and change >= 0 else "red"
-            table.add_row(symbol.split("/")[0], last_text, f"[{style}]{change_text}[/{style}]")
+            table.add_row(symbol.split("/")[0], last_text, Text(change_text, style=style))
         return Panel(table, title="[bold bright_cyan]LIVE MARKET WATCH[/bold bright_cyan]",
                      subtitle="Refresh: 5s  |  Bybit", border_style="cyan", box=box.ROUNDED)
 
