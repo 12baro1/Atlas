@@ -961,8 +961,12 @@ class BacktestRunner:
                 signal_dir == "LONG", stop, fill_candle.low, fill_candle.high
             )
             if fill_stop_hit:
+                fill_target_hit = any(
+                    (fill_candle.high >= target if signal_dir == "LONG" else fill_candle.low <= target)
+                    for target in tps if target is not None
+                )
                 outcome = {"result": "LOSS", "tp": 0, "net_rr": -1.0, "levels": [],
-                           "exit_reason": "STOP", "exit_offset": 0,
+                           "exit_reason": "STOP_AND_TARGET_SAME_BAR_STOP_FIRST" if fill_target_hit else "STOP", "exit_offset": 0,
                            "exit_price": stop, "stop_gap": False,
                            "stop_gap_distance": 0.0, "stop_gap_r": 0.0}
                 outcome_start_index = fill_index
