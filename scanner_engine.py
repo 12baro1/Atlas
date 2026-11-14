@@ -28,11 +28,16 @@ class ScannerEngine:
             if isinstance(result_payload.get("strategy_lab"), dict)
             else build_signal_card(result_payload)
         )
+        is_strategy_plan = isinstance(result_payload.get("strategy_lab"), dict)
+        source_risk = result_payload.get("risk") or {}
+        source_rr = result_payload.get("rr") or {}
         direction = card.get("direction")
-        entry = _finite_number(card.get("entry"))
-        stop = _finite_number(card.get("stop_loss"))
-        targets = [_finite_number(value) for value in (card.get("tp_levels") or [])]
-        rr = _finite_number(card.get("rr"))
+        entry = _finite_number(card.get("entry") if is_strategy_plan else source_risk.get("entry"))
+        stop = _finite_number(card.get("stop_loss") if is_strategy_plan else source_risk.get("stop_loss"))
+        target_source = (card.get("tp_levels") or []) if is_strategy_plan else [source_risk.get(key) for key in ("tp1", "tp2", "tp3")]
+        targets = [_finite_number(value) for value in target_source]
+        rr_source = card.get("rr") if is_strategy_plan else (source_rr.get("rr") if isinstance(source_rr, dict) else source_rr)
+        rr = _finite_number(rr_source)
         entry_type = str(card.get("entry_type") or "NONE").upper()
         levels_valid = (
             entry is not None and stop is not None and len(targets) == 3
@@ -45,15 +50,12 @@ class ScannerEngine:
             levels_valid = stop > entry > targets[0] and all(a > b for a, b in zip(targets, targets[1:]))
         else:
             levels_valid = False
-        is_strategy_plan = isinstance(result_payload.get("strategy_lab"), dict)
-        source_risk = result_payload.get("risk") or {}
-        risk_validation_ok = card.get("risk_setup_valid") is True and (
-            is_strategy_plan or source_risk.get("risk_setup_valid") is True
-        )
+        entry_validation_ok = card.get("entry_valid") is True if is_strategy_plan else entry is not None
+        risk_validation_ok = card.get("risk_setup_valid") is True if is_strategy_plan else source_risk.get("risk_setup_valid") is True
         approved = (
             direction in ("LONG", "SHORT")
             and card.get("decision_action") in ("EXECUTE", "EXECUTE_WITH_CAUTION")
-            and card.get("entry_valid") is True
+            and entry_validation_ok
             and risk_validation_ok
             and entry_type in ("MARKET", "LIMIT")
             and levels_valid
