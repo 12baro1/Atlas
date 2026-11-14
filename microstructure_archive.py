@@ -48,7 +48,7 @@ def record_snapshot(symbol, data):
         except (OSError, ValueError, TypeError):
             pass
         with open(path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, separators=(",", ":"), default=str) + "\\n")
+            handle.write(json.dumps(row, separators=(",", ":"), default=str) + "\n")
             handle.flush()
     return True
 
