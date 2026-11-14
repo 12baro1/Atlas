@@ -349,8 +349,8 @@ class AtlasTUIApp(App):
                 f"TP1: {selected.get('tp1')} | TP2: {selected.get('tp2')} | TP3: {selected.get('tp3')}",
                 f"Brüt RR: {selected.get('rr_tp1')} / {selected.get('rr_tp2')} / {selected.get('rr_tp3')}",
             ])
-            if selected.get("estimated_net_rr_tp1") is not None:
-                lines.append(f"Model net RR (TP1): {selected.get('estimated_net_rr_tp1')} — gerçek fill/slippage garantisi değildir.")
+            if selected.get("estimated_net_rr") is not None:
+                lines.append(f"SMC ağırlıklı net RR: {selected.get('estimated_net_rr')} — gerçek fill/slippage garantisi değildir.")
             for reason in selected.get("reasons") or []:
                 lines.append(f"• {reason}")
         lines.extend([
