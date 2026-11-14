@@ -97,6 +97,36 @@ def _compare(baseline, ablated):
     }
 
 
+def _trade_signature(trade):
+    if not isinstance(trade, dict):
+        return None
+    return {
+        "net_rr": _finite(trade.get("net_rr")),
+        "gross_rr": _finite(trade.get("gross_rr")),
+        "direction": trade.get("direction"),
+        "entry_type": trade.get("entry_type"),
+        "exit_reason": trade.get("exit_reason"),
+    }
+
+
+def _outcome_sensitivity(baseline_trade, ablated_trade):
+    baseline = _trade_signature(baseline_trade)
+    ablated = _trade_signature(ablated_trade)
+    both_executable = baseline is not None and ablated is not None
+    return {
+        "baseline_executable": baseline is not None,
+        "ablated_executable": ablated is not None,
+        "tradeability_changed": (baseline is None) != (ablated is None),
+        "baseline": baseline,
+        "ablated": ablated,
+        "delta_net_rr": (
+            round(ablated["net_rr"] - baseline["net_rr"], 4)
+            if both_executable and baseline["net_rr"] is not None and ablated["net_rr"] is not None
+            else None
+        ),
+    }
+
+
 def _sample_indices(last_index, samples, step=None, warmup=299):
     last_index = int(last_index)
     samples = max(1, int(samples))
@@ -121,28 +151,31 @@ def _sample_indices(last_index, samples, step=None, warmup=299):
     })
 
 
-def run_ablation(symbol, days=14, samples=3, step=None, motors=None, output_path=None, include_derivatives=True):
+def run_ablation(symbol, days=14, samples=3, step=None, motors=None, output_path=None, include_derivatives=True, max_holding_bars=32, limit_expiry_bars=8):
     """Run baseline and one-motor-at-a-time ablations over identical historical snapshots."""
     from backtest import _disable_backtest_live_features, load_historical
+    from backtest_runner import BacktestRunner
     from engine import AtlasEngine
     from historical_derivatives import load_historical_derivatives
     from microstructure_archive import snapshot_at
 
-    if int(days) <= 0 or int(samples) <= 0 or (step is not None and int(step) <= 0):
-        raise ValueError("days and samples must be positive; step must be positive when supplied")
+    if int(days) <= 0 or int(samples) <= 0 or int(max_holding_bars) <= 0 or int(limit_expiry_bars) <= 0 or (step is not None and int(step) <= 0):
+        raise ValueError("days, samples, max_holding_bars and limit_expiry_bars must be positive; step must be positive when supplied")
     _disable_backtest_live_features()
     history = load_historical(symbol, days=days)
     bars = history.get("15m") or []
     if len(bars) < 300:
         raise RuntimeError(f"Insufficient 15m history for ablation: {len(bars)} candles")
     last_index = len(bars) - 1
-    indices = _sample_indices(last_index, samples, step=step, warmup=299)
+    evaluation_last_index = last_index - int(max_holding_bars) - int(limit_expiry_bars)
+    indices = _sample_indices(evaluation_last_index, samples, step=step, warmup=299)
     if not indices:
         raise RuntimeError("No valid post-warmup sample indices")
     start_ms = int(bars[0].time)
     end_ms = int(bars[-1].time) + 15 * 60 * 1000
     derivatives = load_historical_derivatives(symbol, start_ms, end_ms) if include_derivatives else {}
     engine = AtlasEngine()
+    outcome_runner = BacktestRunner(max_holding_bars=max_holding_bars, limit_expiry_bars=limit_expiry_bars)
     available = sorted(name for name in engine.main_engine.motors if name not in ABLATION_EXCLUDED)
     selected_motors = sorted(set(motors or available))
     unknown = sorted(set(selected_motors) - set(engine.main_engine.motors))
