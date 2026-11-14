@@ -12,7 +12,6 @@ from collections import deque
 from config import Config
 from data_engine import exchange, get_correlation_universe, get_market_data, get_smt_universe
 from engine import AtlasEngine
-from strategy_lab import SevenStrategyLab
 from strategy_outcome_journal import StrategyOutcomeJournal
 from manual_trade_service import ManualTradeService
 
@@ -38,7 +37,6 @@ class AtlasRuntime:
         self.full_scan = bool(full_scan)
         self.logger = logger or logging.getLogger("atlas.runtime")
         self.engine = AtlasEngine()
-        self.strategy_lab = SevenStrategyLab()
         self.strategy_outcome_journal = StrategyOutcomeJournal()
         self._stop_event = threading.Event()
         self._thread = None
