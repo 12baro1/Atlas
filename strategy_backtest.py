@@ -20,23 +20,25 @@ from backtest import (
     _effective_now_ms,
     _validate_backtest_coverage,
     _validate_backtest_history,
+    _configured_partial_tp_weights,
 )
 from engine import AtlasEngine
 from strategy_lab import SevenStrategyLab
 from strategy_outcome_journal import StrategyOutcomeJournal
 from historical_derivatives import load_historical_derivatives
 from microstructure_archive import snapshot_at as archived_microstructure_at
+from backtest_runner import simulate_trade_partial
+from execution_costs import realized_trade_cost, adverse_funding_cost_r
 
 
 ENTRY_TIMEFRAME_MS = TIMEFRAME_DURATION_MS["15m"]
-TP_WEIGHTS = (0.5, 0.3, 0.2)
 
 
 def _closed_at(candle, timeframe):
     return int(candle.time) + TIMEFRAME_DURATION_MS[timeframe]
 
 
-def _snapshot_at(history, index, entry_price):
+def _snapshot_at(history, index):
     candles_15m = history.get("15m") or []
     decision_candle = candles_15m[index]
     decision_ms = _closed_at(decision_candle, "15m")
@@ -75,11 +77,11 @@ def _snapshot_at(history, index, entry_price):
         }
         for peer_symbol, frames in (history.get("sector_peer_universe") or {}).items()
     }
-    # This is the next bar's open, not a future candle close. It is the
-    # executable reference for a signal confirmed at decision_ms.
-    snapshot["current_price"] = float(entry_price)
-    snapshot["current_price_source"] = "BACKTEST_NEXT_15M_OPEN"
-    snapshot["current_price_timestamp_ms"] = int(candles_15m[index + 1].time)
+    # The decision sees only the last closed candle. The next 15m open is
+    # used by the fill simulator, never by the decision engine.
+    snapshot["current_price"] = float(decision_candle.close)
+    snapshot["current_price_source"] = "BACKTEST_DECISION_15M_CLOSE"
+    snapshot["current_price_timestamp_ms"] = decision_ms
     snapshot["snapshot_timestamp_ms"] = decision_ms
     # Historical derivatives are timestamp-filtered to prevent look-ahead.
     oi_rows = [
@@ -115,20 +117,19 @@ def _directional_r(direction, entry, exit_price, risk):
 def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee=0.00055,
                        spread_rate=0.0002, slippage_rate=0.0003, max_bars=32,
                        funding_events=()):
-    """Return a cost-adjusted outcome or None when a limit never fills."""
+    """Replay a selected plan through the same fill/exit/cost contract as SMC backtest."""
     direction = str(candidate.get("direction") or "").upper()
-    if direction not in {"LONG", "SHORT"}:
+    if direction not in {"LONG", "SHORT"} or not future_candles:
         return None
     try:
         planned_entry = float(candidate["entry"])
         stop = float(candidate["stop_loss"])
         targets = [float(candidate[key]) for key in ("tp1", "tp2", "tp3") if candidate.get(key) is not None]
+        max_bars = max(1, int(max_bars))
+        fill_open = float(future_candles[0].open)
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
-    if not targets or not all(math.isfinite(value) and value > 0 for value in [planned_entry, stop, *targets]):
-        return None
-    risk = planned_entry - stop if direction == "LONG" else stop - planned_entry
-    if risk <= 0:
+    if not targets or not all(math.isfinite(value) and value > 0 for value in [planned_entry, stop, *targets, fill_open]):
         return None
     if direction == "LONG":
         if not stop < planned_entry < targets[0] or any(a >= b for a, b in zip(targets, targets[1:])):
@@ -136,138 +137,100 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
     else:
         if not targets[0] < planned_entry < stop or any(a <= b for a, b in zip(targets, targets[1:])):
             return None
-    if not future_candles:
-        return None
 
-    entry_type = str(candidate.get("entry_type") or "MARKET").upper()
+    planned_type = str(candidate.get("entry_type") or "MARKET").upper()
     fill_candle = future_candles[0]
-    fill_open = float(fill_candle.open)
-    if entry_type == "LIMIT":
+    simulation_start_offset = 0
+    if planned_type == "LIMIT":
         if not float(fill_candle.low) <= planned_entry <= float(fill_candle.high):
             return None
-        entry = planned_entry
-        entry_fee = maker_fee
-    else:
-        # Preserve stop/target distances when the next-bar open differs from
-        # the reference price used to construct the signal.
-        shift = fill_open - planned_entry
+        marketable = (direction == "LONG" and fill_open <= planned_entry) or (direction == "SHORT" and fill_open >= planned_entry)
+        if marketable:
+            # Gap-through limits fill at the open and incur taker costs.
+            entry = fill_open
+            entry_type = "MARKETABLE_LIMIT"
+            simulation_candles = future_candles[:max_bars]
+            simulation_horizon = max_bars
+        else:
+            entry = planned_entry
+            entry_type = "LIMIT"
+            fill_stop_hit = (float(fill_candle.low) <= stop) if direction == "LONG" else (float(fill_candle.high) >= stop)
+            if fill_stop_hit:
+                # Stop-first handling on the fill candle; target highs/lows are not trusted.
+                simulation_candles = future_candles[:1]
+                simulation_horizon = 1
+            else:
+                # Exclude the fill candle from target simulation because its extremes
+                # may have occurred before the intrabar limit fill.
+                simulation_candles = future_candles[1:max_bars]
+                simulation_horizon = max(1, max_bars - 1)
+                simulation_start_offset = 1
+    elif planned_type == "MARKET":
         entry = fill_open
+        entry_type = "MARKET"
+        shift = fill_open - planned_entry
         stop += shift
         targets = [value + shift for value in targets]
-        risk = entry - stop if direction == "LONG" else stop - entry
-        if risk <= 0:
-            return None
-        if direction == "LONG" and not stop < entry < targets[0]:
-            return None
-        if direction == "SHORT" and not targets[0] < entry < stop:
-            return None
-        entry_fee = taker_fee
+        simulation_candles = future_candles[:max_bars]
+        simulation_horizon = max_bars
+    else:
+        return None
 
-    weights = list(TP_WEIGHTS[:len(targets)])
-    if len(weights) < len(targets):
-        weights.extend([0.0] * (len(targets) - len(weights)))
-    weights[-1] += 1.0 - sum(weights)
-    remaining = 1.0
-    gross_r = 0.0
-    exit_notional = 0.0
-    exit_weight = 0.0
-    stop_price = stop
-    exit_index = None
-    exit_reason = "TIME_EXIT"
+    if direction == "LONG":
+        if not stop < entry < targets[0] or any(a >= b for a, b in zip(targets, targets[1:])):
+            return None
+    else:
+        if not targets[0] < entry < stop or any(a <= b for a, b in zip(targets, targets[1:])):
+            return None
+    risk = entry - stop if direction == "LONG" else stop - entry
+    if risk <= 0 or not simulation_candles:
+        return None
 
-    for offset, candle in enumerate(future_candles[:max_bars]):
-        high, low, close = float(candle.high), float(candle.low), float(candle.close)
-        stop_hit = low <= stop_price if direction == "LONG" else high >= stop_price
-        target_hits = [
-            index for index, target in enumerate(targets)
-            if weights[index] > 0 and (
-                high >= target if direction == "LONG" else low <= target
-            )
-        ]
-        if stop_hit and target_hits:
-            # Same candle touches both sides: adverse stop is assumed first.
-            realized_weight = remaining
-            gross_r += realized_weight * _directional_r(direction, entry, stop_price, risk)
-            exit_notional += realized_weight * stop_price
-            exit_weight += realized_weight
-            remaining = 0.0
-            exit_index = offset
-            exit_reason = "STOP_AND_TARGET_SAME_BAR_STOP_FIRST"
-            break
-        if stop_hit:
-            gross_r += remaining * _directional_r(direction, entry, stop_price, risk)
-            exit_notional += remaining * stop_price
-            exit_weight += remaining
-            remaining = 0.0
-            exit_index = offset
-            exit_reason = "STOP"
-            break
-        for target_index in target_hits:
-            weight = min(weights[target_index], remaining)
-            if weight <= 0:
-                continue
-            target = targets[target_index]
-            gross_r += weight * _directional_r(direction, entry, target, risk)
-            exit_notional += weight * target
-            exit_weight += weight
-            remaining -= weight
-            weights[target_index] = 0.0
-            if target_index == 0 and remaining > 0:
-                stop_price = entry
-            if remaining <= 1e-9:
-                remaining = 0.0
-                exit_index = offset
-                exit_reason = "ALL_TARGETS"
-                break
-        if remaining <= 1e-9:
-            break
-
-    if remaining > 1e-9:
-        last_offset = min(max_bars, len(future_candles)) - 1
-        last_candle = future_candles[last_offset]
-        exit_price = float(last_candle.close)
-        gross_r += remaining * _directional_r(direction, entry, exit_price, risk)
-        exit_notional += remaining * exit_price
-        exit_weight += remaining
-        exit_index = last_offset
-    average_exit = exit_notional / max(exit_weight, 1e-12)
-    trading_cost_r = (
-        entry * entry_fee
-        + entry * spread_rate
-        + entry * slippage_rate
-        + average_exit * taker_fee
-        + average_exit * spread_rate
-        + average_exit * slippage_rate
-    ) / risk
-    closed_candle = future_candles[exit_index or 0]
+    tp_weights = _configured_partial_tp_weights()
+    outcome = simulate_trade_partial(
+        entry=entry, stop_loss=stop, targets=targets,
+        future_candles=simulation_candles, direction=direction,
+        tp_weights=tp_weights, max_holding_bars=simulation_horizon,
+    )
+    if outcome.get("result") == "OPEN" or outcome.get("exit_offset") is None:
+        return None
+    full_exit_index = simulation_start_offset + int(outcome["exit_offset"])
+    if full_exit_index >= len(future_candles):
+        return None
+    closed_candle = future_candles[full_exit_index]
+    exit_price = float(outcome["exit_price"])
+    gross_r = float(outcome["net_rr"])
+    cost_parts = realized_trade_cost(
+        entry_price=entry, exit_price=exit_price, entry_type=entry_type,
+        exit_reason=outcome.get("exit_reason"), targets=targets,
+        reached_levels=outcome.get("levels") or [], tp_weights=tp_weights,
+        partial_exits=True, maker_fee_rate=maker_fee, taker_fee_rate=taker_fee,
+        spread_rate=spread_rate, slippage_rate=slippage_rate,
+    )
+    trading_cost_r = float(cost_parts["total"]) / risk
     entry_time_ms = int(fill_candle.time)
     exit_time_ms = _closed_at(closed_candle, "15m")
-    from execution_costs import adverse_funding_cost_r
     funding = adverse_funding_cost_r(
         direction, entry, risk, entry_time_ms, exit_time_ms,
-        candles=future_candles[:(exit_index or 0) + 1],
-        funding_records=funding_events, timeframe_ms=15 * 60 * 1000,
+        candles=future_candles[:full_exit_index + 1],
+        funding_records=funding_events, timeframe_ms=ENTRY_TIMEFRAME_MS,
     )
     funding_pnl = funding["funding_pnl_r"]
     cost_r = trading_cost_r + funding["funding_cost_r"]
     net_r = gross_r - cost_r
+    weight_label = "-".join(f"{float(tp_weights.get(f'tp{i}', 0.0)):.2f}" for i in (1, 2, 3))
     return {
-        "gross_r": round(gross_r, 8),
-        "trading_cost_r": round(trading_cost_r, 8),
-        "funding_pnl_r": round(funding_pnl, 8),
-        "funding_cost_r": funding["funding_cost_r"],
+        "gross_r": round(gross_r, 8), "trading_cost_r": round(trading_cost_r, 8),
+        "funding_pnl_r": round(funding_pnl, 8), "funding_cost_r": funding["funding_cost_r"],
         "funding_events_charged": funding["charged_events"],
-        "cost_r": round(cost_r, 8),
-        "net_r": round(net_r, 8),
-        "entry": round(entry, 10),
-        "stop_loss": round(stop, 10),
-        "average_exit": round(average_exit, 10),
-        "exit_reason": exit_reason,
-        "bars_held": int(exit_index or 0) + 1,
-        "closed_at_ms": _closed_at(closed_candle, "15m"),
+        "cost_r": round(cost_r, 8), "net_r": round(net_r, 8),
+        "entry": round(entry, 10), "entry_type": entry_type,
+        "stop_loss": round(stop, 10), "average_exit": outcome.get("average_exit"),
+        "exit_reason": outcome.get("exit_reason"),
+        "bars_held": full_exit_index + 1, "closed_at_ms": exit_time_ms,
         "cost_model_id": (
-            f"fee{maker_fee:.6f}-{taker_fee:.6f}_spread{spread_rate:.6f}_"
-            f"slip{slippage_rate:.6f}_funding_historical_partial50-30-20_v2"
+            f"shared_fill_partial{weight_label}_maker{maker_fee:.6f}_taker{taker_fee:.6f}_"
+            f"spread{spread_rate:.6f}_slip{slippage_rate:.6f}_adverse_funding_v3"
         ),
     }
 
