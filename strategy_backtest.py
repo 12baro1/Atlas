@@ -324,12 +324,12 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     _validate_backtest_coverage(history, symbol, days, effective_now)
     attach_historical_smt_universe(history, days, effective_now)
     candles = history.get("15m") or []
+    if len(candles) < 320:
+        raise RuntimeError(f"{symbol}: yetersiz 15m warmup ({len(candles)} mum).")
     derivatives = load_historical_derivatives(
         symbol, int(candles[0].time), int(candles[-1].time) + ENTRY_TIMEFRAME_MS
     )
     history.update(derivatives)
-    if len(candles) < 320:
-        raise RuntimeError(f"{symbol}: yetersiz 15m warmup ({len(candles)} mum).")
     # Split only the actually evaluable interval. This avoids pretending that
     # a provider-limited 1,000-candle history covers the full requested horizon.
     evaluation_start = max(now_ms - int(days * 86_400_000), _closed_at(candles[300], "15m"))
