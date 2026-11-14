@@ -190,8 +190,13 @@ def run_ablation(symbol, days=14, samples=3, step=None, motors=None, output_path
         baseline_result = engine.analyze(copy.deepcopy(snapshot))
         baseline = _signature(baseline_result)
         baseline_attribution = ((baseline_result.get("main_engine") or {}).get("motor_attribution") or {})
+        baseline_trade = outcome_runner._to_trade(
+            copy.deepcopy(baseline_result), bars, entry_index=index + 1,
+            signal_index=index, funding_records=derivatives.get("funding_records") or [],
+        )
         sample = {
-            "decision_time_ms": decision_ms, "baseline": baseline, "motor_results": {},
+            "decision_time_ms": decision_ms, "baseline": baseline,
+            "baseline_outcome": _trade_signature(baseline_trade), "motor_results": {},
             "microstructure_data_quality": {
                 "archive_snapshot": bool(snapshot.get("microstructure_snapshot_timestamp_ms")),
                 "orderbook": isinstance(snapshot.get("orderbook"), dict),
@@ -205,9 +210,15 @@ def run_ablation(symbol, days=14, samples=3, step=None, motors=None, output_path
                 ablated_result = engine.analyze(copy.deepcopy(snapshot))
                 ablated = _signature(ablated_result)
                 comparison = _compare(baseline, ablated)
+                ablated_trade = outcome_runner._to_trade(
+                    copy.deepcopy(ablated_result), bars, entry_index=index + 1,
+                    signal_index=index, funding_records=derivatives.get("funding_records") or [],
+                )
+                outcome = _outcome_sensitivity(baseline_trade, ablated_trade)
                 attribution = baseline_attribution.get("motors", {}).get(motor_name, {})
                 sample["motor_results"][motor_name] = {
                     "status": "COMPLETED", **comparison,
+                    "outcome_sensitivity": outcome,
                     "baseline_event_ids": attribution.get("event_ids", []),
                     "consumed_event_ids": attribution.get("consumed_event_ids", []),
                     "ablated": ablated,
