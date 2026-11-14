@@ -11,6 +11,11 @@ import traceback
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Footer, Header, Input, RichLog, Static
+from rich import box
+from rich.console import Group
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from data_engine import exchange
 from universe_engine import select_symbols
@@ -133,25 +138,17 @@ class AtlasTUIApp(App):
     SUB_TITLE = "7-strategy terminal | local-only | no AI | no Telegram"
 
     CSS = """
-    Screen { background: #070d16; color: #dce7f2; }
-    Header { background: #101c2b; color: #dce7f2; }
-    Footer { background: #101c2b; color: #9aafc4; }
+    Screen { background: #050a12; color: #e5edf7; }
+    Header { background: #0d1a2a; color: #e5edf7; }
+    Footer { background: #0d1a2a; color: #9eb4ca; }
     #main { height: 1fr; padding: 0 1; }
-    #brand {
-        height: 3; content-align: left middle; padding: 0 1;
-        background: #102033; color: #67d3ff; border: round #2d5975; text-style: bold;
-    }
-    #help {
-        height: 3; margin-top: 1; padding: 0 1;
-        background: #0d1826; border-left: tall #55c8ff; color: #b4c5d6;
-    }
-    #overview {
-        height: 6; margin-top: 1; padding: 0 1;
-        background: #0c1724; border: round #29445d; color: #b8cadb;
-    }
-    #status { height: 1; margin-top: 1; padding: 0 1; color: #67d3ff; text-style: bold; }
+    #brand { height: 4; margin-bottom: 1; }
+    #market { height: 6; margin-bottom: 1; }
+    #overview { height: 11; margin-bottom: 1; }
+    #pipeline { height: 9; margin-bottom: 1; }
+    #status { height: 1; color: #5edcff; text-style: bold; }
     #output {
-        height: 1fr; margin-top: 0; padding: 1;
+        height: 1fr; margin-top: 1; padding: 1;
         background: #080f19; border: round #35536b; color: #dce7f2; overflow-y: auto;
     }
     #command {
@@ -179,20 +176,51 @@ class AtlasTUIApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical(id="main"):
-            yield Static("ATLAS  /  PROFESSIONAL TRADING TERMINAL     •     7 STRATEJİ / TEK KARAR", id="brand")
             yield Static(
-                "ANALİZ  BTC / ETH / BRC     TARAMA  50 analiz et / en iyi 5 işlem\n"
-                "RAPOR  performans / öğrenme     ARAÇ  likidite BTC / yardım",
-                id="help",
+                Panel(
+                    Text("A T L A S   /   PROFESSIONAL TRADING TERMINAL", style="bold bright_cyan"),
+                    subtitle="7 STRATEGIES  •  ONE DECISION  •  LOCAL",
+                    border_style="bright_cyan",
+                    box=box.DOUBLE,
+                    padding=(0, 1),
+                ),
+                id="brand",
             )
             yield Static(
-                "STRATEJİ MOTORLARI\n"
-                "01 Trend Pullback   02 Volatility Breakout   03 Mean Reversion\n"
-                "04 Order-flow        05 Liquidation Cascade   06 Relative Strength\n"
-                "07 Integrated SMC   →   ORTAK FİLTRE   →   TEK KARAR",
+                Panel(
+                    Group(
+                        Text("MARKET WATCH", style="bold bright_white"),
+                        Text("BTC/USDT     ETH/USDT     TOTAL MARKET", style="cyan"),
+                        Text("PRICE   ─────       ─────       ─────", style="dim"),
+                        Text("CHANGE  ─────       ─────       ─────", style="dim"),
+                    ),
+                    border_style="steel_blue",
+                    box=box.ROUNDED,
+                    padding=(0, 1),
+                ),
+                id="market",
+            )
+            yield Static(
+                self._strategy_overview_renderable(),
                 id="overview",
             )
-            yield Static("HAZIR  |  Analiz bekleniyor — henüz piyasa verisi çekilmedi", id="status")
+            yield Static(
+                Panel(
+                    Group(
+                        Text("DECISION PIPELINE", style="bold bright_white"),
+                        Text("7 STRATEGY ENGINES", style="cyan"),
+                        Text("          ▼", style="dim"),
+                        Text("SHARED ELIGIBILITY / RISK FILTER", style="yellow"),
+                        Text("          ▼", style="dim"),
+                        Text("SINGLE FINAL SELECTOR", style="bright_magenta"),
+                    ),
+                    border_style="bright_blue",
+                    box=box.ROUNDED,
+                    padding=(0, 1),
+                ),
+                id="pipeline",
+            )
+            yield Static("● SYSTEM READY   |   WAITING FOR COMMAND", id="status")
             yield RichLog(
                 id="output",
                 wrap=True,
@@ -200,12 +228,53 @@ class AtlasTUIApp(App):
                 auto_scroll=True,
                 max_lines=5000,
             )
-            yield Input(placeholder="Coin veya komut gir  •  Enter ile analiz başlat", id="command")
+            yield Input(placeholder="⌕  Coin / command  •  Enter to analyze", id="command")
         yield Footer()
 
+    @staticmethod
+    def _strategy_overview_renderable():
+        table = Table(
+            title="STRATEGY ENGINES",
+            box=box.SIMPLE_HEAVY,
+            expand=True,
+            show_header=False,
+            pad_edge=False,
+        )
+        table.add_column("Engine", style="white", ratio=4)
+        table.add_column("State", justify="right", style="dim", ratio=2)
+        names = (
+            "01  Trend Pullback",
+            "02  Volatility Breakout",
+            "03  Mean Reversion",
+            "04  Order-flow Momentum",
+            "05  Liquidation Cascade",
+            "06  Relative Strength",
+            "07  Integrated SMC",
+        )
+        for name in names:
+            table.add_row(name, "[dim]○ STANDBY[/dim]")
+        return Panel(
+            table,
+            title="[bold bright_cyan]MOTOR STATUS[/bold bright_cyan]",
+            border_style="cyan",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
     def on_mount(self) -> None:
-        self._set_status("HAZIR  |  Komut bekleniyor")
-        self._show("ATLAS HAZIR\n\nCoin analizi veya piyasa taraması başlat.\n\nKomut örnekleri: BTC  •  50 analiz et  •  en iyi 5 işlem")
+        self._set_status("SYSTEM READY  |  COMMAND INPUT ACTIVE")
+        self._show(
+            Panel(
+                Group(
+                    Text("TERMINAL ONLINE", style="bold bright_green"),
+                    Text("Piyasa verisi henüz çekilmedi. Gösterilen motorlar bekleme durumunda.", style="white"),
+                    Text("BTC  •  ETH  •  BRC  •  50 analiz et  •  en iyi 5 işlem", style="bright_cyan"),
+                ),
+                title="[bold]ATLAS[/bold]",
+                border_style="green",
+                box=box.DOUBLE,
+            )
+        )
         self.query_one("#command", Input).focus()
         if self.initial_symbol:
             self._start_command(self.initial_symbol)
@@ -225,13 +294,15 @@ class AtlasTUIApp(App):
     def action_scroll_output_down(self) -> None:
         self.query_one("#output", RichLog).scroll_relative(y=10, animate=False)
 
-    def _show(self, message: str) -> None:
+    def _show(self, message) -> None:
         output = self.query_one("#output", RichLog)
         output.clear()
         output.write(message, scroll_end=True)
 
     def _set_status(self, message: str) -> None:
-        self.query_one("#status", Static).update(message)
+        self.query_one("#status", Static).update(
+            Text(f"◆  {message}", style="bold bright_cyan")
+        )
 
     def _start_command(self, command: str) -> None:
         if self._busy:
