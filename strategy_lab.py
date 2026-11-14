@@ -402,8 +402,7 @@ def _smc_candidate(result):
         "experimental": False,
         "reasons": ["Mevcut Atlas SMC karar motoru EXECUTE üretti"],
     }
-    plan["estimated_net_rr_tp1"] = card.get("net_rr")
-    plan["estimated_net_rr_tp3"] = card.get("net_rr")
+    plan["estimated_net_rr"] = card.get("net_rr")
     return plan
 
 
