@@ -137,6 +137,9 @@ def test_experimental_candidate_is_not_selected_without_validated_performance(mo
     assert report["validated_candidate_count"] == 0
     trend = next(item for item in report["strategies"] if item["strategy_id"] == "trend_pullback")
     assert trend["edge_validation"]["eligible"] is False
+    assert trend["status"] == "BLOCKED_EDGE"
+    assert trend["rejection_stage"] == "EDGE_VALIDATION"
+    assert report["diagnostics"]["rejection_stage_counts"]["EDGE_VALIDATION"] == 1
 
 
 
@@ -149,3 +152,44 @@ def test_plan_uses_opposing_swing_liquidity_when_three_levels_exist():
     assert plan["tp1"] == 105
     assert plan["tp2"] == 108
     assert plan["tp3"] == 111
+
+
+
+def test_diagnostics_report_every_strategy_and_status_counts():
+    report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT", "15m": [], "1h": [], "4h": []})
+
+    diagnostics = report["diagnostics"]
+    assert diagnostics["strategy_count"] == 7
+    assert diagnostics["candidate_count"] == 0
+    assert diagnostics["validated_candidate_count"] == 0
+    assert diagnostics["selected_strategy_id"] is None
+    assert len(diagnostics["strategies"]) == 7
+    assert diagnostics["status_counts"] == {"NO_SETUP": 7}
+
+
+def test_risk_rejection_is_visible_in_strategy_diagnostics(monkeypatch):
+    import strategy_lab
+
+    candidate = {
+        "status": "CANDIDATE", "strategy_id": "trend_pullback",
+        "strategy": strategy_lab.STRATEGY_NAMES["trend_pullback"], "direction": "LONG",
+        "entry_type": "MARKET", "entry": 100.0, "stop_loss": 98.0,
+        "tp1": 102.5, "tp2": 104.0, "tp3": 106.0,
+        "strength": 99.0, "experimental": True, "reasons": ["test"],
+    }
+    monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(candidate))
+    monkeypatch.setattr(strategy_lab, "_regime", lambda data: {"label": "TREND", "trend": "BULLISH", "strength": 1.0})
+    monkeypatch.setattr(strategy_lab, "evaluate_strategy_edge", lambda stats: {
+        "eligible": True, "status": "VALIDATED", "reasons": []
+    })
+    monkeypatch.setattr(strategy_lab, "_risk_validate_candidate", lambda plan: {
+        "eligible": False, "reason": "TEST_STOP_COST_REJECT", "weighted_net_rr": 0.5, "risk_plan": None
+    })
+
+    report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT"})
+    trend = next(item for item in report["strategies"] if item["strategy_id"] == "trend_pullback")
+
+    assert trend["status"] == "BLOCKED_RISK"
+    assert trend["rejection_stage"] == "RISK_VALIDATION"
+    assert trend["rejection_reasons"] == ["TEST_STOP_COST_REJECT"]
+    assert report["diagnostics"]["rejection_stage_counts"] == {"RISK_VALIDATION": 1}
