@@ -309,7 +309,7 @@ def _walk_forward_summary(rows, start_ms, end_ms, folds=5):
     return output
 
 def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
-                                maker_fee=0.0002, taker_fee=0.00055,
+                                limit_expiry_bars=8, maker_fee=0.0002, taker_fee=0.00055,
                                 spread_rate=0.0002, slippage_rate=0.0003,
                                 persist_outcomes=False):
     _disable_backtest_live_features()
@@ -371,19 +371,20 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
             strategy_id = candidate["strategy_id"]
             if index <= active_until.get(strategy_id, -1):
                 continue
-            future = candles[index + 1:index + 1 + max_holding_bars]
+            future = candles[index + 1:index + 1 + max_holding_bars + limit_expiry_bars]
             outcome = simulate_candidate(
                 candidate, future,
                 maker_fee=maker_fee, taker_fee=taker_fee,
                 spread_rate=spread_rate, slippage_rate=slippage_rate,
                 max_bars=max_holding_bars,
+                limit_expiry_bars=limit_expiry_bars,
                 funding_events=history.get("funding_records") or [],
             )
             if outcome is None:
                 continue
-            fill_time = int(candles[index + 1].time)
+            fill_time = int(outcome["fill_time_ms"])
             split = "is" if fill_time < is_cutoff else "oos"
-            active_until[strategy_id] = index + outcome["bars_held"]
+            active_until[strategy_id] = index + outcome["bars_until_exit"]
             record = {
                 **outcome,
                 "strategy_id": strategy_id,
@@ -459,13 +460,15 @@ def main():
     parser.add_argument("--days", type=int, default=30)
     parser.add_argument("--step", type=int, default=1, help="Her kaç 15m mumda bir analiz")
     parser.add_argument("--max-holding-bars", type=int, default=32)
+    parser.add_argument("--limit-expiry-bars", type=int, default=8)
     parser.add_argument("--persist", action="store_true", help="Doğrulanmış maliyet modeliyle IS/OOS sonuçlarını performans günlüğüne yaz")
     args = parser.parse_args()
-    if args.days <= 0 or args.step <= 0 or args.max_holding_bars <= 0:
-        parser.error("--days, --step ve --max-holding-bars pozitif olmalı")
+    if args.days <= 0 or args.step <= 0 or args.max_holding_bars <= 0 or args.limit_expiry_bars <= 0:
+        parser.error("--days, --step, --max-holding-bars ve --limit-expiry-bars pozitif olmalı")
     report = run_seven_strategy_backtest(
         args.symbol, days=args.days, step=args.step,
         max_holding_bars=args.max_holding_bars,
+        limit_expiry_bars=args.limit_expiry_bars,
         persist_outcomes=args.persist,
     )
     print(
