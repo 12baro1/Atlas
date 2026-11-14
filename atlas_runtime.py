@@ -326,9 +326,9 @@ class AtlasRuntime:
         with self._journal_lock:
             return dict(self.engine.trade_journal.setup_statistics())
 
-    def strategy_performance(self):
+    def strategy_performance(self, symbol=None, regime=None):
         """Return independently aggregated, cost-adjusted IS/OOS results per strategy."""
-        return self.strategy_outcome_journal.performance_snapshot()
+        return self.strategy_outcome_journal.performance_snapshot(symbol=symbol, regime=regime)
 
     def record_strategy_outcome(self, **outcome):
         """Persist a closed strategy outcome; callers must supply cost-adjusted net R."""
@@ -428,7 +428,10 @@ class AtlasRuntime:
                         result["strategy_lab"] = self.strategy_lab.analyze(
                             data,
                             smc_result=result,
-                            performance_by_strategy=self.strategy_outcome_journal.performance_snapshot(),
+                            performance_by_strategy=self.strategy_outcome_journal.performance_snapshot(
+                                symbol=symbol,
+                                regime=(result.get("strategy_lab") or {}).get("regime", {}).get("label"),
+                            ),
                         )
                     if result is None:
                         self._inc("skipped")
