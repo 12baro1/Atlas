@@ -330,7 +330,9 @@ def build_selected_strategy_card(result):
         return card
 
     rr_values = [round(abs(target - entry) / risk_distance, 4) for target in targets]
-    estimated_net_rr = selected.get("estimated_net_rr_tp1")
+    estimated_net_rr = selected.get("estimated_net_rr")
+    if estimated_net_rr is None:
+        estimated_net_rr = selected.get("estimated_net_rr_tp1")
     try:
         estimated_net_rr = float(estimated_net_rr) if estimated_net_rr is not None else None
     except (TypeError, ValueError, OverflowError):
