@@ -97,23 +97,46 @@ def _compare(baseline, ablated):
     }
 
 
-def run_ablation(symbol, days=14, samples=3, step=96, motors=None, output_path=None, include_derivatives=True):
+def _sample_indices(last_index, samples, step=None, warmup=299):
+    last_index = int(last_index)
+    samples = max(1, int(samples))
+    warmup = max(0, int(warmup))
+    if last_index < warmup:
+        return []
+    if step is not None:
+        step = int(step)
+        if step <= 0:
+            raise ValueError("step must be positive")
+        return [
+            index for index in
+            (last_index - step * offset for offset in reversed(range(samples)))
+            if index >= warmup
+        ]
+    if samples == 1:
+        return [last_index]
+    span = last_index - warmup
+    return sorted({
+        warmup + round(position * span / (samples - 1))
+        for position in range(samples)
+    })
+
+
+def run_ablation(symbol, days=14, samples=3, step=None, motors=None, output_path=None, include_derivatives=True):
     """Run baseline and one-motor-at-a-time ablations over identical historical snapshots."""
     from backtest import _disable_backtest_live_features, load_historical
     from engine import AtlasEngine
     from historical_derivatives import load_historical_derivatives
     from microstructure_archive import snapshot_at
 
-    if int(days) <= 0 or int(samples) <= 0 or int(step) <= 0:
-        raise ValueError("days, samples and step must be positive")
+    if int(days) <= 0 or int(samples) <= 0 or (step is not None and int(step) <= 0):
+        raise ValueError("days and samples must be positive; step must be positive when supplied")
     _disable_backtest_live_features()
     history = load_historical(symbol, days=days)
     bars = history.get("15m") or []
     if len(bars) < 300:
         raise RuntimeError(f"Insufficient 15m history for ablation: {len(bars)} candles")
     last_index = len(bars) - 1
-    indices = [last_index - step * offset for offset in reversed(range(samples))]
-    indices = [index for index in indices if index >= 299]
+    indices = _sample_indices(last_index, samples, step=step, warmup=299)
     if not indices:
         raise RuntimeError("No valid post-warmup sample indices")
     start_ms = int(bars[indices[0]].time)
@@ -134,7 +157,14 @@ def run_ablation(symbol, days=14, samples=3, step=96, motors=None, output_path=N
         baseline_result = engine.analyze(copy.deepcopy(snapshot))
         baseline = _signature(baseline_result)
         baseline_attribution = ((baseline_result.get("main_engine") or {}).get("motor_attribution") or {})
-        sample = {"decision_time_ms": decision_ms, "baseline": baseline, "motor_results": {}}
+        sample = {
+            "decision_time_ms": decision_ms, "baseline": baseline, "motor_results": {},
+            "microstructure_data_quality": {
+                "archive_snapshot": bool(snapshot.get("microstructure_snapshot_timestamp_ms")),
+                "orderbook": isinstance(snapshot.get("orderbook"), dict),
+                "recent_trades": bool(snapshot.get("recent_trades")),
+            },
+        }
         for motor_name in selected_motors:
             original_target = engine.main_engine._targets[motor_name]
             try:
@@ -170,9 +200,18 @@ def run_ablation(symbol, days=14, samples=3, step=96, motors=None, output_path=N
         }
     report = {
         "schema_version": 1, "symbol": symbol, "days": int(days),
-        "samples": len(rows), "sample_step_bars": int(step),
+        "samples": len(rows),
+        "sample_indices": indices,
+        "sample_step_bars": [indices[i] - indices[i - 1] for i in range(1, len(indices))],
+        "sampling_mode": "fixed_step" if step is not None else "evenly_spaced_across_loaded_history",
         "decision_time_basis": "closed 15m candle close; closed HTF candles only",
         "data_quality": derivatives.get("derivatives_data_quality", {}) if include_derivatives else {"derivatives": "DISABLED"},
+        "microstructure_coverage": {
+            "samples": len(rows),
+            "archive_snapshots": sum(bool(row["microstructure_data_quality"]["archive_snapshot"]) for row in rows),
+            "orderbook_snapshots": sum(bool(row["microstructure_data_quality"]["orderbook"]) for row in rows),
+            "recent_trade_snapshots": sum(bool(row["microstructure_data_quality"]["recent_trades"]) for row in rows),
+        },
         "interpretation": "Ablation measures decision/plan sensitivity on these snapshots only; it does not prove causal PnL contribution or profitability.",
         "motor_summary": summary, "sample_results": rows,
     }
@@ -188,7 +227,7 @@ def main():
     parser.add_argument("--symbol", default="BTC/USDT:USDT")
     parser.add_argument("--days", type=int, default=14)
     parser.add_argument("--samples", type=int, default=3)
-    parser.add_argument("--step", type=int, default=96, help="Bars between sampled decisions (96 = 1 day)")
+    parser.add_argument("--step", type=int, default=None, help="Optional fixed bars between samples; default spreads samples across the loaded history")
     parser.add_argument("--motors", help="Comma-separated motor names; default: all ablatable specialist motors")
     parser.add_argument("--output", default="reports/motor_ablation.json")
     parser.add_argument("--no-derivatives", action="store_true")
