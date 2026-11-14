@@ -116,6 +116,80 @@ def _adx(candles, period=14):
         dx_values.append(100.0 * abs(plus - minus) / denominator if denominator > 0 else 0.0)
     return sum(dx_values[-period:]) / min(period, len(dx_values)) if dx_values else None
 
+
+def _candle_quality(candle):
+    """Normalized candle anatomy; scale-invariant across symbols and prices."""
+    opened, high, low, close = (_value(candle, key) for key in ("open", "high", "low", "close"))
+    if None in (opened, high, low, close) or high <= low:
+        return None
+    span = high - low
+    body = abs(close - opened)
+    return {
+        "body_ratio": body / span,
+        "close_location": (close - low) / span,
+        "upper_wick_ratio": (high - max(opened, close)) / span,
+        "lower_wick_ratio": (min(opened, close) - low) / span,
+        "range": span,
+        "direction": "BULLISH" if close > opened else "BEARISH" if close < opened else "NEUTRAL",
+    }
+
+
+def _relative_volume(candles, lookback=20):
+    """Last-bar volume relative to the median of preceding closed bars."""
+    sample = list(candles or [])
+    if len(sample) < lookback + 1:
+        return None
+    baseline = []
+    for candle in sample[-(lookback + 1):-1]:
+        value = _value(candle, "volume")
+        if value is None or value < 0:
+            return None
+        baseline.append(value)
+    current = _value(sample[-1], "volume")
+    baseline_median = median(baseline) if baseline else 0.0
+    if current is None or baseline_median <= 0:
+        return None
+    ratio = current / baseline_median
+    return ratio if math.isfinite(ratio) else None
+
+
+def _directional_movement(candles, period=14):
+    """Return latest +DI/-DI from a Wilder-style period window."""
+    sample = list(candles or [])
+    if len(sample) < period + 1:
+        return None
+    plus_dm, minus_dm, true_ranges = [], [], []
+    for previous, current in zip(sample[-(period + 1):-1], sample[-period:]):
+        high, low = _value(current, "high"), _value(current, "low")
+        prev_high, prev_low = _value(previous, "high"), _value(previous, "low")
+        prev_close = _value(previous, "close")
+        if None in (high, low, prev_high, prev_low, prev_close):
+            return None
+        up, down = high - prev_high, prev_low - low
+        plus_dm.append(up if up > down and up > 0 else 0.0)
+        minus_dm.append(down if down > up and down > 0 else 0.0)
+        true_ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+    tr_sum = sum(true_ranges)
+    if tr_sum <= 0:
+        return None
+    return {
+        "plus_di": 100.0 * sum(plus_dm) / tr_sum,
+        "minus_di": 100.0 * sum(minus_dm) / tr_sum,
+    }
+
+
+def _efficiency_ratio(values, period=20):
+    """Kaufman-style directional efficiency, from 0 (chop) to 1 (one-way)."""
+    if len(values) < period + 1:
+        return None
+    sample = values[-(period + 1):]
+    path = sum(abs(right - left) for left, right in zip(sample, sample[1:]))
+    if path <= 0:
+        return 0.0
+    result = abs(sample[-1] - sample[0]) / path
+    return result if math.isfinite(result) else None
+
+
 def _rsi(values, period=14):
     if len(values) < period + 1:
         return None
@@ -334,22 +408,33 @@ def _trend_pullback(data):
     if None in (e20, e50, e1, adx_value, e20_previous) or adx_value < 18:
         return None
     trend_slope = (e20 - e20_previous) / atr
+    directional = _directional_movement(h4)
     last, previous = h1[-1], h1[-2]
     close = _value(last, "close")
     prev_close = _value(previous, "close")
     low, high = _value(last, "low"), _value(last, "high")
     prev_low, prev_high = _value(previous, "low"), _value(previous, "high")
-    if None in (close, prev_close, low, high, prev_low, prev_high):
+    quality = _candle_quality(last)
+    efficiency = _efficiency_ratio(c4, 20)
+    if None in (close, prev_close, low, high, prev_low, prev_high) or quality is None or directional is None or efficiency is None:
         return None
     entry = _current_price(data)
     if entry is None:
         return None
     direction = None
-    if e20 > e50 and entry > e1 and entry <= e1 + 1.25 * atr and (low <= e1 * 1.003 or prev_low <= e1 * 1.003) and close > prev_close:
+    bullish_dmi = directional["plus_di"] > directional["minus_di"]
+    bearish_dmi = directional["minus_di"] > directional["plus_di"]
+    if (e20 > e50 and bullish_dmi and entry > e1 and entry <= e1 + 1.25 * atr
+            and (low <= e1 * 1.003 or prev_low <= e1 * 1.003)
+            and close > prev_close and quality["direction"] == "BULLISH"
+            and quality["close_location"] >= 0.60 and quality["body_ratio"] >= 0.25):
         direction = "LONG"
         swing = min(_value(item, "low") for item in h1[-10:] if _value(item, "low") is not None)
         stop = min(entry - 1.0 * atr, swing - 0.1 * atr)
-    elif e20 < e50 and entry < e1 and entry >= e1 - 1.25 * atr and (high >= e1 * 0.997 or prev_high >= e1 * 0.997) and close < prev_close:
+    elif (e20 < e50 and bearish_dmi and entry < e1 and entry >= e1 - 1.25 * atr
+            and (high >= e1 * 0.997 or prev_high >= e1 * 0.997)
+            and close < prev_close and quality["direction"] == "BEARISH"
+            and quality["close_location"] <= 0.40 and quality["body_ratio"] >= 0.25):
         direction = "SHORT"
         swing = max(_value(item, "high") for item in h1[-10:] if _value(item, "high") is not None)
         stop = max(entry + 1.0 * atr, swing + 0.1 * atr)
@@ -359,10 +444,21 @@ def _trend_pullback(data):
     pullback_distance = abs(entry - e1) / atr
     if (direction == "LONG" and trend_slope <= 0) or (direction == "SHORT" and trend_slope >= 0):
         return None
-    strength = min(92.0, 62.0 + min(trend_separation * 5.0, 12.0) + min((adx_value - 18.0) * 0.5, 10.0) + max(0.0, 8.0 - pullback_distance * 6.0))
+    strength = min(92.0, 60.0 + min(trend_separation * 5.0, 10.0)
+                   + min((adx_value - 18.0) * 0.45, 9.0)
+                   + min(efficiency * 10.0, 7.0)
+                   + min(abs(directional["plus_di"] - directional["minus_di"]) * 0.15, 6.0)
+                   + max(0.0, 7.0 - pullback_distance * 5.0))
     plan = _valid_plan(direction, entry, stop, atr, h1, "trend_pullback", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
-        plan["reasons"] = ["4H EMA20/EMA50 alignment and positive EMA20 slope", f"4H ADX={adx_value:.1f}", "1H EMA20 pullback and candle reclaim"]
+        plan["reasons"] = [
+            f"4H EMA20/EMA50 trend alignment; EMA20 slope={trend_slope:.2f} ATR",
+            f"4H ADX={adx_value:.1f}; +DI={directional['plus_di']:.1f}; -DI={directional['minus_di']:.1f}",
+            f"4H directional efficiency={efficiency:.2f}",
+            f"1H EMA20 pullback reclaim; body={quality['body_ratio']:.2f}; close-location={quality['close_location']:.2f}",
+        ]
+        plan["trend_metrics"] = {"adx": round(adx_value, 2), **{key: round(value, 2) for key, value in directional.items()},
+                                 "efficiency_ratio": round(efficiency, 3), "pullback_distance_atr": round(pullback_distance, 3)}
     return plan
 
 
