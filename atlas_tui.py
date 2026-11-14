@@ -181,14 +181,14 @@ class AtlasTUIApp(App):
         with Vertical(id="main"):
             yield Static("ATLAS  /  PROFESSIONAL TRADING TERMINAL     •     7 STRATEJİ / TEK KARAR", id="brand")
             yield Static(
-                "ANALİZ  BTC / ETH / BRC     TARAMA  50 analiz et / en iyi 5 işlem\\n"
+                "ANALİZ  BTC / ETH / BRC     TARAMA  50 analiz et / en iyi 5 işlem\n"
                 "RAPOR  performans / öğrenme     ARAÇ  likidite BTC / yardım",
                 id="help",
             )
             yield Static(
-                "STRATEJİ MOTORLARI\\n"
-                "01 Trend Pullback   02 Volatility Breakout   03 Mean Reversion\\n"
-                "04 Order-flow        05 Liquidation Cascade   06 Relative Strength\\n"
+                "STRATEJİ MOTORLARI\n"
+                "01 Trend Pullback   02 Volatility Breakout   03 Mean Reversion\n"
+                "04 Order-flow        05 Liquidation Cascade   06 Relative Strength\n"
                 "07 Integrated SMC   →   ORTAK FİLTRE   →   TEK KARAR",
                 id="overview",
             )
@@ -205,7 +205,7 @@ class AtlasTUIApp(App):
 
     def on_mount(self) -> None:
         self._set_status("HAZIR  |  Komut bekleniyor")
-        self._show("ATLAS HAZIR\\n\\nCoin analizi veya piyasa taraması başlat.\\n\\nKomut örnekleri: BTC  •  50 analiz et  •  en iyi 5 işlem")
+        self._show("ATLAS HAZIR\n\nCoin analizi veya piyasa taraması başlat.\n\nKomut örnekleri: BTC  •  50 analiz et  •  en iyi 5 işlem")
         self.query_one("#command", Input).focus()
         if self.initial_symbol:
             self._start_command(self.initial_symbol)
@@ -412,7 +412,7 @@ class AtlasTUIApp(App):
         ]
         if signal.get("closed", 0) < 20:
             lines.append("Otomatik sinyal örneklemi 20 kapanan işlemin altında; geçmiş performans kesin sonuç çıkarmaz.")
-        return "\\n".join(lines)
+        return "\n".join(lines)
 
     def _format_liquidity(self, outcome: dict) -> str:
         result = outcome.get("result") or {}
@@ -446,7 +446,7 @@ class AtlasTUIApp(App):
             "",
             "Bu harita mevcut analiz mumlarına dayanır; tek başına işlem sinyali değildir.",
         ])
-        return "\\n".join(lines)
+        return "\n".join(lines)
 
     def _find_best_trade(self, scan_limit=DEFAULT_SCAN_LIMIT, result_limit=1) -> str:
         symbols = _best_symbols(limit=scan_limit)
