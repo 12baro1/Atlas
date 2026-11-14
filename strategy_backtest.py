@@ -247,8 +247,10 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
             if int(candle.time) <= event_ms <= _closed_at(candle, "15m"):
                 mark = float(candle.close)
                 break
-        # Positive funding is paid by longs and received by shorts.
-        funding_pnl += (-1.0 if direction == "LONG" else 1.0) * rate * mark / risk
+        # Count only funding cash outflows. Credits are ignored because
+        # intrabar position size at settlement is ambiguous in OHLCV replay.
+        cashflow_r = (-1.0 if direction == "LONG" else 1.0) * rate * mark / risk
+        funding_pnl += min(0.0, cashflow_r)
     cost_r = trading_cost_r - funding_pnl
     net_r = gross_r - cost_r
     return {
