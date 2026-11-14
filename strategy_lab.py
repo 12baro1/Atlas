@@ -116,6 +116,80 @@ def _adx(candles, period=14):
         dx_values.append(100.0 * abs(plus - minus) / denominator if denominator > 0 else 0.0)
     return sum(dx_values[-period:]) / min(period, len(dx_values)) if dx_values else None
 
+
+def _candle_quality(candle):
+    """Normalized candle anatomy; scale-invariant across symbols and prices."""
+    opened, high, low, close = (_value(candle, key) for key in ("open", "high", "low", "close"))
+    if None in (opened, high, low, close) or high <= low:
+        return None
+    span = high - low
+    body = abs(close - opened)
+    return {
+        "body_ratio": body / span,
+        "close_location": (close - low) / span,
+        "upper_wick_ratio": (high - max(opened, close)) / span,
+        "lower_wick_ratio": (min(opened, close) - low) / span,
+        "range": span,
+        "direction": "BULLISH" if close > opened else "BEARISH" if close < opened else "NEUTRAL",
+    }
+
+
+def _relative_volume(candles, lookback=20):
+    """Last-bar volume relative to the median of preceding closed bars."""
+    sample = list(candles or [])
+    if len(sample) < lookback + 1:
+        return None
+    baseline = []
+    for candle in sample[-(lookback + 1):-1]:
+        value = _value(candle, "volume")
+        if value is None or value < 0:
+            return None
+        baseline.append(value)
+    current = _value(sample[-1], "volume")
+    baseline_median = median(baseline) if baseline else 0.0
+    if current is None or baseline_median <= 0:
+        return None
+    ratio = current / baseline_median
+    return ratio if math.isfinite(ratio) else None
+
+
+def _directional_movement(candles, period=14):
+    """Return latest +DI/-DI from a Wilder-style period window."""
+    sample = list(candles or [])
+    if len(sample) < period + 1:
+        return None
+    plus_dm, minus_dm, true_ranges = [], [], []
+    for previous, current in zip(sample[-(period + 1):-1], sample[-period:]):
+        high, low = _value(current, "high"), _value(current, "low")
+        prev_high, prev_low = _value(previous, "high"), _value(previous, "low")
+        prev_close = _value(previous, "close")
+        if None in (high, low, prev_high, prev_low, prev_close):
+            return None
+        up, down = high - prev_high, prev_low - low
+        plus_dm.append(up if up > down and up > 0 else 0.0)
+        minus_dm.append(down if down > up and down > 0 else 0.0)
+        true_ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+    tr_sum = sum(true_ranges)
+    if tr_sum <= 0:
+        return None
+    return {
+        "plus_di": 100.0 * sum(plus_dm) / tr_sum,
+        "minus_di": 100.0 * sum(minus_dm) / tr_sum,
+    }
+
+
+def _efficiency_ratio(values, period=20):
+    """Kaufman-style directional efficiency, from 0 (chop) to 1 (one-way)."""
+    if len(values) < period + 1:
+        return None
+    sample = values[-(period + 1):]
+    path = sum(abs(right - left) for left, right in zip(sample, sample[1:]))
+    if path <= 0:
+        return 0.0
+    result = abs(sample[-1] - sample[0]) / path
+    return result if math.isfinite(result) else None
+
+
 def _rsi(values, period=14):
     if len(values) < period + 1:
         return None
@@ -304,12 +378,20 @@ def _regime(data):
     closes = _series(candles)
     atr = _atr(candles)
     fast, slow = _ema(closes, 20), _ema(closes, 50)
-    if atr is None or fast is None or slow is None or not closes:
+    adx_value = _adx(candles)
+    efficiency = _efficiency_ratio(closes, 20)
+    if None in (atr, fast, slow, adx_value, efficiency) or not closes:
         return {"label": "UNKNOWN", "trend": "NEUTRAL", "strength": 0.0}
     distance = abs(fast - slow) / atr
     trend = "BULLISH" if fast > slow else "BEARISH" if fast < slow else "NEUTRAL"
-    label = "TREND" if distance >= 0.65 else "RANGE"
-    # A high-volatility flag requires a relative ATR expansion, not a fixed coin price threshold.
+    # EMA separation alone confuses directional trends with noisy, high-beta chop.
+    if distance >= 0.65 and adx_value >= 18.0 and efficiency >= 0.25:
+        label = "TREND"
+    elif distance <= 0.65 and adx_value < 22.0 and efficiency <= 0.35:
+        label = "RANGE"
+    else:
+        label = "TRANSITION"
+    # A high-volatility flag requires relative ATR expansion, not a fixed coin price threshold.
     atr_percentages = []
     for end in range(max(15, len(candles) - 80), len(candles) + 1):
         sample = candles[:end]
@@ -319,7 +401,11 @@ def _regime(data):
             atr_percentages.append(sample_atr / close)
     if len(atr_percentages) >= 10 and atr_percentages[-1] > median(atr_percentages[:-1]) * 1.5:
         label = "HIGH_VOLATILITY"
-    return {"label": label, "trend": trend, "strength": round(distance, 3)}
+    return {
+        "label": label, "trend": trend, "strength": round(distance, 3),
+        "adx": round(adx_value, 2), "efficiency_ratio": round(efficiency, 3),
+        "atr_pct": round(atr / closes[-1], 6) if closes[-1] > 0 else None,
+    }
 
 
 def _trend_pullback(data):
@@ -334,22 +420,33 @@ def _trend_pullback(data):
     if None in (e20, e50, e1, adx_value, e20_previous) or adx_value < 18:
         return None
     trend_slope = (e20 - e20_previous) / atr
+    directional = _directional_movement(h4)
     last, previous = h1[-1], h1[-2]
     close = _value(last, "close")
     prev_close = _value(previous, "close")
     low, high = _value(last, "low"), _value(last, "high")
     prev_low, prev_high = _value(previous, "low"), _value(previous, "high")
-    if None in (close, prev_close, low, high, prev_low, prev_high):
+    quality = _candle_quality(last)
+    efficiency = _efficiency_ratio(c4, 20)
+    if None in (close, prev_close, low, high, prev_low, prev_high) or quality is None or directional is None or efficiency is None:
         return None
     entry = _current_price(data)
     if entry is None:
         return None
     direction = None
-    if e20 > e50 and entry > e1 and entry <= e1 + 1.25 * atr and (low <= e1 * 1.003 or prev_low <= e1 * 1.003) and close > prev_close:
+    bullish_dmi = directional["plus_di"] > directional["minus_di"]
+    bearish_dmi = directional["minus_di"] > directional["plus_di"]
+    if (e20 > e50 and bullish_dmi and entry > e1 and entry <= e1 + 1.25 * atr
+            and (low <= e1 * 1.003 or prev_low <= e1 * 1.003)
+            and close > prev_close and quality["direction"] == "BULLISH"
+            and quality["close_location"] >= 0.60 and quality["body_ratio"] >= 0.25):
         direction = "LONG"
         swing = min(_value(item, "low") for item in h1[-10:] if _value(item, "low") is not None)
         stop = min(entry - 1.0 * atr, swing - 0.1 * atr)
-    elif e20 < e50 and entry < e1 and entry >= e1 - 1.25 * atr and (high >= e1 * 0.997 or prev_high >= e1 * 0.997) and close < prev_close:
+    elif (e20 < e50 and bearish_dmi and entry < e1 and entry >= e1 - 1.25 * atr
+            and (high >= e1 * 0.997 or prev_high >= e1 * 0.997)
+            and close < prev_close and quality["direction"] == "BEARISH"
+            and quality["close_location"] <= 0.40 and quality["body_ratio"] >= 0.25):
         direction = "SHORT"
         swing = max(_value(item, "high") for item in h1[-10:] if _value(item, "high") is not None)
         stop = max(entry + 1.0 * atr, swing + 0.1 * atr)
@@ -359,10 +456,21 @@ def _trend_pullback(data):
     pullback_distance = abs(entry - e1) / atr
     if (direction == "LONG" and trend_slope <= 0) or (direction == "SHORT" and trend_slope >= 0):
         return None
-    strength = min(92.0, 62.0 + min(trend_separation * 5.0, 12.0) + min((adx_value - 18.0) * 0.5, 10.0) + max(0.0, 8.0 - pullback_distance * 6.0))
+    strength = min(92.0, 60.0 + min(trend_separation * 5.0, 10.0)
+                   + min((adx_value - 18.0) * 0.45, 9.0)
+                   + min(efficiency * 10.0, 7.0)
+                   + min(abs(directional["plus_di"] - directional["minus_di"]) * 0.15, 6.0)
+                   + max(0.0, 7.0 - pullback_distance * 5.0))
     plan = _valid_plan(direction, entry, stop, atr, h1, "trend_pullback", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
-        plan["reasons"] = ["4H EMA20/EMA50 alignment and positive EMA20 slope", f"4H ADX={adx_value:.1f}", "1H EMA20 pullback and candle reclaim"]
+        plan["reasons"] = [
+            f"4H EMA20/EMA50 trend alignment; EMA20 slope={trend_slope:.2f} ATR",
+            f"4H ADX={adx_value:.1f}; +DI={directional['plus_di']:.1f}; -DI={directional['minus_di']:.1f}",
+            f"4H directional efficiency={efficiency:.2f}",
+            f"1H EMA20 pullback reclaim; body={quality['body_ratio']:.2f}; close-location={quality['close_location']:.2f}",
+        ]
+        plan["trend_metrics"] = {"adx": round(adx_value, 2), **{key: round(value, 2) for key, value in directional.items()},
+                                 "efficiency_ratio": round(efficiency, 3), "pullback_distance_atr": round(pullback_distance, 3)}
     return plan
 
 
@@ -383,36 +491,54 @@ def _volatility_breakout(data):
     if not bandwidths or prior_band is None:
         return None
     prior_width = (prior_band[2] - prior_band[0]) / max(prior_band[1], 1e-12)
-    if prior_width > sorted(bandwidths)[max(0, int((len(bandwidths) - 1) * 0.50))]:
+    compression_threshold = sorted(bandwidths)[max(0, int((len(bandwidths) - 1) * 0.35))]
+    if prior_width > compression_threshold:
         return None
     previous = candles[-21:-1]
     last = candles[-1]
     prior_highs = [_value(item, "high") for item in previous]
     prior_lows = [_value(item, "low") for item in previous]
-    volumes = [_value(item, "volume") for item in candles[-21:-1]]
-    close, volume = _value(last, "close"), _value(last, "volume")
-    if close is None or volume is None or any(item is None for item in prior_highs + prior_lows + volumes):
+    close = _value(last, "close")
+    quality = _candle_quality(last)
+    volume_ratio = _relative_volume(candles, 20)
+    if close is None or quality is None or volume_ratio is None or any(item is None for item in prior_highs + prior_lows):
         return None
-    average_volume = sum(volumes) / len(volumes)
     entry = _current_price(data)
     if entry is None:
         return None
+    upper_boundary, lower_boundary = max(prior_highs), min(prior_lows)
     direction = None
-    if close > max(prior_highs) and entry >= close and entry <= max(prior_highs) + atr and volume >= average_volume * 1.2:
+    if (close > upper_boundary and entry >= close and entry <= upper_boundary + atr
+            and volume_ratio >= 1.30 and quality["direction"] == "BULLISH"
+            and quality["body_ratio"] >= 0.50 and quality["close_location"] >= 0.75
+            and quality["range"] >= 0.75 * atr):
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif close < min(prior_lows) and entry <= close and entry >= min(prior_lows) - atr and volume >= average_volume * 1.2:
+    elif (close < lower_boundary and entry <= close and entry >= lower_boundary - atr
+            and volume_ratio >= 1.30 and quality["direction"] == "BEARISH"
+            and quality["body_ratio"] >= 0.50 and quality["close_location"] <= 0.25
+            and quality["range"] >= 0.75 * atr):
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
         return None
-    boundary = max(prior_highs) if direction == "LONG" else min(prior_lows)
-    volume_ratio = volume / average_volume if average_volume > 0 else 0.0
+    boundary = upper_boundary if direction == "LONG" else lower_boundary
     breakout_distance = abs(entry - boundary) / atr
-    strength = min(92.0, 65.0 + min(max(0.0, volume_ratio - 1.2) * 12.0, 15.0) + min(breakout_distance * 8.0, 10.0))
+    strength = min(93.0, 61.0 + min(max(0.0, volume_ratio - 1.30) * 10.0, 15.0)
+                   + min(quality["body_ratio"] * 10.0, 8.0)
+                   + min(quality["range"] / atr * 5.0, 7.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "volatility_breakout", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
-        plan["reasons"] = ["1H 20-candle closed breakout after volatility compression", "Volume at least 1.2x prior 20-candle average"]
+        plan["reasons"] = [
+            f"1H 20-candle close breakout after volatility compression (bandwidth={prior_width:.4f})",
+            f"Relative volume={volume_ratio:.2f}x median of prior 20 bars",
+            f"Breakout candle body={quality['body_ratio']:.2f}; close-location={quality['close_location']:.2f}; range={quality['range'] / atr:.2f} ATR",
+        ]
+        plan["breakout_metrics"] = {"compression_bandwidth": round(prior_width, 6),
+                                    "relative_volume": round(volume_ratio, 3),
+                                    "candle_body_ratio": round(quality["body_ratio"], 3),
+                                    "candle_range_atr": round(quality["range"] / atr, 3),
+                                    "breakout_distance_atr": round(breakout_distance, 3)}
     return plan
 
 
@@ -425,19 +551,25 @@ def _mean_reversion(data, regime):
     if regime["label"] != "RANGE" or len(candles) < 25 or atr is None or bands is None or rsi is None:
         return None
     previous_bands = _bollinger(closes[:-1])
-    if previous_bands is None:
+    previous_rsi = _rsi(closes[:-1])
+    if previous_bands is None or previous_rsi is None:
         return None
     lower, _, upper = bands
     prev_lower, _, prev_upper = previous_bands
     previous, last = candles[-2], candles[-1]
     prev_close, close = _value(previous, "close"), _value(last, "close")
-    if None in (prev_close, close):
+    quality = _candle_quality(last)
+    if None in (prev_close, close) or quality is None:
         return None
     direction = None
-    if prev_close < prev_lower and close > lower and rsi <= 42:
+    if (prev_close < prev_lower and close > lower and rsi <= 42
+            and rsi > previous_rsi and quality["direction"] == "BULLISH"
+            and quality["lower_wick_ratio"] >= 0.20 and quality["close_location"] >= 0.60):
         direction = "LONG"
         stop = min(_value(item, "low") for item in candles[-5:] if _value(item, "low") is not None) - 0.15 * atr
-    elif prev_close > prev_upper and close < upper and rsi >= 58:
+    elif (prev_close > prev_upper and close < upper and rsi >= 58
+            and rsi < previous_rsi and quality["direction"] == "BEARISH"
+            and quality["upper_wick_ratio"] >= 0.20 and quality["close_location"] <= 0.40):
         direction = "SHORT"
         stop = max(_value(item, "high") for item in candles[-5:] if _value(item, "high") is not None) + 0.15 * atr
     else:
@@ -458,7 +590,16 @@ def _mean_reversion(data, regime):
     strength = min(88.0, 65.0 + min(extremity * 0.5, 12.0) + min(abs(close - prev_close) / atr * 4.0, 8.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "mean_reversion", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
-        plan["reasons"] = ["15m Bollinger re-entry after outside close", f"RSI14={rsi:.1f}", f"VWAP deviation={vwap_distance_atr:.2f} ATR with mean-side confirmation", "Range regime"]
+        rejection_wick = quality["lower_wick_ratio"] if direction == "LONG" else quality["upper_wick_ratio"]
+        plan["reasons"] = [
+            "15m Bollinger outside-close re-entry in a classified range regime",
+            f"RSI14={rsi:.1f} turning from {previous_rsi:.1f}",
+            f"VWAP deviation={vwap_distance_atr:.2f} ATR with mean-side confirmation",
+            f"Rejection wick={rejection_wick:.2f}; close-location={quality['close_location']:.2f}",
+        ]
+        plan["mean_reversion_metrics"] = {"rsi": round(rsi, 2), "prior_rsi": round(previous_rsi, 2),
+                                          "vwap_distance_atr": round(vwap_distance_atr, 3),
+                                          "rejection_wick_ratio": round(rejection_wick, 3)}
     return plan
 
 
@@ -516,8 +657,11 @@ def _orderflow_momentum(data):
 
     last = candles[-1]
     close, opened = _value(last, "close"), _value(last, "open")
+    quality = _candle_quality(last)
     entry = _current_price(data)
-    if close is None or opened is None or entry is None:
+    if close is None or opened is None or entry is None or quality is None:
+        return None
+    if int(flow.get("trade_count") or 0) < 20:
         return None
     absorption = _absorption_proxy(flow, last, atr)
     direction = None
@@ -527,10 +671,12 @@ def _orderflow_momentum(data):
     elif absorption == "SELLER_FLOW_ABSORBED":
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif imbalance >= 0.18 and trade_delta >= 0.12 and close > opened and entry >= opened:
+    elif (imbalance >= 0.18 and trade_delta >= 0.12 and close > opened and entry >= opened
+          and quality["body_ratio"] >= 0.30 and quality["close_location"] >= 0.65):
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif imbalance <= -0.18 and trade_delta <= -0.12 and close < opened and entry <= opened:
+    elif (imbalance <= -0.18 and trade_delta <= -0.12 and close < opened and entry <= opened
+          and quality["body_ratio"] >= 0.30 and quality["close_location"] <= 0.35):
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
@@ -543,28 +689,32 @@ def _orderflow_momentum(data):
     if plan:
         plan["reasons"] = [
             f"Depth-weighted order-book notional imbalance={imbalance:+.2f}",
-            f"Recent taker notional delta={trade_delta:+.2f}",
-            f"Spread={spread_pct:.4f}%",
+            f"Recent taker notional delta={trade_delta:+.2f} across {int(flow.get('trade_count') or 0)} trades",
+            f"Spread={spread_pct:.4f}%; bid/ask depth notional={flow.get('bid_notional')}/{flow.get('ask_notional')}",
+            f"15m candle body={quality['body_ratio']:.2f}; close-location={quality['close_location']:.2f}",
         ]
         plan["data_quality"] = "ABSORPTION_PROXY" if absorption else "FRESH_BOOK_AND_NOTIONAL_TRADE_FLOW"
         if absorption:
-            plan["reasons"].append(f"Absorption proxy: {absorption}")
+            plan["reasons"].append(f"Absorption proxy: {absorption}; passive absorption is inferred, not directly observed")
         plan["orderflow_metrics"] = {
             "bid_notional": flow.get("bid_notional"),
             "ask_notional": flow.get("ask_notional"),
             "trade_delta": trade_delta,
             "spread_pct": spread_pct,
             "trade_count": flow.get("trade_count"),
+            "candle_body_ratio": round(quality["body_ratio"], 3),
+            "candle_close_location": round(quality["close_location"], 3),
             "absorption_proxy": absorption,
         }
     return plan
 
 
 def _liquidation_cascade(data):
+    """Detect a liquidation-like deleveraging impulse; OI is a proxy, not event data."""
     candles = data.get("1h") or []
     oi = data.get("open_interest") or []
     atr = _atr(candles)
-    if len(candles) < 20 or len(oi) < 2 or atr is None:
+    if len(candles) < 21 or len(oi) < 2 or atr is None:
         return None
     try:
         previous_oi, current_oi = float(oi[-2]), float(oi[-1])
@@ -587,9 +737,11 @@ def _liquidation_cascade(data):
     oi_change = (current_oi - previous_oi) / previous_oi
     last = candles[-1]
     close, opened = _value(last, "close"), _value(last, "open")
+    quality = _candle_quality(last)
+    relative_volume = _relative_volume(candles, 20)
     buy_ratio, _ = _trade_flow(data)
     entry = _current_price(data)
-    if close is None or opened is None or entry is None:
+    if close is None or opened is None or entry is None or quality is None or relative_volume is None:
         return None
     impulse = abs(close - opened) / atr
     direction = None
@@ -603,10 +755,16 @@ def _liquidation_cascade(data):
     # Crowded-side funding is used as a directional confirmation, not as a
     # standalone trigger: positive funding supports long-liquidation shorts;
     # negative funding supports short-squeeze longs.
-    if oi_change <= -0.015 and close > opened and entry > opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio >= 0.56 and funding <= 0.0003:
+    if (oi_change <= -0.015 and close > opened and entry > opened and impulse >= 1.0
+            and quality["direction"] == "BULLISH" and quality["close_location"] >= 0.70
+            and relative_volume >= 1.25 and buy_ratio is not None and buy_ratio >= 0.56
+            and funding <= 0.0003):
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio <= 0.44 and funding >= -0.0003:
+    elif (oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0
+            and quality["direction"] == "BEARISH" and quality["close_location"] <= 0.30
+            and relative_volume >= 1.25 and buy_ratio is not None and buy_ratio <= 0.44
+            and funding >= -0.0003):
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
@@ -614,8 +772,19 @@ def _liquidation_cascade(data):
     strength = min(92.0, 65.0 + min(abs(oi_change) * 400.0, 15.0) + min(impulse * 5.0, 10.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
-        plan["reasons"] = [f"Open interest contraction={oi_change * 100:.2f}%", f"1H impulse={impulse:.2f} ATR", f"Funding rate={funding:.5f}", "Trade-flow confirmation; liquidation side remains a proxy inference"]
+        plan["reasons"] = [
+            f"Open interest contraction={oi_change * 100:.2f}% over timestamped observations",
+            f"1H impulse={impulse:.2f} ATR; relative volume={relative_volume:.2f}x",
+            f"Taker buy-notional ratio={buy_ratio:.2f}; funding={funding:.5f}",
+            f"Impulse candle close-location={quality['close_location']:.2f}",
+            "Liquidation-side interpretation is an OI/flow proxy, not exchange liquidation-event data",
+        ]
         plan["data_quality"] = "OI_CONTRACTION_PROXY_NOT_EXCHANGE_LIQUIDATION_FEED"
+        plan["liquidation_metrics"] = {"oi_change_pct": round(oi_change * 100, 3),
+                                      "impulse_atr": round(impulse, 3),
+                                      "relative_volume": round(relative_volume, 3),
+                                      "taker_buy_notional_ratio": round(buy_ratio, 3),
+                                      "funding_rate": funding}
     return plan
 
 
@@ -703,15 +872,23 @@ def _relative_strength(data):
     if not math.isfinite(beta) or abs(beta) > 5.0:
         return None
 
+    residual_returns = [asset_value - beta * market_value
+                        for asset_value, market_value in zip(asset_returns[-48:], benchmark_returns[-48:])]
     own_return_12 = sum(asset_returns[-12:])
     benchmark_return_12 = sum(benchmark_returns[-12:])
     residual_alpha = own_return_12 - beta * benchmark_return_12
+    residual_alpha_6 = sum(residual_returns[-6:])
+    residual_volatility = math.sqrt(sum(value * value for value in residual_returns) / len(residual_returns))
+    alpha_signal = max(0.02, 0.75 * residual_volatility * math.sqrt(12.0))
     e20 = _ema(closes, 20)
-    if e20 is None:
+    e20_previous = _ema(closes[:-3], 20)
+    if e20 is None or e20_previous is None:
         return None
     direction = (
-        "LONG" if residual_alpha >= 0.02 and closes[-1] > e20
-        else "SHORT" if residual_alpha <= -0.02 and closes[-1] < e20
+        "LONG" if residual_alpha >= alpha_signal and residual_alpha_6 > 0
+        and closes[-1] > e20 and e20 > e20_previous
+        else "SHORT" if residual_alpha <= -alpha_signal and residual_alpha_6 < 0
+        and closes[-1] < e20 and e20 < e20_previous
         else None
     )
     if not direction:
@@ -726,13 +903,17 @@ def _relative_strength(data):
         benchmark_label = "/".join(benchmark_keys)
         sector_label = f" + sector peers ({len(sector_maps)})" if use_sector else ""
         plan["reasons"] = [
-            f"12x4H beta-adjusted residual alpha={residual_alpha * 100:+.2f}%",
+            f"12x4H beta-adjusted residual alpha={residual_alpha * 100:+.2f}% (required {alpha_signal * 100:.2f}%)",
+            f"Recent 6x4H residual alpha={residual_alpha_6 * 100:+.2f}%",
             f"Estimated beta={beta:.2f} vs {benchmark_label}{sector_label}",
-            "Absolute EMA20 trend confirmation",
+            f"EMA20 slope={(e20 - e20_previous) / atr:.2f} ATR; absolute trend confirmation",
         ]
         plan["relative_strength_metrics"] = {
             "beta": round(beta, 4),
             "residual_alpha_12x4h": round(residual_alpha, 6),
+            "residual_alpha_6x4h": round(residual_alpha_6, 6),
+            "required_alpha_12x4h": round(alpha_signal, 6),
+            "residual_volatility_4h": round(residual_volatility, 6),
             "market_return_12x4h": round(benchmark_return_12, 6),
             "sector_peers_used": len(sector_maps) if use_sector else 0,
         }
@@ -847,12 +1028,12 @@ def _smc_candidate(result):
 def _regime_fit(strategy_id, regime):
     label, trend = regime.get("label"), regime.get("trend")
     preferred = {
-        "trend_pullback": {"TREND": 1.0},
-        "volatility_breakout": {"HIGH_VOLATILITY": 1.0, "TREND": 0.85},
-        "mean_reversion": {"RANGE": 1.0},
-        "liquidation_cascade": {"HIGH_VOLATILITY": 1.0},
-        "orderflow_momentum": {"TREND": 0.9, "HIGH_VOLATILITY": 1.0},
-        "relative_strength": {"TREND": 0.9, "HIGH_VOLATILITY": 0.75},
+        "trend_pullback": {"TREND": 1.0, "TRANSITION": 0.55},
+        "volatility_breakout": {"HIGH_VOLATILITY": 1.0, "TREND": 0.85, "TRANSITION": 0.70},
+        "mean_reversion": {"RANGE": 1.0, "TRANSITION": 0.45},
+        "liquidation_cascade": {"HIGH_VOLATILITY": 1.0, "TRANSITION": 0.70},
+        "orderflow_momentum": {"TREND": 0.9, "HIGH_VOLATILITY": 1.0, "TRANSITION": 0.70},
+        "relative_strength": {"TREND": 0.9, "HIGH_VOLATILITY": 0.75, "TRANSITION": 0.60},
         "smc": {"TREND": 0.85, "RANGE": 0.85, "HIGH_VOLATILITY": 0.85, "UNKNOWN": 0.75},
     }
     fit = preferred.get(strategy_id, {}).get(label, 0.55)
@@ -882,21 +1063,21 @@ def _setup_diagnostic(strategy_id, data, regime):
         if len(candles("4h")) >= 29 and _adx(candles("4h")) is None:
             checks.append("INSUFFICIENT_HISTORY: 4h ADX needs at least 29 valid candles.")
         if len(candles("4h")) >= 60 and len(candles("1h")) >= 30 and _atr(candles("1h")) and _adx(candles("4h")) is not None:
-            checks.append("CONDITION_NOT_MET: trend alignment, ADX>=18, EMA20 pullback/reclaim and EMA slope did not align.")
+            checks.append("CONDITION_NOT_MET: 4H EMA trend, ADX/DMI direction, 1H EMA20 pullback, reclaim candle body/close-location and directional efficiency did not align.")
     elif strategy_id == "volatility_breakout":
         checks.append(history("1h", 45))
         if len(candles("1h")) >= 15 and _atr(candles("1h")) is None:
             checks.append("INVALID_DATA: 1h ATR cannot be calculated.")
         if len(candles("1h")) >= 45 and _atr(candles("1h")):
-            checks.append("CONDITION_NOT_MET: 20-candle breakout, prior volatility compression and >=1.2x volume were not all present.")
+            checks.append("CONDITION_NOT_MET: 20-candle close breakout, lower-quartile bandwidth compression, >=1.30x median relative volume and decisive breakout candle anatomy were not all present.")
     elif strategy_id == "mean_reversion":
         checks.append(history("15m", 25))
         if regime.get("label") != "RANGE":
             checks.append(f"REGIME_MISMATCH: mean reversion requires RANGE; current regime is {regime.get('label')}.")
         if len(candles("15m")) >= 25 and _atr(candles("15m")) and _bollinger(_series(candles("15m"))) and _rsi(_series(candles("15m"))) is not None:
-            checks.append("CONDITION_NOT_MET: Bollinger outside-to-inside re-entry, RSI threshold and VWAP-side confirmation did not align.")
+            checks.append("CONDITION_NOT_MET: Bollinger re-entry, RSI reversal slope, rejection wick/close-location and VWAP-side confirmation did not align.")
     elif strategy_id == "liquidation_cascade":
-        checks.append(history("1h", 20))
+        checks.append(history("1h", 21))
         oi = data.get("open_interest") or []
         oi_times = data.get("open_interest_timestamps_ms") or []
         if len(oi) < 2:
@@ -904,7 +1085,7 @@ def _setup_diagnostic(strategy_id, data, regime):
         if len(oi_times) < 2:
             checks.append("MISSING_DATA: open_interest_timestamps_ms has fewer than 2 timestamps; a single OI snapshot cannot establish contraction.")
         if len(oi) >= 2 and len(oi_times) >= 2 and data.get("snapshot_timestamp_ms"):
-            checks.append("CONDITION_NOT_MET: OI contraction <=-1.5%, 1H impulse and same-direction taker-flow/funding confirmation did not align.")
+            checks.append("CONDITION_NOT_MET: timestamped OI contraction <=-1.5%, >=1.0 ATR impulse, >=1.25x relative volume, directional candle close, taker-flow and funding context did not align.")
     elif strategy_id == "orderflow_momentum":
         if not isinstance(data.get("orderbook"), dict):
             checks.append("MISSING_DATA: live orderbook snapshot is unavailable.")
@@ -913,7 +1094,7 @@ def _setup_diagnostic(strategy_id, data, regime):
         if not data.get("snapshot_timestamp_ms"):
             checks.append("MISSING_DATA: snapshot timestamp is unavailable.")
         if data.get("orderbook") and data.get("recent_trades") and data.get("snapshot_timestamp_ms"):
-            checks.append("CONDITION_NOT_MET: fresh book/trades, spread ceiling, imbalance and taker-delta/absorption confirmation did not align.")
+            checks.append("CONDITION_NOT_MET: fresh book/trades, at least 20 valid trades, spread ceiling, depth-weighted imbalance, taker delta and momentum-candle or absorption confirmation did not align.")
     elif strategy_id == "relative_strength":
         checks.append(history("4h", 55))
         symbol = str(data.get("symbol") or "").upper()
@@ -923,7 +1104,7 @@ def _setup_diagnostic(strategy_id, data, regime):
             if len(universe.get(key) or []) < 55:
                 checks.append(f"MISSING_DATA: correlation_universe[{key}] needs at least 55 aligned 4h candles.")
         if len(candles("4h")) >= 55 and all(len(universe.get(key) or []) >= 55 for key in keys):
-            checks.append("CONDITION_NOT_MET: at least 48 aligned returns, valid beta and +/-2% beta-adjusted 12-bar residual alpha with EMA20 confirmation were not all present.")
+            checks.append("CONDITION_NOT_MET: 48 aligned returns, stable beta, volatility-scaled 12-bar residual alpha, same-direction recent 6-bar alpha and rising/falling EMA20 confirmation were not all present.")
     elif strategy_id == "smc":
         checks.append("NO_SMC_GEOMETRY: integrated SMC specialist world did not provide a valid directional entry/stop/three-target plan.")
     checks = [item for item in checks if item]
