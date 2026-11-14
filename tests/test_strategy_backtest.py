@@ -176,8 +176,11 @@ def test_strategy_snapshot_uses_decision_close_not_next_bar_open():
 
 def test_smc_and_strategy_replays_share_marketable_limit_fill_cost_and_funding():
     bar_time = 1_700_000_000_000
-    bars = [Bar(99.0, 103.0, 98.5, 102.0, time=bar_time)]
-    funding = [{"timestamp": bar_time + 900_000, "value": 0.001}]
+    bars = [
+        Bar(99.0, 99.5, 98.5, 99.2, time=bar_time),
+        Bar(99.2, 103.0, 98.5, 102.0, time=bar_time + 900_000),
+    ]
+    funding = [{"timestamp": bar_time + 1_800_000, "value": 0.001}]
     fees = {
         "maker_fee": 0.0002, "taker_fee": 0.00055,
         "spread_rate": 0.0002, "slippage_rate": 0.0003,
