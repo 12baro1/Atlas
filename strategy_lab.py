@@ -564,7 +564,7 @@ def _relative_strength(data):
     strength = min(88.0, 65.0 + min(abs(relative) * 500.0, 20.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "relative_strength", strength, entry_reference=_entry_reference(data))
     if plan:
-        plan["reasons"] = [f"12x4H relative return vs {benchmark}={relative * 100:+.2f}%", f"Price/EMA20 alignment"]
+        plan["reasons"] = [f"12x4H relative return vs {",".join(benchmark_keys)} composite={relative * 100:+.2f}%", "Price/EMA20 alignment"]
     return plan
 
 
