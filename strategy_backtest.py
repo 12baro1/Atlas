@@ -339,7 +339,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     journal = StrategyOutcomeJournal()
     revision = journal.current_revision()
     replay_fingerprint = "|".join(map(str, (
-        symbol, days, step, max_holding_bars, maker_fee, taker_fee,
+        symbol, days, step, max_holding_bars, limit_expiry_bars, maker_fee, taker_fee,
         spread_rate, slippage_rate, revision, evaluation_start, is_cutoff,
     )))
     run_id = hashlib.sha256(replay_fingerprint.encode("utf-8")).hexdigest()
