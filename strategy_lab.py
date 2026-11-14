@@ -1,8 +1,8 @@
-"""Independent seven-strategy analysis and selection for Atlas.
+"""Seven raw setup generators, one shared eligibility filter, one final selector.
 
-The lab is advisory: it never mutates the SMC result or sends exchange orders.
-New strategy candidates are explicitly marked experimental until strategy-specific
-backtests and outcome samples establish a reliable edge.
+The seven sources include one integrated SMC setup assembled by Atlas's SMC
+specialist world. Specialist motors are evidence producers inside that SMC world,
+not additional strategy candidates or independent trade-decision authorities.
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ STRATEGY_NAMES = {
     "liquidation_cascade": "Liquidation Cascade (OI proxy)",
     "orderflow_momentum": "Order Flow Momentum",
     "relative_strength": "Relative Strength",
-    "smc": "SMC (mevcut Atlas)",
+    "smc": "SMC (bütünleşik uzman motorları)",
 }
 
 
@@ -723,58 +723,73 @@ def _absorption_proxy(flow, candle, atr):
     return None
 
 def _smc_candidate(result):
+    """Build the single SMC setup from the integrated SMC specialist world.
+
+    This adapter reads the pre-selector SMC entry/risk geometry. It deliberately
+    does not inspect the legacy signal or decision verdict: those are downstream
+    gates and must not suppress an otherwise valid SMC setup before the shared
+    seven-strategy filter gets to evaluate it.
+    """
     if not isinstance(result, dict):
         return None
+    analysis = result.get("analysis") if isinstance(result.get("analysis"), dict) else {}
+    entry_state = analysis.get("entry") if isinstance(analysis.get("entry"), dict) else result.get("entry")
+    entry_state = entry_state if isinstance(entry_state, dict) else {}
+    source_risk = result.get("risk") if isinstance(result.get("risk"), dict) else {}
+    dynamic_tp = result.get("dynamic_tp") if isinstance(result.get("dynamic_tp"), dict) else {}
+    signal = result.get("signal") if isinstance(result.get("signal"), dict) else {}
+    direction = str(entry_state.get("direction") or signal.get("signal") or "").upper()
     try:
-        from utils.signal_card import build_signal_card
-        card = build_signal_card(result)
-    except Exception:
-        return None
-    if card.get("decision_action") not in {"EXECUTE", "EXECUTE_WITH_CAUTION"}:
-        return None
-    direction = str(card.get("direction") or "").upper()
-    entry, stop = card.get("entry"), card.get("stop_loss")
-    targets = card.get("tp_levels") or []
-    if direction not in {"LONG", "SHORT"} or not entry or not stop or not targets:
-        return None
-    try:
-        entry, stop = float(entry), float(stop)
-        target_values = [float(item.get("price") if isinstance(item, dict) else item) for item in targets[:3]]
+        entry = float(entry_state.get("entry", source_risk.get("entry")))
+        stop = float(source_risk.get("stop_loss", entry_state.get("stop_loss")))
+        target_values = [
+            float(source_risk.get(key) if source_risk.get(key) is not None else dynamic_tp.get(key))
+            for key in ("tp1", "tp2", "tp3")
+        ]
     except (TypeError, ValueError, OverflowError):
         return None
-    if not target_values:
+    if direction not in {"LONG", "SHORT"} or not all(
+        math.isfinite(value) and value > 0 for value in (entry, stop, *target_values)
+    ):
         return None
-    if not all(math.isfinite(value) and value > 0 for value in [entry, stop, *target_values]):
+    if direction == "LONG" and not (stop < entry < target_values[0] <= target_values[1] <= target_values[2]):
         return None
-    if direction == "LONG" and not (stop < entry < target_values[0] and all(left < right for left, right in zip(target_values, target_values[1:]))):
+    if direction == "SHORT" and not (target_values[0] >= target_values[1] >= target_values[2] and target_values[0] < entry < stop):
         return None
-    if direction == "SHORT" and not (target_values[0] < entry < stop and all(left > right for left, right in zip(target_values, target_values[1:]))):
+    risk_distance = abs(entry - stop)
+    if risk_distance <= 0:
         return None
-    risk = abs(entry - stop)
-    if risk <= 0:
-        return None
+    reasoning = entry_state.get("setup_reasoning") if isinstance(entry_state.get("setup_reasoning"), dict) else {}
+    reasons = list(reasoning.get("supporting_evidence") or [])
+    if reasoning.get("thesis"):
+        reasons.insert(0, str(reasoning["thesis"]))
+    if not reasons:
+        reasons = ["Integrated SMC specialist evidence"]
     plan = {
-        "status": "CANDIDATE", "strategy_id": "smc", "strategy": STRATEGY_NAMES["smc"],
-        "direction": direction, "entry_type": card.get("entry_type") or "LIMIT",
-        "entry": entry, "stop_loss": stop,
-        "tp1": target_values[0], "tp2": target_values[1] if len(target_values) > 1 else None,
-        "tp3": target_values[2] if len(target_values) > 2 else None,
-        "rr_tp1": round(abs(target_values[0] - entry) / risk, 3),
-        "rr_tp2": round(abs(target_values[1] - entry) / risk, 3) if len(target_values) > 1 else None,
-        "rr_tp3": round(abs(target_values[2] - entry) / risk, 3) if len(target_values) > 2 else None,
-        "strength": float(card.get("setup_quality") or card.get("confidence") or 0),
+        "status": "RAW_SETUP",
+        "strategy_id": "smc",
+        "strategy": STRATEGY_NAMES["smc"],
+        "direction": direction,
+        "entry_type": str(entry_state.get("entry_type") or "MARKET").upper(),
+        "entry": entry,
+        "stop_loss": stop,
+        "tp1": target_values[0],
+        "tp2": target_values[1],
+        "tp3": target_values[2],
+        "rr_tp1": round(abs(target_values[0] - entry) / risk_distance, 3),
+        "rr_tp2": round(abs(target_values[1] - entry) / risk_distance, 3),
+        "rr_tp3": round(abs(target_values[2] - entry) / risk_distance, 3),
+        "strength": float(signal.get("confidence") or (analysis.get("setup_quality") or {}).get("score") or 0),
         "target_model": "SMC_STRUCTURAL",
         "experimental": False,
-        "reasons": ["Mevcut Atlas SMC karar motoru EXECUTE üretti"],
+        "reasons": reasons,
+        "partial_exit_weights": (
+            source_risk.get("target_rebased_weights")
+            or source_risk.get("partial_exit_weights")
+            or _configured_partial_tp_weights()
+        ),
+        "atr": source_risk.get("atr"),
     }
-    plan["estimated_net_rr"] = card.get("net_rr")
-    source_risk = result.get("risk") or {}
-    plan["partial_exit_weights"] = (
-        source_risk.get("target_rebased_weights")
-        or source_risk.get("partial_exit_weights")
-        or _configured_partial_tp_weights()
-    )
-    plan["atr"] = source_risk.get("atr")
     return plan
 
 
@@ -797,7 +812,7 @@ def _regime_fit(strategy_id, regime):
 
 
 class SevenStrategyLab:
-    """Run six independent experimental strategies plus the existing SMC plan."""
+    """Run six independent generators plus one integrated SMC setup generator."""
 
     def classify_regime(self, data):
         """Expose the same regime classifier used by analyze for scoped statistics."""
