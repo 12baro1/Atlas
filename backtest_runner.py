@@ -111,6 +111,7 @@ def simulate_trade_partial(
     future_candles,
     direction="LONG",
     tp_weights=None,
+    max_holding_bars=None,
 ):
     """Kısmi TP ve gecikmeli trailing-stop simülasyonu (journal ile aynı mum mantığı).
 
@@ -135,6 +136,9 @@ def simulate_trade_partial(
         return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
 
     n = len(levels)
+    all_future_candles = list(future_candles)
+    horizon = max(1, int(max_holding_bars)) if max_holding_bars is not None else None
+    simulation_candles = all_future_candles[:horizon] if horizon is not None else all_future_candles
     if tp_weights and isinstance(tp_weights, dict):
         weights = []
         for level_no, _ in levels:
@@ -159,6 +163,7 @@ def simulate_trade_partial(
     exit_reason = None
     exit_offset = None
     exit_price = None
+    exit_notional = 0.0
     stop_gap = False
     stop_gap_distance = 0.0
     stop_gap_r = 0.0
@@ -170,7 +175,7 @@ def simulate_trade_partial(
     hit_levels = set()
     reached_order = []
 
-    for candle_offset, candle in enumerate(future_candles):
+    for candle_offset, candle in enumerate(simulation_candles):
         low = _num(candle.low)
         high = _num(candle.high)
         opened = _num(getattr(candle, "open", None))
@@ -200,6 +205,7 @@ def simulate_trade_partial(
             exit_reason = "STOP" if reached_tp == 0 else "TRAILING_STOP"
             exit_offset = candle_offset
             exit_price = stop_fill
+            exit_notional += remaining * stop_fill
             stop_gap = bool(stop_gap)
             stop_gap_distance = (
                 max(0.0, trailing_stop - stop_fill) if is_long
@@ -230,6 +236,7 @@ def simulate_trade_partial(
             closed_frac += weight
             reached_tp = level_no
             exit_price = tp_price
+            exit_notional += weight * tp_price
             hit_levels.add(level_no)
             reached_order.append(level_no)
 
@@ -266,6 +273,7 @@ def simulate_trade_partial(
                 exit_reason = "TRAILING_STOP"
                 exit_offset = candle_offset
                 exit_price = trailing_stop
+                exit_notional += remaining * trailing_stop
                 stop_gap = False
                 stop_gap_distance = 0.0
                 stop_gap_r = 0.0
@@ -275,7 +283,20 @@ def simulate_trade_partial(
             break
 
     if closed_frac < 1.0 - 1e-9:
-        return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
+        if horizon is None or len(simulation_candles) < horizon:
+            return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
+        last_candle = simulation_candles[-1]
+        last_close = _num(getattr(last_candle, "close", None))
+        if last_close is None:
+            return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
+        remaining = 1.0 - closed_frac
+        time_exit_rr = ((last_close - entry) / risk_distance if is_long else (entry - last_close) / risk_distance)
+        realized_rr += remaining * time_exit_rr
+        exit_notional += remaining * last_close
+        closed_frac = 1.0
+        exit_price = last_close
+        exit_offset = len(simulation_candles) - 1
+        exit_reason = "TIME_EXIT"
 
     result = "WIN" if realized_rr > 0.0 else "LOSS"
     return {
@@ -286,6 +307,7 @@ def simulate_trade_partial(
         "exit_reason": exit_reason,
         "exit_offset": exit_offset,
         "exit_price": _num(exit_price),
+        "average_exit": _num(exit_notional / max(closed_frac, 1e-12)),
         "stop_gap": stop_gap,
         "stop_gap_distance": _num(stop_gap_distance),
         "stop_gap_r": _num(stop_gap_r),
