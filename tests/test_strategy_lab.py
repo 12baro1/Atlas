@@ -84,7 +84,16 @@ def test_selector_returns_one_original_candidate_without_mixing_levels(monkeypat
     }
     monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(trend_plan))
     monkeypatch.setattr(strategy_lab, "_regime", lambda data: {"label": "TREND", "trend": "BEARISH", "strength": 1.0})
-    report = SevenStrategyLab().analyze({"symbol": "ETH/USDT:USDT"})
+    validated = {
+        "trend_pullback": {
+            "is_trades": 120, "is_expectancy_r": 0.24, "is_profit_factor": 1.42,
+            "is_expectancy_std_r": 0.8, "oos_trades": 40,
+            "oos_expectancy_r": 0.16, "oos_profit_factor": 1.23,
+        }
+    }
+    report = SevenStrategyLab().analyze(
+        {"symbol": "ETH/USDT:USDT"}, performance_by_strategy=validated
+    )
 
     assert report["selected"]["strategy_id"] == "trend_pullback"
     assert report["selected"]["entry"] == 200.0
@@ -106,3 +115,25 @@ def test_current_price_prefers_fresh_ticker_over_last_closed_candle():
     candles = [Candle(100, 102, 99, 101)]
     assert _current_price({"current_price": 103.5, "15m": candles}) == 103.5
     assert _current_price({"15m": candles}) == 101
+
+
+
+def test_experimental_candidate_is_not_selected_without_validated_performance(monkeypatch):
+    import strategy_lab
+
+    candidate = {
+        "status": "CANDIDATE", "strategy_id": "trend_pullback",
+        "strategy": strategy_lab.STRATEGY_NAMES["trend_pullback"], "direction": "LONG",
+        "entry_type": "MARKET", "entry": 100.0, "stop_loss": 98.0,
+        "tp1": 102.5, "tp2": 104.0, "tp3": 106.0,
+        "strength": 99.0, "experimental": True, "reasons": ["synthetic"],
+    }
+    monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(candidate))
+    monkeypatch.setattr(strategy_lab, "_regime", lambda data: {"label": "TREND", "trend": "BULLISH", "strength": 1.0})
+    report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT"})
+
+    assert report["candidate_count"] == 1
+    assert report["selected"] is None
+    assert report["validated_candidate_count"] == 0
+    trend = next(item for item in report["strategies"] if item["strategy_id"] == "trend_pullback")
+    assert trend["edge_validation"]["eligible"] is False
