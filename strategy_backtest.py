@@ -23,7 +23,6 @@ from backtest import (
     _configured_partial_tp_weights,
 )
 from engine import AtlasEngine
-from strategy_lab import SevenStrategyLab
 from strategy_outcome_journal import StrategyOutcomeJournal
 from historical_derivatives import load_historical_derivatives
 from microstructure_archive import snapshot_at as archived_microstructure_at
@@ -373,7 +372,6 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     is_cutoff = evaluation_start + int((evaluation_end - evaluation_start) * 0.70)
 
     engine = AtlasEngine()
-    lab = SevenStrategyLab()
     journal = StrategyOutcomeJournal()
     revision = journal.current_revision()
     replay_fingerprint = "|".join(map(str, (
@@ -396,12 +394,18 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
             continue
         snapshot = _snapshot_at(history, index)
         try:
-            smc_result = engine.analyze(snapshot)
+            analysis_result = engine.analyze(snapshot)
         except Exception:
-            # Keep the six independent evaluators alive if a legacy SMC replay
-            # step encounters an isolated historical-data edge case.
-            smc_result = None
-        report = lab.analyze(snapshot, smc_result=smc_result)
+            # A failed market snapshot produces no strategy candidate.
+            analysis_result = None
+        report = (
+            analysis_result.get("strategy_lab")
+            if isinstance(analysis_result, dict)
+            else None
+        )
+        if not isinstance(report, dict):
+            calls += 1
+            continue
         calls += 1
         # Replay only the one setup that passed the same common filter and
         # single-decision selector used by live analysis. Never open seven
