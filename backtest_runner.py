@@ -432,6 +432,9 @@ class BacktestRunner:
         lenient=True ise decision kapısı atlanır; sinyal yönü LONG/SHORT ve entry geçerliyse
         işlem üretilir (ham sinyalin edge'i ölçülür).
         """
+        self.funding_data_quality = data.get("derivatives_data_quality") or {
+            "funding": "HISTORICAL" if data.get("funding_records") else "NOT_PROVIDED"
+        }
         candles = data.get("15m") or data.get("15M")
         if not candles:
             return self.statistics()
@@ -1318,6 +1321,9 @@ class BacktestRunner:
                 "gross_profit_rr": 0, "gross_loss_rr": 0,
                 "gross_rr": 0, "gross_expectancy": 0, "gross_profit_factor": 0,
                 "total_execution_cost_rr": 0,
+                "total_funding_cost_r": 0,
+                "funding_events_charged": 0,
+                "funding_data_quality": dict(self.funding_data_quality),
                 "entry_fee_rr": 0, "exit_fee_rr": 0, "spread_rr": 0, "slippage_rr": 0,
                 "tp1": 0, "tp2": 0, "tp3": 0,
                 "sample_base": "realized_closed_trades",
@@ -1339,6 +1345,8 @@ class BacktestRunner:
         pf = net_win / net_loss if net_loss > 0 else (net_win if net_win else 0.0)
         gross_total_rr = sum(gross_values)
         total_execution_cost_rr = sum(float(h.get("execution_cost_rr", 0.0) or 0.0) for h in self.history)
+        total_funding_cost_r = sum(float(h.get("funding_cost_r", 0.0) or 0.0) for h in self.history)
+        funding_events_charged = sum(int(h.get("funding_events_charged", 0) or 0) for h in self.history)
 
         # Max drawdown: birikimli net R eğrisinin tepe-taban farkı.
         equity = 0.0
@@ -1422,6 +1430,9 @@ class BacktestRunner:
             "gross_expectancy": round(gross_total_rr / self.total, 4),
             "gross_profit_factor": round(gross_pf, 4),
             "total_execution_cost_rr": round(total_execution_cost_rr, 4),
+            "total_funding_cost_r": round(total_funding_cost_r, 4),
+            "funding_events_charged": funding_events_charged,
+            "funding_data_quality": dict(self.funding_data_quality),
             "entry_fee_rr": round(sum(float(h.get("entry_fee_rr", 0.0) or 0.0) for h in self.history), 4),
             "exit_fee_rr": round(sum(float(h.get("exit_fee_rr", 0.0) or 0.0) for h in self.history), 4),
             "spread_rr": round(sum(float(h.get("spread_rr", 0.0) or 0.0) for h in self.history), 4),
