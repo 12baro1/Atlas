@@ -66,6 +66,7 @@ from trendline_engine import TrendlineEngine
 from unicorn_engine import UnicornEngine
 from volume_profile_engine import VolumeProfileEngine
 from utils.structure_labels import label_swings
+from strategy_lab import SevenStrategyLab
 
 
 DYNAMIC_ANALYSIS_INPUT_KEYS = (
@@ -431,50 +432,86 @@ class AtlasEngine:
             trendline_liquidity=structure_state.get("trendline_liquidity", []),
         )
 
-        decision_state = self.main_engine.decide(
-            signal=execution_state["signal"],
-            confluence=execution_state["confluence"],
-            entry=execution_state["entry"],
-            risk=execution_state["risk"],
-            targets=execution_state.get("dynamic_tp"),
-            current_price=candles[-1].close if candles else None,
-            max_limit_distance_pct=getattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_PERCENT", 0.05),
-            max_market_distance_pct=getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003),
-            mtf=context_state.get("mtf"),
-            ote=context_state.get("ote"),
-            htf_orderblock=context_state.get("htf_orderblock"),
-            liquidity_sweep=structure_state.get("liquidity_sweep"),
-            market_phase=context_state.get("market_phase"),
-            market_regime=market_regime_state,
-            trade_quality=execution_state.get("trade_quality"),
-            setup_consensus=execution_state.get("setup_consensus"),
-            cisd=cisd_state,
-            volume_profile=volume_profile_state,
-            institutional=institutional_state,
-            unicorn=unicorn_state,
-            smt=smt_state,
-            news_filter=news_state,
-            correlation=correlation_state,
-            cooldown=cooldown_state,
-        )
-
-        decision_state = self.main_engine.apply_operational_gates(
-            decision_state,
-            news_filter=news_state,
-            correlation=correlation_state,
-            cooldown=cooldown_state,
-        )
-
-        execution_state["signal"] = self._apply_decision_to_signal(
-            signal=execution_state["signal"],
-            decision=decision_state,
-        )
-        if execution_state["signal"].get("gated_by_decision"):
-            self.logger.info(
-                "Signal gated by decision | symbol=%s action=%s",
-                data.get("symbol", "UNKNOWN"),
-                execution_state["signal"].get("decision_action", "WAIT"),
-            )
+        # Seven raw setups (SMC included) share one filter and one final selector.
+        smc_raw = {
+            "entry": execution_state.get("entry") or {},
+            "risk": execution_state.get("risk") or {},
+            "dynamic_tp": execution_state.get("dynamic_tp") or {},
+            "signal": execution_state.get("signal") or {},
+            "analysis": {
+                "entry": execution_state.get("entry") or {},
+                "setup_quality": execution_state.get("setup_quality") or {},
+            },
+        }
+        strategy_report = SevenStrategyLab().analyze(data, smc_result=smc_raw)
+        selected = strategy_report.get("selected")
+        if isinstance(selected, dict):
+            selected_risk = dict(selected.get("risk_plan") or {})
+            selected_entry = dict(execution_state.get("entry") or {})
+            selected_entry.update({
+                "valid": True,
+                "direction": selected["direction"],
+                "entry_type": selected["entry_type"],
+                "entry": selected["entry"],
+                "stop_loss": selected["stop_loss"],
+                "reason": "Selected by the shared seven-strategy decision",
+                "entry_reason_code": "SHARED_STRATEGY_SELECTION",
+            })
+            selected_risk.update({
+                "entry": selected["entry"], "stop_loss": selected["stop_loss"],
+                "tp1": selected["tp1"], "tp2": selected["tp2"], "tp3": selected["tp3"],
+                "risk_setup_valid": True,
+            })
+            execution_state["entry"] = selected_entry
+            execution_state["risk"] = selected_risk
+            execution_state["dynamic_tp"] = {
+                "tp1": selected["tp1"], "tp2": selected["tp2"], "tp3": selected["tp3"],
+                "synthetic_targets": selected.get("target_model") == "R_MULTIPLE_FALLBACK",
+            }
+            execution_state["rr"] = {
+                "rr": selected.get("rr_tp1"),
+                "weighted_rr": selected_risk.get("weighted_rr"),
+                "weighted_net_rr": selected_risk.get("weighted_net_rr"),
+                "target_max_rr": selected_risk.get("target_max_rr"),
+                "partial_exit_weights": selected.get("partial_exit_weights") or {},
+            }
+            execution_state["signal"] = {
+                **(execution_state.get("signal") or {}),
+                "signal": selected["direction"],
+                "confidence": selected.get("strength", 0),
+                "strength": selected.get("strength", 0),
+                "grade": "SELECTED",
+                "decision_action": "EXECUTE",
+                "gated_by_decision": False,
+                "wait_reason": None,
+                "strategy_id": selected.get("strategy_id"),
+            }
+            decision_state = {
+                "action": "EXECUTE", "signal": selected["direction"],
+                "reason": "Best setup selected after the shared filter",
+                "decision_authority": "SEVEN_STRATEGY_SELECTOR",
+                "selected_strategy_id": selected.get("strategy_id"),
+            }
+        else:
+            execution_state["entry"] = {
+                **(execution_state.get("entry") or {}),
+                "valid": False, "direction": "WAIT", "entry": None, "stop_loss": None,
+                "reason": "No setup passed the shared filter",
+            }
+            execution_state["risk"] = {}
+            execution_state["dynamic_tp"] = {}
+            execution_state["rr"] = {}
+            execution_state["signal"] = {
+                **(execution_state.get("signal") or {}),
+                "signal": "WAIT", "confidence": 0, "decision_action": "SKIP",
+                "gated_by_decision": True, "wait_reason": "No setup passed the shared filter",
+            }
+            decision_state = {
+                "action": "SKIP", "signal": "WAIT",
+                "reason": "No setup passed the shared filter",
+                "decision_authority": "SEVEN_STRATEGY_SELECTOR",
+                "selected_strategy_id": None,
+            }
 
         analysis = self._compose_analysis(
             structure_state=structure_state,
@@ -491,6 +528,8 @@ class AtlasEngine:
             cooldown_state=cooldown_state,
             market_regime_state=market_regime_state,
         )
+
+        analysis["strategy_lab"] = strategy_report
 
         journal_snapshot = self.trade_journal.record_analysis(
             analysis=analysis,
@@ -512,7 +551,8 @@ class AtlasEngine:
             "rr": execution_state["rr"],
             "dynamic_tp": execution_state["dynamic_tp"],
             "journal": journal_snapshot,
-            "decision": decision_state,
+            "decision": decision_state,,
+            "strategy_lab": strategy_report
         }
 
         self.scanner.add(symbol, result_payload)
