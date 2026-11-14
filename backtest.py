@@ -945,7 +945,7 @@ def _save_checkpoint(path, payload):
             pass
 
 
-def _backtest_run_fingerprint(*, symbol, days, chunk_days, step, limit_expiry_bars, lenient, walk_forward):
+def _backtest_run_fingerprint(*, symbol, days, chunk_days, step, limit_expiry_bars, max_holding_bars, lenient, walk_forward):
     """Inputs that make a resumed historical chunk result reusable."""
     config_keys = (
         "MAKER_FEE_RATE", "TAKER_FEE_RATE", "STOP_SPREAD_BUFFER_RATE",
@@ -959,6 +959,7 @@ def _backtest_run_fingerprint(*, symbol, days, chunk_days, step, limit_expiry_ba
         "chunk_days": int(chunk_days),
         "step": int(step),
         "limit_expiry_bars": int(limit_expiry_bars),
+        "max_holding_bars": int(max_holding_bars),
         "lenient": bool(lenient),
         "walk_forward": bool(walk_forward),
         "source_revision": _git_revision(),
@@ -968,7 +969,8 @@ def _backtest_run_fingerprint(*, symbol, days, chunk_days, step, limit_expiry_ba
 
 
 def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
-                           resume, step, limit_expiry_bars, lenient, walk_forward=False):
+                           resume, step, limit_expiry_bars, lenient, walk_forward=False,
+                           max_holding_bars=32):
     """Büyük backtesti tarih aralıklarına göre parçalara böler ve kalıcı checkpoint'ler yazar.
 
     Her parça bağımsız veri indirir ve çalışır; bellekte tek parça kadar veri
@@ -989,8 +991,8 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
         checkpoint = _load_checkpoint(checkpoint_path) if resume else None
         run_fingerprint = _backtest_run_fingerprint(
             symbol=symbol, days=days, chunk_days=chunk_days, step=step,
-            limit_expiry_bars=limit_expiry_bars, lenient=lenient,
-            walk_forward=walk_forward,
+            limit_expiry_bars=limit_expiry_bars, max_holding_bars=max_holding_bars,
+            lenient=lenient, walk_forward=walk_forward,
         )
 
         completed_chunks = set()
@@ -1088,6 +1090,7 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                     slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)),
                     tp_weights=_configured_partial_tp_weights(),
                     limit_expiry_bars=limit_expiry_bars,
+                    max_holding_bars=max_holding_bars,
                 )
                 stats = runner.run(data, step=step, lenient=lenient)
                 _report(stats, f"{symbol} parca {chunk_label}")
@@ -1199,6 +1202,7 @@ def main():
         "--limit-expiry-bars", type=int, default=8,
         help="LIMIT emrinin en fazla kaç adet 15m mum bekleyeceği (varsayılan: 8 = 2 saat)",
     )
+    parser.add_argument("--max-holding-bars", type=int, default=32, help="Açık pozisyon için maksimum 15m bar; 32 = 8 saat")
     parser.add_argument("--tf", choices=("15m",), default="15m", help="Giriş zaman dilimi (şimdilik yalnızca 15m)")
     parser.add_argument(
         "--lenient",
@@ -1226,6 +1230,8 @@ def main():
         parser.error("--step must be greater than zero")
     if args.limit_expiry_bars <= 0:
         parser.error("--limit-expiry-bars must be greater than zero")
+    if args.max_holding_bars <= 0:
+        parser.error("--max-holding-bars must be greater than zero")
     if args.walk_forward and (args.chunk_days <= 0 or math.ceil(args.days / args.chunk_days) < 2):
         parser.error("--walk-forward için en az iki parça oluşturacak --chunk-days gerekli")
 
@@ -1276,7 +1282,7 @@ def main():
             step=args.step,
             limit_expiry_bars=args.limit_expiry_bars,
             lenient=args.lenient,
-            walk_forward=args.walk_forward,
+            walk_forward=args.walk_forward, max_holding_bars=args.max_holding_bars,
         )
         print(f"\nGENEL DURUM: {overall_status}")
         return
@@ -1289,6 +1295,20 @@ def main():
         data = load_historical(
             symbol, days=args.days, now_ms=backtest_now_ms, listing_time_ms=listing_time_ms
         )
+        from historical_derivatives import load_historical_derivatives
+        history_15m = data.get("15m") or []
+        if history_15m:
+            derivative_start = int(history_15m[0].time)
+            derivative_end = int(history_15m[-1].time) + TIMEFRAME_DURATION_MS["15m"]
+            data.update(load_historical_derivatives(symbol, derivative_start, derivative_end))
+        else:
+            data.update({
+                "open_interest_records": [], "funding_records": [],
+                "derivatives_data_quality": {
+                    "open_interest": "UNAVAILABLE_NO_OHLCV",
+                    "funding": "UNAVAILABLE_NO_OHLCV",
+                },
+            })
         attach_historical_smt_universe(data, args.days, backtest_now_ms)
         _validate_backtest_history(data, symbol)
         effective_now_ms = _effective_now_ms(data)
@@ -1304,6 +1324,7 @@ def main():
             slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)),
             tp_weights=_configured_partial_tp_weights(),
             limit_expiry_bars=args.limit_expiry_bars,
+            max_holding_bars=args.max_holding_bars,
         )
         stats = runner.run(data, step=args.step, lenient=args.lenient)
         _report(stats, symbol)
