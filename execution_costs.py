@@ -2,7 +2,8 @@
 
 Rates are fractions of executed notional and apply per filled leg. LIMIT fills
 are modeled as maker; MARKET and stop exits are taker. Spread/slippage proxies
-are charged only on market-executed legs. Funding is intentionally not modeled.
+are charged only on market-executed legs. Adverse historical funding is modeled
+separately and conservatively; funding credits are ignored.
 """
 import math
 
