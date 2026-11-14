@@ -139,8 +139,8 @@ def run_ablation(symbol, days=14, samples=3, step=None, motors=None, output_path
     indices = _sample_indices(last_index, samples, step=step, warmup=299)
     if not indices:
         raise RuntimeError("No valid post-warmup sample indices")
-    start_ms = int(bars[indices[0]].time)
-    end_ms = int(bars[indices[-1]].time) + 15 * 60 * 1000
+    start_ms = int(bars[0].time)
+    end_ms = int(bars[-1].time) + 15 * 60 * 1000
     derivatives = load_historical_derivatives(symbol, start_ms, end_ms) if include_derivatives else {}
     engine = AtlasEngine()
     available = sorted(name for name in engine.main_engine.motors if name not in ABLATION_EXCLUDED)
