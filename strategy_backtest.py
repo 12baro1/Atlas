@@ -348,6 +348,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     return {
         "symbol": symbol,
         "days": days,
+        "effective_days": round((evaluation_end - evaluation_start) / 86_400_000, 2),
         "analysis_calls": calls,
         "evaluation_start_ms": evaluation_start,
         "is_cutoff_ms": is_cutoff,
@@ -381,8 +382,8 @@ def main():
         persist_outcomes=args.persist,
     )
     print(
-        f"7 STRATEJİ BACKTEST | {report['symbol']} | {report['days']} gün | "
-        f"analiz={report['analysis_calls']}"
+        f"7 STRATEJİ BACKTEST | {report['symbol']} | istenen={report['days']} gün | "
+        f"gerçekleşen={report['effective_days']} gün | analiz={report['analysis_calls']}"
     )
     print(f"{'STRATEJİ':<24} {'BÖLÜM':<5} {'İŞLEM':>6} {'WR':>8} {'PF':>8} {'EXP R':>9} {'NET R':>9}")
     for strategy_id, payload in report["results"].items():
