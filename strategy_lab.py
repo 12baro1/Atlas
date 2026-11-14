@@ -209,7 +209,7 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     plan = {
         "status": "CANDIDATE", "strategy_id": source, "strategy": STRATEGY_NAMES[source],
         "direction": direction, "entry_type": str(entry_type or "MARKET").upper(),
-        "entry_reference": entry_reference, "entry": round(entry, 10),
+        "entry_reference": entry_reference, "entry": round(entry, 10), "atr": round(atr, 10),
         "stop_loss": round(stop, 10), "tp1": round(targets[0], 10),
         "tp2": round(targets[1], 10), "tp3": round(targets[2], 10),
         "rr_tp1": round(rr_values[0], 4), "rr_tp2": round(rr_values[1], 4),
