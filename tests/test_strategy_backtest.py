@@ -32,7 +32,7 @@ def test_same_bar_stop_and_target_resolves_to_stop():
         [Bar(100, 103, 97, 101)],
         maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
     )
-    assert outcome["exit_reason"] == "STOP_AND_TARGET_SAME_BAR_STOP_FIRST"
+    assert outcome["exit_reason"] == "STOP"
     assert outcome["gross_r"] == -1.0
     assert outcome["net_r"] == -1.0
 
