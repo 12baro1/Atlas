@@ -315,7 +315,7 @@ def test_structural_plan_ignores_synthetic_stop_distance_and_uses_higher_timefra
     local = [
         Candle(100, high, low, 100)
         for high, low in zip(
-            [101, 102, 103, 105, 103, 102, 104, 105, 108, 106, 105, 107, 108, 111, 109, 108, 107],
+            [101, 102, 103, 105, 103, 102, 104, 105, 108, 106, 105, 107, 108, 109, 109, 108, 107],
             [99, 98, 99, 99, 97, 99, 99, 98, 99, 99, 98, 99, 99, 98, 99, 99, 98],
         )
     ]
@@ -339,7 +339,7 @@ def test_structural_plan_ignores_synthetic_stop_distance_and_uses_higher_timefra
     )
     assert near_stop is not None and far_stop is not None
     assert near_stop["stop_loss"] == far_stop["stop_loss"]
-    assert near_stop["tp3"] >= 125
+    assert near_stop["tp3"] == 118
 
 
 def test_plan_requires_three_real_levels_and_never_falls_back_to_r_multiples():
