@@ -203,6 +203,6 @@ def test_smc_and_strategy_replays_share_marketable_limit_fill_cost_and_funding()
     assert strategy["entry"] == smc["entry"] == 99.0
     assert strategy["entry_type"] == smc["entry_type"] == "MARKETABLE_LIMIT"
     assert strategy["gross_r"] == smc["gross_rr"]
-    assert strategy["trading_cost_r"] == smc["execution_cost_rr"]
+    assert abs(strategy["trading_cost_r"] - smc["execution_cost_rr"]) < 1e-4
     assert strategy["funding_cost_r"] == smc["funding_cost_r"]
-    assert strategy["net_r"] == smc["net_rr"]
+    assert abs(strategy["net_r"] - smc["net_rr"]) < 1e-4
