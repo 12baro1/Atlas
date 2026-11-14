@@ -142,9 +142,10 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
     fill_candle = future_candles[0]
     simulation_start_offset = 0
     if planned_type == "LIMIT":
-        if not float(fill_candle.low) <= planned_entry <= float(fill_candle.high):
-            return None
         marketable = (direction == "LONG" and fill_open <= planned_entry) or (direction == "SHORT" and fill_open >= planned_entry)
+        touched = (float(fill_candle.low) <= planned_entry) if direction == "LONG" else (float(fill_candle.high) >= planned_entry)
+        if not marketable and not touched:
+            return None
         if marketable:
             # Gap-through limits fill at the open and incur taker costs.
             entry = fill_open
