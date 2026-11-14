@@ -78,7 +78,7 @@ def _bollinger(values, period=20, deviations=2.0):
     return mean - deviations * sigma, mean, mean + deviations * sigma
 
 
-def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_type="MARKET"):
+def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_type="MARKET", entry_reference="LAST_CLOSED_15M_FALLBACK"):
     if direction not in {"LONG", "SHORT"} or not all(
         isinstance(value, (int, float)) and math.isfinite(value) and value > 0
         for value in (entry, stop, atr)
@@ -102,6 +102,7 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
         "strategy": STRATEGY_NAMES[source],
         "direction": direction,
         "entry_type": entry_type,
+        "entry_reference": entry_reference,
         "entry": round(entry, 10),
         "stop_loss": round(stop, 10),
         "tp1": round(targets[0], 10),
@@ -118,6 +119,21 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
         "experimental": source != "smc",
         "reasons": [],
     }
+
+
+def _current_price(data):
+    try:
+        value = float(data.get("current_price"))
+    except (TypeError, ValueError, OverflowError):
+        value = None
+    if value is not None and math.isfinite(value) and value > 0:
+        return value
+    candles = data.get("15m") or []
+    return _value(candles[-1], "close") if candles else None
+
+
+def _entry_reference(data):
+    return str(data.get("current_price_source") or "LAST_CLOSED_15M_FALLBACK")
 
 
 def _regime(data):
@@ -159,18 +175,21 @@ def _trend_pullback(data):
     prev_low, prev_high = _value(previous, "low"), _value(previous, "high")
     if None in (close, prev_close, low, high, prev_low, prev_high):
         return None
+    entry = _current_price(data)
+    if entry is None:
+        return None
     direction = None
-    if e20 > e50 and close > e1 and (low <= e1 * 1.003 or prev_low <= e1 * 1.003) and close > prev_close:
+    if e20 > e50 and entry > e1 and entry <= e1 + 1.25 * atr and (low <= e1 * 1.003 or prev_low <= e1 * 1.003) and close > prev_close:
         direction = "LONG"
         swing = min(_value(item, "low") for item in h1[-10:] if _value(item, "low") is not None)
-        stop = min(close - 1.0 * atr, swing - 0.1 * atr)
-    elif e20 < e50 and close < e1 and (high >= e1 * 0.997 or prev_high >= e1 * 0.997) and close < prev_close:
+        stop = min(entry - 1.0 * atr, swing - 0.1 * atr)
+    elif e20 < e50 and entry < e1 and entry >= e1 - 1.25 * atr and (high >= e1 * 0.997 or prev_high >= e1 * 0.997) and close < prev_close:
         direction = "SHORT"
         swing = max(_value(item, "high") for item in h1[-10:] if _value(item, "high") is not None)
-        stop = max(close + 1.0 * atr, swing + 0.1 * atr)
+        stop = max(entry + 1.0 * atr, swing + 0.1 * atr)
     else:
         return None
-    plan = _valid_plan(direction, close, stop, atr, h1, "trend_pullback", 78)
+    plan = _valid_plan(direction, entry, stop, atr, h1, "trend_pullback", 78, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = ["4H EMA20/EMA50 trend alignment", "1H EMA20 pullback and candle reclaim"]
     return plan
@@ -191,16 +210,19 @@ def _volatility_breakout(data):
     if close is None or volume is None or any(item is None for item in prior_highs + prior_lows + volumes):
         return None
     average_volume = sum(volumes) / len(volumes)
+    entry = _current_price(data)
+    if entry is None:
+        return None
     direction = None
-    if close > max(prior_highs) and volume >= average_volume * 1.2:
+    if entry > max(prior_highs) and entry <= max(prior_highs) + atr and volume >= average_volume * 1.2:
         direction = "LONG"
-        stop = close - 1.5 * atr
-    elif close < min(prior_lows) and volume >= average_volume * 1.2:
+        stop = entry - 1.5 * atr
+    elif entry < min(prior_lows) and entry >= min(prior_lows) - atr and volume >= average_volume * 1.2:
         direction = "SHORT"
-        stop = close + 1.5 * atr
+        stop = entry + 1.5 * atr
     else:
         return None
-    plan = _valid_plan(direction, close, stop, atr, candles, "volatility_breakout", 76)
+    plan = _valid_plan(direction, entry, stop, atr, candles, "volatility_breakout", 76, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = ["1H 20-candle Donchian breakout", "Volume at least 1.2x prior 20-candle average"]
     return plan
@@ -232,7 +254,10 @@ def _mean_reversion(data, regime):
         stop = max(_value(item, "high") for item in candles[-5:] if _value(item, "high") is not None) + 0.15 * atr
     else:
         return None
-    plan = _valid_plan(direction, close, stop, atr, candles, "mean_reversion", 72)
+    entry = _current_price(data)
+    if entry is None:
+        return None
+    plan = _valid_plan(direction, entry, stop, atr, candles, "mean_reversion", 72, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = ["15m Bollinger re-entry after outside close", f"RSI14={rsi:.1f}", "Range regime"]
     return plan
@@ -277,18 +302,19 @@ def _orderflow_momentum(data):
     imbalance = bid_qty / ask_qty
     last = candles[-1]
     close, opened = _value(last, "close"), _value(last, "open")
-    if close is None or opened is None:
+    entry = _current_price(data)
+    if close is None or opened is None or entry is None:
         return None
     direction = None
-    if imbalance >= 1.25 and buy_ratio >= 0.58 and close > opened:
+    if imbalance >= 1.25 and buy_ratio >= 0.58 and close > opened and entry >= opened:
         direction = "LONG"
-        stop = close - 1.5 * atr
-    elif imbalance <= 0.80 and buy_ratio <= 0.42 and close < opened:
+        stop = entry - 1.5 * atr
+    elif imbalance <= 0.80 and buy_ratio <= 0.42 and close < opened and entry <= opened:
         direction = "SHORT"
-        stop = close + 1.5 * atr
+        stop = entry + 1.5 * atr
     else:
         return None
-    plan = _valid_plan(direction, close, stop, atr, candles, "orderflow_momentum", 74)
+    plan = _valid_plan(direction, entry, stop, atr, candles, "orderflow_momentum", 74, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = [f"Top-10 order-book bid/ask quantity ratio={imbalance:.2f}", f"Recent taker buy ratio={buy_ratio:.2f}"]
         plan["data_quality"] = "LIVE_SNAPSHOT"
@@ -311,19 +337,20 @@ def _liquidation_cascade(data):
     last = candles[-1]
     close, opened = _value(last, "close"), _value(last, "open")
     buy_ratio, _ = _trade_flow(data)
-    if close is None or opened is None:
+    entry = _current_price(data)
+    if close is None or opened is None or entry is None:
         return None
     impulse = abs(close - opened) / atr
     direction = None
-    if oi_change <= -0.015 and close > opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio >= 0.56:
+    if oi_change <= -0.015 and close > opened and entry > opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio >= 0.56:
         direction = "LONG"
-        stop = close - 1.5 * atr
-    elif oi_change <= -0.015 and close < opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio <= 0.44:
+        stop = entry - 1.5 * atr
+    elif oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio <= 0.44:
         direction = "SHORT"
-        stop = close + 1.5 * atr
+        stop = entry + 1.5 * atr
     else:
         return None
-    plan = _valid_plan(direction, close, stop, atr, candles, "liquidation_cascade", 70)
+    plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", 70, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = [f"Open interest contraction={oi_change * 100:.2f}%", f"1H impulse={impulse:.2f} ATR", "Trade-flow confirmation"]
         plan["data_quality"] = "OI_CONTRACTION_PROXY_NOT_EXCHANGE_LIQUIDATION_FEED"
@@ -351,9 +378,11 @@ def _relative_strength(data):
     direction = "LONG" if relative >= 0.02 and closes[-1] > e20 else "SHORT" if relative <= -0.02 and closes[-1] < e20 else None
     if not direction:
         return None
-    entry = closes[-1]
+    entry = _current_price(data)
+    if entry is None or (direction == "LONG" and entry <= e20) or (direction == "SHORT" and entry >= e20):
+        return None
     stop = entry - 1.5 * atr if direction == "LONG" else entry + 1.5 * atr
-    plan = _valid_plan(direction, entry, stop, atr, candles, "relative_strength", 68)
+    plan = _valid_plan(direction, entry, stop, atr, candles, "relative_strength", 68, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = [f"12x4H relative return vs {benchmark}={relative * 100:+.2f}%", f"Price/EMA20 alignment"]
     return plan
@@ -381,9 +410,11 @@ def _smc_candidate(result):
         return None
     if not target_values:
         return None
-    if direction == "LONG" and not (stop < entry < target_values[0]):
+    if not all(math.isfinite(value) and value > 0 for value in [entry, stop, *target_values]):
         return None
-    if direction == "SHORT" and not (target_values[0] < entry < stop):
+    if direction == "LONG" and not (stop < entry < target_values[0] and all(left < right for left, right in zip(target_values, target_values[1:]))):
+        return None
+    if direction == "SHORT" and not (target_values[0] < entry < stop and all(left > right for left, right in zip(target_values, target_values[1:]))):
         return None
     risk = abs(entry - stop)
     if risk <= 0:
