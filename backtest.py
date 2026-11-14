@@ -534,6 +534,7 @@ def _combine_stats(all_stats):
         "total_funding_cost_r": 0,
         "funding_events_charged": 0,
         "funding_data_quality": {},
+        "microstructure_data_quality": {"analysis_samples": 0, "archived_snapshots": 0, "orderbook_snapshots": 0, "trade_snapshots": 0, "snapshot_coverage_pct": 0.0},
         "entry_fee_rr": 0,
         "exit_fee_rr": 0,
         "spread_rr": 0,
@@ -619,6 +620,8 @@ def _combine_stats(all_stats):
         combined["funding_events_charged"] += int(stats.get("funding_events_charged", 0) or 0)
         for key, value in (stats.get("funding_data_quality") or {}).items():
             combined["funding_data_quality"].setdefault(key, set()).add(str(value))
+        for key in ("analysis_samples", "archived_snapshots", "orderbook_snapshots", "trade_snapshots"):
+            combined["microstructure_data_quality"][key] += int((stats.get("microstructure_data_quality") or {}).get(key, 0) or 0)
         for cost_key in ("entry_fee_rr", "exit_fee_rr", "spread_rr", "slippage_rr"):
             combined[cost_key] += float(stats.get(cost_key, 0) or 0)
         combined["trade_history"].extend(stats.get("trade_history") or [])
@@ -675,6 +678,8 @@ def _combine_stats(all_stats):
             for label, trades in sorted(groups.items())
         }
 
+    micro_quality = combined["microstructure_data_quality"]
+    micro_quality["snapshot_coverage_pct"] = round(micro_quality["archived_snapshots"] / max(1, micro_quality["analysis_samples"]) * 100.0, 2)
     combined["total_execution_cost_rr"] = round(combined["total_execution_cost_rr"], 4)
     combined["total_funding_cost_r"] = round(combined["total_funding_cost_r"], 4)
     combined["total_cost_rr"] = round(combined["total_execution_cost_rr"] + combined["total_funding_cost_r"], 4)
@@ -724,6 +729,7 @@ def _report(stats, name):
     )
     print(f"  Funding veri kalitesi: {stats.get('funding_data_quality', {})}")
     print(f"  Funding maliyeti: {stats.get('total_funding_cost_r', 0)}R | settlement: {stats.get('funding_events_charged', 0)}")
+    print(f"  Mikro yapı arşiv kapsamı: {stats.get('microstructure_data_quality', {})}")
     print("=" * 52)
     print(f"  Analiz çağrısı : {stats.get('analysis_calls', 0)}")
     print(f"  Boş sonuç      : {stats.get('empty_results', 0)}")
