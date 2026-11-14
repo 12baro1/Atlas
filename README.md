@@ -77,9 +77,9 @@ Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Ge
 
 ## 7 strateji analizi
 
-Tek coin komutunda Atlas aynı kapanmış piyasa verisi üzerinde 6 yeni stratejiyi ve mevcut SMC kararını bağımsız değerlendirir. Her stratejinin giriş/stop/hedef geometrisi ayrı tutulur; seçim motoru yalnızca tek bir stratejinin planını gösterir. Strateji koşulları oluşmazsa zorla işlem üretilmez.
+Tek coin komutunda Atlas aynı kapanmış piyasa verisi üzerinde 6 yeni stratejiyi ve mevcut SMC kararını bağımsız değerlendirir. Her stratejinin giriş/stop/hedef geometrisi ayrı tutulur. Yeni motorların adayları yalnızca setup gücü puanıyla seçilmez: stratejiye özel, maliyet sonrası IS/OOS performansı, minimum örneklem ve expectancy güven sınırı doğrulanmadan SMC'nin önüne geçemez. Doğrulanmış deneysel edge yoksa SMC adayı varsa o gösterilir; SMC de yoksa seçilmiş plan üretilmez. Yeni motorların hedefleri yeterli swing likiditesi varsa yapısal seviyelerden, yoksa açıkça etiketlenmiş R-katı fallback ile hesaplanır.
 
-**Önemli doğrulama sınırı:** İlk sürümde 6 yeni strateji deneysel aday üreticilerdir. Strateji bazında aynı-veri backtesti, komisyon/spread/slippage modellemesi ve out-of-sample örneklem tamamlanmadan kârlılık veya geçmiş performans üstünlüğü iddia edilmez. Liquidation Cascade motoru gerçek likidasyon akışı yerine açık pozisyon (OI) daralmasını ve işlem akışını proxy olarak kullanır; gerçek likidasyon verisi olarak yorumlanmamalıdır. Atlas emir göndermez.
+**Önemli doğrulama sınırı:** 6 yeni strateji deneysel aday üreticilerdir. Strateji bazlı kalıcı sonuç günlüğü ve tek kronolojik IS/OOS replay eklendi; ancak tam walk-forward test matrisi, gerçek fill verisi ve her stratejinin tüm gerekli tarihsel veri kaynakları henüz tamamlanmadı. Bu nedenle yalnızca replay'de gerçekten ölçülebilen motorlar, aynı kod revizyonu/sembol/rejim için yeterli IS/OOS örneklemi ve güven sınırı geçerse seçime terfi edebilir. `strategy_performance.py` eksik performans verisinde kapalı-kapı (fail-closed) davranır. Strateji bazında aynı-veri backtesti, komisyon/spread/slippage/funding modellemesi ve out-of-sample örneklem tamamlanmadan kârlılık veya geçmiş performans üstünlüğü iddia edilmez. Liquidation Cascade motoru gerçek likidasyon akışı yerine açık pozisyon (OI) daralmasını ve işlem akışını proxy olarak kullanır; gerçek likidasyon verisi olarak yorumlanmamalıdır. Atlas emir göndermez.
 
 ## Backtest
 
@@ -104,6 +104,26 @@ python3 backtest.py --symbols "BTC/USDT:USDT,ETH/USDT:USDT" --days 60 --chunk-da
 Walk-forward raporunda parametreler değiştirilmez. Eski parçalar eğitim/IS, en yeni parçalar dokunulmamış OOS kontrolüdür. Bu bir parametre optimizasyonu değildir. Küçük OOS örneklemi kârlılık kanıtı sayılmaz.
 
 Backtest geçmiş veriyi simüle eder; gerçek piyasa dolumunu veya gelecekteki performansı garanti etmez.
+
+## 7 strateji backtesti
+
+Yedi motoru ayrı ayrı tarihsel replay ile ölçmek için:
+
+```bash
+python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
+```
+
+Bu replay yalnızca kapanmış mumlarla karar verir; MARKET girişini sonraki 15m mum açılışında, LIMIT girişini fiyat gerçekten limit seviyesine dokunursa doldurur. Aynı mumda SL ve TP birlikte görülürse SL önce kabul edilir. Komisyon, spread ve slippage varsayımları net R'den düşülür.
+
+Maliyet modeli ve IS/OOS kayıtlarını yerel performans günlüğüne yazmak için açıkça `--persist` ekle:
+
+```bash
+python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30 --persist
+```
+
+Performans kayıtları sembol, rejim ve kod revizyonuna göre ayrılır. Kod revizyonu değiştiğinde eski sonuçlar yeni sürümün seçiminde kullanılmaz. Minimum örneklem ve güven sınırı geçilmeden deneysel strateji seçime terfi etmez.
+
+**Tarihsel veri sınırı:** Bybit OHLCV arşivinde geçmiş order-book/taker-trade snapshot'ı bulunmadığı için Order Flow Momentum motoru bu replay'de ölçülmez. Aynı şekilde geçmiş OI/funding serileri bu replay'e henüz bağlanmadığından Liquidation Cascade motoru ölçülmez. Bu iki motor için "işlem yok" sonucu başarısız strateji anlamına gelmez; gerekli tarihsel veri mevcut değildir. Funding maliyeti de replay'de henüz modellenmez. Maliyet varsayımları gerçek dolum garantisi değildir.
 
 ## Güncelleme
 

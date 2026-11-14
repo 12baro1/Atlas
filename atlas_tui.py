@@ -327,8 +327,9 @@ class AtlasTUIApp(App):
             if status == "CANDIDATE":
                 lines.append(
                     f"• {name}: ADAY | {item.get('direction')} | "
-                    f"puan {item.get('selection_score', 0):.1f} | "
-                    f"rejim uyumu {item.get('regime_fit', 0):.2f}"
+                    f"kurulum puanı {item.get('selection_score', 0):.1f} | "
+                    f"rejim uyumu {item.get('regime_fit', 0):.2f} | "
+                    f"edge {((item.get('edge_validation') or {}).get('status') or 'PERFORMANS VERİSİ YOK')}"
                 )
             elif status == "ERROR":
                 lines.append(f"• {name}: HATA | {item.get('reason', 'bilinmeyen hata')}")
@@ -351,8 +352,10 @@ class AtlasTUIApp(App):
             ])
             if selected.get("entry_reference"):
                 lines.append(f"Giriş fiyatı kaynağı: {selected.get('entry_reference')}")
-            if selected.get("target_model") == "R_MULTIPLE":
-                lines.append("TP modeli: sabit R katları (1.25R / 2R / 3R); yapısal hedef değildir.")
+            if selected.get("target_model") == "R_MULTIPLE_FALLBACK":
+                lines.append("TP modeli: yeterli swing likiditesi bulunmadı; açıkça etiketlenmiş R-katı fallback.")
+            elif selected.get("target_model") == "SWING_LIQUIDITY":
+                lines.append("TP modeli: karşı yöndeki swing likidite seviyeleri.")
             elif selected.get("target_model") == "SMC_STRUCTURAL":
                 lines.append("TP modeli: mevcut SMC yapısal hedefleri.")
             if selected.get("estimated_net_rr_tp1") is not None:
@@ -363,7 +366,7 @@ class AtlasTUIApp(App):
                 lines.append(f"• {reason}")
         lines.extend([
             "",
-            "Performans durumu: Strateji bazlı yeterli backtest/işlem örneklemi henüz yok.",
+            f"Seçim: {report.get('selection_method', 'N/A')} | doğrulanmış deneysel aday: {report.get('validated_candidate_count', 0)}",
             report.get("warning") or "",
             f"Analiz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn",
         ])

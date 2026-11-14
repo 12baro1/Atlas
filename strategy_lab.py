@@ -9,6 +9,11 @@ from __future__ import annotations
 import math
 from statistics import median
 
+from strategy_performance import evaluate_strategy_edge, rank_validated_candidate
+from orderbook_engine import OrderBookEngine
+
+_ORDERBOOK_ENGINE = OrderBookEngine()
+
 
 STRATEGY_NAMES = {
     "trend_pullback": "Trend Following + Pullback",
@@ -57,6 +62,38 @@ def _atr(candles, period=14):
     return value if value and math.isfinite(value) and value > 0 else None
 
 
+
+
+def _adx(candles, period=14):
+    if len(candles) < period * 2 + 1:
+        return None
+    plus_dm = []
+    minus_dm = []
+    true_ranges = []
+    for previous, current in zip(candles[-(period * 2 + 1):-1], candles[-(period * 2):]):
+        high = _value(current, "high")
+        low = _value(current, "low")
+        prev_high = _value(previous, "high")
+        prev_low = _value(previous, "low")
+        prev_close = _value(previous, "close")
+        if None in (high, low, prev_high, prev_low, prev_close):
+            return None
+        up = high - prev_high
+        down = prev_low - low
+        plus_dm.append(up if up > down and up > 0 else 0.0)
+        minus_dm.append(down if down > up and down > 0 else 0.0)
+        true_ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+    dx_values = []
+    for index in range(len(true_ranges) - period + 1):
+        tr = sum(true_ranges[index:index + period])
+        if tr <= 0:
+            continue
+        plus = 100.0 * sum(plus_dm[index:index + period]) / tr
+        minus = 100.0 * sum(minus_dm[index:index + period]) / tr
+        denominator = plus + minus
+        dx_values.append(100.0 * abs(plus - minus) / denominator if denominator > 0 else 0.0)
+    return sum(dx_values[-period:]) / min(period, len(dx_values)) if dx_values else None
+
 def _rsi(values, period=14):
     if len(values) < period + 1:
         return None
@@ -67,6 +104,23 @@ def _rsi(values, period=14):
         return 100.0 if gains > 0 else 50.0
     return 100.0 - 100.0 / (1.0 + gains / losses)
 
+
+
+
+def _vwap(candles):
+    numerator = denominator = 0.0
+    for candle in candles or []:
+        high, low, close = (_value(candle, key) for key in ("high", "low", "close"))
+        volume = _value(candle, "volume")
+        if None in (high, low, close, volume) or volume < 0:
+            return None
+        typical = (high + low + close) / 3.0
+        numerator += typical * volume
+        denominator += volume
+    if denominator <= 0:
+        return None
+    value = numerator / denominator
+    return value if math.isfinite(value) and value > 0 else None
 
 def _bollinger(values, period=20, deviations=2.0):
     if len(values) < period:
@@ -87,10 +141,32 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     risk = entry - stop if direction == "LONG" else stop - entry
     if risk <= 0 or risk < 0.75 * atr or risk > 3.0 * atr:
         return None
+    # Prefer actual opposing swing-liquidity levels. Use transparent R-multiple
+    # fallback only when the supplied history does not contain three valid levels.
+    pivots = []
+    sample = list(candles or [])[-120:]
+    for index in range(2, len(sample) - 2):
+        high = _value(sample[index], "high")
+        low = _value(sample[index], "low")
+        if high is None or low is None:
+            continue
+        left_highs = [_value(item, "high") for item in sample[index - 2:index]]
+        right_highs = [_value(item, "high") for item in sample[index + 1:index + 3]]
+        left_lows = [_value(item, "low") for item in sample[index - 2:index]]
+        right_lows = [_value(item, "low") for item in sample[index + 1:index + 3]]
+        if all(value is not None for value in left_highs + right_highs) and all(high > value for value in left_highs + right_highs):
+            if direction == "LONG" and high > entry and (high - entry) / risk >= 1.25:
+                pivots.append(high)
+        if all(value is not None for value in left_lows + right_lows) and all(low < value for value in left_lows + right_lows):
+            if direction == "SHORT" and low < entry and (entry - low) / risk >= 1.25:
+                pivots.append(low)
     if direction == "LONG":
-        targets = [entry + risk * multiple for multiple in (1.25, 2.0, 3.0)]
+        structural = sorted(set(value for value in pivots if value > entry))
+        targets = structural[:3] if len(structural) >= 3 else [entry + risk * multiple for multiple in (1.25, 2.0, 3.0)]
     else:
-        targets = [entry - risk * multiple for multiple in (1.25, 2.0, 3.0)]
+        structural = sorted(set((value for value in pivots if value < entry)), reverse=True)
+        targets = structural[:3] if len(structural) >= 3 else [entry - risk * multiple for multiple in (1.25, 2.0, 3.0)]
+    target_model = "SWING_LIQUIDITY" if len(structural) >= 3 else "R_MULTIPLE_FALLBACK"
     if any(value <= 0 for value in targets):
         return None
     # Bybit public-market fee proxy only; spread/slippage are not known here.
@@ -117,7 +193,7 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
         "estimated_net_rr_tp1": round(1.25 - fee_r, 4),
         "estimated_net_rr_tp3": round(3.0 - fee_r, 4),
         "strength": round(float(strength), 2),
-        "target_model": "R_MULTIPLE",
+        "target_model": target_model,
         "experimental": source != "smc",
         "reasons": [],
     }
@@ -168,8 +244,11 @@ def _trend_pullback(data):
     if len(c4) < 60 or len(c1) < 30 or atr is None:
         return None
     e20, e50, e1 = _ema(c4, 20), _ema(c4, 50), _ema(c1, 20)
-    if None in (e20, e50, e1):
+    adx_value = _adx(h4)
+    e20_previous = _ema(c4[:-5], 20)
+    if None in (e20, e50, e1, adx_value, e20_previous) or adx_value < 18:
         return None
+    trend_slope = (e20 - e20_previous) / atr
     last, previous = h1[-1], h1[-2]
     close = _value(last, "close")
     prev_close = _value(previous, "close")
@@ -193,10 +272,12 @@ def _trend_pullback(data):
         return None
     trend_separation = abs(e20 - e50) / atr
     pullback_distance = abs(entry - e1) / atr
-    strength = min(92.0, 65.0 + min(trend_separation * 5.0, 15.0) + max(0.0, 10.0 - pullback_distance * 8.0))
+    if (direction == "LONG" and trend_slope <= 0) or (direction == "SHORT" and trend_slope >= 0):
+        return None
+    strength = min(92.0, 62.0 + min(trend_separation * 5.0, 12.0) + min((adx_value - 18.0) * 0.5, 10.0) + max(0.0, 8.0 - pullback_distance * 6.0))
     plan = _valid_plan(direction, entry, stop, atr, h1, "trend_pullback", strength, entry_reference=_entry_reference(data))
     if plan:
-        plan["reasons"] = ["4H EMA20/EMA50 trend alignment", "1H EMA20 pullback and candle reclaim"]
+        plan["reasons"] = ["4H EMA20/EMA50 alignment and positive EMA20 slope", f"4H ADX={adx_value:.1f}", "1H EMA20 pullback and candle reclaim"]
     return plan
 
 
@@ -204,7 +285,20 @@ def _volatility_breakout(data):
     candles = data.get("1h") or []
     closes = _series(candles)
     atr = _atr(candles)
-    if len(candles) < 30 or atr is None:
+    if len(candles) < 45 or atr is None:
+        return None
+    # Require pre-breakout volatility compression; the current breakout bar
+    # must close outside the prior range, not merely wick through it.
+    bandwidths = []
+    for end in range(max(20, len(closes) - 41), len(closes) - 1):
+        band = _bollinger(closes[end - 20:end])
+        if band:
+            bandwidths.append((band[2] - band[0]) / max(band[1], 1e-12))
+    prior_band = _bollinger(closes[-21:-1])
+    if not bandwidths or prior_band is None:
+        return None
+    prior_width = (prior_band[2] - prior_band[0]) / max(prior_band[1], 1e-12)
+    if prior_width > sorted(bandwidths)[max(0, int((len(bandwidths) - 1) * 0.50))]:
         return None
     previous = candles[-21:-1]
     last = candles[-1]
@@ -219,10 +313,10 @@ def _volatility_breakout(data):
     if entry is None:
         return None
     direction = None
-    if entry > max(prior_highs) and entry <= max(prior_highs) + atr and volume >= average_volume * 1.2:
+    if close > max(prior_highs) and entry >= close and entry <= max(prior_highs) + atr and volume >= average_volume * 1.2:
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif entry < min(prior_lows) and entry >= min(prior_lows) - atr and volume >= average_volume * 1.2:
+    elif close < min(prior_lows) and entry <= close and entry >= min(prior_lows) - atr and volume >= average_volume * 1.2:
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
@@ -233,7 +327,7 @@ def _volatility_breakout(data):
     strength = min(92.0, 65.0 + min(max(0.0, volume_ratio - 1.2) * 12.0, 15.0) + min(breakout_distance * 8.0, 10.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "volatility_breakout", strength, entry_reference=_entry_reference(data))
     if plan:
-        plan["reasons"] = ["1H 20-candle Donchian breakout", "Volume at least 1.2x prior 20-candle average"]
+        plan["reasons"] = ["1H 20-candle closed breakout after volatility compression", "Volume at least 1.2x prior 20-candle average"]
     return plan
 
 
@@ -264,20 +358,27 @@ def _mean_reversion(data, regime):
     else:
         return None
     entry = _current_price(data)
-    if entry is None:
+    vwap = _vwap(candles[-20:])
+    if entry is None or vwap is None:
         return None
     middle = bands[1]
-    if (direction == "LONG" and not lower <= entry <= middle) or (direction == "SHORT" and not middle <= entry <= upper):
-        return None
+    vwap_distance_atr = abs(entry - vwap) / atr
+    if direction == "LONG":
+        if not lower <= entry <= middle or entry >= vwap or not 0.25 <= vwap_distance_atr <= 2.5:
+            return None
+    else:
+        if not middle <= entry <= upper or entry <= vwap or not 0.25 <= vwap_distance_atr <= 2.5:
+            return None
     extremity = max(0.0, 42.0 - rsi) if direction == "LONG" else max(0.0, rsi - 58.0)
     strength = min(88.0, 65.0 + min(extremity * 0.5, 12.0) + min(abs(close - prev_close) / atr * 4.0, 8.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "mean_reversion", strength, entry_reference=_entry_reference(data))
     if plan:
-        plan["reasons"] = ["15m Bollinger re-entry after outside close", f"RSI14={rsi:.1f}", "Range regime"]
+        plan["reasons"] = ["15m Bollinger re-entry after outside close", f"RSI14={rsi:.1f}", f"VWAP deviation={vwap_distance_atr:.2f} ATR with mean-side confirmation", "Range regime"]
     return plan
 
 
 def _trade_flow(data):
+    """Return recent taker buy ratio using notional-weighted exchange trades."""
     trades = data.get("recent_trades") or []
     buy = sell = 0.0
     for trade in trades:
@@ -285,15 +386,17 @@ def _trade_flow(data):
             continue
         try:
             amount = float(trade.get("amount") or 0)
+            price = float(trade.get("price") or 0)
         except (TypeError, ValueError, OverflowError):
             continue
-        if not math.isfinite(amount) or amount <= 0:
+        if not (math.isfinite(amount) and math.isfinite(price) and amount > 0 and price > 0):
             continue
+        notional = amount * price
         side = str(trade.get("side") or "").lower()
         if side == "buy":
-            buy += amount
+            buy += notional
         elif side == "sell":
-            sell += amount
+            sell += notional
     total = buy + sell
     return (buy / total if total > 0 else None), total
 
@@ -302,37 +405,61 @@ def _orderflow_momentum(data):
     book = data.get("orderbook")
     candles = data.get("15m") or []
     atr = _atr(candles)
-    if not isinstance(book, dict) or atr is None or not candles:
+    now_ms = int(data.get("snapshot_timestamp_ms") or 0)
+    book_ms = int(data.get("orderbook_timestamp_ms") or 0)
+    trades_ms = int(data.get("recent_trades_timestamp_ms") or 0)
+    if not isinstance(book, dict) or atr is None or not candles or not now_ms or not book_ms or not trades_ms:
         return None
-    bids, asks = book.get("bids") or [], book.get("asks") or []
-    try:
-        bid_qty = sum(float(level[1]) for level in bids[:10] if len(level) >= 2)
-        ask_qty = sum(float(level[1]) for level in asks[:10] if len(level) >= 2)
-    except (TypeError, ValueError, OverflowError):
+    if not (0 <= now_ms - book_ms <= 15_000 and 0 <= now_ms - trades_ms <= 30_000):
         return None
-    buy_ratio, total = _trade_flow(data)
-    if bid_qty <= 0 or ask_qty <= 0 or buy_ratio is None or total <= 0:
+
+    # Reuse Atlas's depth-normalized, notional-weighted order-book engine.
+    # It rejects crossed/stale books and stale trades, and computes spread.
+    flow = _ORDERBOOK_ENGINE.analyze(
+        book,
+        direction="NONE",
+        now_ms=now_ms,
+        trades=data.get("recent_trades"),
+    )
+    if not flow.get("active") or not flow.get("trade_flow_active"):
         return None
-    imbalance = bid_qty / ask_qty
+    imbalance = float(flow.get("imbalance") or 0.0)
+    trade_delta = float(flow.get("trade_delta") or 0.0)
+    spread_pct = float(flow.get("spread_pct") or 0.0)
+    if spread_pct > _ORDERBOOK_ENGINE.MARKET_MAX_SPREAD_PCT:
+        return None
+
     last = candles[-1]
     close, opened = _value(last, "close"), _value(last, "open")
     entry = _current_price(data)
     if close is None or opened is None or entry is None:
         return None
     direction = None
-    if imbalance >= 1.25 and buy_ratio >= 0.58 and close > opened and entry >= opened:
+    if imbalance >= 0.18 and trade_delta >= 0.12 and close > opened and entry >= opened:
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif imbalance <= 0.80 and buy_ratio <= 0.42 and close < opened and entry <= opened:
+    elif imbalance <= -0.18 and trade_delta <= -0.12 and close < opened and entry <= opened:
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
         return None
-    strength = min(92.0, 65.0 + min(abs(imbalance - 1.0) * 20.0, 15.0) + min(abs(buy_ratio - 0.5) * 40.0, 10.0))
+
+    strength = min(92.0, 65.0 + min(abs(imbalance) * 35.0, 15.0) + min(abs(trade_delta) * 25.0, 10.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "orderflow_momentum", strength, entry_reference=_entry_reference(data))
     if plan:
-        plan["reasons"] = [f"Top-10 order-book bid/ask quantity ratio={imbalance:.2f}", f"Recent taker buy ratio={buy_ratio:.2f}"]
-        plan["data_quality"] = "LIVE_SNAPSHOT"
+        plan["reasons"] = [
+            f"Depth-weighted order-book notional imbalance={imbalance:+.2f}",
+            f"Recent taker notional delta={trade_delta:+.2f}",
+            f"Spread={spread_pct:.4f}%",
+        ]
+        plan["data_quality"] = "FRESH_BOOK_AND_NOTIONAL_TRADE_FLOW"
+        plan["orderflow_metrics"] = {
+            "bid_notional": flow.get("bid_notional"),
+            "ask_notional": flow.get("ask_notional"),
+            "trade_delta": trade_delta,
+            "spread_pct": spread_pct,
+            "trade_count": flow.get("trade_count"),
+        }
     return plan
 
 
@@ -348,6 +475,18 @@ def _liquidation_cascade(data):
         return None
     if previous_oi <= 0 or not math.isfinite(previous_oi) or not math.isfinite(current_oi):
         return None
+    oi_times = data.get("open_interest_timestamps_ms") or []
+    now_ms = int(data.get("snapshot_timestamp_ms") or 0)
+    if len(oi_times) < 2 or not now_ms:
+        return None
+    try:
+        previous_oi_ms, current_oi_ms = int(oi_times[-2]), int(oi_times[-1])
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not (0 <= now_ms - current_oi_ms <= 2 * 60 * 60 * 1000):
+        return None
+    if not (0 < current_oi_ms - previous_oi_ms <= 3 * 60 * 60 * 1000):
+        return None
     oi_change = (current_oi - previous_oi) / previous_oi
     last = candles[-1]
     close, opened = _value(last, "close"), _value(last, "open")
@@ -357,10 +496,20 @@ def _liquidation_cascade(data):
         return None
     impulse = abs(close - opened) / atr
     direction = None
-    if oi_change <= -0.015 and close > opened and entry > opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio >= 0.56:
+    funding_values = data.get("funding_rate") or []
+    try:
+        funding = float(funding_values[-1]) if funding_values else 0.0
+    except (TypeError, ValueError, OverflowError):
+        funding = 0.0
+    if not math.isfinite(funding):
+        return None
+    # Crowded-side funding is used as a directional confirmation, not as a
+    # standalone trigger: positive funding supports long-liquidation shorts;
+    # negative funding supports short-squeeze longs.
+    if oi_change <= -0.015 and close > opened and entry > opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio >= 0.56 and funding <= 0.0003:
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio <= 0.44:
+    elif oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio <= 0.44 and funding >= -0.0003:
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
@@ -368,7 +517,7 @@ def _liquidation_cascade(data):
     strength = min(92.0, 65.0 + min(abs(oi_change) * 400.0, 15.0) + min(impulse * 5.0, 10.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data))
     if plan:
-        plan["reasons"] = [f"Open interest contraction={oi_change * 100:.2f}%", f"1H impulse={impulse:.2f} ATR", "Trade-flow confirmation"]
+        plan["reasons"] = [f"Open interest contraction={oi_change * 100:.2f}%", f"1H impulse={impulse:.2f} ATR", f"Funding rate={funding:.5f}", "Trade-flow confirmation; liquidation side remains a proxy inference"]
         plan["data_quality"] = "OI_CONTRACTION_PROXY_NOT_EXCHANGE_LIQUIDATION_FEED"
     return plan
 
@@ -379,14 +528,28 @@ def _relative_strength(data):
     atr = _atr(candles)
     if len(closes) < 15 or atr is None:
         return None
-    benchmark = "ETH" if str(data.get("symbol") or "").upper().startswith("BTC/") else "BTC"
+    symbol = str(data.get("symbol") or "").upper()
     universe = data.get("correlation_universe") or {}
-    benchmark_candles = universe.get(benchmark) or []
-    benchmark_closes = _series(benchmark_candles)
-    if len(benchmark_closes) < 15:
+    benchmark_keys = ["ETH"] if symbol.startswith("BTC/") else ["BTC"] if symbol.startswith("ETH/") else ["BTC", "ETH"]
+    benchmark_returns = []
+    try:
+        own_time = int(candles[-1].time)
+    except (AttributeError, TypeError, ValueError, OverflowError):
         return None
+    for benchmark_key in benchmark_keys:
+        benchmark_candles = universe.get(benchmark_key) or []
+        benchmark_closes = _series(benchmark_candles)
+        if len(benchmark_closes) < 15:
+            return None
+        try:
+            benchmark_time = int(benchmark_candles[-1].time)
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            return None
+        if abs(own_time - benchmark_time) > 4 * 60 * 60 * 1000:
+            return None
+        benchmark_returns.append(benchmark_closes[-1] / benchmark_closes[-13] - 1.0)
     own_return = closes[-1] / closes[-13] - 1.0
-    benchmark_return = benchmark_closes[-1] / benchmark_closes[-13] - 1.0
+    benchmark_return = sum(benchmark_returns) / len(benchmark_returns)
     relative = own_return - benchmark_return
     e20 = _ema(closes, 20)
     if e20 is None:
@@ -401,7 +564,8 @@ def _relative_strength(data):
     strength = min(88.0, 65.0 + min(abs(relative) * 500.0, 20.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "relative_strength", strength, entry_reference=_entry_reference(data))
     if plan:
-        plan["reasons"] = [f"12x4H relative return vs {benchmark}={relative * 100:+.2f}%", f"Price/EMA20 alignment"]
+        benchmark_label = "/".join(benchmark_keys)
+        plan["reasons"] = [f"12x4H relative return vs {benchmark_label} composite={relative * 100:+.2f}%", "Price/EMA20 alignment"]
     return plan
 
 
@@ -475,7 +639,11 @@ def _regime_fit(strategy_id, regime):
 class SevenStrategyLab:
     """Run six independent experimental strategies plus the existing SMC plan."""
 
-    def analyze(self, data, smc_result=None):
+    def classify_regime(self, data):
+        """Expose the same regime classifier used by analyze for scoped statistics."""
+        return _regime(data)
+
+    def analyze(self, data, smc_result=None, performance_by_strategy=None):
         regime = _regime(data)
         evaluators = {
             "trend_pullback": lambda: _trend_pullback(data),
@@ -511,20 +679,48 @@ class SevenStrategyLab:
                 })
 
         candidates = [item for item in results if item.get("status") == "CANDIDATE"]
-        candidates.sort(key=lambda item: (item.get("selection_score", 0), item.get("estimated_net_rr_tp1") or 0), reverse=True)
-        selected = candidates[0] if candidates else None
+        performance_by_strategy = performance_by_strategy or {}
+        validated = []
+        for candidate in candidates:
+            strategy_id = candidate["strategy_id"]
+            stats = performance_by_strategy.get(strategy_id)
+            edge = evaluate_strategy_edge(stats)
+            if strategy_id == "smc" and not stats:
+                edge = {
+                    "eligible": False,
+                    "status": "LEGACY_SMC_FALLBACK",
+                    "reasons": ["Existing SMC decision is preserved as fallback until comparable performance evidence exists."],
+                }
+            candidate["edge_validation"] = edge
+            if edge["eligible"]:
+                ranked = rank_validated_candidate(candidate, stats, candidate.get("regime_fit", 1.0))
+                if ranked:
+                    candidate["validated_selection_score"] = ranked["score"]
+                    validated.append(candidate)
+        # The existing SMC decision remains a compatibility fallback. Experimental
+        # engines cannot displace it until independent, cost-adjusted OOS evidence
+        # clears the statistical promotion gates.
+        validated.sort(key=lambda item: item.get("validated_selection_score", 0.0), reverse=True)
+        smc_candidate = next((item for item in candidates if item.get("strategy_id") == "smc"), None)
+        selected = validated[0] if validated else smc_candidate
         return {
-            "version": 1,
+            "version": 2,
             "symbol": data.get("symbol"),
             "regime": regime,
             "strategies": results,
             "candidate_count": len(candidates),
+            "validated_candidate_count": len(validated),
             "selected": selected,
-            "selection_method": "rule_strength_x_regime_fit",
-            "performance_status": "INSUFFICIENT_STRATEGY_SPECIFIC_OUTCOME_DATA",
+            "selection_method": "out_of_sample_edge_gated_with_legacy_smc_fallback",
+            "performance_status": (
+                "VALIDATED_EXPERIMENTAL_EDGE_AVAILABLE"
+                if any(item.get("strategy_id") != "smc" for item in validated)
+                else "NO_EXPERIMENTAL_EDGE_VALIDATED"
+            ),
             "warning": (
-                "Yeni stratejiler deneysel aday üretir. Strateji bazlı aynı-veri backtesti ve "
-                "out-of-sample sonuçları oluşmadan geçmiş kârlılık avantajı iddia edilmez. "
-                "OI contraction, gerçek borsa likidasyon akışı değildir."
+                "Deneysel motorlar yalnızca stratejiye özel, maliyet sonrası ve out-of-sample "
+                "performans yeterli örneklem ve güven sınırlarını geçerse SMC'nin önüne geçebilir. "
+                "Performans kaydı yoksa deneysel aday seçilmez. OI contraction gerçek likidasyon "
+                "akışı değildir; spread/slippage/funding modeli olmayan sonuçlar doğrulanmış sayılmaz."
             ),
         }

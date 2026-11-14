@@ -13,6 +13,7 @@ from config import Config
 from data_engine import exchange, get_correlation_universe, get_market_data, get_smt_universe
 from engine import AtlasEngine
 from strategy_lab import SevenStrategyLab
+from strategy_outcome_journal import StrategyOutcomeJournal
 from manual_trade_service import ManualTradeService
 
 def _is_fresh_15m_data(candles, now_ms, max_age_seconds):
@@ -38,6 +39,7 @@ class AtlasRuntime:
         self.logger = logger or logging.getLogger("atlas.runtime")
         self.engine = AtlasEngine()
         self.strategy_lab = SevenStrategyLab()
+        self.strategy_outcome_journal = StrategyOutcomeJournal()
         self._stop_event = threading.Event()
         self._thread = None
         self._analysis_lock = threading.Lock()
@@ -324,6 +326,18 @@ class AtlasRuntime:
         with self._journal_lock:
             return dict(self.engine.trade_journal.setup_statistics())
 
+    def strategy_performance(self, symbol=None, regime=None):
+        """Return independently aggregated, cost-adjusted IS/OOS results per strategy."""
+        return self.strategy_outcome_journal.performance_snapshot(
+            symbol=symbol,
+            regime=regime,
+            source_revision=self.strategy_outcome_journal.current_revision(),
+        )
+
+    def record_strategy_outcome(self, **outcome):
+        """Persist a closed strategy outcome; callers must supply cost-adjusted net R."""
+        return self.strategy_outcome_journal.record_outcome(**outcome)
+
     def analysis_summary(self):
         with self._journal_lock:
             return dict(self.engine.trade_journal.analysis_summary())
@@ -415,7 +429,16 @@ class AtlasRuntime:
                     if result is not None:
                         # Seven independent strategy evaluations share the same closed market snapshot.
                         # The existing SMC result is preserved as strategy 7, never rewritten.
-                        result["strategy_lab"] = self.strategy_lab.analyze(data, smc_result=result)
+                        strategy_regime = self.strategy_lab.classify_regime(data).get("label")
+                        result["strategy_lab"] = self.strategy_lab.analyze(
+                            data,
+                            smc_result=result,
+                            performance_by_strategy=self.strategy_outcome_journal.performance_snapshot(
+                                symbol=symbol,
+                                regime=strategy_regime,
+                                source_revision=self.strategy_outcome_journal.current_revision(),
+                            ),
+                        )
                     if result is None:
                         self._inc("skipped")
                         return {"ok": False, "symbol": symbol, "error": "no_result"}
