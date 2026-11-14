@@ -94,6 +94,7 @@ def test_journal_accepts_net_funding_credit_as_negative_cost(tmp_path):
         net_r=1.05,
         gross_r=1.0,
         cost_r=-0.05,
+        funding_pnl_r=0.10,
         cost_model_id="fees-spread-slip-minus-funding-v2",
         closed_at_ms=1_900,
         costs_included=True,
@@ -103,3 +104,5 @@ def test_journal_accepts_net_funding_credit_as_negative_cost(tmp_path):
     )
     assert result["accepted"] is True
     assert result["record"]["cost_r"] == -0.05
+    assert result["record"]["trading_cost_r"] == 0.05
+    assert result["record"]["funding_pnl_r"] == 0.10
