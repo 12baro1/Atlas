@@ -194,15 +194,14 @@ def _risk_validate_candidate(candidate):
 def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_type="MARKET", entry_reference="LAST_CLOSED_15M_FALLBACK"):
     if direction not in {"LONG", "SHORT"} or not all(
         isinstance(value, (int, float)) and math.isfinite(value) and value > 0
-        for value in (entry, stop, atr)
+        for value in (entry, atr)
     ):
         return None
-    risk_distance = entry - stop if direction == "LONG" else stop - entry
-    if risk_distance <= 0:
-        return None
-    # Stop-distance policy belongs to the shared filter, not an individual strategy.
-    pivots = []
+
+    # All non-SMC strategies must anchor SL/TP to confirmed market structure.
+    # ATR is used only as a small invalidation buffer, never as a target generator.
     sample = list(candles or [])[-120:]
+    swing_highs, swing_lows = [], []
     for index in range(2, len(sample) - 2):
         high = _value(sample[index], "high")
         low = _value(sample[index], "low")
@@ -212,34 +211,60 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
         right_highs = [_value(item, "high") for item in sample[index + 1:index + 3]]
         left_lows = [_value(item, "low") for item in sample[index - 2:index]]
         right_lows = [_value(item, "low") for item in sample[index + 1:index + 3]]
-        if all(value is not None for value in left_highs + right_highs) and all(high > value for value in left_highs + right_highs):
-            if direction == "LONG" and high > entry and (high - entry) / risk_distance >= 1.25:
-                pivots.append(high)
-        if all(value is not None for value in left_lows + right_lows) and all(low < value for value in left_lows + right_lows):
-            if direction == "SHORT" and low < entry and (entry - low) / risk_distance >= 1.25:
-                pivots.append(low)
+        if all(value is not None for value in left_highs + right_highs):
+            if high > max(left_highs + right_highs):
+                swing_highs.append(high)
+        if all(value is not None for value in left_lows + right_lows):
+            if low < min(left_lows + right_lows):
+                swing_lows.append(low)
+
+    buffer = atr * 0.05
     if direction == "LONG":
-        structural = sorted(set(value for value in pivots if value > entry))
-        targets = structural[:3] if len(structural) >= 3 else [entry + risk_distance * multiple for multiple in (2.0, 3.0, 4.0)]
+        invalidation = [value for value in swing_lows if value < entry]
+        if not invalidation:
+            return None
+        structural_stop = max(invalidation) - buffer
     else:
-        structural = sorted(set((value for value in pivots if value < entry)), reverse=True)
-        targets = structural[:3] if len(structural) >= 3 else [entry - risk_distance * multiple for multiple in (2.0, 3.0, 4.0)]
-    target_model = "SWING_LIQUIDITY" if len(structural) >= 3 else "R_MULTIPLE_FALLBACK"
-    if any(value <= 0 for value in targets):
+        invalidation = [value for value in swing_highs if value > entry]
+        if not invalidation:
+            return None
+        structural_stop = min(invalidation) + buffer
+
+    risk_distance = entry - structural_stop if direction == "LONG" else structural_stop - entry
+    if risk_distance <= 0:
         return None
+
+    if direction == "LONG":
+        structural_targets = sorted(set(
+            value for value in swing_highs
+            if value > entry and (value - entry) / risk_distance >= 1.25
+        ))
+    else:
+        structural_targets = sorted(set(
+            value for value in swing_lows
+            if value < entry and (entry - value) / risk_distance >= 1.25
+        ), reverse=True)
+
+    # Never fabricate 2R/3R/4R targets. A setup needs three real opposing
+    # swing-liquidity levels or it is not an executable candidate.
+    if len(structural_targets) < 3:
+        return None
+    targets = structural_targets[:3]
     rr_values = [abs(value - entry) / risk_distance for value in targets]
     plan = {
         "status": "CANDIDATE", "strategy_id": source, "strategy": STRATEGY_NAMES[source],
         "direction": direction, "entry_type": str(entry_type or "MARKET").upper(),
         "entry_reference": entry_reference, "entry": round(entry, 10), "atr": round(atr, 10),
-        "stop_loss": round(stop, 10), "tp1": round(targets[0], 10),
+        "stop_loss": round(structural_stop, 10), "tp1": round(targets[0], 10),
         "tp2": round(targets[1], 10), "tp3": round(targets[2], 10),
         "rr_tp1": round(rr_values[0], 4), "rr_tp2": round(rr_values[1], 4),
         "rr_tp3": round(rr_values[2], 4), "strength": round(float(strength), 2),
-        "target_model": target_model, "experimental": source != "smc", "reasons": [],
+        "stop_model": "CONFIRMED_SWING_INVALIDATION_ATR_BUFFER",
+        "target_model": "CONFIRMED_OPPOSING_SWING_LIQUIDITY",
+        "experimental": source != "smc", "reasons": [],
     }
     # No risk, fee, minimum-RR, or performance gate is allowed inside a
-    # strategy. Every geometrically describable setup reaches the shared gate.
+    # strategy. Every structurally valid setup reaches the shared gate.
     plan["partial_exit_weights"] = _configured_partial_tp_weights()
     return plan
 
