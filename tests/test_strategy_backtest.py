@@ -75,3 +75,40 @@ def test_short_targets_are_directionally_simulated():
     )
     assert outcome is not None
     assert outcome["gross_r"] > 0
+
+from strategy_backtest import _walk_forward_summary
+
+
+def test_funding_cost_is_applied_at_historical_settlement():
+    bar = Bar(100, 103, 99.5, 102.5, time=1_700_000_000_000)
+    funding = [{"timestamp": 1_700_000_450_000, "value": 0.001}]
+    long_result = simulate_candidate(
+        candidate("LONG"), [bar],
+        maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
+        funding_events=funding,
+    )
+    short_result = simulate_candidate(
+        candidate("SHORT"), [Bar(100, 100.5, 97, 98, time=1_700_000_000_000)],
+        maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
+        funding_events=funding,
+    )
+    assert long_result["funding_pnl_r"] < 0
+    assert short_result["funding_pnl_r"] > 0
+    assert long_result["net_r"] < long_result["gross_r"]
+    assert short_result["net_r"] > short_result["gross_r"]
+
+
+def test_walk_forward_uses_expanding_train_and_sequential_test_windows():
+    start = 1_700_000_000_000
+    end = start + 600_000
+    rows = [
+        {"closed_at_ms": start + 50_000, "net_r": 1.0, "cost_r": 0.1},
+        {"closed_at_ms": start + 250_000, "net_r": -1.0, "cost_r": 0.1},
+        {"closed_at_ms": start + 450_000, "net_r": 2.0, "cost_r": 0.1},
+    ]
+    folds = _walk_forward_summary(rows, start, end, folds=2)
+    assert len(folds) == 2
+    assert folds[0]["train_end_ms"] == folds[0]["test_start_ms"]
+    assert folds[1]["train_start_ms"] == start
+    assert folds[1]["train"]["trades"] >= folds[0]["train"]["trades"]
+    assert folds[0]["test_end_ms"] == folds[1]["test_start_ms"]
