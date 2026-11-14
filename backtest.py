@@ -510,6 +510,8 @@ def _metrics_for_trades(trades):
         "expectancy": round(sum(net) / count, 4) if count else 0.0,
         "profit_factor": pf(net),
         "execution_cost_rr": round(sum(float(item.get("execution_cost_rr", 0.0) or 0.0) for item in trades), 4),
+        "funding_cost_r": round(sum(float(item.get("funding_cost_r", 0.0) or 0.0) for item in trades), 4),
+        "total_cost_rr": round(sum(float(item.get("execution_cost_rr", 0.0) or 0.0) + float(item.get("funding_cost_r", 0.0) or 0.0) for item in trades), 4),
     }
 
 
