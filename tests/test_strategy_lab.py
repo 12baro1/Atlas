@@ -36,8 +36,8 @@ def test_plan_contains_consistent_directional_targets_and_r_multiples():
 
     assert long_plan["stop_loss"] < long_plan["entry"] < long_plan["tp1"] < long_plan["tp2"] < long_plan["tp3"]
     assert short_plan["tp3"] < short_plan["tp2"] < short_plan["tp1"] < short_plan["entry"] < short_plan["stop_loss"]
-    assert long_plan["rr_tp1"] == 1.25
-    assert short_plan["rr_tp3"] == 3.0
+    assert long_plan["rr_tp1"] == 2.0
+    assert short_plan["rr_tp3"] == 4.0
     assert long_plan["experimental"] is True
 
 
@@ -79,7 +79,7 @@ def test_selector_returns_one_original_candidate_without_mixing_levels(monkeypat
         "status": "CANDIDATE", "strategy_id": "trend_pullback",
         "strategy": strategy_lab.STRATEGY_NAMES["trend_pullback"], "direction": "SHORT",
         "entry_type": "MARKET", "entry": 200.0, "stop_loss": 204.0,
-        "tp1": 195.0, "tp2": 192.0, "tp3": 188.0,
+        "tp1": 192.0, "tp2": 188.0, "tp3": 184.0,
         "strength": 100.0, "experimental": True, "reasons": ["trend only"],
     }
     monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(trend_plan))
@@ -98,7 +98,7 @@ def test_selector_returns_one_original_candidate_without_mixing_levels(monkeypat
     assert report["selected"]["strategy_id"] == "trend_pullback"
     assert report["selected"]["entry"] == 200.0
     assert report["selected"]["stop_loss"] == 204.0
-    assert report["selected"]["tp1"] == 195.0
+    assert report["selected"]["tp1"] == 192.0
     assert report["selected"]["reasons"] == ["trend only"]
 
 

@@ -255,6 +255,149 @@ def build_signal_card(result):
     return card
 
 
+
+def build_selected_strategy_card(result):
+    """Build the one canonical terminal card from SevenStrategyLab.selected.
+
+    Experimental strategies can reach this adapter only after the strategy lab's
+    independent cost-adjusted OOS promotion gate. The adapter still validates
+    finite prices, direction, order type, target ordering and positive risk.
+    """
+    result = result if isinstance(result, dict) else {}
+    report = result.get("strategy_lab") or {}
+    selected = report.get("selected")
+    if not isinstance(selected, dict):
+        card = build_signal_card(result)
+        card.update({
+            "verdict": "ATLA",
+            "direction": None,
+            "decision_action": "SKIP",
+            "entry": None,
+            "stop_loss": None,
+            "tp_levels": [],
+            "rr": None,
+            "net_rr": None,
+            "reason": "Yedi strateji içinde seçilebilir, doğrulanmış bir işlem planı yok.",
+            "critical_blocks": ["NO_SELECTED_STRATEGY_PLAN"],
+        })
+        card["summary"] = _summarize(card)
+        return card
+
+    strategy_id = str(selected.get("strategy_id") or "").strip()
+    if strategy_id == "smc":
+        card = build_signal_card(result)
+        card["strategy_id"] = strategy_id
+        card["strategy"] = selected.get("strategy") or "SMC"
+        card["experimental"] = False
+        return card
+
+    direction = str(selected.get("direction") or "").upper()
+    entry_type = str(selected.get("entry_type") or "").upper()
+    try:
+        entry = float(selected.get("entry"))
+        stop = float(selected.get("stop_loss"))
+        targets = [float(selected.get(key)) for key in ("tp1", "tp2", "tp3")]
+    except (TypeError, ValueError, OverflowError):
+        entry = stop = None
+        targets = []
+    valid_numbers = (
+        entry is not None and stop is not None and len(targets) == 3
+        and all(math.isfinite(value) and value > 0 for value in [entry, stop, *targets])
+    )
+    geometry_valid = False
+    if valid_numbers and direction == "LONG":
+        geometry_valid = stop < entry < targets[0] < targets[1] < targets[2]
+    elif valid_numbers and direction == "SHORT":
+        geometry_valid = stop > entry > targets[0] > targets[1] > targets[2]
+    risk_distance = abs(entry - stop) if valid_numbers else 0.0
+    risk_validation = selected.get("risk_validation") or {}
+    risk_plan = selected.get("risk_plan") or {}
+    executable = (
+        risk_validation.get("eligible") is True
+        and isinstance(risk_plan, dict)
+        and risk_plan.get("final_geometry_reconciled") is True
+        and risk_plan.get("risk_setup_valid") is True
+        and geometry_valid and risk_distance > 0
+        and entry_type in {"MARKET", "LIMIT"}
+        and selected.get("status") == "CANDIDATE"
+    )
+    if not executable:
+        card = build_signal_card(result)
+        card.update({
+            "verdict": "ATLA", "direction": None, "decision_action": "SKIP",
+            "entry": None, "stop_loss": None, "tp_levels": [],
+            "rr": None, "net_rr": None,
+            "reason": "Seçilen strateji planı ortak fiyat/geometri doğrulamasından geçemedi.",
+            "critical_blocks": ["SELECTED_PLAN_GEOMETRY_INVALID"],
+        })
+        card["summary"] = _summarize(card)
+        return card
+
+    rr_values = [round(abs(target - entry) / risk_distance, 4) for target in targets]
+    estimated_net_rr = selected.get("estimated_net_rr")
+    if estimated_net_rr is None:
+        estimated_net_rr = selected.get("estimated_net_rr_tp1")
+    try:
+        estimated_net_rr = float(estimated_net_rr) if estimated_net_rr is not None else None
+    except (TypeError, ValueError, OverflowError):
+        estimated_net_rr = None
+    if estimated_net_rr is not None and not math.isfinite(estimated_net_rr):
+        estimated_net_rr = None
+    reasons = list(selected.get("reasons") or [])
+    card = {
+        "symbol": result.get("symbol") or report.get("symbol") or "UNKNOWN",
+        "verdict": "AL" if direction == "LONG" and entry_type == "MARKET" else
+                   "SAT" if direction == "SHORT" and entry_type == "MARKET" else "BEKLE",
+        "direction": direction,
+        "decision_action": "EXECUTE",
+        "signal": direction,
+        "confidence": _num(selected.get("strength")),
+        "grade": "",
+        "strength": "STRATEGY_CANDIDATE",
+        "market_phase": (report.get("regime") or {}).get("label", "UNKNOWN"),
+        "setup_quality": _num(selected.get("strength")),
+        "confluence": None,
+        "setup_allowed": True,
+        "entry": _price(entry),
+        "entry_type": entry_type,
+        "entry_valid": True,
+        "risk_setup_valid": True,
+        "entry_type_reason": "Koşullu LIMIT planı" if entry_type == "LIMIT" else "",
+        "entry_distance_label": "",
+        "entry_distance_pct": None,
+        "entry_distance_atr": None,
+        "requires_pullback": entry_type == "LIMIT",
+        "setup_thesis": selected.get("strategy") or strategy_id,
+        "supporting_evidence": reasons,
+        "opposing_evidence": [],
+        "market_context": [],
+        "candidate_count": report.get("candidate_count", 0),
+        "synthetic_tp_targets": selected.get("target_model") == "R_MULTIPLE_FALLBACK",
+        "stop_loss": _price(stop),
+        "tp_levels": [_price(value) for value in targets],
+        "rr": _num(risk_plan.get("weighted_rr")) or rr_values[0],
+        "net_rr": _num(risk_plan.get("weighted_net_rr")) if risk_plan.get("weighted_net_rr") is not None else estimated_net_rr,
+        "target_max_rr": _num(risk_plan.get("target_max_rr")) or rr_values[-1],
+        "weighted_rr": _num(risk_plan.get("weighted_rr")) or rr_values[0],
+        "weighted_net_rr": _num(risk_plan.get("weighted_net_rr")) if risk_plan.get("weighted_net_rr") is not None else estimated_net_rr,
+        "partial_exit_weights": risk_plan.get("partial_exit_weights") or {},
+        "selected_tp": risk_plan.get("selected_tp") or "weighted_partial_exit",
+        "position_size": _num(risk_plan.get("position_size")),
+        "capital_at_risk": _num(risk_plan.get("capital_at_risk")),
+        "critical_blocks": [],
+        "soft_adjustments": [],
+        "bonuses": [],
+        "reason": None,
+        "summary": "",
+        "strategy_id": strategy_id,
+        "strategy": selected.get("strategy") or strategy_id,
+        "experimental": bool(selected.get("experimental")),
+        "target_model": selected.get("target_model"),
+        "estimated_net_rr_tp1": estimated_net_rr,
+    }
+    card["summary"] = _summarize(card)
+    return card
+
 def _summarize(card):
     """Tek satırlık dürüst özet."""
     if card["verdict"] in ("BEKLE", "ATLA"):
