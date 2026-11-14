@@ -160,6 +160,7 @@ class AtlasTUIApp(App):
         height: auto;
     }
     #dashboard.compact > Static { height: 14; }
+    #dashboard.compact > #chart { height: 20; min-height: 20; }
     #dashboard.compact > RichLog { height: 14; }
     #motors, #chart, #details, #pipeline, #events, #output {
         height: 1fr;
@@ -296,32 +297,40 @@ class AtlasTUIApp(App):
         return Panel(table, title="[bold]MARKET DETAILS[/bold]", border_style="bright_black")
 
     @staticmethod
-    def _chart_renderable(ohlcv, symbol="BTC/USDT:USDT", max_bars=30):
+    def _chart_renderable(ohlcv, symbol="BTC/USDT:USDT", max_bars=30, plot_height=9):
+        header = Text(
+            f"LIVE CANDLES  |  {symbol}  |  5m",
+            style="bold bright_green",
+        )
         if not ohlcv:
-            return Panel(
+            return Group(
+                header,
                 Text("Waiting for live OHLCV candles…", style="dim"),
-                title=f"[bold bright_green]LIVE CANDLE CHART  |  {symbol}  5m[/bold bright_green]",
-                border_style="green",
             )
+
         max_bars = max(8, min(int(max_bars), 48))
         candles = ohlcv[-max_bars:]
         lows = [float(row[3]) for row in candles]
         highs = [float(row[2]) for row in candles]
         low, high = min(lows), max(highs)
         span = max(high - low, 1e-12)
-        height = 6
+        height = max(7, min(int(plot_height), 12))
         grid = [[" " for _ in candles] for _ in range(height)]
+
         for x, row in enumerate(candles):
             opened, top, bottom, close = map(float, (row[1], row[2], row[3], row[4]))
             y_high = max(0, min(height - 1, int((high - top) / span * (height - 1))))
             y_low = max(0, min(height - 1, int((high - bottom) / span * (height - 1))))
             y_open = max(0, min(height - 1, int((high - opened) / span * (height - 1))))
             y_close = max(0, min(height - 1, int((high - close) / span * (height - 1))))
-            up = close >= opened
+            bullish = close >= opened
+            wick_style = "green" if bullish else "red"
+            body_style = "bold bright_green" if bullish else "bold bright_red"
             for y in range(min(y_high, y_low), max(y_high, y_low) + 1):
-                grid[y][x] = ("│", "green" if up else "red")
+                grid[y][x] = ("│", wick_style)
             for y in range(min(y_open, y_close), max(y_open, y_close) + 1):
-                grid[y][x] = ("█", "bright_green" if up else "bright_red")
+                grid[y][x] = ("█", body_style)
+
         lines = []
         for row in grid:
             line = Text()
@@ -331,19 +340,27 @@ class AtlasTUIApp(App):
                 else:
                     line.append(cell)
             lines.append(line)
-        volume = Text("VOL ", style="dim")
+
         max_volume = max(float(row[5]) for row in candles) or 1.0
+        volume = Text("VOL ", style="dim")
+        volume_chars = "▁▂▃▄▅▆▇█"
         for row in candles:
-            level = int(float(row[5]) / max_volume * 4)
-            volume.append("▁▃▅▇█"[level], style="bright_cyan")
-        content = Group(
-            Text(f"H {high:,.4f}     L {low:,.4f}", style="dim"),
+            level = min(7, int(float(row[5]) / max_volume * 7))
+            volume.append(volume_chars[level], style="bright_cyan")
+
+        last = candles[-1]
+        footer = Text(
+            f"O {float(last[1]):,.4f}  H {float(last[2]):,.4f}  "
+            f"L {float(last[3]):,.4f}  C {float(last[4]):,.4f}",
+            style="bold white",
+        )
+        return Group(
+            header,
+            Text(f"HIGH {high:,.4f}                                      LOW {low:,.4f}", style="dim"),
             *lines,
             volume,
-            Text(f"O {float(candles[-1][1]):,.4f}  C {float(candles[-1][4]):,.4f}  |  LIVE", style="bold"),
+            footer,
         )
-        return Panel(content, title=f"[bold bright_green]LIVE CANDLE CHART  |  {symbol}  5m[/bold bright_green]",
-                     subtitle="Green = bullish  |  Red = bearish", border_style="green", box=box.ROUNDED)
 
     def on_mount(self) -> None:
         self._active_symbol = "BTC/USDT:USDT"
@@ -450,10 +467,18 @@ class AtlasTUIApp(App):
             "volume": f"{volume:,.0f} USDT" if isinstance(volume, (int, float)) else "—",
         }
         self.query_one("#market", Static).update(self._market_renderable(tickers))
-        chart_width = self.query_one("#chart", Static).size.width
-        max_bars = max(8, min(48, chart_width - 8))
-        self.query_one("#chart", Static).update(
-            self._chart_renderable(payload.get("candles") or [], payload.get("symbol"), max_bars=max_bars)
+        chart_widget = self.query_one("#chart", Static)
+        chart_width = max(16, chart_widget.size.width - 4)
+        chart_height = max(10, chart_widget.size.height - 3)
+        max_bars = max(8, min(48, chart_width))
+        plot_height = max(7, min(12, chart_height - 5))
+        chart_widget.update(
+            self._chart_renderable(
+                payload.get("candles") or [],
+                payload.get("symbol"),
+                max_bars=max_bars,
+                plot_height=plot_height,
+            )
         )
         self.query_one("#details", Static).update(self._details_renderable(detail))
         if last is not None:
