@@ -328,7 +328,11 @@ class AtlasRuntime:
 
     def strategy_performance(self, symbol=None, regime=None):
         """Return independently aggregated, cost-adjusted IS/OOS results per strategy."""
-        return self.strategy_outcome_journal.performance_snapshot(symbol=symbol, regime=regime)
+        return self.strategy_outcome_journal.performance_snapshot(
+            symbol=symbol,
+            regime=regime,
+            source_revision=self.strategy_outcome_journal.current_revision(),
+        )
 
     def record_strategy_outcome(self, **outcome):
         """Persist a closed strategy outcome; callers must supply cost-adjusted net R."""
@@ -432,6 +436,7 @@ class AtlasRuntime:
                             performance_by_strategy=self.strategy_outcome_journal.performance_snapshot(
                                 symbol=symbol,
                                 regime=strategy_regime,
+                                source_revision=self.strategy_outcome_journal.current_revision(),
                             ),
                         )
                     if result is None:
