@@ -529,6 +529,9 @@ def _combine_stats(all_stats):
         "gross_expectancy": 0,
         "gross_profit_factor": 0,
         "total_execution_cost_rr": 0,
+        "total_funding_cost_r": 0,
+        "funding_events_charged": 0,
+        "funding_data_quality": {},
         "entry_fee_rr": 0,
         "exit_fee_rr": 0,
         "spread_rr": 0,
@@ -610,10 +613,18 @@ def _combine_stats(all_stats):
         combined["gross_loss_rr"] += float(stats.get("gross_loss_rr", 0) or 0)
         combined["gross_rr"] += float(stats.get("gross_rr", 0) or 0)
         combined["total_execution_cost_rr"] += float(stats.get("total_execution_cost_rr", 0) or 0)
+        combined["total_funding_cost_r"] += float(stats.get("total_funding_cost_r", 0) or 0)
+        combined["funding_events_charged"] += int(stats.get("funding_events_charged", 0) or 0)
+        for key, value in (stats.get("funding_data_quality") or {}).items():
+            combined["funding_data_quality"].setdefault(key, set()).add(str(value))
         for cost_key in ("entry_fee_rr", "exit_fee_rr", "spread_rr", "slippage_rr"):
             combined[cost_key] += float(stats.get(cost_key, 0) or 0)
         combined["trade_history"].extend(stats.get("trade_history") or [])
 
+    combined["funding_data_quality"] = {
+        key: (next(iter(values)) if len(values) == 1 else "MIXED:" + ",".join(sorted(values)))
+        for key, values in combined["funding_data_quality"].items()
+    }
     # Rebuild combined direction and MTF outcome groups from the actual closed
     # trades; summing per-symbol percentages would distort the pooled sample.
     combined["direction_breakdown"] = {}
@@ -698,6 +709,8 @@ def _combine_stats(all_stats):
 
 
 def _report(stats, name):
+    print(f"  Funding veri kalitesi: {stats.get('funding_data_quality', {})}")
+    print(f"  Funding maliyeti: {stats.get('total_funding_cost_r', 0)}R | settlement: {stats.get('funding_events_charged', 0)}")
     print("=" * 52)
     print(f"SONUÇ | {name}")
     print(f"  Maliyet varsayımları: maker={getattr(Config, 'MAKER_FEE_RATE', 0.0002):.4%}/leg | "
