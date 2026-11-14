@@ -203,3 +203,35 @@ def test_risk_rejection_is_visible_in_strategy_diagnostics(monkeypatch):
     assert trend["rejection_stage"] == "COMMON_FILTER"
     assert trend["rejection_reasons"] == ["TEST_STOP_COST_REJECT"]
     assert report["diagnostics"]["rejection_stage_counts"] == {"COMMON_FILTER": 1}
+
+
+def test_smc_raw_setup_is_not_suppressed_by_legacy_decision_filters():
+    import strategy_lab
+
+    raw = {
+        "analysis": {
+            "entry": {
+                "direction": "LONG", "entry_type": "LIMIT", "entry": 100.0,
+                "stop_loss": 98.0, "valid": False,
+                "setup_reasoning": {"thesis": "4H CHoCH + OTE + FVG"},
+            },
+            "setup_quality": {"score": 88},
+        },
+        "risk": {
+            "entry": 100.0, "stop_loss": 98.0,
+            "tp1": 104.0, "tp2": 106.0, "tp3": 108.0,
+            "atr": 1.5, "partial_exit_weights": {"tp1": 0.5, "tp2": 0.3, "tp3": 0.2},
+        },
+        "dynamic_tp": {"tp1": 104.0, "tp2": 106.0, "tp3": 108.0},
+        "signal": {"signal": "WAIT", "confidence": 88},
+        "decision": {"action": "SKIP", "reason": "legacy filter rejected"},
+    }
+
+    candidate = strategy_lab._smc_candidate(raw)
+
+    assert candidate is not None
+    assert candidate["strategy_id"] == "smc"
+    assert candidate["direction"] == "LONG"
+    assert candidate["entry"] == 100.0
+    assert candidate["status"] == "RAW_SETUP"
+    assert "4H CHoCH + OTE + FVG" in candidate["reasons"]
