@@ -222,6 +222,7 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     if not validation["eligible"]:
         return None
     plan["risk_plan"] = validation["risk_plan"]
+    plan["partial_exit_weights"] = validation["risk_plan"].get("partial_exit_weights") or _configured_partial_tp_weights()
     plan["estimated_net_rr"] = validation["weighted_net_rr"]
     return plan
 
@@ -750,6 +751,13 @@ def _smc_candidate(result):
         "reasons": ["Mevcut Atlas SMC karar motoru EXECUTE üretti"],
     }
     plan["estimated_net_rr"] = card.get("net_rr")
+    source_risk = result.get("risk") or {}
+    plan["partial_exit_weights"] = (
+        source_risk.get("target_rebased_weights")
+        or source_risk.get("partial_exit_weights")
+        or _configured_partial_tp_weights()
+    )
+    plan["atr"] = source_risk.get("atr")
     return plan
 
 
@@ -833,6 +841,7 @@ class SevenStrategyLab:
                 if not risk_validation["eligible"]:
                     continue
                 candidate["risk_plan"] = risk_validation["risk_plan"]
+                candidate["partial_exit_weights"] = risk_validation["risk_plan"].get("partial_exit_weights") or _configured_partial_tp_weights()
                 candidate["estimated_net_rr"] = risk_validation["weighted_net_rr"]
                 ranked = rank_validated_candidate(candidate, stats, candidate.get("regime_fit", 1.0))
                 if ranked:
