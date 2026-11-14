@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import subprocess
 import threading
 from collections import defaultdict
 
@@ -113,11 +114,23 @@ class StrategyOutcomeJournal:
             "expectancy_std_r": round(math.sqrt(variance), 8),
         }
 
-    def performance_snapshot(self, symbol=None, regime=None):
+    def current_revision(self):
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+                capture_output=True, text=True, check=True,
+            )
+            return result.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return "unknown"
+
+    def performance_snapshot(self, symbol=None, regime=None, source_revision=None):
         with self._lock:
             records = list(self._load())
         requested_symbol = str(symbol).upper() if symbol else None
         requested_regime = str(regime).upper() if regime else None
+        requested_revision = str(source_revision) if source_revision else None
         grouped = defaultdict(lambda: {"is": [], "oos": []})
         for item in records:
             if item.get("costs_included") is not True:
@@ -125,6 +138,8 @@ class StrategyOutcomeJournal:
             if requested_symbol and str(item.get("symbol") or "").upper() != requested_symbol:
                 continue
             if requested_regime and str(item.get("regime") or "").upper() != requested_regime:
+                continue
+            if requested_revision and str(item.get("source_revision") or "unknown") != requested_revision:
                 continue
             split = item.get("split")
             strategy = item.get("strategy_id")
