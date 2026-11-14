@@ -437,3 +437,40 @@ def test_main_geometry_preserves_missing_risk_payload():
     assert result["risk"] is None
     assert result["entry"]["valid"] is True
     assert result["entry"]["tp1"] == 105.0
+
+
+def test_selected_setup_event_ids_are_attributed_to_originating_motors():
+    class _EventMotor:
+        def detect(self):
+            return {"event_id": "15m:smt:1700000000000"}
+
+    decision = _Decision()
+    main = AtlasMainEngine(
+        motors={"smt": _EventMotor(), "context": type("ContextMotor", (), {"detect": lambda self: {"active": True}})()},
+        setup_reasoner=_SetupReasoner(),
+        decision_engine=decision,
+    )
+
+    def pipeline(_data):
+        main.motors["smt"].detect()
+        main.motors["context"].detect()
+        return {
+            "analysis": {
+                "entry": {
+                    "setup_reasoning": {
+                        "supporting_event_ids": ["15m:smt:1700000000000"],
+                        "opposing_event_ids": [],
+                    }
+                }
+            },
+            "decision": {"action": "EXECUTE", "signal": "LONG"},
+        }
+
+    result = main.analyze({"symbol": "BTC/USDT"}, pipeline=pipeline)
+    attribution = result["main_engine"]["motor_attribution"]
+    assert attribution["matched_event_ids"] == ["15m:smt:1700000000000"]
+    assert attribution["invoked_motors_with_consumed_events"] == ["smt"]
+    assert attribution["invoked_motors_without_consumed_event_ids"] == ["context"]
+    assert attribution["motors"]["smt"]["consumed"] is True
+    assert attribution["motors"]["context"]["consumed"] is False
+    assert "not causal edge" in attribution["interpretation"]

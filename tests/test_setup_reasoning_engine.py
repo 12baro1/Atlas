@@ -30,7 +30,7 @@ def _run(**overrides):
 
 def test_same_event_id_is_counted_once_across_smt_poi_and_orderflow_modules():
     event_id = "15m:shared-event:1700000000000"
-    supporting, opposing = SetupReasoningEngine()._evidence(
+    supporting, opposing, supporting_ids, opposing_ids = SetupReasoningEngine()._evidence(
         "LONG",
         {"entry": "LONG", "weekly": "NEUTRAL", "daily": "NEUTRAL", "h4": "BULLISH"},
         None,
@@ -47,9 +47,12 @@ def test_same_event_id_is_counted_once_across_smt_poi_and_orderflow_modules():
         {},
         {},
         {},
+        include_event_ids=True,
     )
     assert supporting.count("SMT LONG") + supporting.count("HTF Order Block LONG") + supporting.count("HTF FVG LONG") + supporting.count("Order flow supports entry") == 1
     assert opposing == []
+    assert supporting_ids == [event_id]
+    assert opposing_ids == []
 
 
 def test_confirmed_sell_side_sweep_can_create_countertrend_long_candidate():
@@ -465,3 +468,13 @@ def test_far_poi_is_kept_for_diagnostics_but_never_selected_as_actionable_setup(
     assert result["candidates"][0]["execution_eligible"] is False
     assert result["selected"]["valid"] is False
     assert result["selected"]["entry_reason_code"] == "ENTRY_TOO_FAR"
+
+
+def test_selected_setup_preserves_supporting_and_opposing_event_ids():
+    result = _run(smt={
+        "active": True, "direction": "BEARISH", "confidence": 80,
+        "event_id": "4h:smt:1700000000000",
+    })
+    selected = result["selected"]
+    assert selected["opposing_event_ids"] == ["4h:smt:1700000000000"]
+    assert any("SMT SHORT" in item for item in selected["opposing_evidence"])

@@ -181,6 +181,51 @@ class AtlasMainEngine:
             },
         }
 
+    def motor_attribution(self, result, diagnostics=None):
+        """Report which specialist event IDs appear in the selected setup evidence.
+
+        This is evidence-consumption attribution, not a causal performance claim.
+        Causal impact requires replaying the same snapshots with motors ablated.
+        """
+        diagnostics = diagnostics or self.motor_diagnostics()
+        analysis = result.get("analysis") if isinstance(result, dict) else {}
+        entry = analysis.get("entry") if isinstance(analysis, dict) else {}
+        reasoning = entry.get("setup_reasoning") if isinstance(entry, dict) else {}
+        reasoning = reasoning if isinstance(reasoning, dict) else {}
+        supporting = set(str(value) for value in reasoning.get("supporting_event_ids") or [] if value)
+        opposing = set(str(value) for value in reasoning.get("opposing_event_ids") or [] if value)
+        consumed = supporting | opposing
+        by_motor = {}
+        all_event_ids = set()
+        for record in self.evidence_pool:
+            motor = str(record.get("motor") or "UNKNOWN")
+            ids = set(str(value) for value in record.get("event_ids") or [] if value)
+            all_event_ids.update(ids)
+            row = by_motor.setdefault(motor, {
+                "calls": 0, "event_ids": [], "consumed_event_ids": [],
+                "supporting_event_ids": [], "opposing_event_ids": [],
+            })
+            row["calls"] += 1
+            row["event_ids"] = sorted(set(row["event_ids"]) | ids)
+            row["consumed_event_ids"] = sorted(set(row["consumed_event_ids"]) | (ids & consumed))
+            row["supporting_event_ids"] = sorted(set(row["supporting_event_ids"]) | (ids & supporting))
+            row["opposing_event_ids"] = sorted(set(row["opposing_event_ids"]) | (ids & opposing))
+        for motor, row in by_motor.items():
+            row["consumed"] = bool(row["consumed_event_ids"])
+        invoked = set(diagnostics.get("invoked_motors") or [])
+        return {
+            "method": "SELECTED_SETUP_EVENT_ID_OVERLAP",
+            "interpretation": "Event-ID overlap shows evidence consumption, not causal edge or PnL contribution.",
+            "supporting_event_ids": sorted(supporting),
+            "opposing_event_ids": sorted(opposing),
+            "selected_event_id_count": len(consumed),
+            "matched_event_ids": sorted(consumed & all_event_ids),
+            "unmatched_selected_event_ids": sorted(consumed - all_event_ids),
+            "motors": by_motor,
+            "invoked_motors_with_consumed_events": sorted(motor for motor, row in by_motor.items() if row["consumed"]),
+            "invoked_motors_without_consumed_event_ids": sorted(invoked - {motor for motor, row in by_motor.items() if row["consumed"]}),
+            "invoked_motors_without_event_ids": diagnostics.get("event_identity", {}).get("motors_without_event_ids", []),
+        }
     def analyze(self, market_data, *, pipeline):
         """Main engine controls lifecycle; pipeline is the ordered expert-analysis adapter."""
         if not callable(pipeline):
@@ -207,12 +252,15 @@ class AtlasMainEngine:
             decision = result.get("decision") or {}
             self.last_motor_report.setdefault("final_action", decision.get("action"))
             self.last_motor_report.setdefault("final_direction", decision.get("signal"))
+            attribution = self.motor_attribution(result, diagnostics)
+            self.last_motor_report["motor_attribution"] = attribution
             analysis = result.get("analysis")
             if isinstance(analysis, dict):
                 existing_diagnostics = analysis.get("motor_diagnostics")
                 if not isinstance(existing_diagnostics, dict):
                     existing_diagnostics = {}
                 existing_diagnostics["execution_trace"] = diagnostics
+                existing_diagnostics["motor_attribution"] = attribution
                 analysis["motor_diagnostics"] = existing_diagnostics
             result["main_engine"] = {
                 **self.last_motor_report,
