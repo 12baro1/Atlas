@@ -194,8 +194,12 @@ def _risk_validate_candidate(candidate):
 def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_type="MARKET", entry_reference="LAST_CLOSED_15M_FALLBACK", structure_candles=None):
     if direction not in {"LONG", "SHORT"} or not all(
         isinstance(value, (int, float)) and math.isfinite(value) and value > 0
-        for value in (entry, atr)
+        for value in (entry, stop, atr)
     ):
+        return None
+    # The strategy-provided stop is only a directional sanity check. Its
+    # numeric level is never used; the shared structure engine replaces it.
+    if (direction == "LONG" and stop >= entry) or (direction == "SHORT" and stop <= entry):
         return None
 
     # All non-SMC strategies must anchor SL/TP to confirmed market structure.
