@@ -24,6 +24,8 @@ from backtest import (
 from engine import AtlasEngine
 from strategy_lab import SevenStrategyLab
 from strategy_outcome_journal import StrategyOutcomeJournal
+from historical_derivatives import load_historical_derivatives
+from microstructure_archive import snapshot_at as archived_microstructure_at
 
 
 ENTRY_TIMEFRAME_MS = TIMEFRAME_DURATION_MS["15m"]
@@ -70,11 +72,29 @@ def _snapshot_at(history, index, entry_price):
     snapshot["current_price_source"] = "BACKTEST_NEXT_15M_OPEN"
     snapshot["current_price_timestamp_ms"] = int(candles_15m[index + 1].time)
     snapshot["snapshot_timestamp_ms"] = decision_ms
-    # Historical OHLCV does not contain historical order-book/trade/OI snapshots.
-    snapshot["orderbook"] = None
-    snapshot["recent_trades"] = None
-    snapshot["open_interest"] = []
-    snapshot["funding_rate"] = []
+    # Historical derivatives are timestamp-filtered to prevent look-ahead.
+    oi_rows = [
+        item for item in (history.get("open_interest_records") or [])
+        if int(item.get("timestamp") or 0) <= decision_ms
+    ]
+    funding_rows = [
+        item for item in (history.get("funding_records") or [])
+        if int(item.get("timestamp") or 0) <= decision_ms
+    ]
+    snapshot["open_interest"] = [float(item["value"]) for item in oi_rows]
+    snapshot["open_interest_timestamps_ms"] = [int(item["timestamp"]) for item in oi_rows]
+    snapshot["funding_rate"] = [float(item["value"]) for item in funding_rows]
+    snapshot["funding_rate_timestamps_ms"] = [int(item["timestamp"]) for item in funding_rows]
+    # Archived book/trade snapshots are only usable if they existed before the
+    # decision close and are fresh enough. No current snapshot is backfilled.
+    micro = archived_microstructure_at(history.get("symbol"), decision_ms)
+    if micro:
+        snapshot.update(micro)
+    else:
+        snapshot["orderbook"] = None
+        snapshot["recent_trades"] = None
+        snapshot["orderbook_timestamp_ms"] = None
+        snapshot["recent_trades_timestamp_ms"] = None
     return snapshot
 
 
@@ -84,7 +104,8 @@ def _directional_r(direction, entry, exit_price, risk):
 
 
 def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee=0.00055,
-                       spread_rate=0.0002, slippage_rate=0.0003, max_bars=32):
+                       spread_rate=0.0002, slippage_rate=0.0003, max_bars=32,
+                       funding_events=()):
     """Return a cost-adjusted outcome or None when a limit never fills."""
     direction = str(candidate.get("direction") or "").upper()
     if direction not in {"LONG", "SHORT"}:
@@ -201,7 +222,7 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
         exit_weight += remaining
         exit_index = last_offset
     average_exit = exit_notional / max(exit_weight, 1e-12)
-    cost_r = (
+    trading_cost_r = (
         entry * entry_fee
         + entry * spread_rate
         + entry * slippage_rate
@@ -209,10 +230,31 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
         + average_exit * spread_rate
         + average_exit * slippage_rate
     ) / risk
-    net_r = gross_r - cost_r
     closed_candle = future_candles[exit_index or 0]
+    entry_time_ms = int(fill_candle.time)
+    exit_time_ms = _closed_at(closed_candle, "15m")
+    funding_pnl = 0.0
+    for event in funding_events or ():
+        try:
+            event_ms = int(event.get("timestamp") or 0)
+            rate = float(event.get("value"))
+        except (TypeError, ValueError, OverflowError, AttributeError):
+            continue
+        if not (entry_time_ms < event_ms <= exit_time_ms) or not math.isfinite(rate):
+            continue
+        mark = entry
+        for candle in future_candles[:(exit_index or 0) + 1]:
+            if int(candle.time) <= event_ms <= _closed_at(candle, "15m"):
+                mark = float(candle.close)
+                break
+        # Positive funding is paid by longs and received by shorts.
+        funding_pnl += (-1.0 if direction == "LONG" else 1.0) * rate * mark / risk
+    cost_r = trading_cost_r - funding_pnl
+    net_r = gross_r - cost_r
     return {
         "gross_r": round(gross_r, 8),
+        "trading_cost_r": round(trading_cost_r, 8),
+        "funding_pnl_r": round(funding_pnl, 8),
         "cost_r": round(cost_r, 8),
         "net_r": round(net_r, 8),
         "entry": round(entry, 10),
@@ -223,7 +265,7 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
         "closed_at_ms": _closed_at(closed_candle, "15m"),
         "cost_model_id": (
             f"fee{maker_fee:.6f}-{taker_fee:.6f}_spread{spread_rate:.6f}_"
-            f"slip{slippage_rate:.6f}_partial50-30-20_v1"
+            f"slip{slippage_rate:.6f}_funding_historical_partial50-30-20_v2"
         ),
     }
 
@@ -243,6 +285,33 @@ def _summarize(rows):
     }
 
 
+
+def _walk_forward_summary(rows, start_ms, end_ms, folds=5):
+    """Anchored expanding-window validation with sequential untouched test folds."""
+    span = max(0, int(end_ms) - int(start_ms))
+    if span <= 0 or folds < 2:
+        return []
+    test_width = span / (folds + 1)
+    output = []
+    for fold_index in range(folds):
+        test_start = int(start_ms + test_width * (fold_index + 1))
+        test_end = int(start_ms + test_width * (fold_index + 2))
+        train = [row for row in rows if int(row.get("closed_at_ms") or 0) < test_start]
+        test = [
+            row for row in rows
+            if test_start <= int(row.get("closed_at_ms") or 0) < test_end
+        ]
+        output.append({
+            "fold": fold_index + 1,
+            "train_start_ms": int(start_ms),
+            "train_end_ms": test_start,
+            "test_start_ms": test_start,
+            "test_end_ms": test_end,
+            "train": _summarize(train),
+            "test": _summarize(test),
+        })
+    return output
+
 def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
                                 maker_fee=0.0002, taker_fee=0.00055,
                                 spread_rate=0.0002, slippage_rate=0.0003,
@@ -255,6 +324,10 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     _validate_backtest_coverage(history, symbol, days, effective_now)
     attach_historical_smt_universe(history, days, effective_now)
     candles = history.get("15m") or []
+    derivatives = load_historical_derivatives(
+        symbol, int(candles[0].time), int(candles[-1].time) + ENTRY_TIMEFRAME_MS
+    )
+    history.update(derivatives)
     if len(candles) < 320:
         raise RuntimeError(f"{symbol}: yetersiz 15m warmup ({len(candles)} mum).")
     # Split only the actually evaluable interval. This avoids pretending that
@@ -304,6 +377,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
                 maker_fee=maker_fee, taker_fee=taker_fee,
                 spread_rate=spread_rate, slippage_rate=slippage_rate,
                 max_bars=max_holding_bars,
+                funding_events=history.get("funding_records") or [],
             )
             if outcome is None:
                 continue
@@ -349,6 +423,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
             "OOS": _summarize([item for item in rows if item["split"] == "oos"]),
             "all": _summarize(rows),
             "trades": rows,
+            "walk_forward": _walk_forward_summary(rows, evaluation_start, evaluation_end),
         }
     return {
         "symbol": symbol,
@@ -363,10 +438,14 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
             source_revision=revision,
             run_id=run_id,
         ),
+        "derivatives_data_quality": history.get("derivatives_data_quality") or {},
+        "microstructure_archive": "LOCAL_TIMESTAMPED_ARCHIVE_ONLY",
         "historical_data_limitations": [
-            "Order-flow engine is not evaluated: historical OHLCV does not contain timestamped historical order-book snapshots or taker trades.",
-            "Liquidation proxy is not evaluated: historical OI and funding series are not currently attached to this replay.",
-            "Reported costs use configured fee/spread/slippage assumptions, not actual exchange fills.",
+            "Walk-forward uses anchored expanding training windows and sequential test folds; it does not auto-tune parameters.",
+            "Funding costs are applied only at historical settlement timestamps returned by the exchange; if funding history is unavailable, outcomes must not be treated as fully cost-complete.",
+            "Order-flow replay requires previously archived timestamped order-book/trade snapshots. No historical book is fabricated or backfilled.",
+            "Liquidation cascade uses historical OI/funding plus archived trade flow where available; it remains a proxy, not an exchange liquidation-event feed.",
+            "Fees, spread and slippage remain configurable execution assumptions, not actual exchange fills.",
         ],
     }
 
