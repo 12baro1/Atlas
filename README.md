@@ -105,6 +105,26 @@ Walk-forward raporunda parametreler değiştirilmez. Eski parçalar eğitim/IS, 
 
 Backtest geçmiş veriyi simüle eder; gerçek piyasa dolumunu veya gelecekteki performansı garanti etmez.
 
+## 7 strateji backtesti
+
+Yedi motoru ayrı ayrı tarihsel replay ile ölçmek için:
+
+```bash
+python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
+```
+
+Bu replay yalnızca kapanmış mumlarla karar verir; MARKET girişini sonraki 15m mum açılışında, LIMIT girişini fiyat gerçekten limit seviyesine dokunursa doldurur. Aynı mumda SL ve TP birlikte görülürse SL önce kabul edilir. Komisyon, spread ve slippage varsayımları net R'den düşülür.
+
+Maliyet modeli ve IS/OOS kayıtlarını yerel performans günlüğüne yazmak için açıkça `--persist` ekle:
+
+```bash
+python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30 --persist
+```
+
+Performans kayıtları sembol, rejim ve kod revizyonuna göre ayrılır. Kod revizyonu değiştiğinde eski sonuçlar yeni sürümün seçiminde kullanılmaz. Minimum örneklem ve güven sınırı geçilmeden deneysel strateji seçime terfi etmez.
+
+**Tarihsel veri sınırı:** Bybit OHLCV arşivinde geçmiş order-book/taker-trade snapshot'ı bulunmadığı için Order Flow Momentum motoru bu replay'de ölçülmez. Aynı şekilde geçmiş OI/funding serileri bu replay'e henüz bağlanmadığından Liquidation Cascade motoru ölçülmez. Bu iki motor için "işlem yok" sonucu başarısız strateji anlamına gelmez; gerekli tarihsel veri mevcut değildir. Funding maliyeti de replay'de henüz modellenmez. Maliyet varsayımları gerçek dolum garantisi değildir.
+
 ## Güncelleme
 
 ```bash
