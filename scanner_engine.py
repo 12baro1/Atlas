@@ -31,7 +31,7 @@ class ScannerEngine:
         is_strategy_plan = isinstance(result_payload.get("strategy_lab"), dict)
         source_risk = result_payload.get("risk") or {}
         source_rr = result_payload.get("rr") or {}
-        direction = card.get("direction")
+        direction = card.get("direction") if is_strategy_plan else (result_payload.get("signal") or {}).get("signal")
         entry = _finite_number(card.get("entry") if is_strategy_plan else source_risk.get("entry"))
         stop = _finite_number(card.get("stop_loss") if is_strategy_plan else source_risk.get("stop_loss"))
         target_source = (card.get("tp_levels") or []) if is_strategy_plan else [source_risk.get(key) for key in ("tp1", "tp2", "tp3")]
