@@ -378,12 +378,20 @@ def _regime(data):
     closes = _series(candles)
     atr = _atr(candles)
     fast, slow = _ema(closes, 20), _ema(closes, 50)
-    if atr is None or fast is None or slow is None or not closes:
+    adx_value = _adx(candles)
+    efficiency = _efficiency_ratio(closes, 20)
+    if None in (atr, fast, slow, adx_value, efficiency) or not closes:
         return {"label": "UNKNOWN", "trend": "NEUTRAL", "strength": 0.0}
     distance = abs(fast - slow) / atr
     trend = "BULLISH" if fast > slow else "BEARISH" if fast < slow else "NEUTRAL"
-    label = "TREND" if distance >= 0.65 else "RANGE"
-    # A high-volatility flag requires a relative ATR expansion, not a fixed coin price threshold.
+    # EMA separation alone confuses directional trends with noisy, high-beta chop.
+    if distance >= 0.65 and adx_value >= 18.0 and efficiency >= 0.25:
+        label = "TREND"
+    elif distance <= 0.65 and adx_value < 22.0 and efficiency <= 0.35:
+        label = "RANGE"
+    else:
+        label = "TRANSITION"
+    # A high-volatility flag requires relative ATR expansion, not a fixed coin price threshold.
     atr_percentages = []
     for end in range(max(15, len(candles) - 80), len(candles) + 1):
         sample = candles[:end]
@@ -393,7 +401,11 @@ def _regime(data):
             atr_percentages.append(sample_atr / close)
     if len(atr_percentages) >= 10 and atr_percentages[-1] > median(atr_percentages[:-1]) * 1.5:
         label = "HIGH_VOLATILITY"
-    return {"label": label, "trend": trend, "strength": round(distance, 3)}
+    return {
+        "label": label, "trend": trend, "strength": round(distance, 3),
+        "adx": round(adx_value, 2), "efficiency_ratio": round(efficiency, 3),
+        "atr_pct": round(atr / closes[-1], 6) if closes[-1] > 0 else None,
+    }
 
 
 def _trend_pullback(data):
@@ -1016,12 +1028,12 @@ def _smc_candidate(result):
 def _regime_fit(strategy_id, regime):
     label, trend = regime.get("label"), regime.get("trend")
     preferred = {
-        "trend_pullback": {"TREND": 1.0},
-        "volatility_breakout": {"HIGH_VOLATILITY": 1.0, "TREND": 0.85},
-        "mean_reversion": {"RANGE": 1.0},
-        "liquidation_cascade": {"HIGH_VOLATILITY": 1.0},
-        "orderflow_momentum": {"TREND": 0.9, "HIGH_VOLATILITY": 1.0},
-        "relative_strength": {"TREND": 0.9, "HIGH_VOLATILITY": 0.75},
+        "trend_pullback": {"TREND": 1.0, "TRANSITION": 0.55},
+        "volatility_breakout": {"HIGH_VOLATILITY": 1.0, "TREND": 0.85, "TRANSITION": 0.70},
+        "mean_reversion": {"RANGE": 1.0, "TRANSITION": 0.45},
+        "liquidation_cascade": {"HIGH_VOLATILITY": 1.0, "TRANSITION": 0.70},
+        "orderflow_momentum": {"TREND": 0.9, "HIGH_VOLATILITY": 1.0, "TRANSITION": 0.70},
+        "relative_strength": {"TREND": 0.9, "HIGH_VOLATILITY": 0.75, "TRANSITION": 0.60},
         "smc": {"TREND": 0.85, "RANGE": 0.85, "HIGH_VOLATILITY": 0.85, "UNKNOWN": 0.75},
     }
     fit = preferred.get(strategy_id, {}).get(label, 0.55)
