@@ -71,7 +71,7 @@ def test_smc_is_kept_as_independent_seventh_strategy(monkeypatch):
     report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT"}, smc_result={"unchanged": True})
 
     smc = next(item for item in report["strategies"] if item["strategy_id"] == "smc")
-    assert smc["status"] == "CANDIDATE"
+    assert smc["status"] == "SELECTED"
     assert smc["entry"] == 100.0
     assert smc["experimental"] is False
     assert report["selected"] is smc
@@ -140,6 +140,11 @@ def test_experimental_candidate_is_not_selected_without_validated_performance(mo
     }
     monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(candidate))
     monkeypatch.setattr(strategy_lab, "_regime", lambda data: {"label": "TREND", "trend": "BULLISH", "strength": 1.0})
+    monkeypatch.setattr(strategy_lab, "_risk_validate_candidate", lambda plan: {
+        "eligible": True, "reason": None, "weighted_net_rr": 2.5,
+        "risk_plan": {"final_geometry_reconciled": True, "risk_setup_valid": True,
+                      "weighted_net_rr": 2.5, "weighted_rr": 2.7},
+    })
     report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT"})
 
     assert report["candidate_count"] == 1
@@ -187,9 +192,6 @@ def test_risk_rejection_is_visible_in_strategy_diagnostics(monkeypatch):
     }
     monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(candidate))
     monkeypatch.setattr(strategy_lab, "_regime", lambda data: {"label": "TREND", "trend": "BULLISH", "strength": 1.0})
-    monkeypatch.setattr(strategy_lab, "evaluate_strategy_edge", lambda stats: {
-        "eligible": True, "status": "VALIDATED", "reasons": []
-    })
     monkeypatch.setattr(strategy_lab, "_risk_validate_candidate", lambda plan: {
         "eligible": False, "reason": "TEST_STOP_COST_REJECT", "weighted_net_rr": 0.5, "risk_plan": None
     })
