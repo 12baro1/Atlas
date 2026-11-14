@@ -52,6 +52,7 @@ def test_combined_stats_aggregate_historical_funding_cost_and_quality():
             "gross_profit_rr": 1.2, "gross_loss_rr": 0.0,
             "total_funding_cost_r": 0.1, "funding_events_charged": 2,
             "funding_data_quality": {"funding": "HISTORICAL", "open_interest": "UNAVAILABLE"},
+            "microstructure_data_quality": {"analysis_samples": 10, "archived_snapshots": 2, "orderbook_snapshots": 1, "trade_snapshots": 2},
             "trade_history": [{"gross_rr": 1.2, "net_rr": 1.0, "funding_cost_r": 0.1}],
         }),
         ("ETH", {
@@ -59,6 +60,7 @@ def test_combined_stats_aggregate_historical_funding_cost_and_quality():
             "gross_profit_rr": 0.0, "gross_loss_rr": 0.8,
             "total_funding_cost_r": 0.2, "funding_events_charged": 3,
             "funding_data_quality": {"funding": "UNAVAILABLE", "open_interest": "UNAVAILABLE"},
+            "microstructure_data_quality": {"analysis_samples": 5, "archived_snapshots": 3, "orderbook_snapshots": 2, "trade_snapshots": 3},
             "trade_history": [{"gross_rr": -0.8, "net_rr": -1.0, "funding_cost_r": 0.2}],
         }),
     ])
@@ -66,4 +68,7 @@ def test_combined_stats_aggregate_historical_funding_cost_and_quality():
     assert combined["funding_events_charged"] == 5
     assert combined["funding_data_quality"]["funding"].startswith("MIXED:")
     assert combined["funding_data_quality"]["open_interest"] == "UNAVAILABLE"
+    assert combined["microstructure_data_quality"]["analysis_samples"] == 15
+    assert combined["microstructure_data_quality"]["archived_snapshots"] == 5
+    assert combined["microstructure_data_quality"]["snapshot_coverage_pct"] == 33.33
     assert combined["segment_breakdown"]["entry_type"]["UNKNOWN"]["funding_cost_r"] == 0.3
