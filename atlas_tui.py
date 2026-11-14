@@ -393,7 +393,7 @@ class AtlasTUIApp(App):
             pass
 
     def _animate_code_panel(self) -> None:
-        if not self._busy:
+        if not getattr(self, "_trace_active", False):
             return
         try:
             panel = self.query_one("#events", RichLog)
@@ -536,6 +536,7 @@ class AtlasTUIApp(App):
         self._code_frame_index = 0
         self._log_event(f"ANALYSIS TRACE STARTED  |  {command.upper()}")
         self._motor_cycle_active = not _is_report_command(command)
+        self._trace_active = self._motor_cycle_active
         if _is_symbol_input(command):
             symbol = command.strip().upper()
             self._active_symbol = symbol if "/" in symbol else f"{symbol}/USDT:USDT"
@@ -842,4 +843,5 @@ class AtlasTUIApp(App):
             self._log_event("ANALYSIS COMPLETE  |  Seven strategy generators finished.")
         self._set_status("ANALYSIS COMPLETE  |  MARKET FEED CONTINUES")
         self._busy = False
+        self._trace_active = False
         self._log_event("ANALYSIS TRACE PAUSED  |  Waiting for next command.")
