@@ -551,8 +551,8 @@ class AtlasEngine:
             "rr": execution_state["rr"],
             "dynamic_tp": execution_state["dynamic_tp"],
             "journal": journal_snapshot,
-            "decision": decision_state,,
-            "strategy_lab": strategy_report
+            "decision": decision_state,
+            "strategy_lab": strategy_report,
         }
 
         self.scanner.add(symbol, result_payload)
