@@ -17,6 +17,9 @@ from backtest import (
     _disable_backtest_live_features,
     attach_historical_smt_universe,
     load_historical,
+    _effective_now_ms,
+    _validate_backtest_coverage,
+    _validate_backtest_history,
 )
 from engine import AtlasEngine
 from strategy_lab import SevenStrategyLab
@@ -257,12 +260,19 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     _disable_backtest_live_features()
     now_ms = int(time.time() * 1000)
     history = load_historical(symbol, days=days, now_ms=now_ms)
-    attach_historical_smt_universe(history, days, now_ms)
+    _validate_backtest_history(history, symbol)
+    effective_now = _effective_now_ms(history)
+    _validate_backtest_coverage(history, symbol, days, effective_now)
+    attach_historical_smt_universe(history, days, effective_now)
     candles = history.get("15m") or []
-    evaluation_start = now_ms - int(days * 86_400_000)
-    evaluation_end = _closed_at(candles[-1], "15m") if candles else evaluation_start
     if len(candles) < 320:
         raise RuntimeError(f"{symbol}: yetersiz 15m warmup ({len(candles)} mum).")
+    # Split only the actually evaluable interval. This avoids pretending that
+    # a provider-limited 1,000-candle history covers the full requested horizon.
+    evaluation_start = max(now_ms - int(days * 86_400_000), _closed_at(candles[300], "15m"))
+    evaluation_end = _closed_at(candles[-2], "15m")
+    if evaluation_end <= evaluation_start:
+        raise RuntimeError(f"{symbol}: IS/OOS için yeterli değerlendirme aralığı yok.")
     is_cutoff = evaluation_start + int((evaluation_end - evaluation_start) * 0.70)
 
     engine = AtlasEngine()
