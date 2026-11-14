@@ -168,8 +168,10 @@ class SetupReasoningEngine:
                   htf_fvg, smt, unicorn, cisd, volume_profile, institutional,
                   orderbook, correlation, market_phase, market_regime, breaker=None,
                   ifvg=None, trendline_sweep=None, eqh_eql=None, inducement=None,
-                  premium_discount=None, internal_structure=None):
+                  premium_discount=None, internal_structure=None,
+                  include_event_ids=False):
         supporting, opposing = [], []
+        supporting_event_ids, opposing_event_ids = [], []
         seen_event_ids = set()
 
         def append_evidence(target, label, event_id=None):
@@ -178,6 +180,7 @@ class SetupReasoningEngine:
                 if identity in seen_event_ids:
                     return
                 seen_event_ids.add(identity)
+                (supporting_event_ids if target is supporting else opposing_event_ids).append(identity)
             target.append(label)
 
         expected = "BULLISH" if direction == "LONG" else "BEARISH"
@@ -328,6 +331,8 @@ class SetupReasoningEngine:
                     opposing, "Cross-market counterpressure",
                     correlation.get("event_id"),
                 )
+        if include_event_ids:
+            return supporting, opposing, supporting_event_ids, opposing_event_ids
         return supporting, opposing
 
     def generate(self, *, base_entry, mtf, structure, fvg, orderblocks,
@@ -444,13 +449,13 @@ class SetupReasoningEngine:
                     sweep.get("is_sweep") and sweep_expected and post.get("confirmed")
                     and self._direction(post.get("direction")) == direction
                 )
-                support, opposition = self._evidence(
+                support, opposition, support_event_ids, opposition_event_ids = self._evidence(
                     direction, mtf, sweep, structure, ote, htf_orderblock, htf_fvg,
                     smt, unicorn, cisd, volume_profile, institutional, orderbook,
                     correlation, market_phase, regime, breaker=breaker,
                     ifvg=ifvg, trendline_sweep=trendline_sweep, eqh_eql=eqh_eql,
                     inducement=inducement, premium_discount=premium_discount,
-                    internal_structure=internal_structure,
+                    internal_structure=internal_structure, include_event_ids=True,
                 )
                 # Keep specialist price levels and add the full directional evidence
                 # from the main reasoner, including motors unavailable to EntryOptimizer.
@@ -748,6 +753,8 @@ class SetupReasoningEngine:
                     "entry_distance_label": distance_label,
                     "supporting_evidence": support,
                     "opposing_evidence": opposition,
+                    "supporting_event_ids": support_event_ids,
+                    "opposing_event_ids": opposition_event_ids,
                     "motor_evidence_sources": motor_evidence_sources,
                     "market_context": market_context,
                     "reasoning": (
