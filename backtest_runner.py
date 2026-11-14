@@ -351,6 +351,64 @@ def market_fallback_check(opened, planned_entry, stop, tp1, direction, risk=None
     return net_rr >= minimum_net_rr, net_rr, "rr" if net_rr < minimum_net_rr else "ok"
 
 
+def rebase_remaining_targets(risk, direction, candle, tp_weights=None,
+                             maker_fee_rate=None, taker_fee_rate=None,
+                             spread_rate=None, slippage_rate=None):
+    """Shared stale-target rebase used before a resting LIMIT can fill."""
+    direction = str(direction or "").upper()
+    is_long = direction == "LONG"
+    current_weights = risk.get("target_rebased_weights")
+    if not isinstance(current_weights, dict):
+        current_weights = tp_weights if isinstance(tp_weights, dict) else {}
+    targets = [
+        (index, _num(risk.get(f"tp{index}")), current_weights.get(f"tp{index}", 1.0))
+        for index in range(1, 4)
+        if _num(risk.get(f"tp{index}")) is not None
+    ]
+    if not targets:
+        return False, "no_structural_targets"
+    close = _num(getattr(candle, "close", None))
+    high = _num(getattr(candle, "high", None))
+    low = _num(getattr(candle, "low", None))
+    entry = _num(risk.get("entry"))
+    stop = _num(risk.get("stop_loss"))
+    if None in (close, high, low, entry, stop):
+        return False, "incomplete_levels"
+    remaining = []
+    for _, target, weight in targets:
+        touched = high >= target if is_long else low <= target
+        still_ahead = target > close if is_long else target < close
+        if not touched and still_ahead:
+            remaining.append((target, weight))
+    if not remaining:
+        return False, "no_remaining_structural_target"
+    risk_distance = abs(entry - stop)
+    if risk_distance <= 0:
+        return False, "invalid_structural_risk"
+    target_map = {f"tp{i}": item[0] for i, item in enumerate(remaining[:3], start=1)}
+    rebased_weights = {f"tp{i}": item[1] for i, item in enumerate(remaining[:3], start=1)}
+    cost = estimate_plan_cost(
+        entry_price=entry, targets=target_map, weights=rebased_weights,
+        entry_type="LIMIT",
+        maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002) if maker_fee_rate is None else maker_fee_rate),
+        taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055) if taker_fee_rate is None else taker_fee_rate),
+        spread_rate=float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002) if spread_rate is None else spread_rate),
+        slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003) if slippage_rate is None else slippage_rate),
+    )
+    first_target = remaining[0][0]
+    first_reward = first_target - entry if is_long else entry - first_target
+    net_first_rr = (first_reward - float(cost.get("total", 0.0))) / risk_distance
+    minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
+    if first_reward <= 0 or net_first_rr < minimum_net_rr:
+        return False, "remaining_target_net_rr_below_minimum"
+    for index in range(1, 4):
+        risk[f"tp{index}"] = remaining[index - 1][0] if index <= len(remaining) else None
+    risk["target_rebased_weights"] = rebased_weights
+    risk["target_rebased_after_pre_fill_touch"] = True
+    risk["target_rebase_net_first_rr"] = round(net_first_rr, 4)
+    return True, "remaining_structural_targets_rebased"
+
+
 class BacktestRunner:
     """Fiyat serisini ileri sararak engine sinyallerini tetikler ve sonuç toplar."""
 
@@ -701,67 +759,11 @@ class BacktestRunner:
         return None
 
     def _rebase_remaining_targets(self, risk, direction, candle):
-        """Remove targets already touched before LIMIT fill and validate the remaining plan."""
-        direction = str(direction or "").upper()
-        is_long = direction == "LONG"
-        current_weights = risk.get("target_rebased_weights")
-        if not isinstance(current_weights, dict):
-            current_weights = self.tp_weights if isinstance(self.tp_weights, dict) else {}
-        targets = [
-            (index, _num(risk.get(f"tp{index}")), current_weights.get(f"tp{index}", 1.0))
-            for index in range(1, 4)
-            if _num(risk.get(f"tp{index}")) is not None
-        ]
-        if not targets:
-            return False, "no_structural_targets"
-
-        close = _num(getattr(candle, "close", None))
-        high = _num(getattr(candle, "high", None))
-        low = _num(getattr(candle, "low", None))
-        entry = _num(risk.get("entry"))
-        stop = _num(risk.get("stop_loss"))
-        if None in (close, high, low, entry, stop):
-            return False, "incomplete_levels"
-
-        remaining = []
-        for original_index, target, weight in targets:
-            touched = high >= target if is_long else low <= target
-            still_ahead = target > close if is_long else target < close
-            if not touched and still_ahead:
-                remaining.append((target, weight))
-        if not remaining:
-            return False, "no_remaining_structural_target"
-
-        risk_distance = abs(entry - stop)
-        if risk_distance <= 0:
-            return False, "invalid_structural_risk"
-        target_map = {f"tp{i}": item[0] for i, item in enumerate(remaining[:3], start=1)}
-        rebased_weights = {
-            f"tp{i}": item[1] for i, item in enumerate(remaining[:3], start=1)
-        }
-        cost = estimate_plan_cost(
-            entry_price=entry,
-            targets=target_map,
-            weights=rebased_weights,
-            entry_type="LIMIT",
-            maker_fee_rate=self.maker_fee_rate,
-            taker_fee_rate=self.taker_fee_rate,
-            spread_rate=self.spread_rate,
-            slippage_rate=self.slippage_rate,
+        return rebase_remaining_targets(
+            risk, direction, candle, tp_weights=self.tp_weights,
+            maker_fee_rate=self.maker_fee_rate, taker_fee_rate=self.taker_fee_rate,
+            spread_rate=self.spread_rate, slippage_rate=self.slippage_rate,
         )
-        first_target = remaining[0][0]
-        first_reward = first_target - entry if is_long else entry - first_target
-        net_first_rr = (first_reward - float(cost.get("total", 0.0))) / risk_distance
-        minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
-        if first_reward <= 0 or net_first_rr < minimum_net_rr:
-            return False, "remaining_target_net_rr_below_minimum"
-
-        for index in range(1, 4):
-            risk[f"tp{index}"] = remaining[index - 1][0] if index <= len(remaining) else None
-        risk["target_rebased_weights"] = rebased_weights
-        risk["target_rebased_after_pre_fill_touch"] = True
-        risk["target_rebase_net_first_rr"] = round(net_first_rr, 4)
-        return True, "remaining_structural_targets_rebased"
 
     def _market_fallback_check(self, opened, planned_entry, stop, tp1, direction, risk):
         return market_fallback_check(
