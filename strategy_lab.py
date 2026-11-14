@@ -514,21 +514,28 @@ def _relative_strength(data):
     atr = _atr(candles)
     if len(closes) < 15 or atr is None:
         return None
-    benchmark = "ETH" if str(data.get("symbol") or "").upper().startswith("BTC/") else "BTC"
+    symbol = str(data.get("symbol") or "").upper()
     universe = data.get("correlation_universe") or {}
-    benchmark_candles = universe.get(benchmark) or []
-    benchmark_closes = _series(benchmark_candles)
-    if len(benchmark_closes) < 15:
-        return None
+    benchmark_keys = ["ETH"] if symbol.startswith("BTC/") else ["BTC"] if symbol.startswith("ETH/") else ["BTC", "ETH"]
+    benchmark_returns = []
     try:
         own_time = int(candles[-1].time)
-        benchmark_time = int(benchmark_candles[-1].time)
     except (AttributeError, TypeError, ValueError, OverflowError):
         return None
-    if abs(own_time - benchmark_time) > 4 * 60 * 60 * 1000:
-        return None
+    for benchmark_key in benchmark_keys:
+        benchmark_candles = universe.get(benchmark_key) or []
+        benchmark_closes = _series(benchmark_candles)
+        if len(benchmark_closes) < 15:
+            return None
+        try:
+            benchmark_time = int(benchmark_candles[-1].time)
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            return None
+        if abs(own_time - benchmark_time) > 4 * 60 * 60 * 1000:
+            return None
+        benchmark_returns.append(benchmark_closes[-1] / benchmark_closes[-13] - 1.0)
     own_return = closes[-1] / closes[-13] - 1.0
-    benchmark_return = benchmark_closes[-1] / benchmark_closes[-13] - 1.0
+    benchmark_return = sum(benchmark_returns) / len(benchmark_returns)
     relative = own_return - benchmark_return
     e20 = _ema(closes, 20)
     if e20 is None:
