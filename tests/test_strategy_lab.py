@@ -165,6 +165,21 @@ def test_plan_uses_real_swing_invalidation_and_three_opposing_liquidity_levels()
     assert plan["tp3"] == 111
     assert plan["rr_tp1"] > 1.25
 
+    # Mirror the same confirmed structure for a SHORT: swing highs define
+    # invalidation and descending swing lows define the three targets.
+    short_highs = [201, 202, 203, 205, 203, 202, 204, 205, 208, 206, 205, 207, 208, 211, 209, 208, 207]
+    short_lows = [199, 198, 199, 195, 197, 198, 196, 195, 192, 194, 195, 193, 192, 191, 193, 194, 195]
+    short_candles = [
+        Candle(200, high, low, 199)
+        for high, low in zip(short_highs, short_lows)
+    ]
+    short_plan = _valid_plan("SHORT", 200, 202, 1, short_candles, "trend_pullback", 70)
+
+    assert short_plan is not None
+    assert short_plan["tp3"] < short_plan["tp2"] < short_plan["tp1"] < 200 < short_plan["stop_loss"]
+    assert short_plan["stop_model"] == "CONFIRMED_SWING_INVALIDATION_ATR_BUFFER"
+    assert short_plan["target_model"] == "CONFIRMED_OPPOSING_SWING_LIQUIDITY"
+
 
 
 def test_diagnostics_report_every_strategy_and_status_counts():
