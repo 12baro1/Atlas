@@ -675,6 +675,7 @@ def _combine_stats(all_stats):
             for label, trades in sorted(groups.items())
         }
 
+    combined["total_cost_rr"] = round(combined["total_execution_cost_rr"] + combined["total_funding_cost_r"], 4)
     combined["losses"] = combined["total"] - combined["wins"]
     if combined["total"]:
         combined["winrate"] = round(combined["wins"] / combined["total"] * 100, 2)
