@@ -378,6 +378,10 @@ class BacktestRunner:
         self.funding_cost_r = 0.0
         self.funding_events_charged = 0
         self.funding_data_quality = {}
+        self.microstructure_samples = 0
+        self.microstructure_snapshots = 0
+        self.microstructure_orderbooks = 0
+        self.microstructure_trade_snapshots = 0
         # Diagnostic counters explain why historical analysis produces no trades.
         self.analysis_calls = 0
         self.empty_results = 0
@@ -471,6 +475,13 @@ class BacktestRunner:
                 micro = snapshot_at(window["symbol"], decision_time_ms) or {}
             except Exception:
                 micro = {}
+            self.microstructure_samples += 1
+            if micro.get("microstructure_snapshot_timestamp_ms"):
+                self.microstructure_snapshots += 1
+            if isinstance(micro.get("orderbook"), dict):
+                self.microstructure_orderbooks += 1
+            if isinstance(micro.get("recent_trades"), list) and micro.get("recent_trades"):
+                self.microstructure_trade_snapshots += 1
             window.update(micro)
 
             self.analysis_calls += 1
