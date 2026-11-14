@@ -351,6 +351,10 @@ class AtlasTUIApp(App):
             ])
             if selected.get("entry_reference"):
                 lines.append(f"Giriş fiyatı kaynağı: {selected.get('entry_reference')}")
+            if selected.get("target_model") == "R_MULTIPLE":
+                lines.append("TP modeli: sabit R katları (1.25R / 2R / 3R); yapısal hedef değildir.")
+            elif selected.get("target_model") == "SMC_STRUCTURAL":
+                lines.append("TP modeli: mevcut SMC yapısal hedefleri.")
             if selected.get("estimated_net_rr_tp1") is not None:
                 lines.append(f"TP1 net RR (yalnız ücret tahmini): {selected.get('estimated_net_rr_tp1')} — spread/slippage dahil değildir.")
             if selected.get("estimated_net_rr") is not None:
