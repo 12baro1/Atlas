@@ -672,9 +672,9 @@ def _absorption_proxy(flow, candle, atr):
     if None in (opened, close) or trade_count < 20:
         return None
     price_progress = (close - opened) / atr
-    if delta >= 0.18 and price_progress <= 0.15 and imbalance <= -0.10:
+    if delta >= 0.18 and abs(price_progress) <= 0.15 and imbalance <= -0.10:
         return "BUYER_FLOW_ABSORBED"
-    if delta <= -0.18 and price_progress >= -0.15 and imbalance >= 0.10:
+    if delta <= -0.18 and abs(price_progress) <= 0.15 and imbalance >= 0.10:
         return "SELLER_FLOW_ABSORBED"
     return None
 
