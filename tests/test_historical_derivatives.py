@@ -18,7 +18,7 @@ class FakeExchange:
 def test_historical_derivatives_are_timestamped_and_sorted(monkeypatch):
     monkeypatch.setattr(historical_derivatives, "exchange", FakeExchange())
     result = historical_derivatives.load_historical_derivatives(
-        "BTC/USDT:USDT", 1_700_000_000_000, 1_700_010_000_000
+        "BTC/USDT:USDT", 1_700_000_000_000, 1_700_100_000_000
     )
     assert result["open_interest_records"] == [
         {"timestamp": 1_700_000_000_000, "value": 100.0},
