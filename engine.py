@@ -462,10 +462,10 @@ class AtlasEngine:
                     "candidate_count": strategy_report.get("candidate_count", 0),
                     "thesis": selected.get("strategy") or selected.get("strategy_id"),
                     "supporting_evidence": list(selected.get("reasons") or []),
-                    "opposing_evidence": [],
-                    "supporting_event_ids": [],
-                    "opposing_event_ids": [],
-                    "market_context": [strategy_report.get("regime", {}).get("label", "UNKNOWN")],
+                    "opposing_evidence": list(selected.get("opposing_evidence") or []),
+                    "supporting_event_ids": list(selected.get("supporting_event_ids") or []),
+                    "opposing_event_ids": list(selected.get("opposing_event_ids") or []),
+                    "market_context": list(selected.get("market_context") or [strategy_report.get("regime", {}).get("label", "UNKNOWN")]),
                 },
             })
             if selected.get("strategy_id") != "smc":
