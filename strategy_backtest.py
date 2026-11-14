@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import argparse
 import math
-import os
-import subprocess
 import time
 from collections import defaultdict
 
@@ -29,18 +27,6 @@ from strategy_outcome_journal import StrategyOutcomeJournal
 
 ENTRY_TIMEFRAME_MS = TIMEFRAME_DURATION_MS["15m"]
 TP_WEIGHTS = (0.5, 0.3, 0.2)
-
-
-def _revision():
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-            capture_output=True, text=True, check=True
-        )
-        return result.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return "unknown"
 
 
 def _closed_at(candle, timeframe):
@@ -281,7 +267,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     engine = AtlasEngine()
     lab = SevenStrategyLab()
     journal = StrategyOutcomeJournal()
-    revision = _revision()
+    revision = journal.current_revision()
     all_outcomes = defaultdict(list)
     active_until = {}
     calls = 0
