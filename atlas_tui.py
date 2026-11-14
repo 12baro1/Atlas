@@ -648,53 +648,50 @@ class AtlasTUIApp(App):
                 "Karar ayrıntısı çıktı panelinde."
             )
         strategies = report.get("strategies") or []
-        rows = ["DURUM       STRATEJİ"]
-        for item in strategies[:7]:
+        def strategy_label(item):
             name = str(item.get("strategy") or item.get("strategy_id") or "STRATEJİ")
             status = str(item.get("status") or "NO_SETUP").upper()
-            direction = str(item.get("direction") or "—").upper()
             if status == "SELECTED":
-                marker = "[SEC]"
+                marker = "SEC"
             elif status == "BLOCKED_COMMON_FILTER":
-                marker = "[RED]"
+                marker = "RED"
             elif status == "FILTERED_NOT_SELECTED":
-                marker = "[OK ]"
+                marker = "OK "
             elif status == "ERROR":
-                marker = "[ERR]"
+                marker = "ERR"
             else:
-                marker = "[---]"
-            rows.append(f"{marker} {name[:24]}  {direction}")
-        if len(strategies) < 7:
-            rows.append(f"{7 - len(strategies)} strateji raporu eksik")
+                marker = "---"
+            return f"{marker}:{name[:13]}"
+        labels = [strategy_label(item) for item in strategies[:7]]
+        rows = []
+        for index in range(0, len(labels), 2):
+            left = labels[index]
+            right = labels[index + 1] if index + 1 < len(labels) else ""
+            rows.append(f"{left:<19} {right}")
+        if not rows:
+            rows = ["Strateji verisi gelmedi."]
         selected = report.get("selected")
         regime = report.get("regime") or {}
         symbol = result.get("symbol") or outcome.get("symbol") or "UNKNOWN"
         raw_count = report.get("candidate_count", 0)
         passed_count = report.get("validated_candidate_count", 0)
         decision_lines = [
-            f"SEMBOL: {symbol}",
-            f"REJİM: {regime.get('label', 'UNKNOWN')}  |  YÖN: {regime.get('trend', '—')}",
-            f"HAM SETUP: {raw_count}  |  FİLTREYİ GEÇEN: {passed_count}",
+            f"{symbol} | {regime.get('label', 'UNKNOWN')} / {regime.get('trend', '—')}",
+            f"HAM SETUP: {raw_count}  |  FİLTRE: {passed_count} GEÇTİ",
         ]
         if isinstance(selected, dict):
             decision_lines.extend([
-                f"SON KARAR: {selected.get('direction', '—')} / {selected.get('entry_type', '—')}",
-                f"GİRİŞ: {selected.get('entry', '—')}  SL: {selected.get('stop_loss', '—')}",
-                f"TP1: {selected.get('tp1', '—')}  TP2: {selected.get('tp2', '—')}",
-                f"TP3: {selected.get('tp3', '—')}  RR: {selected.get('rr_tp1', '—')}",
-                f"STRATEJİ: {selected.get('strategy', '—')}",
+                f"SEÇİM: {selected.get('direction', '—')} {selected.get('entry_type', '—')} | {selected.get('strategy', '—')}",
+                f"ENTRY: {selected.get('entry', '—')}  SL: {selected.get('stop_loss', '—')}",
+                f"TP1 {selected.get('tp1', '—')} | TP2 {selected.get('tp2', '—')} | TP3 {selected.get('tp3', '—')} | RR {selected.get('rr_tp1', '—')}",
             ])
         else:
             decision_lines.extend([
                 "SON KARAR: İŞLEME GİRME",
                 "Geçerli setup seçilmedi.",
+                "Ret ayrıntıları çıktı panelinde.",
             ])
-            blockers = []
-            for item in strategies:
-                blockers.extend(item.get("rejection_reasons") or [])
-            if blockers:
-                decision_lines.append("ENGEL: " + " / ".join(dict.fromkeys(map(str, blockers)))[:100])
-        return "\n".join(rows), "\n".join(decision_lines)
+        return "\\n".join(rows), "\\n".join(decision_lines)
 
     def _finish(self, message: str, dashboard=None) -> None:
         self._show(message)
