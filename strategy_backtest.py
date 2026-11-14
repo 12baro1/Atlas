@@ -198,7 +198,7 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
     if risk <= 0 or not simulation_candles:
         return None
 
-    tp_weights = _configured_partial_tp_weights()
+    tp_weights = candidate.get("partial_exit_weights") or _configured_partial_tp_weights()
     outcome = simulate_trade_partial(
         entry=entry, stop_loss=stop, targets=targets,
         future_candles=simulation_candles, direction=direction,
