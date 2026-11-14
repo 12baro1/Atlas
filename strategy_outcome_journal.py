@@ -129,6 +129,7 @@ class StrategyOutcomeJournal:
             "strategy_lab.py", "strategy_performance.py",
             "strategy_backtest.py", "strategy_outcome_journal.py",
             "historical_derivatives.py", "microstructure_archive.py",
+            "sector_universe.py", "backtest.py",
             "data_engine.py", "orderbook_engine.py", "engine.py",
             "risk_engine.py", "rr_engine.py", "dynamic_tp_engine.py",
             "timing.py", "utils/signal_card.py",
