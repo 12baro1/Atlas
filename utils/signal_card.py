@@ -284,13 +284,6 @@ def build_selected_strategy_card(result):
         return card
 
     strategy_id = str(selected.get("strategy_id") or "").strip()
-    if strategy_id == "smc":
-        card = build_signal_card(result)
-        card["strategy_id"] = strategy_id
-        card["strategy"] = selected.get("strategy") or "SMC"
-        card["experimental"] = False
-        return card
-
     direction = str(selected.get("direction") or "").upper()
     entry_type = str(selected.get("entry_type") or "").upper()
     try:
