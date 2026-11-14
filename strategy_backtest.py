@@ -348,6 +348,11 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     )))
     run_id = hashlib.sha256(replay_fingerprint.encode("utf-8")).hexdigest()
     run_created_at_ms = int(time.time() * 1000)
+    funding_available = (history.get("derivatives_data_quality") or {}).get("funding") == "HISTORICAL"
+    persistence_enabled = bool(persist_outcomes and funding_available)
+    persistence_block_reason = None
+    if persist_outcomes and not funding_available:
+        persistence_block_reason = "Historical funding series unavailable; cost-complete outcomes were not persisted."
     all_outcomes = defaultdict(list)
     active_until = {}
     calls = 0
@@ -393,7 +398,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
                 "regime": (report.get("regime") or {}).get("label", "UNKNOWN"),
             }
             all_outcomes[strategy_id].append(record)
-            if persist_outcomes:
+            if persistence_enabled:
                 trade_id = f"{run_id}|{strategy_id}|{fill_time}"
                 journal.record_outcome(
                     strategy_id=strategy_id,
@@ -440,6 +445,8 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
         ),
         "derivatives_data_quality": history.get("derivatives_data_quality") or {},
         "microstructure_archive": "LOCAL_TIMESTAMPED_ARCHIVE_ONLY",
+        "persistence_enabled": persistence_enabled,
+        "persistence_block_reason": persistence_block_reason,
         "historical_data_limitations": [
             "Walk-forward uses anchored expanding training windows and sequential test folds; it does not auto-tune parameters.",
             "Funding costs are applied only at historical settlement timestamps returned by the exchange; if funding history is unavailable, outcomes must not be treated as fully cost-complete.",
@@ -477,6 +484,16 @@ def main():
                 f"{strategy_id:<24} {split:<5} {item['trades']:>6} "
                 f"{item['win_rate_pct']:>7.2f}% {item['net_profit_factor']:>8.3f} "
                 f"{item['net_expectancy_r']:>9.4f} {item['net_r']:>9.3f}"
+            )
+    if report.get("persistence_block_reason"):
+        print(f"KAYIT ENGELLENDİ | {report['persistence_block_reason']}")
+    for strategy_id, payload in report["results"].items():
+        print(f"WALK-FORWARD | {strategy_id}")
+        for fold in payload["walk_forward"]:
+            test = fold["test"]
+            print(
+                f"  Fold {fold['fold']}: test={test['trades']} işlem "
+                f"EXP={test['net_expectancy_r']:.4f}R PF={test['net_profit_factor']:.3f}"
             )
     for note in report["historical_data_limitations"]:
         print(f"VERİ SINIRI | {note}")
