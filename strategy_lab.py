@@ -17,6 +17,27 @@ from config import Config
 _ORDERBOOK_ENGINE = OrderBookEngine()
 
 
+def _configured_partial_tp_weights():
+    raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2")
+    if isinstance(raw, dict):
+        values = [raw.get(f"tp{i}", 1.0) for i in range(1, 4)]
+    elif isinstance(raw, str):
+        values = raw.split(",")
+    elif isinstance(raw, (list, tuple)):
+        values = list(raw)
+    else:
+        values = []
+    weights = {}
+    for index in range(3):
+        value = values[index] if index < len(values) else 1.0
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            number = 0.0
+        weights[f"tp{index + 1}"] = number if math.isfinite(number) and number > 0 else 0.0
+    return weights if sum(weights.values()) > 0 else {"tp1": 1.0, "tp2": 1.0, "tp3": 1.0}
+
+
 STRATEGY_NAMES = {
     "trend_pullback": "Trend Following + Pullback",
     "volatility_breakout": "Volatility Breakout",
