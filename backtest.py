@@ -1031,6 +1031,22 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                     symbol, days=chunk_days, now_ms=chunk_now_ms,
                     listing_time_ms=listing_time_ms,
                 )
+                # Historical derivatives are loaded independently. Missing
+                # endpoints stay unavailable; never substitute live values.
+                from historical_derivatives import load_historical_derivatives
+                history_15m = data.get("15m") or []
+                if history_15m:
+                    derivative_start = int(history_15m[0].time)
+                    derivative_end = int(history_15m[-1].time) + TIMEFRAME_DURATION_MS["15m"]
+                    data.update(load_historical_derivatives(symbol, derivative_start, derivative_end))
+                else:
+                    data.update({
+                        "open_interest_records": [], "funding_records": [],
+                        "derivatives_data_quality": {
+                            "open_interest": "UNAVAILABLE_NO_OHLCV",
+                            "funding": "UNAVAILABLE_NO_OHLCV",
+                        },
+                    })
                 attach_historical_smt_universe(data, chunk_days, chunk_now_ms)
                 _validate_backtest_history(data, symbol)
                 effective_now_ms = _effective_now_ms(data)
