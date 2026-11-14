@@ -130,7 +130,7 @@ class AtlasTUIApp(App):
     """One screen, one command input, output shown locally only."""
 
     TITLE = "ATLAS"
-    SUB_TITLE = "SMC terminal | local-only | no AI | no Telegram"
+    SUB_TITLE = "7-strategy terminal | local-only | no AI | no Telegram"
 
     CSS = """
     Screen {
@@ -290,22 +290,76 @@ class AtlasTUIApp(App):
                         "Sembolün USDT perpetual piyasasında bulunduğunu kontrol et."
                     )
                 else:
-                    card = build_signal_card(outcome["result"])
-                    action = str(card.get("decision_action") or "").upper()
-                    direction = card.get("direction") in {"LONG", "SHORT"}
-                    entry_type = str(card.get("entry_type") or "").upper()
-                    has_levels = bool(card.get("entry")) and bool(card.get("stop_loss")) and len(card.get("tp_levels") or []) >= 1
-                    market_signal = action in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and direction and entry_type == "MARKET" and has_levels
-                    limit_signal = action in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and entry_type == "LIMIT" and direction and has_levels
-                    if market_signal or limit_signal:
-                        result_text = format_card_text(card)
-                        result_text += f"\n\nAnaliz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn"
+                    strategy_report = (outcome.get("result") or {}).get("strategy_lab")
+                    if isinstance(strategy_report, dict):
+                        result_text = self._format_strategy_report(outcome)
                     else:
-                        result_text = "Şu an girilebilir MARKET/LIMIT sinyali yok."
+                        card = build_signal_card(outcome["result"])
+                        action = str(card.get("decision_action") or "").upper()
+                        direction = card.get("direction") in {"LONG", "SHORT"}
+                        entry_type = str(card.get("entry_type") or "").upper()
+                        has_levels = bool(card.get("entry")) and bool(card.get("stop_loss")) and len(card.get("tp_levels") or []) >= 1
+                        market_signal = action in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and direction and entry_type == "MARKET" and has_levels
+                        limit_signal = action in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and entry_type == "LIMIT" and direction and has_levels
+                        if market_signal or limit_signal:
+                            result_text = format_card_text(card)
+                        else:
+                            result_text = "Şu an girilebilir MARKET/LIMIT sinyali yok."
+                        result_text += f"\n\nAnaliz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn"
             self.call_from_thread(self._finish, result_text)
         except Exception:
             self.call_from_thread(self._finish, traceback.format_exc())
 
+
+    def _format_strategy_report(self, outcome: dict) -> str:
+        result = outcome.get("result") or {}
+        report = result.get("strategy_lab") or {}
+        regime = report.get("regime") or {}
+        lines = [
+            f"7 STRATEJİ ANALİZİ | {result.get('symbol') or outcome.get('symbol') or 'UNKNOWN'}",
+            f"Piyasa rejimi: {regime.get('label', 'UNKNOWN')} | Yön: {regime.get('trend', 'NEUTRAL')}",
+            "",
+            "STRATEJİ SONUÇLARI",
+        ]
+        for item in report.get("strategies") or []:
+            name = item.get("strategy") or item.get("strategy_id") or "UNKNOWN"
+            status = item.get("status")
+            if status == "CANDIDATE":
+                lines.append(
+                    f"• {name}: ADAY | {item.get('direction')} | "
+                    f"puan {item.get('selection_score', 0):.1f} | "
+                    f"rejim uyumu {item.get('regime_fit', 0):.2f}"
+                )
+            elif status == "ERROR":
+                lines.append(f"• {name}: HATA | {item.get('reason', 'bilinmeyen hata')}")
+            else:
+                lines.append(f"• {name}: Kurulum yok")
+        selected = report.get("selected")
+        lines.extend(["", "SEÇİLEN STRATEJİ"])
+        if not isinstance(selected, dict):
+            lines.append("Geçerli aday yok. Zorla işlem planı üretilmedi.")
+        else:
+            if selected.get("experimental"):
+                lines.append("DENEYSEL STRATEJİ — önce demo/backtest doğrulaması gerekir.")
+            lines.extend([
+                f"Strateji: {selected.get('strategy')}",
+                f"Yön: {selected.get('direction')} | Emir: {selected.get('entry_type')}",
+                f"Giriş: {selected.get('entry')}",
+                f"Stop Loss: {selected.get('stop_loss')}",
+                f"TP1: {selected.get('tp1')} | TP2: {selected.get('tp2')} | TP3: {selected.get('tp3')}",
+                f"Brüt RR: {selected.get('rr_tp1')} / {selected.get('rr_tp2')} / {selected.get('rr_tp3')}",
+            ])
+            if selected.get("estimated_net_rr_tp1") is not None:
+                lines.append(f"Model net RR (TP1): {selected.get('estimated_net_rr_tp1')} — gerçek fill/slippage garantisi değildir.")
+            for reason in selected.get("reasons") or []:
+                lines.append(f"• {reason}")
+        lines.extend([
+            "",
+            "Performans durumu: Strateji bazlı yeterli backtest/işlem örneklemi henüz yok.",
+            report.get("warning") or "",
+            f"Analiz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn",
+        ])
+        return "\\n".join(line for line in lines if line)
 
     def _format_performance(self, command: str) -> str:
         signal = self.runtime.signal_performance()
