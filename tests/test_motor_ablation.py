@@ -1,4 +1,4 @@
-from motor_ablation import DisabledMotor, _compare, _snapshot_for_index, _sample_indices
+from motor_ablation import DisabledMotor, _compare, _snapshot_for_index, _sample_indices, _outcome_sensitivity
 
 
 class _Candle:
@@ -51,3 +51,20 @@ def test_default_ablation_samples_are_spread_across_loaded_history():
 def test_explicit_ablation_step_keeps_fixed_recent_spacing():
     assert _sample_indices(999, 3, step=96) == [807, 903, 999]
     assert _sample_indices(200, 3) == []
+
+
+def test_motor_ablation_reports_sampled_net_r_counterfactual():
+    result = _outcome_sensitivity(
+        {"net_rr": 1.25, "gross_rr": 1.5, "direction": "LONG", "entry_type": "MARKET"},
+        {"net_rr": 0.75, "gross_rr": 1.0, "direction": "LONG", "entry_type": "LIMIT"},
+    )
+    assert result["baseline_executable"] is True
+    assert result["ablated_executable"] is True
+    assert result["tradeability_changed"] is False
+    assert result["delta_net_rr"] == -0.5
+
+
+def test_motor_ablation_marks_tradeability_change_without_fabricating_delta():
+    result = _outcome_sensitivity({"net_rr": 1.0}, None)
+    assert result["tradeability_changed"] is True
+    assert result["delta_net_rr"] is None
