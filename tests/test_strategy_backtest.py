@@ -1,5 +1,6 @@
 from strategy_backtest import simulate_candidate, _snapshot_at
 from backtest_runner import BacktestRunner
+from backtest import _configured_partial_tp_weights
 
 
 def candidate(direction="LONG", entry_type="MARKET"):
@@ -187,7 +188,7 @@ def test_smc_and_strategy_replays_share_marketable_limit_fill_cost_and_funding()
     runner = BacktestRunner(
         maker_fee_rate=fees["maker_fee"], taker_fee_rate=fees["taker_fee"],
         spread_rate=fees["spread_rate"], slippage_rate=fees["slippage_rate"],
-        tp_weights={"tp1": 0.5, "tp2": 0.3, "tp3": 0.2},
+        tp_weights=_configured_partial_tp_weights(),
     )
     smc = runner._to_trade(
         {
