@@ -91,3 +91,18 @@ def test_selector_returns_one_original_candidate_without_mixing_levels(monkeypat
     assert report["selected"]["stop_loss"] == 204.0
     assert report["selected"]["tp1"] == 195.0
     assert report["selected"]["reasons"] == ["trend only"]
+
+
+
+def test_plan_rejects_fee_drag_that_erases_tp1_reward():
+    candles = [Candle(100, 101, 99, 100)]
+    # 0.01 price risk on a 100 price creates fees larger than the 1.25R target.
+    assert _valid_plan("LONG", 100, 99.99, 0.01, candles, "trend_pullback", 70) is None
+
+
+def test_current_price_prefers_fresh_ticker_over_last_closed_candle():
+    from strategy_lab import _current_price
+
+    candles = [Candle(100, 102, 99, 101)]
+    assert _current_price({"current_price": 103.5, "15m": candles}) == 103.5
+    assert _current_price({"15m": candles}) == 101
