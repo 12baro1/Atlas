@@ -1,4 +1,5 @@
 from utils.signal_card import build_selected_strategy_card, format_card_text
+from scanner_engine import ScannerEngine
 
 
 def _result(selected):
@@ -76,3 +77,33 @@ def test_missing_selected_plan_does_not_fall_back_to_smc_execute():
     card = build_selected_strategy_card(result)
     assert card["decision_action"] == "SKIP"
     assert card["direction"] is None
+
+def test_selected_short_plan_preserves_directional_price_geometry():
+    card = build_selected_strategy_card(_result(_candidate(
+        direction="SHORT", entry=100.0, stop_loss=102.0,
+        tp1=97.5, tp2=96.0, tp3=94.0,
+    )))
+    assert card["direction"] == "SHORT"
+    assert card["stop_loss"] > card["entry"] > card["tp_levels"][0]
+
+
+def test_scanner_uses_selected_strategy_instead_of_smc_payload():
+    result = _result(_candidate())
+    scanner = ScannerEngine()
+    scanner.add("BTC/USDT:USDT", result)
+    row = scanner.results()[0]
+    assert row["tradable"] is True
+    assert row["strategy_id"] == "trend_pullback"
+    assert row["direction"] == "LONG"
+    assert row["entry"] == 100.0
+
+
+def test_scanner_fails_closed_when_strategy_selection_is_missing():
+    result = _result(None)
+    result["signal"] = {"signal": "LONG"}
+    result["decision"] = {"action": "EXECUTE"}
+    result["risk"] = {"entry": 100, "stop_loss": 98, "tp1": 102, "tp2": 104, "tp3": 106, "risk_setup_valid": True}
+    result["analysis"] = {"entry": {"entry": 100, "stop_loss": 98, "entry_type": "MARKET", "valid": True}}
+    scanner = ScannerEngine()
+    scanner.add("BTC/USDT:USDT", result)
+    assert scanner.summary()["executable"] == []
