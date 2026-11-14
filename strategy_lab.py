@@ -856,27 +856,74 @@ class SevenStrategyLab:
                     "reasons": ["Existing SMC decision is preserved as fallback until comparable performance evidence exists."],
                 }
             candidate["edge_validation"] = edge
-            if edge["eligible"]:
-                risk_validation = _risk_validate_candidate(candidate)
-                candidate["risk_validation"] = {key: value for key, value in risk_validation.items() if key != "risk_plan"}
-                if not risk_validation["eligible"]:
-                    continue
-                candidate["risk_plan"] = risk_validation["risk_plan"]
-                candidate["partial_exit_weights"] = risk_validation["risk_plan"].get("partial_exit_weights") or _configured_partial_tp_weights()
-                candidate["estimated_net_rr"] = risk_validation["weighted_net_rr"]
-                ranked = rank_validated_candidate(candidate, stats, candidate.get("regime_fit", 1.0))
-                if ranked:
-                    candidate["validated_selection_score"] = ranked["score"]
-                    validated.append(candidate)
+            if not edge["eligible"]:
+                # Keep the candidate visible: absence of validated edge is a rejection
+                # stage, not evidence that the strategy failed to generate a setup.
+                if strategy_id != "smc":
+                    candidate["status"] = "BLOCKED_EDGE"
+                    candidate["rejection_stage"] = "EDGE_VALIDATION"
+                    candidate["rejection_reasons"] = list(edge.get("reasons") or [edge.get("status", "EDGE_NOT_VALIDATED")])
+                continue
+
+            risk_validation = _risk_validate_candidate(candidate)
+            candidate["risk_validation"] = {key: value for key, value in risk_validation.items() if key != "risk_plan"}
+            if not risk_validation["eligible"]:
+                candidate["status"] = "BLOCKED_RISK"
+                candidate["rejection_stage"] = "RISK_VALIDATION"
+                candidate["rejection_reasons"] = [risk_validation.get("reason") or "RISK_VALIDATION_FAILED"]
+                continue
+
+            candidate["risk_plan"] = risk_validation["risk_plan"]
+            candidate["partial_exit_weights"] = risk_validation["risk_plan"].get("partial_exit_weights") or _configured_partial_tp_weights()
+            candidate["estimated_net_rr"] = risk_validation["weighted_net_rr"]
+            ranked = rank_validated_candidate(candidate, stats, candidate.get("regime_fit", 1.0))
+            if ranked:
+                candidate["validated_selection_score"] = ranked["score"]
+                candidate["status"] = "VALIDATED_CANDIDATE"
+                validated.append(candidate)
+            else:
+                candidate["status"] = "BLOCKED_RANKING"
+                candidate["rejection_stage"] = "RANKING"
+                candidate["rejection_reasons"] = ["Candidate did not receive a valid ranking score"]
         # The existing SMC decision remains a compatibility fallback. Experimental
         # engines cannot displace it until independent, cost-adjusted OOS evidence
         # clears the statistical promotion gates.
         validated.sort(key=lambda item: item.get("validated_selection_score", 0.0), reverse=True)
         smc_candidate = next((item for item in candidates if item.get("strategy_id") == "smc"), None)
         selected = validated[0] if validated else smc_candidate
+        diagnostic_rows = []
+        for item in results:
+            diagnostic_rows.append({
+                "strategy_id": item["strategy_id"],
+                "status": item.get("status", "UNKNOWN"),
+                "direction": item.get("direction"),
+                "entry_type": item.get("entry_type"),
+                "rejection_stage": item.get("rejection_stage"),
+                "rejection_reasons": list(item.get("rejection_reasons") or []),
+                "edge_status": (item.get("edge_validation") or {}).get("status"),
+                "risk_reason": (item.get("risk_validation") or {}).get("reason"),
+                "selected": item is selected,
+            })
+        status_counts = {}
+        rejection_stage_counts = {}
+        for row in diagnostic_rows:
+            status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
+            stage = row.get("rejection_stage")
+            if stage:
+                rejection_stage_counts[stage] = rejection_stage_counts.get(stage, 0) + 1
+
         return {
             "version": 2,
             "symbol": data.get("symbol"),
+            "diagnostics": {
+                "strategy_count": len(diagnostic_rows),
+                "candidate_count": len(candidates),
+                "validated_candidate_count": len(validated),
+                "selected_strategy_id": selected.get("strategy_id") if selected else None,
+                "status_counts": status_counts,
+                "rejection_stage_counts": rejection_stage_counts,
+                "strategies": diagnostic_rows,
+            },
             "regime": regime,
             "strategies": results,
             "candidate_count": len(candidates),
