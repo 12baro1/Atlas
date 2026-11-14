@@ -35,7 +35,7 @@ class ScannerEngine:
         rr = _finite_number(card.get("rr"))
         entry_type = str(card.get("entry_type") or "NONE").upper()
         levels_valid = (
-            entry is not None and stop is not None and len(targets) >= 1
+            entry is not None and stop is not None and len(targets) == 3
             and all(value is not None for value in targets)
             and rr is not None and rr > 0
         )
@@ -45,11 +45,16 @@ class ScannerEngine:
             levels_valid = stop > entry > targets[0] and all(a > b for a, b in zip(targets, targets[1:]))
         else:
             levels_valid = False
+        is_strategy_plan = isinstance(result_payload.get("strategy_lab"), dict)
+        source_risk = result_payload.get("risk") or {}
+        risk_validation_ok = card.get("risk_setup_valid") is True and (
+            is_strategy_plan or source_risk.get("risk_setup_valid") is True
+        )
         approved = (
             direction in ("LONG", "SHORT")
             and card.get("decision_action") in ("EXECUTE", "EXECUTE_WITH_CAUTION")
             and card.get("entry_valid") is True
-            and card.get("risk_setup_valid") is True
+            and risk_validation_ok
             and entry_type in ("MARKET", "LIMIT")
             and levels_valid
         )
