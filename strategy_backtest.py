@@ -256,7 +256,7 @@ def _summarize(rows):
 def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
                                 maker_fee=0.0002, taker_fee=0.00055,
                                 spread_rate=0.0002, slippage_rate=0.0003,
-                                persist_outcomes=True):
+                                persist_outcomes=False):
     _disable_backtest_live_features()
     now_ms = int(time.time() * 1000)
     history = load_historical(symbol, days=days, now_ms=now_ms)
@@ -354,7 +354,10 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
         "evaluation_start_ms": evaluation_start,
         "is_cutoff_ms": is_cutoff,
         "results": results,
-        "performance_records": journal.performance_snapshot(),
+        "performance_records": journal.performance_snapshot(
+            symbol=symbol,
+            source_revision=revision,
+        ),
         "historical_data_limitations": [
             "Order-flow engine is not evaluated: historical OHLCV does not contain timestamped historical order-book snapshots or taker trades.",
             "Liquidation proxy is not evaluated: historical OI and funding series are not currently attached to this replay.",
@@ -369,14 +372,14 @@ def main():
     parser.add_argument("--days", type=int, default=30)
     parser.add_argument("--step", type=int, default=1, help="Her kaç 15m mumda bir analiz")
     parser.add_argument("--max-holding-bars", type=int, default=32)
-    parser.add_argument("--no-persist", action="store_true", help="Performans günlüğüne sonuç yazma")
+    parser.add_argument("--persist", action="store_true", help="Doğrulanmış maliyet modeliyle IS/OOS sonuçlarını performans günlüğüne yaz")
     args = parser.parse_args()
     if args.days <= 0 or args.step <= 0 or args.max_holding_bars <= 0:
         parser.error("--days, --step ve --max-holding-bars pozitif olmalı")
     report = run_seven_strategy_backtest(
         args.symbol, days=args.days, step=args.step,
         max_holding_bars=args.max_holding_bars,
-        persist_outcomes=not args.no_persist,
+        persist_outcomes=args.persist,
     )
     print(
         f"7 STRATEJİ BACKTEST | {report['symbol']} | {report['days']} gün | "
