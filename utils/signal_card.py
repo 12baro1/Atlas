@@ -259,8 +259,8 @@ def build_signal_card(result):
 def build_selected_strategy_card(result):
     """Build the one canonical terminal card from SevenStrategyLab.selected.
 
-    Experimental strategies can reach this adapter only after the strategy lab's
-    independent cost-adjusted OOS promotion gate. The adapter still validates
+    Every strategy reaches this adapter only after the shared common filter and
+    single-decision selector. The adapter still validates
     finite prices, direction, order type, target ordering and positive risk.
     """
     result = result if isinstance(result, dict) else {}
@@ -284,13 +284,6 @@ def build_selected_strategy_card(result):
         return card
 
     strategy_id = str(selected.get("strategy_id") or "").strip()
-    if strategy_id == "smc":
-        card = build_signal_card(result)
-        card["strategy_id"] = strategy_id
-        card["strategy"] = selected.get("strategy") or "SMC"
-        card["experimental"] = False
-        return card
-
     direction = str(selected.get("direction") or "").upper()
     entry_type = str(selected.get("entry_type") or "").upper()
     try:
@@ -319,7 +312,7 @@ def build_selected_strategy_card(result):
         and risk_plan.get("risk_setup_valid") is True
         and geometry_valid and risk_distance > 0
         and entry_type in {"MARKET", "LIMIT"}
-        and selected.get("status") == "CANDIDATE"
+        and selected.get("status") in {"SELECTED", "CANDIDATE"}
     )
     if not executable:
         card = build_signal_card(result)

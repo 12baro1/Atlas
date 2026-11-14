@@ -1,15 +1,14 @@
-"""Independent seven-strategy analysis and selection for Atlas.
+"""Seven raw setup generators, one shared eligibility filter, one final selector.
 
-The lab is advisory: it never mutates the SMC result or sends exchange orders.
-New strategy candidates are explicitly marked experimental until strategy-specific
-backtests and outcome samples establish a reliable edge.
+The seven sources include one integrated SMC setup assembled by Atlas's SMC
+specialist world. Specialist motors are evidence producers inside that SMC world,
+not additional strategy candidates or independent trade-decision authorities.
 """
 from __future__ import annotations
 
 import math
 from statistics import median
 
-from strategy_performance import evaluate_strategy_edge, rank_validated_candidate
 from orderbook_engine import OrderBookEngine
 from risk_engine import RiskEngine
 from config import Config
@@ -45,7 +44,7 @@ STRATEGY_NAMES = {
     "liquidation_cascade": "Liquidation Cascade (OI proxy)",
     "orderflow_momentum": "Order Flow Momentum",
     "relative_strength": "Relative Strength",
-    "smc": "SMC (mevcut Atlas)",
+    "smc": "SMC (bütünleşik uzman motorları)",
 }
 
 
@@ -199,8 +198,9 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     ):
         return None
     risk_distance = entry - stop if direction == "LONG" else stop - entry
-    if risk_distance <= 0 or risk_distance < 0.75 * atr or risk_distance > 3.0 * atr:
+    if risk_distance <= 0:
         return None
+    # Stop-distance policy belongs to the shared filter, not an individual strategy.
     pivots = []
     sample = list(candles or [])[-120:]
     for index in range(2, len(sample) - 2):
@@ -238,13 +238,9 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
         "rr_tp3": round(rr_values[2], 4), "strength": round(float(strength), 2),
         "target_model": target_model, "experimental": source != "smc", "reasons": [],
     }
-    validation = _risk_validate_candidate(plan)
-    plan["risk_validation"] = {key: value for key, value in validation.items() if key != "risk_plan"}
-    if not validation["eligible"]:
-        return None
-    plan["risk_plan"] = validation["risk_plan"]
-    plan["partial_exit_weights"] = validation["risk_plan"].get("partial_exit_weights") or _configured_partial_tp_weights()
-    plan["estimated_net_rr"] = validation["weighted_net_rr"]
+    # No risk, fee, minimum-RR, or performance gate is allowed inside a
+    # strategy. Every geometrically describable setup reaches the shared gate.
+    plan["partial_exit_weights"] = _configured_partial_tp_weights()
     return plan
 
 def _current_price(data):
@@ -727,58 +723,83 @@ def _absorption_proxy(flow, candle, atr):
     return None
 
 def _smc_candidate(result):
+    """Build the single SMC setup from the integrated SMC specialist world.
+
+    This adapter reads the pre-selector SMC entry/risk geometry. It deliberately
+    does not inspect the legacy signal or decision verdict: those are downstream
+    gates and must not suppress an otherwise valid SMC setup before the shared
+    seven-strategy filter gets to evaluate it.
+    """
     if not isinstance(result, dict):
         return None
+    analysis = result.get("analysis") if isinstance(result.get("analysis"), dict) else {}
+    entry_state = analysis.get("entry") if isinstance(analysis.get("entry"), dict) else result.get("entry")
+    entry_state = entry_state if isinstance(entry_state, dict) else {}
+    source_risk = result.get("risk") if isinstance(result.get("risk"), dict) else {}
+    dynamic_tp = result.get("dynamic_tp") if isinstance(result.get("dynamic_tp"), dict) else {}
+    signal = result.get("signal") if isinstance(result.get("signal"), dict) else {}
+    direction = str(entry_state.get("direction") or signal.get("signal") or "").upper()
     try:
-        from utils.signal_card import build_signal_card
-        card = build_signal_card(result)
-    except Exception:
-        return None
-    if card.get("decision_action") not in {"EXECUTE", "EXECUTE_WITH_CAUTION"}:
-        return None
-    direction = str(card.get("direction") or "").upper()
-    entry, stop = card.get("entry"), card.get("stop_loss")
-    targets = card.get("tp_levels") or []
-    if direction not in {"LONG", "SHORT"} or not entry or not stop or not targets:
-        return None
-    try:
-        entry, stop = float(entry), float(stop)
-        target_values = [float(item.get("price") if isinstance(item, dict) else item) for item in targets[:3]]
+        entry_value = entry_state.get("entry")
+        if entry_value is None:
+            entry_value = source_risk.get("entry")
+        stop_value = source_risk.get("stop_loss")
+        if stop_value is None:
+            stop_value = entry_state.get("stop_loss")
+        entry = float(entry_value)
+        stop = float(stop_value)
+        target_values = [
+            float(source_risk.get(key) if source_risk.get(key) is not None else dynamic_tp.get(key))
+            for key in ("tp1", "tp2", "tp3")
+        ]
     except (TypeError, ValueError, OverflowError):
         return None
-    if not target_values:
+    if direction not in {"LONG", "SHORT"} or not all(
+        math.isfinite(value) and value > 0 for value in (entry, stop, *target_values)
+    ):
         return None
-    if not all(math.isfinite(value) and value > 0 for value in [entry, stop, *target_values]):
+    if direction == "LONG" and not (stop < entry < target_values[0] <= target_values[1] <= target_values[2]):
         return None
-    if direction == "LONG" and not (stop < entry < target_values[0] and all(left < right for left, right in zip(target_values, target_values[1:]))):
+    if direction == "SHORT" and not (target_values[0] >= target_values[1] >= target_values[2] and target_values[0] < entry < stop):
         return None
-    if direction == "SHORT" and not (target_values[0] < entry < stop and all(left > right for left, right in zip(target_values, target_values[1:]))):
+    risk_distance = abs(entry - stop)
+    if risk_distance <= 0:
         return None
-    risk = abs(entry - stop)
-    if risk <= 0:
-        return None
+    reasoning = entry_state.get("setup_reasoning") if isinstance(entry_state.get("setup_reasoning"), dict) else {}
+    reasons = list(reasoning.get("supporting_evidence") or [])
+    if reasoning.get("thesis"):
+        reasons.insert(0, str(reasoning["thesis"]))
+    if not reasons:
+        reasons = ["Integrated SMC specialist evidence"]
     plan = {
-        "status": "CANDIDATE", "strategy_id": "smc", "strategy": STRATEGY_NAMES["smc"],
-        "direction": direction, "entry_type": card.get("entry_type") or "LIMIT",
-        "entry": entry, "stop_loss": stop,
-        "tp1": target_values[0], "tp2": target_values[1] if len(target_values) > 1 else None,
-        "tp3": target_values[2] if len(target_values) > 2 else None,
-        "rr_tp1": round(abs(target_values[0] - entry) / risk, 3),
-        "rr_tp2": round(abs(target_values[1] - entry) / risk, 3) if len(target_values) > 1 else None,
-        "rr_tp3": round(abs(target_values[2] - entry) / risk, 3) if len(target_values) > 2 else None,
-        "strength": float(card.get("setup_quality") or card.get("confidence") or 0),
+        "status": "RAW_SETUP",
+        "strategy_id": "smc",
+        "strategy": STRATEGY_NAMES["smc"],
+        "direction": direction,
+        "entry_type": str(entry_state.get("entry_type") or "MARKET").upper(),
+        "entry": entry,
+        "stop_loss": stop,
+        "tp1": target_values[0],
+        "tp2": target_values[1],
+        "tp3": target_values[2],
+        "rr_tp1": round(abs(target_values[0] - entry) / risk_distance, 3),
+        "rr_tp2": round(abs(target_values[1] - entry) / risk_distance, 3),
+        "rr_tp3": round(abs(target_values[2] - entry) / risk_distance, 3),
+        "strength": float(signal.get("confidence") or (analysis.get("setup_quality") or {}).get("score") or 0),
         "target_model": "SMC_STRUCTURAL",
         "experimental": False,
-        "reasons": ["Mevcut Atlas SMC karar motoru EXECUTE üretti"],
+        "reasons": reasons,
+        "supporting_event_ids": list(reasoning.get("supporting_event_ids") or []),
+        "opposing_event_ids": list(reasoning.get("opposing_event_ids") or []),
+        "opposing_evidence": list(reasoning.get("opposing_evidence") or []),
+        "market_context": list(reasoning.get("market_context") or []),
+        "partial_exit_weights": (
+            source_risk.get("target_rebased_weights")
+            or source_risk.get("partial_exit_weights")
+            or _configured_partial_tp_weights()
+        ),
+        "atr": source_risk.get("atr"),
     }
-    plan["estimated_net_rr"] = card.get("net_rr")
-    source_risk = result.get("risk") or {}
-    plan["partial_exit_weights"] = (
-        source_risk.get("target_rebased_weights")
-        or source_risk.get("partial_exit_weights")
-        or _configured_partial_tp_weights()
-    )
-    plan["atr"] = source_risk.get("atr")
     return plan
 
 
@@ -801,13 +822,14 @@ def _regime_fit(strategy_id, regime):
 
 
 class SevenStrategyLab:
-    """Run six independent experimental strategies plus the existing SMC plan."""
+    """Run six independent generators plus one integrated SMC setup generator."""
 
     def classify_regime(self, data):
         """Expose the same regime classifier used by analyze for scoped statistics."""
         return _regime(data)
 
     def analyze(self, data, smc_result=None, performance_by_strategy=None):
+        """Run seven independent setup generators, one shared filter, one selector."""
         regime = _regime(data)
         evaluators = {
             "trend_pullback": lambda: _trend_pullback(data),
@@ -818,6 +840,10 @@ class SevenStrategyLab:
             "relative_strength": lambda: _relative_strength(data),
             "smc": lambda: _smc_candidate(smc_result),
         }
+
+        # Stage 1: each strategy only creates its own setup. No common risk,
+        # edge, ranking, fee, or portfolio gate runs in these evaluators.
+        generated = []
         results = []
         for strategy_id, evaluator in evaluators.items():
             try:
@@ -827,12 +853,15 @@ class SevenStrategyLab:
                         "strategy_id": strategy_id,
                         "strategy": STRATEGY_NAMES[strategy_id],
                         "status": "NO_SETUP",
-                        "reason": "Strateji koşulları oluşmadı veya gerekli veri yok.",
+                        "reason": "No strategy-native setup on this market snapshot.",
                     })
                     continue
-                fit = _regime_fit(strategy_id, regime)
-                candidate["regime_fit"] = round(fit, 3)
-                candidate["selection_score"] = round(candidate["strength"] * fit, 2)
+                candidate = dict(candidate)
+                candidate["strategy_id"] = strategy_id
+                candidate["strategy"] = STRATEGY_NAMES[strategy_id]
+                candidate["status"] = "RAW_SETUP"
+                candidate["regime_fit"] = round(_regime_fit(strategy_id, regime), 3)
+                generated.append(candidate)
                 results.append(candidate)
             except Exception as exc:
                 results.append({
@@ -842,83 +871,127 @@ class SevenStrategyLab:
                     "reason": f"{type(exc).__name__}: {exc}",
                 })
 
-        candidates = [item for item in results if item.get("status") == "CANDIDATE"]
-        performance_by_strategy = performance_by_strategy or {}
-        validated = []
-        for candidate in candidates:
-            strategy_id = candidate["strategy_id"]
-            stats = performance_by_strategy.get(strategy_id)
-            edge = evaluate_strategy_edge(stats)
-            if strategy_id == "smc" and not stats:
-                edge = {
-                    "eligible": False,
-                    "status": "LEGACY_SMC_FALLBACK",
-                    "reasons": ["Existing SMC decision is preserved as fallback until comparable performance evidence exists."],
-                }
-            candidate["edge_validation"] = edge
-            if not edge["eligible"]:
-                # Keep the candidate visible: absence of validated edge is a rejection
-                # stage, not evidence that the strategy failed to generate a setup.
-                if strategy_id != "smc":
-                    candidate["status"] = "BLOCKED_EDGE"
-                    candidate["rejection_stage"] = "EDGE_VALIDATION"
-                    candidate["rejection_reasons"] = list(edge.get("reasons") or [edge.get("status", "EDGE_NOT_VALIDATED")])
+        # Stage 2: the only shared eligibility gate. All seven strategies
+        # arrive here under identical rules. It owns geometry, stop-risk,
+        # execution friction, and minimum net-RR checks.
+        eligible = []
+        for candidate in generated:
+            direction = str(candidate.get("direction") or "").upper()
+            try:
+                entry = float(candidate.get("entry"))
+                stop = float(candidate.get("stop_loss"))
+                targets = [float(candidate.get(key)) for key in ("tp1", "tp2", "tp3")]
+                finite = all(math.isfinite(value) and value > 0 for value in [entry, stop, *targets])
+                geometry_ok = (
+                    finite
+                    and ((direction == "LONG" and stop < entry < targets[0] <= targets[1] <= targets[2])
+                         or (direction == "SHORT" and targets[0] >= targets[1] >= targets[2] and targets[0] < entry < stop))
+                )
+            except (TypeError, ValueError, OverflowError):
+                geometry_ok = False
+            if not geometry_ok:
+                candidate["status"] = "BLOCKED_COMMON_FILTER"
+                candidate["rejection_stage"] = "COMMON_FILTER"
+                candidate["rejection_reasons"] = ["INVALID_OR_INCONSISTENT_SETUP_GEOMETRY"]
                 continue
 
-            risk_validation = _risk_validate_candidate(candidate)
-            candidate["risk_validation"] = {key: value for key, value in risk_validation.items() if key != "risk_plan"}
-            if not risk_validation["eligible"]:
-                candidate["status"] = "BLOCKED_RISK"
-                candidate["rejection_stage"] = "RISK_VALIDATION"
-                candidate["rejection_reasons"] = [risk_validation.get("reason") or "RISK_VALIDATION_FAILED"]
+            # Execution eligibility also belongs to this one shared gate.
+            # Far LIMIT plans stay valid; an impossible-side LIMIT or stale/far
+            # MARKET entry is rejected here for every strategy by identical rules.
+            entry_type = str(candidate.get("entry_type") or "MARKET").upper()
+            current_price = _current_price(data)
+            execution_rejection = None
+            if entry_type not in {"MARKET", "LIMIT"}:
+                execution_rejection = "UNSUPPORTED_ENTRY_TYPE"
+            elif current_price is not None:
+                distance_pct = abs(entry - current_price) / current_price
+                if entry_type == "MARKET":
+                    max_market_distance = float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003))
+                    if distance_pct > max_market_distance:
+                        execution_rejection = "MARKET_ENTRY_TOO_FAR"
+                elif direction == "LONG" and entry >= current_price:
+                    execution_rejection = "LONG_LIMIT_NOT_BELOW_MARKET"
+                elif direction == "SHORT" and entry <= current_price:
+                    execution_rejection = "SHORT_LIMIT_NOT_ABOVE_MARKET"
+            if execution_rejection:
+                candidate["status"] = "BLOCKED_COMMON_FILTER"
+                candidate["rejection_stage"] = "COMMON_FILTER"
+                candidate["rejection_reasons"] = [execution_rejection]
                 continue
 
-            candidate["risk_plan"] = risk_validation["risk_plan"]
-            candidate["partial_exit_weights"] = risk_validation["risk_plan"].get("partial_exit_weights") or _configured_partial_tp_weights()
-            candidate["estimated_net_rr"] = risk_validation["weighted_net_rr"]
-            ranked = rank_validated_candidate(candidate, stats, candidate.get("regime_fit", 1.0))
-            if ranked:
-                candidate["validated_selection_score"] = ranked["score"]
-                candidate["status"] = "VALIDATED_CANDIDATE"
-                validated.append(candidate)
+            validation = _risk_validate_candidate(candidate)
+            candidate["risk_validation"] = {
+                key: value for key, value in validation.items() if key != "risk_plan"
+            }
+            if not validation.get("eligible"):
+                candidate["status"] = "BLOCKED_COMMON_FILTER"
+                candidate["rejection_stage"] = "COMMON_FILTER"
+                candidate["rejection_reasons"] = [
+                    validation.get("reason") or "COMMON_RISK_FILTER_REJECTED"
+                ]
+                continue
+
+            risk_plan = validation["risk_plan"] or {}
+            candidate["risk_plan"] = risk_plan
+            candidate["partial_exit_weights"] = (
+                risk_plan.get("partial_exit_weights") or _configured_partial_tp_weights()
+            )
+            candidate["estimated_net_rr"] = validation.get("weighted_net_rr")
+            candidate["status"] = "FILTERED_SETUP"
+            eligible.append(candidate)
+
+        # Stage 3: one deterministic authority selects exactly one complete
+        # candidate. No strategy can bypass the common filter or win via an
+        # unvalidated historical-performance promotion flag.
+        def selection_key(item):
+            net_rr = item.get("estimated_net_rr")
+            try:
+                net_rr = float(net_rr)
+            except (TypeError, ValueError, OverflowError):
+                net_rr = 0.0
+            strength = float(item.get("strength") or 0.0)
+            regime_fit = float(item.get("regime_fit") or 0.0)
+            return (round(net_rr, 6), round(strength * regime_fit, 4), item["strategy_id"])
+
+        selected = max(eligible, key=selection_key) if eligible else None
+        for candidate in eligible:
+            candidate["selected"] = candidate is selected
+            if candidate is selected:
+                candidate["status"] = "SELECTED"
             else:
-                candidate["status"] = "BLOCKED_RANKING"
-                candidate["rejection_stage"] = "RANKING"
-                candidate["rejection_reasons"] = ["Candidate did not receive a valid ranking score"]
-        # The existing SMC decision remains a compatibility fallback. Experimental
-        # engines cannot displace it until independent, cost-adjusted OOS evidence
-        # clears the statistical promotion gates.
-        validated.sort(key=lambda item: item.get("validated_selection_score", 0.0), reverse=True)
-        smc_candidate = next((item for item in candidates if item.get("strategy_id") == "smc"), None)
-        selected = validated[0] if validated else smc_candidate
-        diagnostic_rows = []
-        for item in results:
-            diagnostic_rows.append({
-                "strategy_id": item["strategy_id"],
-                "status": item.get("status", "UNKNOWN"),
-                "direction": item.get("direction"),
-                "entry_type": item.get("entry_type"),
-                "rejection_stage": item.get("rejection_stage"),
-                "rejection_reasons": list(item.get("rejection_reasons") or []),
-                "edge_status": (item.get("edge_validation") or {}).get("status"),
-                "risk_reason": (item.get("risk_validation") or {}).get("reason"),
-                "selected": item is selected,
-            })
+                candidate["status"] = "FILTERED_NOT_SELECTED"
+                candidate["rejection_stage"] = "SINGLE_DECISION"
+                candidate["rejection_reasons"] = ["Another eligible setup ranked higher"]
+
         status_counts = {}
         rejection_stage_counts = {}
-        for row in diagnostic_rows:
-            status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
-            stage = row.get("rejection_stage")
+        diagnostic_rows = []
+        for item in results:
+            status = item.get("status", "UNKNOWN")
+            status_counts[status] = status_counts.get(status, 0) + 1
+            stage = item.get("rejection_stage")
             if stage:
                 rejection_stage_counts[stage] = rejection_stage_counts.get(stage, 0) + 1
+            diagnostic_rows.append({
+                "strategy_id": item["strategy_id"],
+                "status": status,
+                "direction": item.get("direction"),
+                "entry_type": item.get("entry_type"),
+                "rejection_stage": stage,
+                "rejection_reasons": list(item.get("rejection_reasons") or []),
+                "selected": item is selected,
+            })
 
         return {
-            "version": 2,
+            "version": 3,
             "symbol": data.get("symbol"),
+            "pipeline": ["SEVEN_INDEPENDENT_GENERATORS", "ONE_COMMON_FILTER", "ONE_FINAL_DECISION"],
             "diagnostics": {
                 "strategy_count": len(diagnostic_rows),
-                "candidate_count": len(candidates),
-                "validated_candidate_count": len(validated),
+                "raw_setup_count": len(generated),
+                "common_filter_passed_count": len(eligible),
+                "candidate_count": len(generated),
+                "validated_candidate_count": len(eligible),
                 "selected_strategy_id": selected.get("strategy_id") if selected else None,
                 "status_counts": status_counts,
                 "rejection_stage_counts": rejection_stage_counts,
@@ -926,19 +999,14 @@ class SevenStrategyLab:
             },
             "regime": regime,
             "strategies": results,
-            "candidate_count": len(candidates),
-            "validated_candidate_count": len(validated),
+            "candidate_count": len(generated),
+            "validated_candidate_count": len(eligible),
             "selected": selected,
-            "selection_method": "out_of_sample_edge_gated_with_legacy_smc_fallback",
-            "performance_status": (
-                "VALIDATED_EXPERIMENTAL_EDGE_AVAILABLE"
-                if any(item.get("strategy_id") != "smc" for item in validated)
-                else "NO_EXPERIMENTAL_EDGE_VALIDATED"
-            ),
+            "selection_method": "single_common_filter_then_net_rr_strength_regime_rank",
+            "performance_status": "OBSERVATIONAL_ONLY_NOT_AN_ELIGIBILITY_GATE",
             "warning": (
-                "Deneysel motorlar yalnızca stratejiye özel, maliyet sonrası ve out-of-sample "
-                "performans yeterli örneklem ve güven sınırlarını geçerse SMC'nin önüne geçebilir. "
-                "Performans kaydı yoksa deneysel aday seçilmez. OI contraction gerçek likidasyon "
-                "akışı değildir; spread/slippage/funding modeli olmayan sonuçlar doğrulanmış sayılmaz."
+                "Strategy-native setup rules remain inside each generator. All shared risk, "
+                "execution-cost and minimum-net-RR checks run once in the common filter. "
+                "Historical strategy performance is observational and does not suppress setup generation."
             ),
         }

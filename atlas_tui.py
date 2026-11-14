@@ -324,17 +324,19 @@ class AtlasTUIApp(App):
         for item in report.get("strategies") or []:
             name = item.get("strategy") or item.get("strategy_id") or "UNKNOWN"
             status = item.get("status")
-            if status == "CANDIDATE":
-                lines.append(
-                    f"• {name}: ADAY | {item.get('direction')} | "
-                    f"kurulum puanı {item.get('selection_score', 0):.1f} | "
-                    f"rejim uyumu {item.get('regime_fit', 0):.2f} | "
-                    f"edge {((item.get('edge_validation') or {}).get('status') or 'PERFORMANS VERİSİ YOK')}"
-                )
+            if status == "SELECTED":
+                lines.append(f"• {name}: SEÇİLDİ | {item.get('direction')} | ortak filtreyi geçti")
+            elif status == "FILTERED_NOT_SELECTED":
+                lines.append(f"• {name}: FİLTREYİ GEÇTİ, SEÇİLMEDİ | {item.get('direction')}")
+            elif status == "BLOCKED_COMMON_FILTER":
+                reasons = " / ".join(item.get("rejection_reasons") or [])
+                lines.append(f"• {name}: ORTAK FİLTRE REDDETTİ | {reasons}")
+            elif status == "RAW_SETUP":
+                lines.append(f"• {name}: HAM SETUP | {item.get('direction')}")
             elif status == "ERROR":
                 lines.append(f"• {name}: HATA | {item.get('reason', 'bilinmeyen hata')}")
             else:
-                lines.append(f"• {name}: Kurulum yok")
+                lines.append(f"• {name}: Setup yok")
         selected = report.get("selected")
         lines.extend(["", "SEÇİLEN STRATEJİ"])
         if not isinstance(selected, dict):
@@ -367,7 +369,7 @@ class AtlasTUIApp(App):
         lines.extend(["", "ORTAK İŞLEM KARTI", format_card_text(build_selected_strategy_card(result))])
         lines.extend([
             "",
-            f"Seçim: {report.get('selection_method', 'N/A')} | doğrulanmış deneysel aday: {report.get('validated_candidate_count', 0)}",
+            f"Akış: {' → '.join(report.get('pipeline') or [])} | ham setup: {report.get('candidate_count', 0)} | ortak filtreden geçen: {report.get('validated_candidate_count', 0)}",
             report.get("warning") or "",
             f"Analiz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn",
         ])

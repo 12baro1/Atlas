@@ -23,7 +23,6 @@ from backtest import (
     _configured_partial_tp_weights,
 )
 from engine import AtlasEngine
-from strategy_lab import SevenStrategyLab
 from strategy_outcome_journal import StrategyOutcomeJournal
 from historical_derivatives import load_historical_derivatives
 from microstructure_archive import snapshot_at as archived_microstructure_at
@@ -373,7 +372,6 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     is_cutoff = evaluation_start + int((evaluation_end - evaluation_start) * 0.70)
 
     engine = AtlasEngine()
-    lab = SevenStrategyLab()
     journal = StrategyOutcomeJournal()
     revision = journal.current_revision()
     replay_fingerprint = "|".join(map(str, (
@@ -388,7 +386,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     if persist_outcomes and not funding_available:
         persistence_block_reason = "Historical funding series unavailable; cost-complete outcomes were not persisted."
     all_outcomes = defaultdict(list)
-    active_until = {}
+    active_until = -1
     calls = 0
     for index in range(300, len(candles) - 1, max(1, int(step))):
         decision_ms = _closed_at(candles[index], "15m")
@@ -396,62 +394,69 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
             continue
         snapshot = _snapshot_at(history, index)
         try:
-            smc_result = engine.analyze(snapshot)
+            analysis_result = engine.analyze(snapshot)
         except Exception:
-            # Keep the six independent evaluators alive if a legacy SMC replay
-            # step encounters an isolated historical-data edge case.
-            smc_result = None
-        report = lab.analyze(snapshot, smc_result=smc_result)
+            # A failed market snapshot produces no strategy candidate.
+            analysis_result = None
+        report = (
+            analysis_result.get("strategy_lab")
+            if isinstance(analysis_result, dict)
+            else None
+        )
+        if not isinstance(report, dict):
+            calls += 1
+            continue
         calls += 1
-        for candidate in report.get("strategies") or []:
-            if candidate.get("status") != "CANDIDATE":
-                continue
-            strategy_id = candidate["strategy_id"]
-            if index <= active_until.get(strategy_id, -1):
-                continue
-            future = candles[index + 1:index + 1 + max_holding_bars + limit_expiry_bars]
-            outcome = simulate_candidate(
-                candidate, future,
-                maker_fee=maker_fee, taker_fee=taker_fee,
-                spread_rate=spread_rate, slippage_rate=slippage_rate,
-                max_bars=max_holding_bars,
-                limit_expiry_bars=limit_expiry_bars,
-                funding_events=history.get("funding_records") or [],
-                signal_candle=candles[index],
+        # Replay only the one setup that passed the same common filter and
+        # single-decision selector used by live analysis. Never open seven
+        # simultaneous strategy trades from one market snapshot.
+        candidate = report.get("selected")
+        if not isinstance(candidate, dict) or index <= active_until:
+            continue
+        strategy_id = candidate["strategy_id"]
+        future = candles[index + 1:index + 1 + max_holding_bars + limit_expiry_bars]
+        outcome = simulate_candidate(
+            candidate, future,
+            maker_fee=maker_fee, taker_fee=taker_fee,
+            spread_rate=spread_rate, slippage_rate=slippage_rate,
+            max_bars=max_holding_bars,
+            limit_expiry_bars=limit_expiry_bars,
+            funding_events=history.get("funding_records") or [],
+            signal_candle=candles[index],
+        )
+        if outcome is None:
+            continue
+        fill_time = int(outcome["fill_time_ms"])
+        split = "is" if fill_time < is_cutoff else "oos"
+        active_until = index + outcome["bars_until_exit"]
+        record = {
+            **outcome,
+            "strategy_id": strategy_id,
+            "symbol": symbol,
+            "split": split,
+            "signal_time_ms": decision_ms,
+            "regime": (report.get("regime") or {}).get("label", "UNKNOWN"),
+        }
+        all_outcomes[strategy_id].append(record)
+        if persistence_enabled:
+            trade_id = f"{run_id}|{strategy_id}|{fill_time}"
+            journal.record_outcome(
+                strategy_id=strategy_id,
+                trade_id=trade_id,
+                run_id=run_id,
+                run_created_at_ms=run_created_at_ms,
+                split=split,
+                net_r=outcome["net_r"],
+                gross_r=outcome["gross_r"],
+                cost_r=outcome["cost_r"],
+                funding_pnl_r=outcome["funding_pnl_r"],
+                cost_model_id=outcome["cost_model_id"],
+                closed_at_ms=outcome["closed_at_ms"],
+                costs_included=True,
+                symbol=symbol,
+                source_revision=revision,
+                regime=record["regime"],
             )
-            if outcome is None:
-                continue
-            fill_time = int(outcome["fill_time_ms"])
-            split = "is" if fill_time < is_cutoff else "oos"
-            active_until[strategy_id] = index + outcome["bars_until_exit"]
-            record = {
-                **outcome,
-                "strategy_id": strategy_id,
-                "symbol": symbol,
-                "split": split,
-                "signal_time_ms": decision_ms,
-                "regime": (report.get("regime") or {}).get("label", "UNKNOWN"),
-            }
-            all_outcomes[strategy_id].append(record)
-            if persistence_enabled:
-                trade_id = f"{run_id}|{strategy_id}|{fill_time}"
-                journal.record_outcome(
-                    strategy_id=strategy_id,
-                    trade_id=trade_id,
-                    run_id=run_id,
-                    run_created_at_ms=run_created_at_ms,
-                    split=split,
-                    net_r=outcome["net_r"],
-                    gross_r=outcome["gross_r"],
-                    cost_r=outcome["cost_r"],
-                    funding_pnl_r=outcome["funding_pnl_r"],
-                    cost_model_id=outcome["cost_model_id"],
-                    closed_at_ms=outcome["closed_at_ms"],
-                    costs_included=True,
-                    symbol=symbol,
-                    source_revision=revision,
-                    regime=record["regime"],
-                )
 
     results = {}
     for strategy_id in (
