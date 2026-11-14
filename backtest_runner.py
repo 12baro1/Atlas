@@ -318,7 +318,7 @@ class BacktestRunner:
 
     def __init__(self, analyze_fn=None, fee_rate=None, partial_exits=True, tp_weights=None,
                  limit_expiry_bars=8, spread_rate=None, slippage_rate=None,
-                 maker_fee_rate=None, taker_fee_rate=None):
+                 maker_fee_rate=None, taker_fee_rate=None, max_holding_bars=32):
         self.analyze_fn = analyze_fn
         # Explicit legacy fee_rate keeps older test/integration callers stable.
         # Production backtests pass maker/taker rates and use per-fill accounting.
@@ -346,6 +346,7 @@ class BacktestRunner:
         self.partial_exits = bool(partial_exits)
         self.tp_weights = tp_weights
         self.limit_expiry_bars = max(1, int(limit_expiry_bars))
+        self.max_holding_bars = max(1, int(max_holding_bars))
         self.full_exit_calls = 0
         self.history = []
         self.total = 0
@@ -964,47 +965,36 @@ class BacktestRunner:
             else:
                 # Exclude the fill candle from target simulation. Its high/low
                 # may have occurred before the intrabar limit order was filled.
-                future = candles[fill_index + 1:]
+                future = candles[fill_index + 1:fill_index + self.max_holding_bars]
                 outcome_start_index = fill_index + 1
+                horizon_after_fill = max(1, self.max_holding_bars - 1)
                 if use_partial:
                     outcome = simulate_trade_partial(
-                        entry=entry_price,
-                        stop_loss=stop,
-                        targets=tps,
-                        future_candles=future,
-                        direction=signal_dir,
-                        tp_weights=trade_tp_weights,
+                        entry=entry_price, stop_loss=stop, targets=tps,
+                        future_candles=future, direction=signal_dir,
+                        tp_weights=trade_tp_weights, max_holding_bars=horizon_after_fill,
                     )
                 else:
                     outcome = simulate_trade(
-                        entry=entry_price,
-                        stop_loss=stop,
-                        targets=tps,
-                        future_candles=future,
-                        direction=signal_dir,
-                        round_trip_cost_rate=self.fee_rate,
+                        entry=entry_price, stop_loss=stop, targets=tps,
+                        future_candles=future, direction=signal_dir,
+                        round_trip_cost_rate=self.fee_rate, max_holding_bars=horizon_after_fill,
                     )
         else:
             # MARKET and gap-through LIMIT orders fill at candle open.
-            future = candles[fill_index:]
+            future = candles[fill_index:fill_index + self.max_holding_bars]
             outcome_start_index = fill_index
             if use_partial:
                 outcome = simulate_trade_partial(
-                    entry=entry_price,
-                    stop_loss=stop,
-                    targets=tps,
-                    future_candles=future,
-                    direction=signal_dir,
-                    tp_weights=self.tp_weights,
+                    entry=entry_price, stop_loss=stop, targets=tps,
+                    future_candles=future, direction=signal_dir,
+                    tp_weights=self.tp_weights, max_holding_bars=self.max_holding_bars,
                 )
             else:
                 outcome = simulate_trade(
-                    entry=entry_price,
-                    stop_loss=stop,
-                    targets=tps,
-                    future_candles=future,
-                    direction=signal_dir,
-                    round_trip_cost_rate=self.fee_rate,
+                    entry=entry_price, stop_loss=stop, targets=tps,
+                    future_candles=future, direction=signal_dir,
+                    round_trip_cost_rate=self.fee_rate, max_holding_bars=self.max_holding_bars,
                 )
 
         # Pencere içinde çözülemeyen (ne SL ne TP) işlemleri istatistiğe katma.
