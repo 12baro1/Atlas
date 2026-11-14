@@ -9,7 +9,7 @@ import threading
 import traceback
 
 from textual.app import App, ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Input, RichLog, Static
 
 from data_engine import exchange
@@ -147,7 +147,7 @@ class AtlasTUIApp(App):
     }
     #main {
         height: 1fr;
-        padding: 1 2;
+        padding: 1 2 0 2;
     }
     #brand {
         height: 3;
@@ -158,8 +158,34 @@ class AtlasTUIApp(App):
         border: round #24445d;
         text-style: bold;
     }
+    #status {
+        height: 1;
+        margin-top: 1;
+        color: #79d7b0;
+        text-style: bold;
+    }
+    #dashboard {
+        height: 12;
+        margin-top: 1;
+        layout: horizontal;
+    }
+    #strategy-panel, #decision-panel {
+        width: 1fr;
+        height: 12;
+        padding: 1 2;
+        background: #0d1724;
+        border: round #29445d;
+        color: #c7d5e4;
+    }
+    #strategy-panel {
+        border-title-color: #55c8ff;
+    }
+    #decision-panel {
+        margin-left: 1;
+        border-title-color: #79d7b0;
+    }
     #help {
-        height: 4;
+        height: 3;
         margin-top: 1;
         padding: 0 2;
         background: #0d1724;
@@ -168,9 +194,10 @@ class AtlasTUIApp(App):
     }
     #output {
         height: 1fr;
+        min-height: 8;
         margin-top: 1;
         padding: 1 2;
-        background: #0b1420;
+        background: #080f19;
         border: round #29445d;
         overflow-y: auto;
     }
@@ -183,6 +210,31 @@ class AtlasTUIApp(App):
     }
     #command:focus {
         border: round #8bdcff;
+    }
+    @media (max-width: 80) {
+        #main {
+            padding: 0 1;
+        }
+        #dashboard {
+            height: 14;
+            layout: vertical;
+        }
+        #strategy-panel, #decision-panel {
+            width: 1fr;
+            height: 7;
+            padding: 0 1;
+        }
+        #decision-panel {
+            margin-left: 0;
+            margin-top: 1;
+        }
+        #help {
+            height: 3;
+            padding: 0 1;
+        }
+        #output {
+            padding: 1;
+        }
     }
     """
 
@@ -205,10 +257,25 @@ class AtlasTUIApp(App):
         yield Header()
         with Vertical(id="main"):
             yield Static("ATLAS  /  PROFESSIONAL TRADING TERMINAL     •     7 STRATEJİ / TEK KARAR", id="brand")
+            yield Static("SİSTEM HAZIR  |  SONUÇ BEKLENİYOR  |  EMİR GÖNDERME: KAPALI", id="status")
+            with Horizontal(id="dashboard"):
+                strategy_panel = Static(
+                    "Henüz analiz yapılmadı.\nBTC / ETH / BRC yazarak başlat.",
+                    id="strategy-panel",
+                    markup=False,
+                )
+                strategy_panel.border_title = "7 STRATEJİ MOTORU"
+                yield strategy_panel
+                decision_panel = Static(
+                    "ORTAK FİLTRE: —\nTEK KARAR: —\n\nGeçerli setup bekleniyor.",
+                    id="decision-panel",
+                    markup=False,
+                )
+                decision_panel.border_title = "ORTAK FİLTRE / TEK KARAR"
+                yield decision_panel
             yield Static(
-                "ANALİZ     BTC / ETH / BRC yaz\n"
-                "TARAMA     50 analiz et  •  en iyi 5 işlem  •  tüm piyasayı tara\n"
-                "KONTROL    performans  •  likidite BTC  •  yardım",
+                "ANALİZ: BTC / ETH / BRC   •   TARAMA: 50 analiz et / en iyi 5 işlem\n"
+                "KONTROL: performans / likidite BTC / yardım",
                 id="help",
             )
             yield RichLog(
@@ -284,10 +351,12 @@ class AtlasTUIApp(App):
             )
             return
         self._busy = True
+        self.query_one("#status", Static).update(f"ANALİZ ÇALIŞIYOR  |  {command.upper()}  |  EMİR GÖNDERME: KAPALI")
         self._show(f"{command.upper()}\nAnaliz ediliyor…\nVeri kaynağına bağlanılıyor.")
         threading.Thread(target=self._run_command, args=(command,), daemon=True).start()
 
     def _run_command(self, command: str) -> None:
+        dashboard = None
         try:
             lowered = command.strip().lower()
             scan_request = _parse_scan_command(lowered)
@@ -312,6 +381,7 @@ class AtlasTUIApp(App):
                         "Sembolün USDT perpetual piyasasında bulunduğunu kontrol et."
                     )
                 else:
+                    dashboard = self._dashboard_payload(outcome)
                     strategy_report = (outcome.get("result") or {}).get("strategy_lab")
                     if isinstance(strategy_report, dict):
                         result_text = self._format_strategy_report(outcome)
@@ -328,9 +398,9 @@ class AtlasTUIApp(App):
                         else:
                             result_text = "Şu an girilebilir MARKET/LIMIT sinyali yok."
                         result_text += f"\n\nAnaliz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn"
-            self.call_from_thread(self._finish, result_text)
+            self.call_from_thread(self._finish, result_text, dashboard)
         except Exception:
-            self.call_from_thread(self._finish, traceback.format_exc())
+            self.call_from_thread(self._finish, traceback.format_exc(), None)
 
 
     def _format_strategy_report(self, outcome: dict) -> str:
@@ -568,6 +638,70 @@ class AtlasTUIApp(App):
             sections.append("Analiz hatası: " + "; ".join(errors[:3]))
         return "\n".join(sections)
 
-    def _finish(self, message: str) -> None:
+    def _dashboard_payload(self, outcome: dict):
+        result = outcome.get("result") or {}
+        report = result.get("strategy_lab") or {}
+        if not isinstance(report, dict):
+            return (
+                "STRATEJİ RAPORU BU ANALİZDE YOK",
+                f"SEMBOL: {result.get('symbol') or outcome.get('symbol') or 'UNKNOWN'}\n"
+                "Karar ayrıntısı çıktı panelinde."
+            )
+        strategies = report.get("strategies") or []
+        rows = ["DURUM       STRATEJİ"]
+        for item in strategies[:7]:
+            name = str(item.get("strategy") or item.get("strategy_id") or "STRATEJİ")
+            status = str(item.get("status") or "NO_SETUP").upper()
+            direction = str(item.get("direction") or "—").upper()
+            if status == "SELECTED":
+                marker = "[SEC]"
+            elif status == "BLOCKED_COMMON_FILTER":
+                marker = "[RED]"
+            elif status == "FILTERED_NOT_SELECTED":
+                marker = "[OK ]"
+            elif status == "ERROR":
+                marker = "[ERR]"
+            else:
+                marker = "[---]"
+            rows.append(f"{marker} {name[:24]}  {direction}")
+        if len(strategies) < 7:
+            rows.append(f"{7 - len(strategies)} strateji raporu eksik")
+        selected = report.get("selected")
+        regime = report.get("regime") or {}
+        symbol = result.get("symbol") or outcome.get("symbol") or "UNKNOWN"
+        raw_count = report.get("candidate_count", 0)
+        passed_count = report.get("validated_candidate_count", 0)
+        decision_lines = [
+            f"SEMBOL: {symbol}",
+            f"REJİM: {regime.get('label', 'UNKNOWN')}  |  YÖN: {regime.get('trend', '—')}",
+            f"HAM SETUP: {raw_count}  |  FİLTREYİ GEÇEN: {passed_count}",
+        ]
+        if isinstance(selected, dict):
+            decision_lines.extend([
+                f"SON KARAR: {selected.get('direction', '—')} / {selected.get('entry_type', '—')}",
+                f"GİRİŞ: {selected.get('entry', '—')}  SL: {selected.get('stop_loss', '—')}",
+                f"TP1: {selected.get('tp1', '—')}  TP2: {selected.get('tp2', '—')}",
+                f"TP3: {selected.get('tp3', '—')}  RR: {selected.get('rr_tp1', '—')}",
+                f"STRATEJİ: {selected.get('strategy', '—')}",
+            ])
+        else:
+            decision_lines.extend([
+                "SON KARAR: İŞLEME GİRME",
+                "Geçerli setup seçilmedi.",
+            ])
+            blockers = []
+            for item in strategies:
+                blockers.extend(item.get("rejection_reasons") or [])
+            if blockers:
+                decision_lines.append("ENGEL: " + " / ".join(dict.fromkeys(map(str, blockers)))[:100])
+        return "\n".join(rows), "\n".join(decision_lines)
+
+    def _finish(self, message: str, dashboard=None) -> None:
         self._show(message)
+        if dashboard:
+            self.query_one("#strategy-panel", Static).update(dashboard[0])
+            self.query_one("#decision-panel", Static).update(dashboard[1])
+        self.query_one("#status", Static).update(
+            "ANALİZ TAMAMLANDI  |  EMİR GÖNDERME: KAPALI"
+        )
         self._busy = False
