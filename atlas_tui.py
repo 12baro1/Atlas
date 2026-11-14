@@ -163,7 +163,7 @@ class AtlasTUIApp(App):
         margin-top: 1;
         padding: 0 2;
         background: #0d1724;
-        border-left: thick #55c8ff;
+        border-left: tall #55c8ff;
         color: #9fb2c7;
     }
     #output {
@@ -206,8 +206,8 @@ class AtlasTUIApp(App):
         with Vertical(id="main"):
             yield Static("ATLAS  /  PROFESSIONAL TRADING TERMINAL     •     7 STRATEJİ / TEK KARAR", id="brand")
             yield Static(
-                "ANALİZ     BTC / ETH / BRC yaz\\n"
-                "TARAMA     50 analiz et  •  en iyi 5 işlem  •  tüm piyasayı tara\\n"
+                "ANALİZ     BTC / ETH / BRC yaz\n"
+                "TARAMA     50 analiz et  •  en iyi 5 işlem  •  tüm piyasayı tara\n"
                 "KONTROL    performans  •  likidite BTC  •  yardım",
                 id="help",
             )
