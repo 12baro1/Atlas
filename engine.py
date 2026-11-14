@@ -66,7 +66,6 @@ from trendline_engine import TrendlineEngine
 from unicorn_engine import UnicornEngine
 from volume_profile_engine import VolumeProfileEngine
 from utils.structure_labels import label_swings
-from strategy_lab import SevenStrategyLab
 
 
 DYNAMIC_ANALYSIS_INPUT_KEYS = (
@@ -136,6 +135,7 @@ class AtlasEngine:
 
     def __init__(self, structure_engine_cls=None):
         Config.refresh_from_env()
+        from strategy_lab import SevenStrategyLab
         # Testlerde sahte sınıf enjekte edebilmek için sınıf referansı tutulur.
         self.structure_engine_cls = structure_engine_cls or MarketStructureEngine
         self.logger = logging.getLogger("atlas.engine")
