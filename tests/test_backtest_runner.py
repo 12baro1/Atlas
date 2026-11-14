@@ -1105,3 +1105,52 @@ def test_stop_atr_diagnostics_use_final_risk_distance():
 
     stats = BacktestRunner(analyze_fn=fake_analyze).run({"15m": candles})
     assert stats["stop_atr_buckets"] == {">=0.50 ATR": 2}
+
+
+def test_runner_deducts_adverse_historical_funding_from_net_r():
+    runner = BacktestRunner(
+        fee_rate=0.0, partial_exits=False, spread_rate=0.0, slippage_rate=0.0
+    )
+    candles = [_candle(0, 100.0, 102.0, 100.1, 101.5)]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 100.0, "stop_loss": 99.0, "tp1": 101.5, "tp2": None, "tp3": None},
+        "analysis": {"entry": {"entry_type": "MARKET"}},
+    }
+    trade = runner._to_trade(
+        result, candles, entry_index=0,
+        funding_records=[{"timestamp": 900_000, "value": 0.001}],
+    )
+    assert trade is not None
+    assert trade["gross_rr"] == 1.5
+    assert trade["funding_cost_r"] == 0.1015
+    assert trade["net_rr"] == 1.3985
+    runner._record(trade)
+    stats = runner.statistics()
+    assert stats["total_funding_cost_r"] == 0.1015
+    assert stats["funding_events_charged"] == 1
+
+
+def test_runner_exposes_only_asof_funding_records_to_analysis():
+    candles = [_candle(i * 900_000, 100.0, 100.2, 99.8, 100.0) for i in range(302)]
+    captured = []
+    decision_ms = candles[300].time + 900_000
+
+    def fake_analyze(window):
+        if len(window["15m"]) == 301:
+            captured.extend(window["funding_records"])
+        return None
+
+    runner = BacktestRunner(analyze_fn=fake_analyze)
+    stats = runner.run({
+        "symbol": "BTC/USDT:USDT",
+        "15m": candles,
+        "funding_records": [
+            {"timestamp": decision_ms, "value": 0.001},
+            {"timestamp": decision_ms + 900_000, "value": 0.002},
+        ],
+        "derivatives_data_quality": {"funding": "HISTORICAL"},
+    })
+    assert captured == [{"timestamp": decision_ms, "value": 0.001}]
+    assert stats["funding_data_quality"]["funding"] == "HISTORICAL"
