@@ -1094,7 +1094,7 @@ def _setup_diagnostic(strategy_id, data, regime):
         if not data.get("snapshot_timestamp_ms"):
             checks.append("MISSING_DATA: snapshot timestamp is unavailable.")
         if data.get("orderbook") and data.get("recent_trades") and data.get("snapshot_timestamp_ms"):
-            checks.append("CONDITION_NOT_MET: fresh book/trades, spread ceiling, imbalance and taker-delta/absorption confirmation did not align.")
+            checks.append("CONDITION_NOT_MET: fresh book/trades, at least 20 valid trades, spread ceiling, depth-weighted imbalance, taker delta and momentum-candle or absorption confirmation did not align.")
     elif strategy_id == "relative_strength":
         checks.append(history("4h", 55))
         symbol = str(data.get("symbol") or "").upper()
