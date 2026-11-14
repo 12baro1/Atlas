@@ -361,7 +361,7 @@ class AtlasTUIApp(App):
             report.get("warning") or "",
             f"Analiz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn",
         ])
-        return "\\n".join(line for line in lines if line)
+        return "\n".join(line for line in lines if line)
 
     def _format_performance(self, command: str) -> str:
         signal = self.runtime.signal_performance()
