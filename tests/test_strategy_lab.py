@@ -37,7 +37,7 @@ def test_plan_contains_consistent_directional_targets_and_r_multiples():
     assert long_plan["stop_loss"] < long_plan["entry"] < long_plan["tp1"] < long_plan["tp2"] < long_plan["tp3"]
     assert short_plan["tp3"] < short_plan["tp2"] < short_plan["tp1"] < short_plan["entry"] < short_plan["stop_loss"]
     assert long_plan["rr_tp1"] == 2.0
-    assert short_plan["rr_tp3"] == 3.0
+    assert short_plan["rr_tp3"] == 4.0
     assert long_plan["experimental"] is True
 
 
