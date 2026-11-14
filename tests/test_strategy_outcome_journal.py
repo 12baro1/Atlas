@@ -12,8 +12,13 @@ def test_journal_persists_and_aggregates_is_oos_separately(tmp_path):
             trade_id=f"is-{index}",
             split="is",
             net_r=value,
+            gross_r=value + 0.1,
+            cost_r=0.1,
+            cost_model_id="maker-taker-spread-slip-v1",
             closed_at_ms=1_700_000_000_000 + index,
             costs_included=True,
+            symbol="BTC/USDT:USDT",
+            source_revision="test-rev",
             regime="TREND",
         )
         assert result["accepted"] is True
@@ -23,8 +28,13 @@ def test_journal_persists_and_aggregates_is_oos_separately(tmp_path):
             trade_id=f"oos-{index}",
             split="oos",
             net_r=value,
+            gross_r=value + 0.1,
+            cost_r=0.1,
+            cost_model_id="maker-taker-spread-slip-v1",
             closed_at_ms=1_700_100_000_000 + index,
             costs_included=True,
+            symbol="BTC/USDT:USDT",
+            source_revision="test-rev",
             regime="TREND",
         )
 
@@ -36,17 +46,26 @@ def test_journal_persists_and_aggregates_is_oos_separately(tmp_path):
     assert stats["is_profit_factor"] > 1
 
 
-def test_journal_rejects_outcomes_without_costs_and_duplicate_ids(tmp_path):
+def test_journal_rejects_outcomes_without_reconciled_costs_and_duplicate_ids(tmp_path):
     journal = StrategyOutcomeJournal(str(tmp_path / "outcomes.jsonl"))
-    payload = dict(strategy_id="smc", trade_id="same", split="is", net_r=1.0, closed_at_ms=1000)
+    payload = dict(
+        strategy_id="smc", trade_id="same", split="is", net_r=0.9,
+        gross_r=1.0, cost_r=0.1, cost_model_id="maker-taker-v1",
+        closed_at_ms=1000, symbol="BTC/USDT:USDT", source_revision="test",
+    )
     assert journal.record_outcome(**payload, costs_included=False)["accepted"] is False
     assert journal.record_outcome(**payload, costs_included=True)["accepted"] is True
     assert journal.record_outcome(**payload, costs_included=True)["reason"] == "duplicate_trade_id"
+    inconsistent = dict(payload, trade_id="bad-cost", net_r=1.0)
+    assert journal.record_outcome(**inconsistent, costs_included=True)["accepted"] is False
 
 
 def test_journal_rejects_unknown_strategy_and_non_finite_r(tmp_path):
     journal = StrategyOutcomeJournal(str(tmp_path / "outcomes.jsonl"))
-    common = dict(trade_id="x", split="is", closed_at_ms=1000, costs_included=True)
+    common = dict(
+        trade_id="x", split="is", closed_at_ms=1000, costs_included=True,
+        gross_r=1.1, cost_r=0.1, cost_model_id="cost-v1",
+    )
     assert journal.record_outcome(strategy_id="made_up", net_r=1, **common)["accepted"] is False
     assert journal.record_outcome(strategy_id="smc", net_r=float("nan"), **common)["accepted"] is False
 
