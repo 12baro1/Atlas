@@ -361,7 +361,7 @@ class AtlasTUIApp(App):
             if selected.get("estimated_net_rr_tp1") is not None:
                 lines.append(f"TP1 net RR (yalnız ücret tahmini): {selected.get('estimated_net_rr_tp1')} — spread/slippage dahil değildir.")
             if selected.get("estimated_net_rr") is not None:
-                lines.append(f"SMC ağırlıklı net RR: {selected.get('estimated_net_rr')} — gerçek fill/slippage garantisi değildir.")
+                lines.append(f"Maliyet sonrası ağırlıklı net RR: {selected.get('estimated_net_rr')} — gerçek fill/slippage garantisi değildir.")
             for reason in selected.get("reasons") or []:
                 lines.append(f"• {reason}")
         lines.extend(["", "ORTAK İŞLEM KARTI", format_card_text(build_selected_strategy_card(result))])
