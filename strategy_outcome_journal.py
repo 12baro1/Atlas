@@ -43,23 +43,26 @@ class StrategyOutcomeJournal:
         self._records = records
         return records
 
-    def record_outcome(self, *, strategy_id, trade_id, split, net_r, gross_r, cost_r, cost_model_id, closed_at_ms, costs_included, symbol="UNKNOWN", source_revision="unknown", regime="UNKNOWN"):
+    def record_outcome(self, *, strategy_id, trade_id, run_id, run_created_at_ms, split, net_r, gross_r, cost_r, cost_model_id, closed_at_ms, costs_included, symbol="UNKNOWN", source_revision="unknown", regime="UNKNOWN"):
         strategy = str(strategy_id or "").strip()
         identifier = str(trade_id or "").strip()
+        replay_id = str(run_id or "").strip()
         sample = str(split or "").lower()
         try:
             result_r = float(net_r)
             gross_result_r = float(gross_r)
             cost_result_r = float(cost_r)
             closed_at = int(closed_at_ms)
+            run_created = int(run_created_at_ms)
         except (TypeError, ValueError, OverflowError):
             return {"accepted": False, "reason": "invalid_numeric_outcome"}
-        if strategy not in VALID_STRATEGIES or not identifier or sample not in {"is", "oos"}:
+        if strategy not in VALID_STRATEGIES or not identifier or not replay_id or sample not in {"is", "oos"}:
             return {"accepted": False, "reason": "invalid_strategy_trade_or_split"}
         model_id = str(cost_model_id or "").strip()
         if (
             not all(math.isfinite(value) for value in (result_r, gross_result_r, cost_result_r))
             or closed_at <= 0
+            or run_created <= 0
             or costs_included is not True
             or not model_id
             or cost_result_r < 0
@@ -70,6 +73,8 @@ class StrategyOutcomeJournal:
         record = {
             "strategy_id": strategy,
             "trade_id": identifier,
+            "run_id": replay_id,
+            "run_created_at_ms": run_created,
             "split": sample,
             "net_r": round(result_r, 8),
             "gross_r": round(gross_result_r, 8),
@@ -131,21 +136,27 @@ class StrategyOutcomeJournal:
                 return "unknown"
         return "sha256:" + digest.hexdigest()
 
-    def performance_snapshot(self, symbol=None, regime=None, source_revision=None):
+    def performance_snapshot(self, symbol=None, regime=None, source_revision=None, run_id=None):
         with self._lock:
             records = list(self._load())
         requested_symbol = str(symbol).upper() if symbol else None
         requested_regime = str(regime).upper() if regime else None
         requested_revision = str(source_revision) if source_revision else None
+        requested_run = str(run_id) if run_id else None
+        matching_records = [
+            item for item in records
+            if (not requested_symbol or str(item.get("symbol") or "").upper() == requested_symbol)
+            and (not requested_regime or str(item.get("regime") or "").upper() == requested_regime)
+            and (not requested_revision or str(item.get("source_revision") or "unknown") == requested_revision)
+        ]
+        if requested_run is None and matching_records:
+            latest = max(matching_records, key=lambda item: int(item.get("run_created_at_ms") or 0))
+            requested_run = str(latest.get("run_id") or "")
         grouped = defaultdict(lambda: {"is": [], "oos": []})
-        for item in records:
+        for item in matching_records:
             if item.get("costs_included") is not True:
                 continue
-            if requested_symbol and str(item.get("symbol") or "").upper() != requested_symbol:
-                continue
-            if requested_regime and str(item.get("regime") or "").upper() != requested_regime:
-                continue
-            if requested_revision and str(item.get("source_revision") or "unknown") != requested_revision:
+            if requested_run and str(item.get("run_id") or "") != requested_run:
                 continue
             split = item.get("split")
             strategy = item.get("strategy_id")
