@@ -47,74 +47,53 @@ def _tps(targets):
     return None, None, None
 
 
-def simulate_trade(entry, stop_loss, targets, future_candles, direction="LONG", round_trip_cost_rate=0.002):
-    """Bir girişten itibaren sonraki mumlarda önce hangi hedefe ulaşıldığını bulur.
-
-    future_candles: Candle nesneleri (time artan). Her mumda: low/high.
-    Dönüş: {"result": "WIN"/"LOSS"/"OPEN", "tp": 1/2/3 ya da 0, "net_rr": float}
-      - OPEN: verilen pencere içinde ne SL ne de TP vurulmadı (sonuç açık).
-    """
+def simulate_trade(entry, stop_loss, targets, future_candles, direction="LONG", round_trip_cost_rate=0.002, max_holding_bars=None):
+    """Simulate one full exit; optionally close at the shared max-holding horizon."""
     direction = (direction or "LONG").upper()
     entry = _num(entry)
     stop = _num(stop_loss)
     tp1, tp2, tp3 = _tps(targets)
-    levels = [
-        (level_no, target)
-        for level_no, target in enumerate((tp1, tp2, tp3), start=1)
-        if target is not None
-    ]
-
+    levels = [(level_no, target) for level_no, target in enumerate((tp1, tp2, tp3), start=1) if target is not None]
     if entry is None or stop is None or not future_candles or not levels:
         return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
-
     risk_distance = abs(entry - stop)
-    if risk_distance == 0:
+    if risk_distance <= 0:
         return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
-
     is_long = direction in ("LONG", "BUY")
-
-    for offset, candle in enumerate(future_candles):
-        low = candle.low
-        high = candle.high
-
+    bars = list(future_candles)
+    horizon = max(1, int(max_holding_bars)) if max_holding_bars is not None else None
+    simulation_bars = bars[:horizon] if horizon is not None else bars
+    for offset, candle in enumerate(simulation_bars):
+        low, high = candle.low, candle.high
         opened = _num(getattr(candle, "open", None))
         if is_long:
             if low <= stop:
-                stop_gap = opened is not None and opened <= stop
-                exit_price = opened if stop_gap else stop
+                gap = opened is not None and opened <= stop
+                exit_price = opened if gap else stop
                 realized_r = (exit_price - entry) / risk_distance
-                gap_distance = max(0.0, stop - exit_price) if stop_gap else 0.0
-                return {"result": "LOSS", "tp": 0, "net_rr": _num(realized_r),
-                        "exit_reason": "STOP", "exit_offset": offset,
-                        "exit_price": exit_price, "stop_gap": stop_gap,
-                        "stop_gap_distance": _num(gap_distance),
-                        "stop_gap_r": _num(gap_distance / risk_distance)}
-            for level_no, tp in levels:
-                if high >= tp:
-                    rr = abs(tp - entry) / risk_distance
-                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr),
-                            "exit_reason": f"TP{level_no}", "exit_offset": offset,
-                            "exit_price": tp, "stop_gap": False,
-                            "stop_gap_distance": 0.0, "stop_gap_r": 0.0}
+                gap_distance = max(0.0, stop - exit_price) if gap else 0.0
+                return {"result": "LOSS", "tp": 0, "net_rr": _num(realized_r), "exit_reason": "STOP", "exit_offset": offset, "exit_price": exit_price, "stop_gap": gap, "stop_gap_distance": _num(gap_distance), "stop_gap_r": _num(gap_distance / risk_distance)}
+            for level_no, target in levels:
+                if high >= target:
+                    rr = abs(target - entry) / risk_distance
+                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr), "exit_reason": f"TP{level_no}", "exit_offset": offset, "exit_price": target, "stop_gap": False, "stop_gap_distance": 0.0, "stop_gap_r": 0.0}
         else:
             if high >= stop:
-                stop_gap = opened is not None and opened >= stop
-                exit_price = opened if stop_gap else stop
+                gap = opened is not None and opened >= stop
+                exit_price = opened if gap else stop
                 realized_r = (entry - exit_price) / risk_distance
-                gap_distance = max(0.0, exit_price - stop) if stop_gap else 0.0
-                return {"result": "LOSS", "tp": 0, "net_rr": _num(realized_r),
-                        "exit_reason": "STOP", "exit_offset": offset,
-                        "exit_price": exit_price, "stop_gap": stop_gap,
-                        "stop_gap_distance": _num(gap_distance),
-                        "stop_gap_r": _num(gap_distance / risk_distance)}
-            for level_no, tp in levels:
-                if low <= tp:
-                    rr = abs(entry - tp) / risk_distance
-                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr),
-                            "exit_reason": f"TP{level_no}", "exit_offset": offset,
-                            "exit_price": tp, "stop_gap": False,
-                            "stop_gap_distance": 0.0, "stop_gap_r": 0.0}
-
+                gap_distance = max(0.0, exit_price - stop) if gap else 0.0
+                return {"result": "LOSS", "tp": 0, "net_rr": _num(realized_r), "exit_reason": "STOP", "exit_offset": offset, "exit_price": exit_price, "stop_gap": gap, "stop_gap_distance": _num(gap_distance), "stop_gap_r": _num(gap_distance / risk_distance)}
+            for level_no, target in levels:
+                if low <= target:
+                    rr = abs(entry - target) / risk_distance
+                    return {"result": "WIN", "tp": level_no, "net_rr": _num(rr), "exit_reason": f"TP{level_no}", "exit_offset": offset, "exit_price": target, "stop_gap": False, "stop_gap_distance": 0.0, "stop_gap_r": 0.0}
+    if horizon is not None and len(simulation_bars) >= horizon:
+        last = simulation_bars[-1]
+        exit_price = _num(last.close)
+        if exit_price is not None:
+            realized_r = (exit_price - entry) / risk_distance if is_long else (entry - exit_price) / risk_distance
+            return {"result": "WIN" if realized_r > 0 else "LOSS", "tp": 0, "net_rr": _num(realized_r), "exit_reason": "TIME_EXIT", "exit_offset": len(simulation_bars) - 1, "exit_price": exit_price, "stop_gap": False, "stop_gap_distance": 0.0, "stop_gap_r": 0.0}
     return {"result": "OPEN", "tp": 0, "net_rr": 0.0}
 
 
