@@ -76,3 +76,8 @@ def test_absorption_proxy_rejects_low_sample_or_moving_price():
     assert strategy_lab._absorption_proxy({
         "trade_delta": 0.3, "imbalance": -0.2, "trade_count": 40
     }, candle, 1.0) is None
+
+    falling_price = TimedCandle(2, 100, 100.1, 97.9, 98)
+    assert strategy_lab._absorption_proxy({
+        "trade_delta": 0.3, "imbalance": -0.2, "trade_count": 40
+    }, falling_price, 1.0) is None
