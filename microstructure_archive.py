@@ -1,4 +1,4 @@
-"""Opt-in local JSONL archive for timestamped live microstructure snapshots.
+"""Local JSONL archive for timestamped live microstructure snapshots.
 
 This creates a future replay dataset; it does not backfill historical order books.
 """
@@ -7,8 +7,10 @@ from __future__ import annotations
 import json
 import os
 import threading
+from bisect import bisect_right
 
 _LOCK = threading.RLock()
+_CACHE = {}
 
 
 def _path(symbol):
@@ -56,21 +58,31 @@ def record_snapshot(symbol, data):
 def snapshot_at(symbol, asof_ms, *, book_max_age_ms=15_000, trades_max_age_ms=30_000):
     """Return the newest archived feed snapshot available at or before asof_ms."""
     path = _path(symbol)
-    best = None
     try:
-        with open(path, "r", encoding="utf-8") as handle:
-            for line in handle:
-                try:
-                    row = json.loads(line)
-                    stamp = int(row.get("snapshot_timestamp_ms") or 0)
-                except (ValueError, TypeError):
-                    continue
-                if 0 < stamp <= int(asof_ms) and (best is None or stamp > best[0]):
-                    best = (stamp, row)
+        stat = os.stat(path)
+        cache_key = (stat.st_mtime_ns, stat.st_size)
+        cached = _CACHE.get(path)
+        if cached is None or cached[0] != cache_key:
+            rows = []
+            with open(path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        row = json.loads(line)
+                        stamp = int(row.get("snapshot_timestamp_ms") or 0)
+                    except (ValueError, TypeError):
+                        continue
+                    if stamp > 0:
+                        rows.append((stamp, row))
+            rows.sort(key=lambda item: item[0])
+            cached = (cache_key, rows, [item[0] for item in rows])
+            _CACHE[path] = cached
+        rows, stamps = cached[1], cached[2]
     except OSError:
         return None
-    if best is None:
+    index = bisect_right(stamps, int(asof_ms)) - 1
+    if index < 0:
         return None
+    best = rows[index]
     row = best[1]
     book_ms = int(row.get("orderbook_timestamp_ms") or 0)
     trades_ms = int(row.get("recent_trades_timestamp_ms") or 0)
