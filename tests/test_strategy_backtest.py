@@ -93,9 +93,15 @@ def test_funding_cost_is_applied_at_historical_settlement():
         funding_events=funding,
     )
     assert long_result["funding_pnl_r"] < 0
-    assert short_result["funding_pnl_r"] > 0
+    assert short_result["funding_pnl_r"] == 0
+    short_pays = simulate_candidate(
+        candidate("SHORT"), [Bar(100, 100.5, 97, 98, time=1_700_000_000_000)],
+        maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
+        funding_events=[{"timestamp": 1_700_000_450_000, "value": -0.001}],
+    )
+    assert short_pays["funding_pnl_r"] < 0
     assert long_result["net_r"] < long_result["gross_r"]
-    assert short_result["net_r"] > short_result["gross_r"]
+    assert short_pays["net_r"] < short_pays["gross_r"]
 
 
 def test_walk_forward_uses_expanding_train_and_sequential_test_windows():
