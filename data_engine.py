@@ -142,6 +142,7 @@ def get_market_data(symbol, force_refresh=False):
             valid_oi = [
                 item for item in records
                 if isinstance(item, dict)
+                and item.get("timestamp") is not None
                 and (item.get("openInterestValue") is not None or item.get("openInterestAmount") is not None)
             ]
             data["open_interest"] = [
