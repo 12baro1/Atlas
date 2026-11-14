@@ -489,6 +489,7 @@ class AtlasTUIApp(App):
             )
             return
         self._busy = True
+        self._motor_cycle_active = not _is_report_command(command)
         if _is_symbol_input(command):
             symbol = command.strip().upper()
             self._active_symbol = symbol if "/" in symbol else f"{symbol}/USDT:USDT"
@@ -784,8 +785,9 @@ class AtlasTUIApp(App):
 
     def _finish(self, message: str) -> None:
         self._show(message)
-        self.query_one("#motors", Static).update(self._motors_renderable("DONE"))
-        self.query_one("#pipeline", Static).update(self._pipeline_renderable("DONE"))
-        self._log_event("ANALYSIS COMPLETE  |  Final result updated.")
+        if getattr(self, "_motor_cycle_active", False):
+            self.query_one("#motors", Static).update(self._motors_renderable("DONE"))
+            self.query_one("#pipeline", Static).update(self._pipeline_renderable("DONE"))
+            self._log_event("ANALYSIS COMPLETE  |  Seven strategy generators finished.")
         self._set_status("ANALYSIS COMPLETE  |  MARKET FEED CONTINUES")
         self._busy = False
