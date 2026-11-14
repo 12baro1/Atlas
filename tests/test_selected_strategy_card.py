@@ -34,6 +34,12 @@ def _candidate(**overrides):
         "target_model": "SWING_LIQUIDITY",
         "reasons": ["4H trend aligned", "1H pullback reclaimed"],
         "risk_validation": {"eligible": True, "weighted_net_rr": 2.5},
+        "risk_plan": {
+            "risk_setup_valid": True, "final_geometry_reconciled": True,
+            "weighted_rr": 2.7, "weighted_net_rr": 2.5,
+            "target_max_rr": 4.0, "partial_exit_weights": {"tp1": 0.5, "tp2": 0.3, "tp3": 0.2},
+            "position_size": 5.0, "capital_at_risk": 10.0,
+        },
     }
     payload.update(overrides)
     return payload
