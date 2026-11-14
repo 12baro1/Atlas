@@ -61,6 +61,21 @@ def _paginate(fetch, symbol, start_ms, end_ms, *, timeframe=None, limit=200):
     return records
 
 
+def _coverage_status(records, start_ms, end_ms, interval_ms):
+    records = sorted(records or [], key=lambda row: int(row.get("timestamp") or 0))
+    if not records:
+        return "UNAVAILABLE", 0.0
+    start_ms = int(start_ms)
+    end_ms = int(end_ms)
+    interval_ms = max(1, int(interval_ms))
+    expected = max(1, int(math.ceil(max(0, end_ms - start_ms) / interval_ms)))
+    coverage_pct = min(100.0, len(records) / expected * 100.0)
+    first_ms = int(records[0]["timestamp"])
+    last_ms = int(records[-1]["timestamp"])
+    endpoints_covered = first_ms <= start_ms + interval_ms and last_ms >= end_ms - interval_ms
+    return ("HISTORICAL" if coverage_pct >= 90.0 and endpoints_covered else "PARTIAL"), round(coverage_pct, 2)
+
+
 def load_historical_derivatives(symbol, start_ms, end_ms):
     """Fetch timestamped OI/funding history; no current-value fallback."""
     result = {
@@ -75,15 +90,18 @@ def load_historical_derivatives(symbol, start_ms, end_ms):
             result["open_interest_records"] = _normalise(
                 raw, ("openInterestValue", "openInterestAmount"), start_ms, end_ms
             )
-            result["derivatives_data_quality"]["open_interest"] = (
-                "HISTORICAL" if result["open_interest_records"] else "UNAVAILABLE"
+            status, coverage = _coverage_status(
+                result["open_interest_records"], start_ms, end_ms, 60 * 60 * 1000
             )
+            result["derivatives_data_quality"]["open_interest"] = status
+            result["derivatives_data_quality"]["open_interest_coverage_pct"] = coverage
         except Exception as exc:
             result["derivatives_data_quality"]["open_interest"] = (
                 f"UNAVAILABLE:{type(exc).__name__}"
             )
     else:
         result["derivatives_data_quality"]["open_interest"] = "UNSUPPORTED"
+        result["derivatives_data_quality"]["open_interest_coverage_pct"] = 0.0
 
     funding_fetch = getattr(exchange, "fetch_funding_rate_history", None)
     if callable(funding_fetch):
@@ -92,13 +110,16 @@ def load_historical_derivatives(symbol, start_ms, end_ms):
             result["funding_records"] = _normalise(
                 raw, ("fundingRate",), start_ms, end_ms
             )
-            result["derivatives_data_quality"]["funding"] = (
-                "HISTORICAL" if result["funding_records"] else "UNAVAILABLE"
+            status, coverage = _coverage_status(
+                result["funding_records"], start_ms, end_ms, 8 * 60 * 60 * 1000
             )
+            result["derivatives_data_quality"]["funding"] = status
+            result["derivatives_data_quality"]["funding_coverage_pct"] = coverage
         except Exception as exc:
             result["derivatives_data_quality"]["funding"] = (
                 f"UNAVAILABLE:{type(exc).__name__}"
             )
     else:
         result["derivatives_data_quality"]["funding"] = "UNSUPPORTED"
+        result["derivatives_data_quality"]["funding_coverage_pct"] = 0.0
     return result
