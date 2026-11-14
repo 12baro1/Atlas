@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from bisect import bisect_right
 
 _LOCK = threading.RLock()
@@ -17,6 +18,52 @@ def _path(symbol):
     safe = str(symbol).replace("/", "_").replace(":", "_").replace("\\", "_")
     root = os.getenv("ATLAS_MICROSTRUCTURE_ARCHIVE_DIR", "data/microstructure")
     return os.path.join(root, safe + ".jsonl")
+
+
+def _prune_if_needed(path, now_ms):
+    try:
+        max_bytes = int(os.getenv("ATLAS_MICROSTRUCTURE_ARCHIVE_MAX_BYTES", str(5 * 1024 * 1024)))
+        retention_days = int(os.getenv("ATLAS_MICROSTRUCTURE_ARCHIVE_RETENTION_DAYS", "7"))
+    except (TypeError, ValueError):
+        max_bytes, retention_days = 5 * 1024 * 1024, 7
+    max_bytes = max(1024, max_bytes)
+    retention_ms = max(1, retention_days) * 24 * 60 * 60 * 1000
+    cutoff_ms = int(now_ms) - retention_ms
+    try:
+        size = os.path.getsize(path)
+        if size <= max_bytes:
+            with open(path, "r", encoding="utf-8") as handle:
+                first_line = handle.readline()
+            try:
+                oldest_ms = int(json.loads(first_line).get("snapshot_timestamp_ms") or 0)
+            except (ValueError, TypeError):
+                oldest_ms = 0
+            if oldest_ms >= cutoff_ms:
+                return False
+        rows = []
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                    stamp = int(row.get("snapshot_timestamp_ms") or 0)
+                except (ValueError, TypeError):
+                    continue
+                if stamp >= cutoff_ms:
+                    rows.append((stamp, line if line.endswith("\n") else line + "\n"))
+        rows.sort(key=lambda item: item[0])
+        while len(rows) > 1 and sum(len(line.encode("utf-8")) for _, line in rows) > max_bytes:
+            rows.pop(0)
+        if not rows:
+            return False
+        temp_path = path + ".tmp"
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            for _, line in rows:
+                handle.write(line)
+        os.replace(temp_path, path)
+        _CACHE.pop(path, None)
+        return True
+    except OSError:
+        return False
 
 
 def record_snapshot(symbol, data):
@@ -52,6 +99,7 @@ def record_snapshot(symbol, data):
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, separators=(",", ":"), default=str) + "\n")
             handle.flush()
+        _prune_if_needed(path, timestamp or int(time.time() * 1000))
     return True
 
 
