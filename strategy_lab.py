@@ -789,6 +789,10 @@ def _smc_candidate(result):
         "target_model": "SMC_STRUCTURAL",
         "experimental": False,
         "reasons": reasons,
+        "supporting_event_ids": list(reasoning.get("supporting_event_ids") or []),
+        "opposing_event_ids": list(reasoning.get("opposing_event_ids") or []),
+        "opposing_evidence": list(reasoning.get("opposing_evidence") or []),
+        "market_context": list(reasoning.get("market_context") or []),
         "partial_exit_weights": (
             source_risk.get("target_rebased_weights")
             or source_risk.get("partial_exit_weights")
