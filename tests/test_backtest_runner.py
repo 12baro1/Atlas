@@ -64,7 +64,7 @@ def test_runner_counts_and_reports_expectancy():
             }
         return None
 
-    runner = BacktestRunner(analyze_fn=fake_analyze)
+    runner = BacktestRunner(analyze_fn=fake_analyze, max_holding_bars=400)
     stats = runner.run({"15m": candles})
     assert stats["total"] == 1
     assert stats["wins"] == 1
