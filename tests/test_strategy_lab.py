@@ -235,3 +235,30 @@ def test_smc_raw_setup_is_not_suppressed_by_legacy_decision_filters():
     assert candidate["entry"] == 100.0
     assert candidate["status"] == "RAW_SETUP"
     assert "4H CHoCH + OTE + FVG" in candidate["reasons"]
+
+
+def test_execution_distance_gate_is_shared_and_preserves_far_limit_plans(monkeypatch):
+    import strategy_lab
+
+    market_plan = {
+        "direction": "LONG", "entry_type": "MARKET", "entry": 100.0,
+        "stop_loss": 98.0, "tp1": 104.0, "tp2": 106.0, "tp3": 108.0,
+        "strength": 80.0, "reasons": ["test"],
+    }
+    monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(market_plan))
+    monkeypatch.setattr(strategy_lab, "_risk_validate_candidate", lambda plan: {
+        "eligible": True, "reason": None, "weighted_net_rr": 2.5,
+        "risk_plan": {"final_geometry_reconciled": True, "risk_setup_valid": True,
+                      "weighted_net_rr": 2.5, "weighted_rr": 2.7},
+    })
+    report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT", "current_price": 1000.0})
+    trend = next(item for item in report["strategies"] if item["strategy_id"] == "trend_pullback")
+    assert trend["status"] == "BLOCKED_COMMON_FILTER"
+    assert trend["rejection_reasons"] == ["MARKET_ENTRY_TOO_FAR"]
+
+    limit_plan = dict(market_plan, entry_type="LIMIT")
+    monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(limit_plan))
+    report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT", "current_price": 1000.0})
+    trend = next(item for item in report["strategies"] if item["strategy_id"] == "trend_pullback")
+    assert trend["status"] == "SELECTED"
+    assert trend["entry_type"] == "LIMIT"
