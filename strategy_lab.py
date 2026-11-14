@@ -685,8 +685,14 @@ class SevenStrategyLab:
             strategy_id = candidate["strategy_id"]
             stats = performance_by_strategy.get(strategy_id)
             edge = evaluate_strategy_edge(stats)
+            if strategy_id == "smc" and not stats:
+                edge = {
+                    "eligible": False,
+                    "status": "LEGACY_SMC_FALLBACK",
+                    "reasons": ["Existing SMC decision is preserved as fallback until comparable performance evidence exists."],
+                }
             candidate["edge_validation"] = edge
-            if strategy_id != "smc" and edge["eligible"]:
+            if edge["eligible"]:
                 ranked = rank_validated_candidate(candidate, stats, candidate.get("regime_fit", 1.0))
                 if ranked:
                     candidate["validated_selection_score"] = ranked["score"]
@@ -706,7 +712,11 @@ class SevenStrategyLab:
             "validated_candidate_count": len(validated),
             "selected": selected,
             "selection_method": "out_of_sample_edge_gated_with_legacy_smc_fallback",
-            "performance_status": "VALIDATED_EXPERIMENTAL_EDGE_AVAILABLE" if validated else "NO_EXPERIMENTAL_EDGE_VALIDATED",
+            "performance_status": (
+                "VALIDATED_EXPERIMENTAL_EDGE_AVAILABLE"
+                if any(item.get("strategy_id") != "smc" for item in validated)
+                else "NO_EXPERIMENTAL_EDGE_VALIDATED"
+            ),
             "warning": (
                 "Deneysel motorlar yalnızca stratejiye özel, maliyet sonrası ve out-of-sample "
                 "performans yeterli örneklem ve güven sınırlarını geçerse SMC'nin önüne geçebilir. "
