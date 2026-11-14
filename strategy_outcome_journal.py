@@ -113,12 +113,18 @@ class StrategyOutcomeJournal:
             "expectancy_std_r": round(math.sqrt(variance), 8),
         }
 
-    def performance_snapshot(self):
+    def performance_snapshot(self, symbol=None, regime=None):
         with self._lock:
             records = list(self._load())
+        requested_symbol = str(symbol).upper() if symbol else None
+        requested_regime = str(regime).upper() if regime else None
         grouped = defaultdict(lambda: {"is": [], "oos": []})
         for item in records:
             if item.get("costs_included") is not True:
+                continue
+            if requested_symbol and str(item.get("symbol") or "").upper() != requested_symbol:
+                continue
+            if requested_regime and str(item.get("regime") or "").upper() != requested_regime:
                 continue
             split = item.get("split")
             strategy = item.get("strategy_id")
