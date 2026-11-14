@@ -690,10 +690,11 @@ def _orderflow_momentum(data):
 
 
 def _liquidation_cascade(data):
+    """Detect a liquidation-like deleveraging impulse; OI is a proxy, not event data."""
     candles = data.get("1h") or []
     oi = data.get("open_interest") or []
     atr = _atr(candles)
-    if len(candles) < 20 or len(oi) < 2 or atr is None:
+    if len(candles) < 21 or len(oi) < 2 or atr is None:
         return None
     try:
         previous_oi, current_oi = float(oi[-2]), float(oi[-1])
@@ -716,9 +717,11 @@ def _liquidation_cascade(data):
     oi_change = (current_oi - previous_oi) / previous_oi
     last = candles[-1]
     close, opened = _value(last, "close"), _value(last, "open")
+    quality = _candle_quality(last)
+    relative_volume = _relative_volume(candles, 20)
     buy_ratio, _ = _trade_flow(data)
     entry = _current_price(data)
-    if close is None or opened is None or entry is None:
+    if close is None or opened is None or entry is None or quality is None or relative_volume is None:
         return None
     impulse = abs(close - opened) / atr
     direction = None
@@ -732,10 +735,16 @@ def _liquidation_cascade(data):
     # Crowded-side funding is used as a directional confirmation, not as a
     # standalone trigger: positive funding supports long-liquidation shorts;
     # negative funding supports short-squeeze longs.
-    if oi_change <= -0.015 and close > opened and entry > opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio >= 0.56 and funding <= 0.0003:
+    if (oi_change <= -0.015 and close > opened and entry > opened and impulse >= 1.0
+            and quality["direction"] == "BULLISH" and quality["close_location"] >= 0.70
+            and relative_volume >= 1.25 and buy_ratio is not None and buy_ratio >= 0.56
+            and funding <= 0.0003):
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio <= 0.44 and funding >= -0.0003:
+    elif (oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0
+            and quality["direction"] == "BEARISH" and quality["close_location"] <= 0.30
+            and relative_volume >= 1.25 and buy_ratio is not None and buy_ratio <= 0.44
+            and funding >= -0.0003):
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
@@ -743,8 +752,19 @@ def _liquidation_cascade(data):
     strength = min(92.0, 65.0 + min(abs(oi_change) * 400.0, 15.0) + min(impulse * 5.0, 10.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
-        plan["reasons"] = [f"Open interest contraction={oi_change * 100:.2f}%", f"1H impulse={impulse:.2f} ATR", f"Funding rate={funding:.5f}", "Trade-flow confirmation; liquidation side remains a proxy inference"]
+        plan["reasons"] = [
+            f"Open interest contraction={oi_change * 100:.2f}% over timestamped observations",
+            f"1H impulse={impulse:.2f} ATR; relative volume={relative_volume:.2f}x",
+            f"Taker buy-notional ratio={buy_ratio:.2f}; funding={funding:.5f}",
+            f"Impulse candle close-location={quality['close_location']:.2f}",
+            "Liquidation-side interpretation is an OI/flow proxy, not exchange liquidation-event data",
+        ]
         plan["data_quality"] = "OI_CONTRACTION_PROXY_NOT_EXCHANGE_LIQUIDATION_FEED"
+        plan["liquidation_metrics"] = {"oi_change_pct": round(oi_change * 100, 3),
+                                      "impulse_atr": round(impulse, 3),
+                                      "relative_volume": round(relative_volume, 3),
+                                      "taker_buy_notional_ratio": round(buy_ratio, 3),
+                                      "funding_rate": funding}
     return plan
 
 
@@ -832,15 +852,23 @@ def _relative_strength(data):
     if not math.isfinite(beta) or abs(beta) > 5.0:
         return None
 
+    residual_returns = [asset_value - beta * market_value
+                        for asset_value, market_value in zip(asset_returns[-48:], benchmark_returns[-48:])]
     own_return_12 = sum(asset_returns[-12:])
     benchmark_return_12 = sum(benchmark_returns[-12:])
     residual_alpha = own_return_12 - beta * benchmark_return_12
+    residual_alpha_6 = sum(residual_returns[-6:])
+    residual_volatility = math.sqrt(sum(value * value for value in residual_returns) / len(residual_returns))
+    alpha_signal = max(0.02, 0.75 * residual_volatility * math.sqrt(12.0))
     e20 = _ema(closes, 20)
-    if e20 is None:
+    e20_previous = _ema(closes[:-3], 20)
+    if e20 is None or e20_previous is None:
         return None
     direction = (
-        "LONG" if residual_alpha >= 0.02 and closes[-1] > e20
-        else "SHORT" if residual_alpha <= -0.02 and closes[-1] < e20
+        "LONG" if residual_alpha >= alpha_signal and residual_alpha_6 > 0
+        and closes[-1] > e20 and e20 > e20_previous
+        else "SHORT" if residual_alpha <= -alpha_signal and residual_alpha_6 < 0
+        and closes[-1] < e20 and e20 < e20_previous
         else None
     )
     if not direction:
@@ -855,13 +883,17 @@ def _relative_strength(data):
         benchmark_label = "/".join(benchmark_keys)
         sector_label = f" + sector peers ({len(sector_maps)})" if use_sector else ""
         plan["reasons"] = [
-            f"12x4H beta-adjusted residual alpha={residual_alpha * 100:+.2f}%",
+            f"12x4H beta-adjusted residual alpha={residual_alpha * 100:+.2f}% (required {alpha_signal * 100:.2f}%)",
+            f"Recent 6x4H residual alpha={residual_alpha_6 * 100:+.2f}%",
             f"Estimated beta={beta:.2f} vs {benchmark_label}{sector_label}",
-            "Absolute EMA20 trend confirmation",
+            f"EMA20 slope={(e20 - e20_previous) / atr:.2f} ATR; absolute trend confirmation",
         ]
         plan["relative_strength_metrics"] = {
             "beta": round(beta, 4),
             "residual_alpha_12x4h": round(residual_alpha, 6),
+            "residual_alpha_6x4h": round(residual_alpha_6, 6),
+            "required_alpha_12x4h": round(alpha_signal, 6),
+            "residual_volatility_4h": round(residual_volatility, 6),
             "market_return_12x4h": round(benchmark_return_12, 6),
             "sector_peers_used": len(sector_maps) if use_sector else 0,
         }
