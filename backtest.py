@@ -712,14 +712,14 @@ def _combine_stats(all_stats):
 
 
 def _report(stats, name):
-    print(f"  Funding veri kalitesi: {stats.get('funding_data_quality', {})}")
-    print(f"  Funding maliyeti: {stats.get('total_funding_cost_r', 0)}R | settlement: {stats.get('funding_events_charged', 0)}")
     print("=" * 52)
     print(f"SONUÇ | {name}")
-    print(f"  Maliyet varsayımları: maker={getattr(Config, 'MAKER_FEE_RATE', 0.0002):.4%}/leg | "
+    print(f"  Maliyet varsayımları: maker={getattr(Config, 'MAKER_FEE_RATE', 0.0002):.4%}/leg | ")
           f"taker={getattr(Config, 'TAKER_FEE_RATE', 0.00055):.4%}/leg | "
           f"spread={getattr(Config, 'STOP_SPREAD_BUFFER_RATE', 0.0002):.4%}/market leg | "
           f"slippage={getattr(Config, 'STOP_SLIPPAGE_BUFFER_RATE', 0.0003):.4%}/market leg")
+    print(f"  Funding veri kalitesi: {stats.get('funding_data_quality', {})}")
+    print(f"  Funding maliyeti: {stats.get('total_funding_cost_r', 0)}R | settlement: {stats.get('funding_events_charged', 0)}")
     print("=" * 52)
     print(f"  Analiz çağrısı : {stats.get('analysis_calls', 0)}")
     print(f"  Boş sonuç      : {stats.get('empty_results', 0)}")
