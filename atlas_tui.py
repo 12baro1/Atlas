@@ -343,22 +343,89 @@ class AtlasTUIApp(App):
                      subtitle="Green = bullish  |  Red = bearish", border_style="green", box=box.ROUNDED)
 
     def on_mount(self) -> None:
-        self._set_status("SYSTEM READY  |  COMMAND INPUT ACTIVE")
-        self._show(
-            Panel(
-                Group(
-                    Text("TERMINAL ONLINE", style="bold bright_green"),
-                    Text("Piyasa verisi henüz çekilmedi. Gösterilen motorlar bekleme durumunda.", style="white"),
-                    Text("BTC  •  ETH  •  BRC  •  50 analiz et  •  en iyi 5 işlem", style="bright_cyan"),
-                ),
-                title="[bold]ATLAS[/bold]",
-                border_style="green",
-                box=box.DOUBLE,
-            )
-        )
+        self._active_symbol = "BTC/USDT:USDT"
+        self._market_refresh_busy = False
+        self._set_status("BYBIT PUBLIC FEED  |  CONNECTING")
+        self._log_event("Atlas dashboard initialized; connecting to Bybit public market data.")
         self.query_one("#command", Input).focus()
+        self._on_resize()
+        self.set_interval(5.0, self._request_market_refresh)
+        self._request_market_refresh()
         if self.initial_symbol:
             self._start_command(self.initial_symbol)
+
+    def on_resize(self, event) -> None:
+        self._on_resize()
+
+    def _on_resize(self) -> None:
+        try:
+            dashboard = self.query_one("#dashboard", Grid)
+            if self.size.width < 105:
+                dashboard.add_class("compact")
+            else:
+                dashboard.remove_class("compact")
+        except Exception:
+            pass
+
+    def _log_event(self, message: str) -> None:
+        try:
+            self.query_one("#events", RichLog).write(message)
+        except Exception:
+            pass
+
+    def _request_market_refresh(self) -> None:
+        if self._market_refresh_busy:
+            return
+        self._market_refresh_busy = True
+        threading.Thread(target=self._fetch_market_snapshot, daemon=True).start()
+
+    def _fetch_market_snapshot(self) -> None:
+        try:
+            tickers = {}
+            for symbol in ("BTC/USDT:USDT", "ETH/USDT:USDT"):
+                try:
+                    tickers[symbol] = exchange.fetch_ticker(symbol)
+                except Exception:
+                    tickers[symbol] = {}
+            selected = self._active_symbol
+            candles = exchange.fetch_ohlcv(selected, timeframe="5m", limit=48) or []
+            ticker = tickers.get(selected) or {}
+            if not ticker:
+                try:
+                    ticker = exchange.fetch_ticker(selected) or {}
+                except Exception:
+                    ticker = {}
+            payload = {"tickers": tickers, "selected_ticker": ticker, "candles": candles, "symbol": selected}
+            self.call_from_thread(self._update_dashboard, payload)
+        except Exception as exc:
+            self.call_from_thread(self._set_status, f"MARKET FEED ERROR  |  {str(exc)[:100]}")
+        finally:
+            self._market_refresh_busy = False
+
+    def _update_dashboard(self, payload: dict) -> None:
+        tickers = payload.get("tickers") or {}
+        ticker = payload.get("selected_ticker") or {}
+        last = ticker.get("last")
+        change = ticker.get("percentage")
+        high = ticker.get("high")
+        low = ticker.get("low")
+        volume = ticker.get("quoteVolume")
+        def fmt(value):
+            return f"{value:,.4f}" if isinstance(value, (int, float)) else "—"
+        detail = {
+            "symbol": payload.get("symbol", self._active_symbol),
+            "last": fmt(last),
+            "change": f"{change:+.2f}%" if isinstance(change, (int, float)) else "—",
+            "range": f"{fmt(high)} / {fmt(low)}",
+            "volume": f"{volume:,.0f} USDT" if isinstance(volume, (int, float)) else "—",
+        }
+        self.query_one("#market", Static).update(self._market_renderable(tickers))
+        self.query_one("#chart", Static).update(self._chart_renderable(payload.get("candles") or [], payload.get("symbol")))
+        self.query_one("#details", Static).update(self._details_renderable(detail))
+        if last is not None:
+            self._set_status(f"BYBIT LIVE  |  {payload.get('symbol')}  |  LAST {fmt(last)}  |  REFRESH 5s")
+        else:
+            self._set_status("BYBIT FEED CONNECTED  |  SELECTED TICKER UNAVAILABLE")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         command = event.value.strip()
@@ -422,6 +489,15 @@ class AtlasTUIApp(App):
             )
             return
         self._busy = True
+        if _is_symbol_input(command):
+            symbol = command.strip().upper()
+            self._active_symbol = symbol if "/" in symbol else f"{symbol}/USDT:USDT"
+            self._log_event(f"ANALYSIS START  |  {self._active_symbol}")
+        elif _parse_scan_command(command) is not None:
+            self._log_event(f"MARKET SCAN START  |  {command.upper()}")
+        if not _is_report_command(command):
+            self.query_one("#motors", Static).update(self._motors_renderable("RUNNING"))
+            self.query_one("#pipeline", Static).update(self._pipeline_renderable("RUNNING"))
         self._show(f"{command.upper()}\nAnaliz ediliyor…\nVeri kaynağına bağlanılıyor.")
         threading.Thread(target=self._run_command, args=(command,), daemon=True).start()
 
@@ -708,5 +784,8 @@ class AtlasTUIApp(App):
 
     def _finish(self, message: str) -> None:
         self._show(message)
-        self._set_status("TAMAMLANDI  |  Sonuç panelde gösteriliyor")
+        self.query_one("#motors", Static).update(self._motors_renderable("DONE"))
+        self.query_one("#pipeline", Static).update(self._pipeline_renderable("DONE"))
+        self._log_event("ANALYSIS COMPLETE  |  Final result updated.")
+        self._set_status("ANALYSIS COMPLETE  |  MARKET FEED CONTINUES")
         self._busy = False
