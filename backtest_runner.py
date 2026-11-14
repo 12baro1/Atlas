@@ -1123,7 +1123,7 @@ class BacktestRunner:
             "funding_cost_r": round(funding_cost_r, 8),
             "funding_events_charged": funding_result["charged_events"],
             "total_cost_rr": round(execution_cost_rr + funding_cost_r, 4),
-            "cost_model": ("per_fill_maker_taker_market_friction_plus_adverse_historical_funding" if self.legacy_fee_rate is None and funding_records else "per_fill_maker_taker_market_friction") if self.legacy_fee_rate is None else "round_trip_fee_plus_spread_slippage_proxy",
+            "cost_model": ("per_fill_maker_taker_market_friction" if self.legacy_fee_rate is None else "round_trip_fee_plus_spread_slippage_proxy") + ("_plus_adverse_historical_funding" if funding_records else ""),
             "_w": net_rr > 0.0,
             "_tp": outcome.get("tp", 0),
             "_levels": outcome.get("levels") or [],
