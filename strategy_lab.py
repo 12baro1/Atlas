@@ -1043,21 +1043,21 @@ def _setup_diagnostic(strategy_id, data, regime):
         if len(candles("4h")) >= 29 and _adx(candles("4h")) is None:
             checks.append("INSUFFICIENT_HISTORY: 4h ADX needs at least 29 valid candles.")
         if len(candles("4h")) >= 60 and len(candles("1h")) >= 30 and _atr(candles("1h")) and _adx(candles("4h")) is not None:
-            checks.append("CONDITION_NOT_MET: trend alignment, ADX>=18, EMA20 pullback/reclaim and EMA slope did not align.")
+            checks.append("CONDITION_NOT_MET: 4H EMA trend, ADX/DMI direction, 1H EMA20 pullback, reclaim candle body/close-location and directional efficiency did not align.")
     elif strategy_id == "volatility_breakout":
         checks.append(history("1h", 45))
         if len(candles("1h")) >= 15 and _atr(candles("1h")) is None:
             checks.append("INVALID_DATA: 1h ATR cannot be calculated.")
         if len(candles("1h")) >= 45 and _atr(candles("1h")):
-            checks.append("CONDITION_NOT_MET: 20-candle breakout, prior volatility compression and >=1.2x volume were not all present.")
+            checks.append("CONDITION_NOT_MET: 20-candle close breakout, lower-quartile bandwidth compression, >=1.30x median relative volume and decisive breakout candle anatomy were not all present.")
     elif strategy_id == "mean_reversion":
         checks.append(history("15m", 25))
         if regime.get("label") != "RANGE":
             checks.append(f"REGIME_MISMATCH: mean reversion requires RANGE; current regime is {regime.get('label')}.")
         if len(candles("15m")) >= 25 and _atr(candles("15m")) and _bollinger(_series(candles("15m"))) and _rsi(_series(candles("15m"))) is not None:
-            checks.append("CONDITION_NOT_MET: Bollinger outside-to-inside re-entry, RSI threshold and VWAP-side confirmation did not align.")
+            checks.append("CONDITION_NOT_MET: Bollinger re-entry, RSI reversal slope, rejection wick/close-location and VWAP-side confirmation did not align.")
     elif strategy_id == "liquidation_cascade":
-        checks.append(history("1h", 20))
+        checks.append(history("1h", 21))
         oi = data.get("open_interest") or []
         oi_times = data.get("open_interest_timestamps_ms") or []
         if len(oi) < 2:
@@ -1065,7 +1065,7 @@ def _setup_diagnostic(strategy_id, data, regime):
         if len(oi_times) < 2:
             checks.append("MISSING_DATA: open_interest_timestamps_ms has fewer than 2 timestamps; a single OI snapshot cannot establish contraction.")
         if len(oi) >= 2 and len(oi_times) >= 2 and data.get("snapshot_timestamp_ms"):
-            checks.append("CONDITION_NOT_MET: OI contraction <=-1.5%, 1H impulse and same-direction taker-flow/funding confirmation did not align.")
+            checks.append("CONDITION_NOT_MET: timestamped OI contraction <=-1.5%, >=1.0 ATR impulse, >=1.25x relative volume, directional candle close, taker-flow and funding context did not align.")
     elif strategy_id == "orderflow_momentum":
         if not isinstance(data.get("orderbook"), dict):
             checks.append("MISSING_DATA: live orderbook snapshot is unavailable.")
@@ -1084,7 +1084,7 @@ def _setup_diagnostic(strategy_id, data, regime):
             if len(universe.get(key) or []) < 55:
                 checks.append(f"MISSING_DATA: correlation_universe[{key}] needs at least 55 aligned 4h candles.")
         if len(candles("4h")) >= 55 and all(len(universe.get(key) or []) >= 55 for key in keys):
-            checks.append("CONDITION_NOT_MET: at least 48 aligned returns, valid beta and +/-2% beta-adjusted 12-bar residual alpha with EMA20 confirmation were not all present.")
+            checks.append("CONDITION_NOT_MET: 48 aligned returns, stable beta, volatility-scaled 12-bar residual alpha, same-direction recent 6-bar alpha and rising/falling EMA20 confirmation were not all present.")
     elif strategy_id == "smc":
         checks.append("NO_SMC_GEOMETRY: integrated SMC specialist world did not provide a valid directional entry/stop/three-target plan.")
     checks = [item for item in checks if item]
