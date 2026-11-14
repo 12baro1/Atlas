@@ -328,6 +328,13 @@ def _orderflow_momentum(data):
     atr = _atr(candles)
     if not isinstance(book, dict) or atr is None or not candles:
         return None
+    now_ms = int(data.get("snapshot_timestamp_ms") or 0)
+    book_ms = int(data.get("orderbook_timestamp_ms") or 0)
+    trades_ms = int(data.get("recent_trades_timestamp_ms") or 0)
+    if not now_ms or not book_ms or not trades_ms:
+        return None
+    if not (0 <= now_ms - book_ms <= 15_000 and 0 <= now_ms - trades_ms <= 30_000):
+        return None
     bids, asks = book.get("bids") or [], book.get("asks") or []
     try:
         bid_qty = sum(float(level[1]) for level in bids[:10] if len(level) >= 2)
@@ -372,6 +379,18 @@ def _liquidation_cascade(data):
         return None
     if previous_oi <= 0 or not math.isfinite(previous_oi) or not math.isfinite(current_oi):
         return None
+    oi_times = data.get("open_interest_timestamps_ms") or []
+    now_ms = int(data.get("snapshot_timestamp_ms") or 0)
+    if len(oi_times) < 2 or not now_ms:
+        return None
+    try:
+        previous_oi_ms, current_oi_ms = int(oi_times[-2]), int(oi_times[-1])
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not (0 <= now_ms - current_oi_ms <= 2 * 60 * 60 * 1000):
+        return None
+    if not (0 < current_oi_ms - previous_oi_ms <= 3 * 60 * 60 * 1000):
+        return None
     oi_change = (current_oi - previous_oi) / previous_oi
     last = candles[-1]
     close, opened = _value(last, "close"), _value(last, "open")
@@ -408,6 +427,13 @@ def _relative_strength(data):
     benchmark_candles = universe.get(benchmark) or []
     benchmark_closes = _series(benchmark_candles)
     if len(benchmark_closes) < 15:
+        return None
+    try:
+        own_time = int(candles[-1].time)
+        benchmark_time = int(benchmark_candles[-1].time)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+    if abs(own_time - benchmark_time) > 4 * 60 * 60 * 1000:
         return None
     own_return = closes[-1] / closes[-13] - 1.0
     benchmark_return = benchmark_closes[-1] / benchmark_closes[-13] - 1.0
