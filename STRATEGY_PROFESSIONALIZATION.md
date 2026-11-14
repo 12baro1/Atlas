@@ -116,4 +116,7 @@ Implemented on top of the professionalization branch:
 - Live order-book and recent-trade snapshots are archived locally as JSONL and replayed only when their timestamps precede the historical decision and meet freshness limits. This archive starts collecting from deployment onward; it cannot recreate past order books.
 - Historical liquidation analysis can use timestamped OI/funding plus archived trade flow, but remains a proxy and is not a true liquidation-event feed.
 
+- Relative Strength now estimates rolling 48-bar 4H beta and 12-bar residual alpha versus a timestamp-aligned BTC/ETH composite, optionally blended with a configured sector-peer basket. The same peer candles are loaded in historical replay.
+- Order Flow Momentum includes a conservative absorption proxy: aggressive taker delta that fails to move price while opposing displayed depth is dominant. It is labeled as a proxy, not true queue-level absorption.
+
 The exchange's historical order-book archive is not exposed by the current CCXT/Bybit path. Therefore complete historical book replay remains data-limited until an external historical L2 provider or a sufficiently long local archive is available. Fees, spread, and slippage remain assumptions. Unit tests were added; merge still requires a completed passing CI run and a local full-suite run.
