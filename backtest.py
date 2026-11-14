@@ -30,6 +30,7 @@ from core.candle import Candle
 from backtest_runner import BacktestRunner
 from engine import AtlasEngine
 from config import Config
+from sector_universe import configured_sector_peers
 
 
 TIMEFRAME_DURATION_MS = {
@@ -374,6 +375,11 @@ def attach_historical_smt_universe(data, days, now_ms):
                 )
         universe[comparison_symbol] = frames
     data["smt_universe"] = universe
+    data["sector_peer_universe"] = {}
+    for peer_symbol in configured_sector_peers(primary_symbol):
+        data["sector_peer_universe"][peer_symbol] = {
+            "4h": _load_smt_comparison_history(peer_symbol, "4h", days, now_ms)
+        }
     return data
 
 def _validate_backtest_history(data, symbol):
