@@ -180,9 +180,9 @@ class AtlasTUIApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical(id="main"):
-            yield Static("ATLAS  /  SMC ANALİZ TERMİNALİ", id="brand")
+            yield Static("ATLAS  /  7 STRATEJİ ANALİZ TERMİNALİ", id="brand")
             yield Static(
-                "Bir coin yaz: BTC / ETH — tek coin analizi\n"
+                "Bir coin yaz: BTC / ETH — 7 strateji karşılaştırmalı analiz\n"
                 "'50 analiz et' — 50 piyasayı tara, en iyi 5 kurulumu göster\n"
                 "'en iyi 5 işlem' — 100 piyasadan en iyi 5 kurulumu seç\n"
                 "'tüm piyasayı tara' — uygun tüm USDT perpetual piyasaları tara\n"
@@ -234,7 +234,7 @@ class AtlasTUIApp(App):
             self._show(
                 "KOMUTLAR\n"
                 "TEK COIN\n"
-                "• BTC / ETH / BRC — seçilen coini analiz et\n\n"
+                "• BTC / ETH / BRC — 7 stratejiyi çalıştır, tek plan seç\n\n"
                 "PIYASA TARAMA\n"
                 "• işlem ver — 30 piyasayı tara, en iyi 1 kurulumu göster\n"
                 "• 50 analiz et — 50 piyasayı tara, en iyi 5 kurulumu göster\n"
