@@ -821,6 +821,77 @@ def _regime_fit(strategy_id, regime):
     return fit
 
 
+def _setup_diagnostic(strategy_id, data, regime):
+    """Explain why a native generator returned no setup without changing its rules."""
+    def candles(tf):
+        return data.get(tf) or []
+
+    def history(tf, minimum):
+        count = len(candles(tf))
+        return (f"INSUFFICIENT_HISTORY: {tf} has {count} candles; needs {minimum}.") if count < minimum else None
+
+    def missing(name, value):
+        return f"MISSING_DATA: {name} is unavailable." if not value else None
+
+    checks = []
+    if strategy_id == "trend_pullback":
+        checks += [history("4h", 60), history("1h", 30)]
+        if len(candles("1h")) >= 15 and _atr(candles("1h")) is None:
+            checks.append("INVALID_DATA: 1h ATR cannot be calculated.")
+        if len(candles("4h")) >= 29 and _adx(candles("4h")) is None:
+            checks.append("INSUFFICIENT_HISTORY: 4h ADX needs at least 29 valid candles.")
+        if len(candles("4h")) >= 60 and len(candles("1h")) >= 30 and _atr(candles("1h")) and _adx(candles("4h")) is not None:
+            checks.append("CONDITION_NOT_MET: trend alignment, ADX>=18, EMA20 pullback/reclaim and EMA slope did not align.")
+    elif strategy_id == "volatility_breakout":
+        checks.append(history("1h", 45))
+        if len(candles("1h")) >= 15 and _atr(candles("1h")) is None:
+            checks.append("INVALID_DATA: 1h ATR cannot be calculated.")
+        if len(candles("1h")) >= 45 and _atr(candles("1h")):
+            checks.append("CONDITION_NOT_MET: 20-candle breakout, prior volatility compression and >=1.2x volume were not all present.")
+    elif strategy_id == "mean_reversion":
+        checks.append(history("15m", 25))
+        if regime.get("label") != "RANGE":
+            checks.append(f"REGIME_MISMATCH: mean reversion requires RANGE; current regime is {regime.get('label')}.")
+        if len(candles("15m")) >= 25 and _atr(candles("15m")) and _bollinger(_series(candles("15m"))) and _rsi(_series(candles("15m"))) is not None:
+            checks.append("CONDITION_NOT_MET: Bollinger outside-to-inside re-entry, RSI threshold and VWAP-side confirmation did not align.")
+    elif strategy_id == "liquidation_cascade":
+        checks.append(history("1h", 20))
+        oi = data.get("open_interest") or []
+        oi_times = data.get("open_interest_timestamps_ms") or []
+        if len(oi) < 2:
+            checks.append(f"MISSING_DATA: open_interest history has {len(oi)} points; at least 2 timestamped observations are required.")
+        if len(oi_times) < 2:
+            checks.append("MISSING_DATA: open_interest_timestamps_ms has fewer than 2 timestamps; a single OI snapshot cannot establish contraction.")
+        if len(oi) >= 2 and len(oi_times) >= 2 and data.get("snapshot_timestamp_ms"):
+            checks.append("CONDITION_NOT_MET: OI contraction <=-1.5%, 1H impulse and same-direction taker-flow/funding confirmation did not align.")
+    elif strategy_id == "orderflow_momentum":
+        if not isinstance(data.get("orderbook"), dict):
+            checks.append("MISSING_DATA: live orderbook snapshot is unavailable.")
+        if not data.get("recent_trades"):
+            checks.append("MISSING_DATA: recent executed trades are unavailable.")
+        if not data.get("snapshot_timestamp_ms"):
+            checks.append("MISSING_DATA: snapshot timestamp is unavailable.")
+        if data.get("orderbook") and data.get("recent_trades") and data.get("snapshot_timestamp_ms"):
+            checks.append("CONDITION_NOT_MET: fresh book/trades, spread ceiling, imbalance and taker-delta/absorption confirmation did not align.")
+    elif strategy_id == "relative_strength":
+        checks.append(history("4h", 55))
+        symbol = str(data.get("symbol") or "").upper()
+        keys = ["ETH"] if symbol.startswith("BTC/") else ["BTC"] if symbol.startswith("ETH/") else ["BTC", "ETH"]
+        universe = data.get("correlation_universe") or {}
+        for key in keys:
+            if len(universe.get(key) or []) < 55:
+                checks.append(f"MISSING_DATA: correlation_universe[{key}] needs at least 55 aligned 4h candles.")
+        if len(candles("4h")) >= 55 and all(len(universe.get(key) or []) >= 55 for key in keys):
+            checks.append("CONDITION_NOT_MET: at least 48 aligned returns, valid beta and +/-2% beta-adjusted 12-bar residual alpha with EMA20 confirmation were not all present.")
+    elif strategy_id == "smc":
+        checks.append("NO_SMC_GEOMETRY: integrated SMC specialist world did not provide a valid directional entry/stop/three-target plan.")
+    checks = [item for item in checks if item]
+    if not checks:
+        checks = ["CONDITION_NOT_MET: strategy-native pattern conditions were not satisfied."]
+    # Prefer missing-data/history explanations over a generic pattern message.
+    return checks[0] if len(checks) == 1 else " | ".join(checks)
+
+
 class SevenStrategyLab:
     """Run six independent generators plus one integrated SMC setup generator."""
 
@@ -849,11 +920,20 @@ class SevenStrategyLab:
             try:
                 candidate = evaluator()
                 if candidate is None:
+                    reason = _setup_diagnostic(strategy_id, data, regime)
+                    status = (
+                        "MISSING_DATA" if "MISSING_DATA:" in reason
+                        else "INSUFFICIENT_HISTORY" if "INSUFFICIENT_HISTORY:" in reason
+                        else "CONDITION_NOT_MET" if "CONDITION_NOT_MET:" in reason or "REGIME_MISMATCH:" in reason
+                        else "NO_SETUP"
+                    )
                     results.append({
                         "strategy_id": strategy_id,
                         "strategy": STRATEGY_NAMES[strategy_id],
-                        "status": "NO_SETUP",
-                        "reason": "No strategy-native setup on this market snapshot.",
+                        "status": status,
+                        "reason": reason,
+                        "rejection_stage": "STRATEGY_GENERATOR",
+                        "rejection_reasons": [reason],
                     })
                     continue
                 candidate = dict(candidate)
@@ -978,6 +1058,7 @@ class SevenStrategyLab:
                 "direction": item.get("direction"),
                 "entry_type": item.get("entry_type"),
                 "rejection_stage": stage,
+                "reason": item.get("reason"),
                 "rejection_reasons": list(item.get("rejection_reasons") or []),
                 "selected": item is selected,
             })
