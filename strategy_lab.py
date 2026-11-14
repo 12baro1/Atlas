@@ -191,7 +191,7 @@ def _risk_validate_candidate(candidate):
         return {"eligible": False, "reason": f"risk validation error: {type(exc).__name__}: {exc}", "weighted_net_rr": None, "risk_plan": None}
 
 
-def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_type="MARKET", entry_reference="LAST_CLOSED_15M_FALLBACK"):
+def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_type="MARKET", entry_reference="LAST_CLOSED_15M_FALLBACK", structure_candles=None):
     if direction not in {"LONG", "SHORT"} or not all(
         isinstance(value, (int, float)) and math.isfinite(value) and value > 0
         for value in (entry, atr)
@@ -200,23 +200,27 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
 
     # All non-SMC strategies must anchor SL/TP to confirmed market structure.
     # ATR is used only as a small invalidation buffer, never as a target generator.
-    sample = list(candles or [])[-120:]
+    # Detect pivots independently per timeframe. Never concatenate candles
+    # from different intervals: that would create false cross-timeframe pivots.
+    candle_sets = structure_candles or [candles]
     swing_highs, swing_lows = [], []
-    for index in range(2, len(sample) - 2):
-        high = _value(sample[index], "high")
-        low = _value(sample[index], "low")
-        if high is None or low is None:
-            continue
-        left_highs = [_value(item, "high") for item in sample[index - 2:index]]
-        right_highs = [_value(item, "high") for item in sample[index + 1:index + 3]]
-        left_lows = [_value(item, "low") for item in sample[index - 2:index]]
-        right_lows = [_value(item, "low") for item in sample[index + 1:index + 3]]
-        if all(value is not None for value in left_highs + right_highs):
-            if high > max(left_highs + right_highs):
-                swing_highs.append(high)
-        if all(value is not None for value in left_lows + right_lows):
-            if low < min(left_lows + right_lows):
-                swing_lows.append(low)
+    for candle_set in candle_sets:
+        sample = list(candle_set or [])[-120:]
+        for index in range(2, len(sample) - 2):
+            high = _value(sample[index], "high")
+            low = _value(sample[index], "low")
+            if high is None or low is None:
+                continue
+            left_highs = [_value(item, "high") for item in sample[index - 2:index]]
+            right_highs = [_value(item, "high") for item in sample[index + 1:index + 3]]
+            left_lows = [_value(item, "low") for item in sample[index - 2:index]]
+            right_lows = [_value(item, "low") for item in sample[index + 1:index + 3]]
+            if all(value is not None for value in left_highs + right_highs):
+                if high > max(left_highs + right_highs):
+                    swing_highs.append(high)
+            if all(value is not None for value in left_lows + right_lows):
+                if low < min(left_lows + right_lows):
+                    swing_lows.append(low)
 
     buffer = atr * 0.05
     if direction == "LONG":
@@ -283,6 +287,15 @@ def _entry_reference(data):
     return str(data.get("current_price_source") or "LAST_CLOSED_15M_FALLBACK")
 
 
+def _structure_candle_sets(data):
+    """Return available OHLCV series separately, preserving timeframe identity."""
+    return [
+        data.get(timeframe) or []
+        for timeframe in ("15m", "1h", "4h", "1d", "1w")
+        if data.get(timeframe)
+    ]
+
+
 def _regime(data):
     candles = data.get("4h") or []
     closes = _series(candles)
@@ -344,7 +357,7 @@ def _trend_pullback(data):
     if (direction == "LONG" and trend_slope <= 0) or (direction == "SHORT" and trend_slope >= 0):
         return None
     strength = min(92.0, 62.0 + min(trend_separation * 5.0, 12.0) + min((adx_value - 18.0) * 0.5, 10.0) + max(0.0, 8.0 - pullback_distance * 6.0))
-    plan = _valid_plan(direction, entry, stop, atr, h1, "trend_pullback", strength, entry_reference=_entry_reference(data))
+    plan = _valid_plan(direction, entry, stop, atr, h1, "trend_pullback", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
         plan["reasons"] = ["4H EMA20/EMA50 alignment and positive EMA20 slope", f"4H ADX={adx_value:.1f}", "1H EMA20 pullback and candle reclaim"]
     return plan
@@ -394,7 +407,7 @@ def _volatility_breakout(data):
     volume_ratio = volume / average_volume if average_volume > 0 else 0.0
     breakout_distance = abs(entry - boundary) / atr
     strength = min(92.0, 65.0 + min(max(0.0, volume_ratio - 1.2) * 12.0, 15.0) + min(breakout_distance * 8.0, 10.0))
-    plan = _valid_plan(direction, entry, stop, atr, candles, "volatility_breakout", strength, entry_reference=_entry_reference(data))
+    plan = _valid_plan(direction, entry, stop, atr, candles, "volatility_breakout", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
         plan["reasons"] = ["1H 20-candle closed breakout after volatility compression", "Volume at least 1.2x prior 20-candle average"]
     return plan
@@ -440,7 +453,7 @@ def _mean_reversion(data, regime):
             return None
     extremity = max(0.0, 42.0 - rsi) if direction == "LONG" else max(0.0, rsi - 58.0)
     strength = min(88.0, 65.0 + min(extremity * 0.5, 12.0) + min(abs(close - prev_close) / atr * 4.0, 8.0))
-    plan = _valid_plan(direction, entry, stop, atr, candles, "mean_reversion", strength, entry_reference=_entry_reference(data))
+    plan = _valid_plan(direction, entry, stop, atr, candles, "mean_reversion", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
         plan["reasons"] = ["15m Bollinger re-entry after outside close", f"RSI14={rsi:.1f}", f"VWAP deviation={vwap_distance_atr:.2f} ATR with mean-side confirmation", "Range regime"]
     return plan
@@ -523,7 +536,7 @@ def _orderflow_momentum(data):
     strength = min(92.0, 65.0 + min(abs(imbalance) * 35.0, 15.0) + min(abs(trade_delta) * 25.0, 10.0))
     if absorption:
         strength = min(94.0, strength + 2.0)
-    plan = _valid_plan(direction, entry, stop, atr, candles, "orderflow_momentum", strength, entry_reference=_entry_reference(data))
+    plan = _valid_plan(direction, entry, stop, atr, candles, "orderflow_momentum", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
         plan["reasons"] = [
             f"Depth-weighted order-book notional imbalance={imbalance:+.2f}",
@@ -596,7 +609,7 @@ def _liquidation_cascade(data):
     else:
         return None
     strength = min(92.0, 65.0 + min(abs(oi_change) * 400.0, 15.0) + min(impulse * 5.0, 10.0))
-    plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data))
+    plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
         plan["reasons"] = [f"Open interest contraction={oi_change * 100:.2f}%", f"1H impulse={impulse:.2f} ATR", f"Funding rate={funding:.5f}", "Trade-flow confirmation; liquidation side remains a proxy inference"]
         plan["data_quality"] = "OI_CONTRACTION_PROXY_NOT_EXCHANGE_LIQUIDATION_FEED"
@@ -705,7 +718,7 @@ def _relative_strength(data):
         return None
     stop = entry - 1.5 * atr if direction == "LONG" else entry + 1.5 * atr
     strength = min(90.0, 64.0 + min(abs(residual_alpha) * 450.0, 22.0) + min(abs(beta) * 2.0, 4.0))
-    plan = _valid_plan(direction, entry, stop, atr, candles, "relative_strength", strength, entry_reference=_entry_reference(data))
+    plan = _valid_plan(direction, entry, stop, atr, candles, "relative_strength", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
         benchmark_label = "/".join(benchmark_keys)
         sector_label = f" + sector peers ({len(sector_maps)})" if use_sector else ""
