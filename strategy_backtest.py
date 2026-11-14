@@ -218,7 +218,7 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
     funding_pnl = funding["funding_pnl_r"]
     cost_r = trading_cost_r + funding["funding_cost_r"]
     net_r = gross_r - cost_r
-    weight_label = "-".join(f"{float(tp_weights.get(f'tp{i}', 0.0)):.2f}" for i in (1, 2, 3))
+    weight_label = "-".join(str(round(float(tp_weights.get("tp" + str(i), 0.0)), 2)) for i in (1, 2, 3))
     return {
         "gross_r": round(gross_r, 8), "trading_cost_r": round(trading_cost_r, 8),
         "funding_pnl_r": round(funding_pnl, 8), "funding_cost_r": funding["funding_cost_r"],
