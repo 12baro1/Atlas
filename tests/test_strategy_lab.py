@@ -210,7 +210,8 @@ def test_risk_rejection_is_visible_in_strategy_diagnostics(monkeypatch):
     assert trend["status"] == "BLOCKED_COMMON_FILTER"
     assert trend["rejection_stage"] == "COMMON_FILTER"
     assert trend["rejection_reasons"] == ["TEST_STOP_COST_REJECT"]
-    assert report["diagnostics"]["rejection_stage_counts"] == {"COMMON_FILTER": 1}
+    assert report["diagnostics"]["rejection_stage_counts"]["COMMON_FILTER"] == 1
+    assert report["diagnostics"]["rejection_stage_counts"]["STRATEGY_GENERATOR"] >= 1
 
 
 def test_smc_raw_setup_is_not_suppressed_by_legacy_decision_filters():
