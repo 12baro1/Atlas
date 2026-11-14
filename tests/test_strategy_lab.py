@@ -177,7 +177,15 @@ def test_diagnostics_report_every_strategy_and_status_counts():
     assert diagnostics["validated_candidate_count"] == 0
     assert diagnostics["selected_strategy_id"] is None
     assert len(diagnostics["strategies"]) == 7
-    assert diagnostics["status_counts"] == {"NO_SETUP": 7}
+    assert diagnostics["status_counts"] == {
+        "INSUFFICIENT_HISTORY": 4,
+        "MISSING_DATA": 2,
+        "NO_SETUP": 1,
+    }
+    by_id = {item["strategy_id"]: item for item in report["strategies"]}
+    assert "open_interest_timestamps_ms" in by_id["liquidation_cascade"]["reason"]
+    assert "orderbook" in by_id["orderflow_momentum"]["reason"]
+    assert "correlation_universe" in by_id["relative_strength"]["reason"]
 
 
 def test_risk_rejection_is_visible_in_strategy_diagnostics(monkeypatch):
@@ -262,3 +270,26 @@ def test_execution_distance_gate_is_shared_and_preserves_far_limit_plans(monkeyp
     trend = next(item for item in report["strategies"] if item["strategy_id"] == "trend_pullback")
     assert trend["status"] == "SELECTED"
     assert trend["entry_type"] == "LIMIT"
+
+
+
+def test_diagnostics_distinguish_missing_live_inputs_from_pattern_mismatch():
+    from strategy_lab import SevenStrategyLab
+
+    report = SevenStrategyLab().analyze({
+        "symbol": "BTC/USDT:USDT",
+        "15m": [Candle(100, 101, 99, 100) for _ in range(40)],
+        "1h": [Candle(100, 101, 99, 100) for _ in range(60)],
+        "4h": [Candle(100, 101, 99, 100) for _ in range(80)],
+        "open_interest": [1000.0],
+        "open_interest_timestamps_ms": [],
+        "recent_trades": [],
+        "orderbook": None,
+        "correlation_universe": {},
+    })
+    by_id = {item["strategy_id"]: item for item in report["strategies"]}
+
+    assert by_id["liquidation_cascade"]["status"] == "MISSING_DATA"
+    assert "timestamped observations" in by_id["liquidation_cascade"]["reason"]
+    assert by_id["orderflow_momentum"]["status"] == "MISSING_DATA"
+    assert by_id["relative_strength"]["status"] == "MISSING_DATA"
