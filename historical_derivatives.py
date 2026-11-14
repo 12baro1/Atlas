@@ -99,6 +99,7 @@ def load_historical_derivatives(symbol, start_ms, end_ms):
             result["derivatives_data_quality"]["open_interest"] = (
                 f"UNAVAILABLE:{type(exc).__name__}"
             )
+            result["derivatives_data_quality"]["open_interest_coverage_pct"] = 0.0
     else:
         result["derivatives_data_quality"]["open_interest"] = "UNSUPPORTED"
         result["derivatives_data_quality"]["open_interest_coverage_pct"] = 0.0
@@ -119,6 +120,7 @@ def load_historical_derivatives(symbol, start_ms, end_ms):
             result["derivatives_data_quality"]["funding"] = (
                 f"UNAVAILABLE:{type(exc).__name__}"
             )
+            result["derivatives_data_quality"]["funding_coverage_pct"] = 0.0
     else:
         result["derivatives_data_quality"]["funding"] = "UNSUPPORTED"
         result["derivatives_data_quality"]["funding_coverage_pct"] = 0.0
