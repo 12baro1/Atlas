@@ -170,7 +170,9 @@ python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
 - Rapor, 5 ardışık test pencereli anchored walk-forward sonuçlarını IS/OOS sonuçlarından ayrı gösterir.
 - Bybit'in tarihsel OI ve funding uç noktaları destekleniyorsa zaman damgalı seriler yüklenir. Funding ödemesi pozisyon yönüne göre net R'ye yansıtılır.
 - Funding geçmişi alınamazsa `--persist` sonuçları performans günlüğüne yazmaz. Eksik maliyetli örnekler strateji seçiminde kullanılamaz.
-- Canlı order-book ve recent-trade örnekleri yerel olarak `data/microstructure/` altında JSONL arşivine kaydedilir. Kapatmak için `ATLAS_MICROSTRUCTURE_ARCHIVE_ENABLED=0` ayarlayın.
+- Canlı order-book ve recent-trade örnekleri yerel olarak `data/microstructure/` altında JSONL arşivine kaydedilir.
+- Relative Strength, BTC/ETH beta-adjusted residual alpha kullanır. İsteğe bağlı sektör/peer grubu `ATLAS_SECTOR_PEERS_JSON` ile tanımlanır; örnek: `{"SOL":["AVAX/USDT:USDT","ADA/USDT:USDT"]}`. Bilinmeyen coinlere otomatik sektör etiketi uydurulmaz.
+- Order Flow Momentum, agresif alış/satış akışı fiyatı ilerletemediğinde ve karşı tarafta derinlik varsa absorption proxy üretir. Bu, gerçek kuyruk yenilenmesi veya gizli emir kanıtı değildir. Kapatmak için `ATLAS_MICROSTRUCTURE_ARCHIVE_ENABLED=0` ayarlayın.
 - Geçmiş order-book verisi geriye dönük üretilemez. Order-flow replay yalnızca karar zamanından önce arşivlenmiş ve tazeliği doğrulanmış örnekleri kullanır. Arşiv oluşana kadar bu motorun tarihsel performansı ölçülmüş sayılmaz.
 - Liquidation Cascade, gerçek liquidation-event akışı değildir; tarihsel OI/funding ve varsa arşivlenmiş trade-flow ile sınırlı bir proxy'dir.
 
