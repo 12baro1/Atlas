@@ -42,27 +42,42 @@ class StrategyOutcomeJournal:
         self._records = records
         return records
 
-    def record_outcome(self, *, strategy_id, trade_id, split, net_r, closed_at_ms, costs_included, regime="UNKNOWN"):
+    def record_outcome(self, *, strategy_id, trade_id, split, net_r, gross_r, cost_r, cost_model_id, closed_at_ms, costs_included, symbol="UNKNOWN", source_revision="unknown", regime="UNKNOWN"):
         strategy = str(strategy_id or "").strip()
         identifier = str(trade_id or "").strip()
         sample = str(split or "").lower()
         try:
             result_r = float(net_r)
+            gross_result_r = float(gross_r)
+            cost_result_r = float(cost_r)
             closed_at = int(closed_at_ms)
         except (TypeError, ValueError, OverflowError):
             return {"accepted": False, "reason": "invalid_numeric_outcome"}
         if strategy not in VALID_STRATEGIES or not identifier or sample not in {"is", "oos"}:
             return {"accepted": False, "reason": "invalid_strategy_trade_or_split"}
-        if not math.isfinite(result_r) or closed_at <= 0 or costs_included is not True:
-            return {"accepted": False, "reason": "outcome_must_be_finite_closed_and_cost_adjusted"}
+        model_id = str(cost_model_id or "").strip()
+        if (
+            not all(math.isfinite(value) for value in (result_r, gross_result_r, cost_result_r))
+            or closed_at <= 0
+            or costs_included is not True
+            or not model_id
+            or cost_result_r < 0
+            or abs(result_r - (gross_result_r - cost_result_r)) > 1e-5
+        ):
+            return {"accepted": False, "reason": "outcome_requires_reconciled_gross_cost_net_r_and_cost_model"}
 
         record = {
             "strategy_id": strategy,
             "trade_id": identifier,
             "split": sample,
             "net_r": round(result_r, 8),
+            "gross_r": round(gross_result_r, 8),
+            "cost_r": round(cost_result_r, 8),
+            "cost_model_id": model_id,
             "closed_at_ms": closed_at,
             "costs_included": True,
+            "symbol": str(symbol or "UNKNOWN"),
+            "source_revision": str(source_revision or "unknown"),
             "regime": str(regime or "UNKNOWN"),
         }
         with self._lock:
