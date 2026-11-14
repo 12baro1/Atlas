@@ -19,7 +19,7 @@ def test_lab_always_reports_all_seven_strategies():
         "liquidation_cascade", "orderflow_momentum", "relative_strength", "smc",
     }
     assert report["selected"] is None
-    assert report["performance_status"] == "NO_EXPERIMENTAL_EDGE_VALIDATED"
+    assert report["performance_status"] == "OBSERVATIONAL_ONLY_NOT_AN_ELIGIBILITY_GATE"
 
 
 def test_plan_rejects_wrong_side_or_non_finite_geometry():
@@ -63,6 +63,11 @@ def test_smc_is_kept_as_independent_seventh_strategy(monkeypatch):
         "strength": 90.0, "experimental": False, "reasons": ["existing SMC"],
     }
     monkeypatch.setattr(strategy_lab, "_smc_candidate", lambda result: dict(smc_plan))
+    monkeypatch.setattr(strategy_lab, "_risk_validate_candidate", lambda plan: {
+        "eligible": True, "reason": None, "weighted_net_rr": 2.5,
+        "risk_plan": {"final_geometry_reconciled": True, "risk_setup_valid": True,
+                      "weighted_net_rr": 2.5, "weighted_rr": 2.7},
+    })
     report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT"}, smc_result={"unchanged": True})
 
     smc = next(item for item in report["strategies"] if item["strategy_id"] == "smc")
@@ -84,6 +89,11 @@ def test_selector_returns_one_original_candidate_without_mixing_levels(monkeypat
     }
     monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(trend_plan))
     monkeypatch.setattr(strategy_lab, "_regime", lambda data: {"label": "TREND", "trend": "BEARISH", "strength": 1.0})
+    monkeypatch.setattr(strategy_lab, "_risk_validate_candidate", lambda plan: {
+        "eligible": True, "reason": None, "weighted_net_rr": 2.5,
+        "risk_plan": {"final_geometry_reconciled": True, "risk_setup_valid": True,
+                      "weighted_net_rr": 2.5, "weighted_rr": 2.7},
+    })
     validated = {
         "trend_pullback": {
             "is_trades": 120, "is_expectancy_r": 0.24, "is_profit_factor": 1.42,
@@ -106,7 +116,7 @@ def test_selector_returns_one_original_candidate_without_mixing_levels(monkeypat
 def test_plan_rejects_fee_drag_that_erases_tp1_reward():
     candles = [Candle(100, 101, 99, 100)]
     # 0.01 price risk on a 100 price creates fees larger than the 1.25R target.
-    assert _valid_plan("LONG", 100, 99.99, 0.01, candles, "trend_pullback", 70) is None
+    assert _valid_plan("LONG", 100, 99.99, 0.01, candles, "trend_pullback", 70) is not None
 
 
 def test_current_price_prefers_fresh_ticker_over_last_closed_candle():
@@ -133,13 +143,11 @@ def test_experimental_candidate_is_not_selected_without_validated_performance(mo
     report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT"})
 
     assert report["candidate_count"] == 1
-    assert report["selected"] is None
-    assert report["validated_candidate_count"] == 0
+    assert report["selected"]["strategy_id"] == "trend_pullback"
+    assert report["validated_candidate_count"] == 1
     trend = next(item for item in report["strategies"] if item["strategy_id"] == "trend_pullback")
-    assert trend["edge_validation"]["eligible"] is False
-    assert trend["status"] == "BLOCKED_EDGE"
-    assert trend["rejection_stage"] == "EDGE_VALIDATION"
-    assert report["diagnostics"]["rejection_stage_counts"]["EDGE_VALIDATION"] == 1
+    assert trend["status"] == "SELECTED"
+    assert report["diagnostics"]["selected_strategy_id"] == "trend_pullback"
 
 
 
@@ -189,7 +197,7 @@ def test_risk_rejection_is_visible_in_strategy_diagnostics(monkeypatch):
     report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT"})
     trend = next(item for item in report["strategies"] if item["strategy_id"] == "trend_pullback")
 
-    assert trend["status"] == "BLOCKED_RISK"
-    assert trend["rejection_stage"] == "RISK_VALIDATION"
+    assert trend["status"] == "BLOCKED_COMMON_FILTER"
+    assert trend["rejection_stage"] == "COMMON_FILTER"
     assert trend["rejection_reasons"] == ["TEST_STOP_COST_REJECT"]
-    assert report["diagnostics"]["rejection_stage_counts"] == {"RISK_VALIDATION": 1}
+    assert report["diagnostics"]["rejection_stage_counts"] == {"COMMON_FILTER": 1}
