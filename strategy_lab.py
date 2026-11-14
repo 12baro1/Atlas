@@ -266,6 +266,9 @@ def _mean_reversion(data, regime):
     entry = _current_price(data)
     if entry is None:
         return None
+    middle = bands[1]
+    if (direction == "LONG" and not lower <= entry <= middle) or (direction == "SHORT" and not middle <= entry <= upper):
+        return None
     extremity = max(0.0, 42.0 - rsi) if direction == "LONG" else max(0.0, rsi - 58.0)
     strength = min(88.0, 65.0 + min(extremity * 0.5, 12.0) + min(abs(close - prev_close) / atr * 4.0, 8.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "mean_reversion", strength, entry_reference=_entry_reference(data))
