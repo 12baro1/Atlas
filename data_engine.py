@@ -1,5 +1,6 @@
 import time
 import math
+import os
 import ccxt
 from core.candle import Candle
 
@@ -219,6 +220,13 @@ def get_market_data(symbol, force_refresh=False):
     # Take the snapshot clock after all optional feeds have been fetched so
     # their exchange timestamps are never incorrectly classified as future.
     data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
+    if os.getenv("ATLAS_MICROSTRUCTURE_ARCHIVE_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}:
+        try:
+            from microstructure_archive import record_snapshot
+            record_snapshot(symbol, data)
+        except Exception:
+            # Archiving is optional and must never interrupt market analysis.
+            pass
     return data
 
 
