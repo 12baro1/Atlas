@@ -1202,6 +1202,8 @@ class BacktestRunner:
             "expectancy": round(sum(net) / count, 4) if count else 0.0,
             "profit_factor": pf(net),
             "execution_cost_rr": round(sum(float(item.get("execution_cost_rr", 0.0) or 0.0) for item in trades), 4),
+            "funding_cost_r": round(sum(float(item.get("funding_cost_r", 0.0) or 0.0) for item in trades), 4),
+            "total_cost_rr": round(sum(float(item.get("execution_cost_rr", 0.0) or 0.0) + float(item.get("funding_cost_r", 0.0) or 0.0) for item in trades), 4),
         }
 
     def direction_breakdown(self):
@@ -1321,6 +1323,7 @@ class BacktestRunner:
                 "gross_profit_rr": 0, "gross_loss_rr": 0,
                 "gross_rr": 0, "gross_expectancy": 0, "gross_profit_factor": 0,
                 "total_execution_cost_rr": 0,
+                "total_cost_rr": 0,
                 "total_funding_cost_r": 0,
                 "funding_events_charged": 0,
                 "funding_data_quality": dict(self.funding_data_quality),
@@ -1430,6 +1433,7 @@ class BacktestRunner:
             "gross_expectancy": round(gross_total_rr / self.total, 4),
             "gross_profit_factor": round(gross_pf, 4),
             "total_execution_cost_rr": round(total_execution_cost_rr, 4),
+            "total_cost_rr": round(total_execution_cost_rr + total_funding_cost_r, 4),
             "total_funding_cost_r": round(total_funding_cost_r, 4),
             "funding_events_charged": funding_events_charged,
             "funding_data_quality": dict(self.funding_data_quality),
