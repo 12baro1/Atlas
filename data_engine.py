@@ -108,31 +108,48 @@ def invalidate_all():
 def get_market_data(symbol, force_refresh=False):
     data = {"symbol": symbol}
     # Public Bybit order-book snapshot; optional so OHLCV analysis survives API hiccups.
+    data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
+    data["orderbook_timestamp_ms"] = None
     try:
         data["orderbook"] = exchange.fetch_order_book(symbol, limit=50)
+        book_timestamp = data["orderbook"].get("timestamp") if isinstance(data["orderbook"], dict) else None
+        data["orderbook_timestamp_ms"] = int(book_timestamp) if book_timestamp is not None else int(exchange.milliseconds())
     except Exception:
         data["orderbook"] = None
 
     # Recent executed trades provide taker buy/sell delta. This is a short
     # rolling sample, not a historical cumulative-volume-delta series.
+    data["recent_trades_timestamp_ms"] = None
     try:
         data["recent_trades"] = exchange.fetch_trades(symbol, limit=200)
+        valid_trade_times = [
+            int(item["timestamp"]) for item in (data["recent_trades"] or [])
+            if isinstance(item, dict) and item.get("timestamp") is not None
+        ]
+        data["recent_trades_timestamp_ms"] = max(valid_trade_times) if valid_trade_times else None
     except Exception:
         data["recent_trades"] = None
 
     # Derivatives context is optional: unsupported endpoints or exchange
     # hiccups must not break OHLCV analysis.
     data["open_interest"] = []
+    data["open_interest_timestamps_ms"] = []
     fetch_oi = getattr(exchange, "fetch_open_interest_history", None)
     if callable(fetch_oi):
         try:
             records = fetch_oi(symbol, timeframe="1h", limit=100) or []
             records = sorted(records, key=lambda item: item.get("timestamp") or 0)
-            data["open_interest"] = [
-                float(item.get("openInterestValue") or item.get("openInterestAmount"))
-                for item in records
+            valid_oi = [
+                item for item in records
                 if isinstance(item, dict)
                 and (item.get("openInterestValue") is not None or item.get("openInterestAmount") is not None)
+            ]
+            data["open_interest"] = [
+                float(item.get("openInterestValue") or item.get("openInterestAmount"))
+                for item in valid_oi
+            ]
+            data["open_interest_timestamps_ms"] = [
+                int(item["timestamp"]) for item in valid_oi if item.get("timestamp") is not None
             ]
         except Exception:
             data["open_interest"] = []
@@ -177,6 +194,7 @@ def get_market_data(symbol, force_refresh=False):
     # Use a fresh ticker snapshot for MARKET reference entries. If unavailable,
     # the strategy lab explicitly falls back to the last closed 15m close.
     data["current_price"] = None
+    data["current_price_timestamp_ms"] = None
     data["current_price_source"] = "LAST_CLOSED_15M_FALLBACK"
     try:
         ticker = exchange.fetch_ticker(symbol) or {}
@@ -186,6 +204,7 @@ def get_market_data(symbol, force_refresh=False):
         fresh = ticker_time is None or 0 <= now_ms - int(ticker_time) <= 60_000
         if math.isfinite(ticker_price) and ticker_price > 0 and fresh:
             data["current_price"] = ticker_price
+            data["current_price_timestamp_ms"] = int(ticker_time) if ticker_time is not None else now_ms
             data["current_price_source"] = "BYBIT_TICKER"
     except (AttributeError, TypeError, ValueError, OverflowError):
         pass
@@ -194,6 +213,7 @@ def get_market_data(symbol, force_refresh=False):
         pass
     if data["current_price"] is None and data.get("15m"):
         data["current_price"] = data["15m"][-1].close
+        data["current_price_timestamp_ms"] = int(data["15m"][-1].time) + 15 * 60 * 1000
 
     return data
 
