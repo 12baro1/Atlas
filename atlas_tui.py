@@ -134,7 +134,16 @@ class AtlasTUIApp(App):
 
     CSS = """
     Screen {
-        background: $background;
+        background: #080e17;
+        color: #d7e0eb;
+    }
+    Header {
+        background: #101b2a;
+        color: #d7e0eb;
+    }
+    Footer {
+        background: #101b2a;
+        color: #8fa3b8;
     }
     #main {
         height: 1fr;
@@ -143,22 +152,37 @@ class AtlasTUIApp(App):
     #brand {
         height: 3;
         content-align: left middle;
-        color: $accent;
+        padding: 0 2;
+        background: #101b2a;
+        color: #55c8ff;
+        border: round #24445d;
         text-style: bold;
     }
     #help {
         height: 4;
-        color: $text-muted;
+        margin-top: 1;
+        padding: 0 2;
+        background: #0d1724;
+        border-left: tall #55c8ff;
+        color: #9fb2c7;
     }
     #output {
         height: 1fr;
-        border: round $accent;
+        margin-top: 1;
         padding: 1 2;
+        background: #0b1420;
+        border: round #29445d;
         overflow-y: auto;
     }
     #command {
         dock: bottom;
-        margin: 1 0;
+        height: 3;
+        margin: 1 0 0 0;
+        border: round #55c8ff;
+        background: #101b2a;
+    }
+    #command:focus {
+        border: round #8bdcff;
     }
     """
 
@@ -180,13 +204,11 @@ class AtlasTUIApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical(id="main"):
-            yield Static("ATLAS  /  7 STRATEJİ ANALİZ TERMİNALİ", id="brand")
+            yield Static("ATLAS  /  PROFESSIONAL TRADING TERMINAL     •     7 STRATEJİ / TEK KARAR", id="brand")
             yield Static(
-                "Bir coin yaz: BTC / ETH — 7 strateji karşılaştırmalı analiz\n"
-                "'50 analiz et' — 50 piyasayı tara, en iyi 5 kurulumu göster\n"
-                "'en iyi 5 işlem' — 100 piyasadan en iyi 5 kurulumu seç\n"
-                "'tüm piyasayı tara' — uygun tüm USDT perpetual piyasaları tara\n"
-                "'yardım' — komutların tamamı",
+                "ANALİZ     BTC / ETH / BRC yaz\n"
+                "TARAMA     50 analiz et  •  en iyi 5 işlem  •  tüm piyasayı tara\n"
+                "KONTROL    performans  •  likidite BTC  •  yardım",
                 id="help",
             )
             yield RichLog(
@@ -196,7 +218,7 @@ class AtlasTUIApp(App):
                 auto_scroll=True,
                 max_lines=5000,
             )
-            yield Input(placeholder="Coin veya komut yazıp Enter'a bas...", id="command")
+            yield Input(placeholder="Coin veya komut gir  •  Enter ile analiz başlat", id="command")
         yield Footer()
 
     def on_mount(self) -> None:
