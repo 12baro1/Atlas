@@ -25,7 +25,8 @@ def test_historical_derivatives_are_timestamped_and_sorted(monkeypatch):
         {"timestamp": 1_700_003_600_000, "value": 90.0},
     ]
     assert result["funding_records"] == [
-        {"timestamp": 1_700_000_000_000, "value": 0.0001}
+        {"timestamp": 1_700_000_000_000, "value": 0.0001},
+        {"timestamp": 1_700_028_800_000, "value": -0.0002},
     ]
     assert result["derivatives_data_quality"]["funding"] == "PARTIAL"
     assert result["derivatives_data_quality"]["funding_coverage_pct"] < 90
