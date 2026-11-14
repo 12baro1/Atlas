@@ -1,4 +1,4 @@
-from strategy_backtest import simulate_candidate
+from strategy_backtest import simulate_candidate, _snapshot_at
 
 
 def candidate(direction="LONG", entry_type="MARKET"):
@@ -118,3 +118,55 @@ def test_walk_forward_uses_expanding_train_and_sequential_test_windows():
     assert folds[1]["train_start_ms"] == start
     assert folds[1]["train"]["trades"] >= folds[0]["train"]["trades"]
     assert folds[0]["test_end_ms"] == folds[1]["test_start_ms"]
+
+
+def test_limit_gap_through_fills_at_open_as_marketable_limit():
+    outcome = simulate_candidate(
+        candidate(entry_type="LIMIT"),
+        [Bar(99.0, 103.0, 98.5, 102.0)],
+        maker_fee=0.0002, taker_fee=0.00055, spread_rate=0.0002, slippage_rate=0.0003,
+    )
+    assert outcome is not None
+    assert outcome["entry"] == 99.0
+    assert outcome["entry_type"] == "MARKETABLE_LIMIT"
+    assert outcome["exit_reason"] == "TRAILING_STOP"
+
+
+def test_intrabar_limit_fill_excludes_fill_candle_targets():
+    outcome = simulate_candidate(
+        candidate(entry_type="LIMIT"),
+        [
+            Bar(101.0, 102.0, 99.5, 101.5),
+            Bar(101.5, 103.0, 100.5, 102.8),
+            Bar(102.8, 103.0, 99.5, 100.0),
+        ],
+        maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
+    )
+    assert outcome is not None
+    assert outcome["entry"] == 100.0
+    assert outcome["entry_type"] == "LIMIT"
+    assert outcome["bars_held"] == 3
+    assert outcome["exit_reason"] == "TRAILING_STOP"
+
+
+def test_shared_max_holding_horizon_closes_unresolved_position_at_last_close():
+    bars = [Bar(100.0, 101.0, 99.0, 101.0, time=1_700_000_000_000 + i * 900_000) for i in range(32)]
+    outcome = simulate_candidate(
+        candidate(), bars, maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0, max_bars=32
+    )
+    assert outcome is not None
+    assert outcome["exit_reason"] == "TIME_EXIT"
+    assert outcome["bars_held"] == 32
+    assert outcome["gross_r"] == 0.5
+
+
+def test_strategy_snapshot_uses_decision_close_not_next_bar_open():
+    bars = [
+        Bar(99.0, 101.0, 98.0, 100.0, time=1_700_000_000_000),
+        Bar(500.0, 510.0, 490.0, 505.0, time=1_700_000_900_000),
+    ]
+    history = {"symbol": "BTC/USDT:USDT", "15m": bars}
+    snapshot = _snapshot_at(history, 0)
+    assert snapshot["current_price"] == 100.0
+    assert snapshot["current_price_source"] == "BACKTEST_DECISION_15M_CLOSE"
+    assert snapshot["current_price_timestamp_ms"] == bars[0].time + 900_000
