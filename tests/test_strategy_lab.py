@@ -337,3 +337,31 @@ def test_diagnostics_distinguish_missing_live_inputs_from_pattern_mismatch():
     assert "timestamped observations" in by_id["liquidation_cascade"]["reason"]
     assert by_id["orderflow_momentum"]["status"] == "MISSING_DATA"
     assert by_id["relative_strength"]["status"] == "MISSING_DATA"
+
+def test_strategy_evidence_helpers_are_scale_invariant_and_directional():
+    import strategy_lab
+
+    candle = Candle(100.0, 110.0, 98.0, 108.0, volume=150.0)
+    quality = strategy_lab._candle_quality(candle)
+    assert quality["direction"] == "BULLISH"
+    assert quality["body_ratio"] == 8.0 / 12.0
+    assert quality["close_location"] == 10.0 / 12.0
+    assert quality["lower_wick_ratio"] == 2.0 / 12.0
+
+    history = [Candle(100.0, 101.0, 99.0, 100.0, volume=100.0) for _ in range(20)]
+    history.append(Candle(100.0, 102.0, 99.5, 101.5, volume=150.0))
+    assert strategy_lab._relative_volume(history, 20) == 1.5
+
+
+def test_directional_movement_and_efficiency_ratio_measure_trend_quality():
+    import strategy_lab
+
+    rising = [
+        Candle(100.0 + i, 101.0 + i, 99.5 + i, 100.5 + i)
+        for i in range(20)
+    ]
+    dmi = strategy_lab._directional_movement(rising, period=14)
+    assert dmi is not None
+    assert dmi["plus_di"] > dmi["minus_di"]
+    assert strategy_lab._efficiency_ratio([float(i) for i in range(25)], 20) == 1.0
+
