@@ -891,6 +891,30 @@ class SevenStrategyLab:
                 candidate["rejection_reasons"] = ["INVALID_OR_INCONSISTENT_SETUP_GEOMETRY"]
                 continue
 
+            # Execution eligibility also belongs to this one shared gate.
+            # Far LIMIT plans stay valid; an impossible-side LIMIT or stale/far
+            # MARKET entry is rejected here for every strategy by identical rules.
+            entry_type = str(candidate.get("entry_type") or "MARKET").upper()
+            current_price = _current_price(data)
+            execution_rejection = None
+            if entry_type not in {"MARKET", "LIMIT"}:
+                execution_rejection = "UNSUPPORTED_ENTRY_TYPE"
+            elif current_price is not None:
+                distance_pct = abs(entry - current_price) / current_price
+                if entry_type == "MARKET":
+                    max_market_distance = float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003))
+                    if distance_pct > max_market_distance:
+                        execution_rejection = "MARKET_ENTRY_TOO_FAR"
+                elif direction == "LONG" and entry >= current_price:
+                    execution_rejection = "LONG_LIMIT_NOT_BELOW_MARKET"
+                elif direction == "SHORT" and entry <= current_price:
+                    execution_rejection = "SHORT_LIMIT_NOT_ABOVE_MARKET"
+            if execution_rejection:
+                candidate["status"] = "BLOCKED_COMMON_FILTER"
+                candidate["rejection_stage"] = "COMMON_FILTER"
+                candidate["rejection_reasons"] = [execution_rejection]
+                continue
+
             validation = _risk_validate_candidate(candidate)
             candidate["risk_validation"] = {
                 key: value for key, value in validation.items() if key != "risk_plan"
