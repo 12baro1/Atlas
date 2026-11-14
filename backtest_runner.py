@@ -1433,7 +1433,6 @@ class BacktestRunner:
                 "direction_breakdown": self.direction_breakdown(),
                 "mtf_trade_breakdown": self.mtf_trade_breakdown(),
                 "segment_breakdown": self.segment_breakdown(),
-            "strategy_performance_breakdown": self.strategy_performance_breakdown(),
                 "strategy_performance_breakdown": self.strategy_performance_breakdown(),
             }
         wins = self.wins
@@ -1553,6 +1552,7 @@ class BacktestRunner:
             "direction_breakdown": self.direction_breakdown(),
             "mtf_trade_breakdown": self.mtf_trade_breakdown(),
             "segment_breakdown": self.segment_breakdown(),
+            "strategy_performance_breakdown": self.strategy_performance_breakdown(),
         }
 
 
