@@ -9,6 +9,8 @@ from __future__ import annotations
 import math
 from statistics import median
 
+from strategy_performance import evaluate_strategy_edge, rank_validated_candidate
+
 
 STRATEGY_NAMES = {
     "trend_pullback": "Trend Following + Pullback",
@@ -475,7 +477,7 @@ def _regime_fit(strategy_id, regime):
 class SevenStrategyLab:
     """Run six independent experimental strategies plus the existing SMC plan."""
 
-    def analyze(self, data, smc_result=None):
+    def analyze(self, data, smc_result=None, performance_by_strategy=None):
         regime = _regime(data)
         evaluators = {
             "trend_pullback": lambda: _trend_pullback(data),
@@ -511,20 +513,38 @@ class SevenStrategyLab:
                 })
 
         candidates = [item for item in results if item.get("status") == "CANDIDATE"]
-        candidates.sort(key=lambda item: (item.get("selection_score", 0), item.get("estimated_net_rr_tp1") or 0), reverse=True)
-        selected = candidates[0] if candidates else None
+        performance_by_strategy = performance_by_strategy or {}
+        validated = []
+        for candidate in candidates:
+            strategy_id = candidate["strategy_id"]
+            stats = performance_by_strategy.get(strategy_id)
+            edge = evaluate_strategy_edge(stats)
+            candidate["edge_validation"] = edge
+            if strategy_id != "smc" and edge["eligible"]:
+                ranked = rank_validated_candidate(candidate, stats, candidate.get("regime_fit", 1.0))
+                if ranked:
+                    candidate["validated_selection_score"] = ranked["score"]
+                    validated.append(candidate)
+        # The existing SMC decision remains a compatibility fallback. Experimental
+        # engines cannot displace it until independent, cost-adjusted OOS evidence
+        # clears the statistical promotion gates.
+        validated.sort(key=lambda item: item.get("validated_selection_score", 0.0), reverse=True)
+        smc_candidate = next((item for item in candidates if item.get("strategy_id") == "smc"), None)
+        selected = validated[0] if validated else smc_candidate
         return {
-            "version": 1,
+            "version": 2,
             "symbol": data.get("symbol"),
             "regime": regime,
             "strategies": results,
             "candidate_count": len(candidates),
+            "validated_candidate_count": len(validated),
             "selected": selected,
-            "selection_method": "rule_strength_x_regime_fit",
-            "performance_status": "INSUFFICIENT_STRATEGY_SPECIFIC_OUTCOME_DATA",
+            "selection_method": "out_of_sample_edge_gated_with_legacy_smc_fallback",
+            "performance_status": "VALIDATED_EXPERIMENTAL_EDGE_AVAILABLE" if validated else "NO_EXPERIMENTAL_EDGE_VALIDATED",
             "warning": (
-                "Yeni stratejiler deneysel aday üretir. Strateji bazlı aynı-veri backtesti ve "
-                "out-of-sample sonuçları oluşmadan geçmiş kârlılık avantajı iddia edilmez. "
-                "OI contraction, gerçek borsa likidasyon akışı değildir."
+                "Deneysel motorlar yalnızca stratejiye özel, maliyet sonrası ve out-of-sample "
+                "performans yeterli örneklem ve güven sınırlarını geçerse SMC'nin önüne geçebilir. "
+                "Performans kaydı yoksa deneysel aday seçilmez. OI contraction gerçek likidasyon "
+                "akışı değildir; spread/slippage/funding modeli olmayan sonuçlar doğrulanmış sayılmaz."
             ),
         }
