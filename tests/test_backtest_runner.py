@@ -1154,3 +1154,5 @@ def test_runner_exposes_only_asof_funding_records_to_analysis():
     })
     assert captured == [{"timestamp": decision_ms, "value": 0.001}]
     assert stats["funding_data_quality"]["funding"] == "HISTORICAL"
+    assert stats["microstructure_data_quality"]["analysis_samples"] == 2
+    assert stats["microstructure_data_quality"]["archived_snapshots"] == 0
