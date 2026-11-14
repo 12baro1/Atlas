@@ -308,3 +308,47 @@ def test_diagnostics_distinguish_missing_live_inputs_from_pattern_mismatch():
     assert "timestamped observations" in by_id["liquidation_cascade"]["reason"]
     assert by_id["orderflow_momentum"]["status"] == "MISSING_DATA"
     assert by_id["relative_strength"]["status"] == "MISSING_DATA"
+
+def test_structural_plan_ignores_synthetic_stop_distance_and_uses_higher_timeframe_levels():
+    from strategy_lab import _structure_candle_sets
+
+    local = [
+        Candle(100, high, low, 100)
+        for high, low in zip(
+            [101, 102, 103, 105, 103, 102, 104, 105, 108, 106, 105, 107, 108, 111, 109, 108, 107],
+            [99, 98, 99, 99, 97, 99, 99, 98, 99, 99, 98, 99, 99, 98, 99, 99, 98],
+        )
+    ]
+    higher = [
+        Candle(100, high, low, 100)
+        for high, low in zip(
+            [112, 113, 114, 118, 114, 113, 115, 116, 121, 117, 116, 119, 120, 125, 122, 121, 120],
+            [99, 98, 99, 99, 97, 99, 99, 98, 99, 99, 98, 99, 99, 98, 99, 99, 98],
+        )
+    ]
+    structure = _structure_candle_sets({"15m": local, "4h": higher})
+    assert structure == [local, higher]
+
+    near_stop = _valid_plan(
+        "LONG", 100, 98, 1, local, "trend_pullback", 70,
+        structure_candles=structure,
+    )
+    far_stop = _valid_plan(
+        "LONG", 100, 90, 1, local, "trend_pullback", 70,
+        structure_candles=structure,
+    )
+    assert near_stop is not None and far_stop is not None
+    assert near_stop["stop_loss"] == far_stop["stop_loss"]
+    assert near_stop["tp3"] >= 125
+
+
+def test_plan_requires_three_real_levels_and_never_falls_back_to_r_multiples():
+    candles = [
+        Candle(100, high, low, 100)
+        for high, low in zip(
+            [101, 102, 103, 105, 103, 102, 104, 105, 108, 106, 105],
+            [99, 98, 99, 99, 97, 99, 99, 98, 99, 99, 98],
+        )
+    ]
+    assert _valid_plan("LONG", 100, 98, 1, candles, "trend_pullback", 70) is None
+
