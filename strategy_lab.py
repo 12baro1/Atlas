@@ -639,6 +639,10 @@ def _regime_fit(strategy_id, regime):
 class SevenStrategyLab:
     """Run six independent experimental strategies plus the existing SMC plan."""
 
+    def classify_regime(self, data):
+        """Expose the same regime classifier used by analyze for scoped statistics."""
+        return _regime(data)
+
     def analyze(self, data, smc_result=None, performance_by_strategy=None):
         regime = _regime(data)
         evaluators = {
