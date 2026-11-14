@@ -130,7 +130,7 @@ class AtlasTUIApp(App):
     """One screen, one command input, output shown locally only."""
 
     TITLE = "ATLAS"
-    SUB_TITLE = "SMC terminal | local-only | no AI | no Telegram"
+    SUB_TITLE = "7-strategy terminal | local-only | no AI | no Telegram"
 
     CSS = """
     Screen {
@@ -180,9 +180,9 @@ class AtlasTUIApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical(id="main"):
-            yield Static("ATLAS  /  SMC ANALİZ TERMİNALİ", id="brand")
+            yield Static("ATLAS  /  7 STRATEJİ ANALİZ TERMİNALİ", id="brand")
             yield Static(
-                "Bir coin yaz: BTC / ETH — tek coin analizi\n"
+                "Bir coin yaz: BTC / ETH — 7 strateji karşılaştırmalı analiz\n"
                 "'50 analiz et' — 50 piyasayı tara, en iyi 5 kurulumu göster\n"
                 "'en iyi 5 işlem' — 100 piyasadan en iyi 5 kurulumu seç\n"
                 "'tüm piyasayı tara' — uygun tüm USDT perpetual piyasaları tara\n"
@@ -234,7 +234,7 @@ class AtlasTUIApp(App):
             self._show(
                 "KOMUTLAR\n"
                 "TEK COIN\n"
-                "• BTC / ETH / BRC — seçilen coini analiz et\n\n"
+                "• BTC / ETH / BRC — 7 stratejiyi çalıştır, tek plan seç\n\n"
                 "PIYASA TARAMA\n"
                 "• işlem ver — 30 piyasayı tara, en iyi 1 kurulumu göster\n"
                 "• 50 analiz et — 50 piyasayı tara, en iyi 5 kurulumu göster\n"
@@ -290,22 +290,84 @@ class AtlasTUIApp(App):
                         "Sembolün USDT perpetual piyasasında bulunduğunu kontrol et."
                     )
                 else:
-                    card = build_signal_card(outcome["result"])
-                    action = str(card.get("decision_action") or "").upper()
-                    direction = card.get("direction") in {"LONG", "SHORT"}
-                    entry_type = str(card.get("entry_type") or "").upper()
-                    has_levels = bool(card.get("entry")) and bool(card.get("stop_loss")) and len(card.get("tp_levels") or []) >= 1
-                    market_signal = action in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and direction and entry_type == "MARKET" and has_levels
-                    limit_signal = action in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and entry_type == "LIMIT" and direction and has_levels
-                    if market_signal or limit_signal:
-                        result_text = format_card_text(card)
-                        result_text += f"\n\nAnaliz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn"
+                    strategy_report = (outcome.get("result") or {}).get("strategy_lab")
+                    if isinstance(strategy_report, dict):
+                        result_text = self._format_strategy_report(outcome)
                     else:
-                        result_text = "Şu an girilebilir MARKET/LIMIT sinyali yok."
+                        card = build_signal_card(outcome["result"])
+                        action = str(card.get("decision_action") or "").upper()
+                        direction = card.get("direction") in {"LONG", "SHORT"}
+                        entry_type = str(card.get("entry_type") or "").upper()
+                        has_levels = bool(card.get("entry")) and bool(card.get("stop_loss")) and len(card.get("tp_levels") or []) >= 1
+                        market_signal = action in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and direction and entry_type == "MARKET" and has_levels
+                        limit_signal = action in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and entry_type == "LIMIT" and direction and has_levels
+                        if market_signal or limit_signal:
+                            result_text = format_card_text(card)
+                        else:
+                            result_text = "Şu an girilebilir MARKET/LIMIT sinyali yok."
+                        result_text += f"\n\nAnaliz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn"
             self.call_from_thread(self._finish, result_text)
         except Exception:
             self.call_from_thread(self._finish, traceback.format_exc())
 
+
+    def _format_strategy_report(self, outcome: dict) -> str:
+        result = outcome.get("result") or {}
+        report = result.get("strategy_lab") or {}
+        regime = report.get("regime") or {}
+        lines = [
+            f"7 STRATEJİ ANALİZİ | {result.get('symbol') or outcome.get('symbol') or 'UNKNOWN'}",
+            f"Piyasa rejimi: {regime.get('label', 'UNKNOWN')} | Yön: {regime.get('trend', 'NEUTRAL')}",
+            "",
+            "STRATEJİ SONUÇLARI",
+        ]
+        for item in report.get("strategies") or []:
+            name = item.get("strategy") or item.get("strategy_id") or "UNKNOWN"
+            status = item.get("status")
+            if status == "CANDIDATE":
+                lines.append(
+                    f"• {name}: ADAY | {item.get('direction')} | "
+                    f"puan {item.get('selection_score', 0):.1f} | "
+                    f"rejim uyumu {item.get('regime_fit', 0):.2f}"
+                )
+            elif status == "ERROR":
+                lines.append(f"• {name}: HATA | {item.get('reason', 'bilinmeyen hata')}")
+            else:
+                lines.append(f"• {name}: Kurulum yok")
+        selected = report.get("selected")
+        lines.extend(["", "SEÇİLEN STRATEJİ"])
+        if not isinstance(selected, dict):
+            lines.append("Geçerli aday yok. Zorla işlem planı üretilmedi.")
+        else:
+            if selected.get("experimental"):
+                lines.append("DENEYSEL STRATEJİ — önce demo/backtest doğrulaması gerekir.")
+            lines.extend([
+                f"Strateji: {selected.get('strategy')}",
+                f"Yön: {selected.get('direction')} | Emir: {selected.get('entry_type')}",
+                f"Giriş: {selected.get('entry')}",
+                f"Stop Loss: {selected.get('stop_loss')}",
+                f"TP1: {selected.get('tp1')} | TP2: {selected.get('tp2')} | TP3: {selected.get('tp3')}",
+                f"Brüt RR: {selected.get('rr_tp1')} / {selected.get('rr_tp2')} / {selected.get('rr_tp3')}",
+            ])
+            if selected.get("entry_reference"):
+                lines.append(f"Giriş fiyatı kaynağı: {selected.get('entry_reference')}")
+            if selected.get("target_model") == "R_MULTIPLE":
+                lines.append("TP modeli: sabit R katları (1.25R / 2R / 3R); yapısal hedef değildir.")
+            elif selected.get("target_model") == "SMC_STRUCTURAL":
+                lines.append("TP modeli: mevcut SMC yapısal hedefleri.")
+            if selected.get("estimated_net_rr_tp1") is not None:
+                lines.append(f"TP1 net RR (yalnız ücret tahmini): {selected.get('estimated_net_rr_tp1')} — spread/slippage dahil değildir.")
+            if selected.get("estimated_net_rr") is not None:
+                lines.append(f"SMC ağırlıklı net RR: {selected.get('estimated_net_rr')} — gerçek fill/slippage garantisi değildir.")
+            for reason in selected.get("reasons") or []:
+                lines.append(f"• {reason}")
+        lines.extend([
+            "",
+            "Performans durumu: Strateji bazlı yeterli backtest/işlem örneklemi henüz yok.",
+            report.get("warning") or "",
+            f"Analiz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn",
+        ])
+        return "\n".join(line for line in lines if line)
 
     def _format_performance(self, command: str) -> str:
         signal = self.runtime.signal_performance()

@@ -1,6 +1,6 @@
 # Atlas
 
-Atlas, kripto piyasalarını SMC (Smart Money Concepts) yaklaşımıyla analiz eden, terminal üzerinden çalışan bir analiz aracıdır. Android UserLAnd/Ubuntu ve Linux üzerinde kullanılabilir.
+Atlas, Bybit USDT perpetual piyasalarını terminal üzerinden analiz eder. Tek coin analizinde 7 ayrı stratejiyi çalıştırır: Trend Following + Pullback, Volatility Breakout, Mean Reversion, Liquidation Cascade (açık pozisyon daralması proxy'si), Order Flow Momentum, Relative Strength ve mevcut SMC motoru. Android UserLAnd/Ubuntu ve Linux üzerinde kullanılabilir.
 
 **Bu sürüm analiz aracıdır; otomatik al-sat yapmaz.** Borsaya emir veya pozisyon göndermez. Analiz için herkese açık piyasa verilerini kullanır. Bybit API anahtarı gerekmez.
 
@@ -61,7 +61,7 @@ Atlas açıldığında komut alanına sembol veya desteklenen komutlardan birini
 
 | Komut | İşlev |
 |---|---|
-| `BTC`, `ETH`, `SOL` | İlgili USDT perpetual piyasasını analiz eder |
+| `BTC`, `ETH`, `SOL` | İlgili piyasayı 7 stratejiyle analiz eder; adayları karşılaştırıp tek plan seçer |
 | `işlem ver` | Varsayılan taramayı çalıştırır ve uygun kurulum arar |
 | `50 analiz et` | 50 piyasayı tarar |
 | `100 analiz et` | 100 piyasayı tarar |
@@ -74,6 +74,12 @@ Atlas açıldığında komut alanına sembol veya desteklenen komutlardan birini
 | `çıkış` | Programdan çıkar |
 
 Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Geçerli koşulları sağlayan kurulum yoksa Atlas sinyal üretmeyebilir.
+
+## 7 strateji analizi
+
+Tek coin komutunda Atlas aynı kapanmış piyasa verisi üzerinde 6 yeni stratejiyi ve mevcut SMC kararını bağımsız değerlendirir. Her stratejinin giriş/stop/hedef geometrisi ayrı tutulur; seçim motoru yalnızca tek bir stratejinin planını gösterir. Strateji koşulları oluşmazsa zorla işlem üretilmez.
+
+**Önemli doğrulama sınırı:** İlk sürümde 6 yeni strateji deneysel aday üreticilerdir. Strateji bazında aynı-veri backtesti, komisyon/spread/slippage modellemesi ve out-of-sample örneklem tamamlanmadan kârlılık veya geçmiş performans üstünlüğü iddia edilmez. Liquidation Cascade motoru gerçek likidasyon akışı yerine açık pozisyon (OI) daralmasını ve işlem akışını proxy olarak kullanır; gerçek likidasyon verisi olarak yorumlanmamalıdır. Atlas emir göndermez.
 
 ## Backtest
 

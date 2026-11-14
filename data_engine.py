@@ -174,6 +174,27 @@ def get_market_data(symbol, force_refresh=False):
     for timeframe, c_limit in TIMEFRAMES.items():
         data[timeframe] = fetch_candles(symbol, timeframe, c_limit, force_refresh=force_refresh)
 
+    # Use a fresh ticker snapshot for MARKET reference entries. If unavailable,
+    # the strategy lab explicitly falls back to the last closed 15m close.
+    data["current_price"] = None
+    data["current_price_source"] = "LAST_CLOSED_15M_FALLBACK"
+    try:
+        ticker = exchange.fetch_ticker(symbol) or {}
+        ticker_price = float(ticker.get("last"))
+        ticker_time = ticker.get("timestamp")
+        now_ms = int(exchange.milliseconds())
+        fresh = ticker_time is None or 0 <= now_ms - int(ticker_time) <= 60_000
+        if math.isfinite(ticker_price) and ticker_price > 0 and fresh:
+            data["current_price"] = ticker_price
+            data["current_price_source"] = "BYBIT_TICKER"
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        pass
+    except Exception:
+        # Ticker is optional; OHLCV remains the authoritative fallback.
+        pass
+    if data["current_price"] is None and data.get("15m"):
+        data["current_price"] = data["15m"][-1].close
+
     return data
 
 
