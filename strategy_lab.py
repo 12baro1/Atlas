@@ -406,7 +406,11 @@ def _orderflow_momentum(data):
     candles = data.get("15m") or []
     atr = _atr(candles)
     now_ms = int(data.get("snapshot_timestamp_ms") or 0)
-    if not isinstance(book, dict) or atr is None or not candles or not now_ms:
+    book_ms = int(data.get("orderbook_timestamp_ms") or 0)
+    trades_ms = int(data.get("recent_trades_timestamp_ms") or 0)
+    if not isinstance(book, dict) or atr is None or not candles or not now_ms or not book_ms or not trades_ms:
+        return None
+    if not (0 <= now_ms - book_ms <= 15_000 and 0 <= now_ms - trades_ms <= 30_000):
         return None
 
     # Reuse Atlas's depth-normalized, notional-weighted order-book engine.
