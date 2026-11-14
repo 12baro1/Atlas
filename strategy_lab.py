@@ -9,7 +9,6 @@ from __future__ import annotations
 import math
 from statistics import median
 
-from strategy_performance import evaluate_strategy_edge, rank_validated_candidate
 from orderbook_engine import OrderBookEngine
 from risk_engine import RiskEngine
 from config import Config
@@ -199,8 +198,9 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     ):
         return None
     risk_distance = entry - stop if direction == "LONG" else stop - entry
-    # Strategy generators describe structure only. Stop-distance policy belongs
-    # to the shared filter below, not to an individual strategy.
+    if risk_distance <= 0:
+        return None
+    # Stop-distance policy belongs to the shared filter, not an individual strategy.
     pivots = []
     sample = list(candles or [])[-120:]
     for index in range(2, len(sample) - 2):
