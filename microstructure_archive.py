@@ -51,8 +51,10 @@ def _prune_if_needed(path, now_ms):
                 if stamp >= cutoff_ms:
                     rows.append((stamp, line if line.endswith("\n") else line + "\n"))
         rows.sort(key=lambda item: item[0])
-        while len(rows) > 1 and sum(len(line.encode("utf-8")) for _, line in rows) > max_bytes:
-            rows.pop(0)
+        total_bytes = sum(len(line.encode("utf-8")) for _, line in rows)
+        while len(rows) > 1 and total_bytes > max_bytes:
+            _, oldest_line = rows.pop(0)
+            total_bytes -= len(oldest_line.encode("utf-8"))
         if not rows:
             return False
         temp_path = path + ".tmp"
