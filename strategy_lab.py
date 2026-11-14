@@ -143,6 +143,7 @@ def _risk_validate_candidate(candidate):
         risk = {
             "entry_type": str(candidate.get("entry_type") or "MARKET").upper(),
             "side": str(candidate.get("direction") or "").upper(),
+            "atr": candidate.get("atr"),
             "risk_setup_valid": True,
             "minimum_net_rr": float(Config.MINIMUM_NET_RR),
             "risk_percent_base": float(Config.RISK_PERCENT),
