@@ -245,13 +245,15 @@ def test_smc_and_strategy_replays_share_bounded_market_fallback():
 
 def test_pending_limit_fill_after_multiple_bars_matches_smc_expiry_and_time_exit():
     bars = [
+        Bar(100.0, 101.0, 99.0, 100.0, time=1_700_199_100_000),
         Bar(105.0, 106.0, 104.0, 105.0, time=1_700_200_000_000),
         Bar(101.0, 102.0, 99.5, 101.0, time=1_700_200_900_000),
         Bar(101.0, 103.0, 100.5, 102.8, time=1_700_201_800_000),
     ]
     plan = candidate(entry_type="LIMIT")
+    plan.update({"tp1": 110.0, "tp2": 112.0, "tp3": 115.0})
     strategy = simulate_candidate(
-        plan, bars, maker_fee=0.0002, taker_fee=0.00055,
+        plan, bars[1:], maker_fee=0.0002, taker_fee=0.00055,
         spread_rate=0.0002, slippage_rate=0.0003,
         max_bars=2, limit_expiry_bars=2,
     )
@@ -265,14 +267,14 @@ def test_pending_limit_fill_after_multiple_bars_matches_smc_expiry_and_time_exit
         {
             "decision": {"action": "EXECUTE"},
             "signal": {"signal": "LONG"},
-            "risk": {"entry": 100.0, "stop_loss": 98.0, "tp1": 102.5, "tp2": 104.0, "tp3": 106.0},
+            "risk": {"entry": 100.0, "stop_loss": 98.0, "tp1": 110.0, "tp2": 112.0, "tp3": 115.0},
             "analysis": {"entry": {"entry_type": "LIMIT"}},
         },
-        bars, entry_index=0,
+        bars, entry_index=1,
     )
     assert strategy is not None and smc is not None
     assert strategy["fill_offset"] == 1
-    assert strategy["fill_time_ms"] == bars[1].time
+    assert strategy["fill_time_ms"] == bars[2].time
     assert strategy["entry_type"] == smc["entry_type"] == "LIMIT"
     assert strategy["entry"] == smc["entry"] == 100.0
     assert strategy["gross_r"] == smc["gross_rr"]
