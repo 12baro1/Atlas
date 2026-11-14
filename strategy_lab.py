@@ -492,10 +492,20 @@ def _liquidation_cascade(data):
         return None
     impulse = abs(close - opened) / atr
     direction = None
-    if oi_change <= -0.015 and close > opened and entry > opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio >= 0.56:
+    funding_values = data.get("funding_rate") or []
+    try:
+        funding = float(funding_values[-1]) if funding_values else 0.0
+    except (TypeError, ValueError, OverflowError):
+        funding = 0.0
+    if not math.isfinite(funding):
+        return None
+    # Crowded-side funding is used as a directional confirmation, not as a
+    # standalone trigger: positive funding supports long-liquidation shorts;
+    # negative funding supports short-squeeze longs.
+    if oi_change <= -0.015 and close > opened and entry > opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio >= 0.56 and funding <= 0.0003:
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio <= 0.44:
+    elif oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0 and buy_ratio is not None and buy_ratio <= 0.44 and funding >= -0.0003:
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
@@ -503,7 +513,7 @@ def _liquidation_cascade(data):
     strength = min(92.0, 65.0 + min(abs(oi_change) * 400.0, 15.0) + min(impulse * 5.0, 10.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data))
     if plan:
-        plan["reasons"] = [f"Open interest contraction={oi_change * 100:.2f}%", f"1H impulse={impulse:.2f} ATR", "Trade-flow confirmation"]
+        plan["reasons"] = [f"Open interest contraction={oi_change * 100:.2f}%", f"1H impulse={impulse:.2f} ATR", f"Funding rate={funding:.5f}", "Trade-flow confirmation; liquidation side remains a proxy inference"]
         plan["data_quality"] = "OI_CONTRACTION_PROXY_NOT_EXCHANGE_LIQUIDATION_FEED"
     return plan
 
