@@ -335,8 +335,11 @@ class AtlasTUIApp(App):
                 lines.append(f"• {name}: HAM SETUP | {item.get('direction')}")
             elif status == "ERROR":
                 lines.append(f"• {name}: HATA | {item.get('reason', 'bilinmeyen hata')}")
+            elif status in {"MISSING_DATA", "INSUFFICIENT_HISTORY", "CONDITION_NOT_MET", "NO_SETUP"}:
+                reason = item.get("reason") or "Strateji koşulları oluşmadı."
+                lines.append(f"• {name}: {status} | {reason}")
             else:
-                lines.append(f"• {name}: Setup yok")
+                lines.append(f"• {name}: {status or 'NO_SETUP'} | {item.get('reason') or 'Ayrıntı yok'}")
         selected = report.get("selected")
         lines.extend(["", "SEÇİLEN STRATEJİ"])
         if not isinstance(selected, dict):
