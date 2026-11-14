@@ -40,3 +40,7 @@ run/*.pid
 # Yerel AI binary/model dosyalari (repository'ye girmez)
 models/
 .local/
+
+# Yerel strateji performansı ve mikro yapı arşivi
+data/microstructure/
+data/strategy_outcomes.jsonl
