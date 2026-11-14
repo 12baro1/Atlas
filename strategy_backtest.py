@@ -116,7 +116,7 @@ def _directional_r(direction, entry, exit_price, risk):
 
 def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee=0.00055,
                        spread_rate=0.0002, slippage_rate=0.0003, max_bars=32,
-                       funding_events=()):
+                       limit_expiry_bars=8, funding_events=()):
     """Replay a selected plan through the same fill/exit/cost contract as SMC backtest."""
     direction = str(candidate.get("direction") or "").upper()
     if direction not in {"LONG", "SHORT"} or not future_candles:
@@ -139,50 +139,67 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
             return None
 
     planned_type = str(candidate.get("entry_type") or "MARKET").upper()
-    fill_candle = future_candles[0]
     simulation_start_offset = 0
+    fill_index = 0
     if planned_type == "LIMIT":
-        marketable = (direction == "LONG" and fill_open <= planned_entry) or (direction == "SHORT" and fill_open >= planned_entry)
-        touched = (float(fill_candle.low) <= planned_entry) if direction == "LONG" else (float(fill_candle.high) >= planned_entry)
-        if marketable:
-            # Gap-through limits fill at the open and incur taker costs.
-            entry = fill_open
-            entry_type = "MARKETABLE_LIMIT"
-            simulation_candles = future_candles[:max_bars]
-            simulation_horizon = max_bars
-        elif touched:
-            entry = planned_entry
-            entry_type = "LIMIT"
-            fill_stop_hit = (float(fill_candle.low) <= stop) if direction == "LONG" else (float(fill_candle.high) >= stop)
-            if fill_stop_hit:
-                # Stop-first handling on the fill candle; target highs/lows are not trusted.
-                simulation_candles = future_candles[:1]
-                simulation_horizon = 1
-            else:
-                # Exclude the fill candle from target simulation because its extremes
-                # may have occurred before the intrabar limit fill.
-                simulation_candles = future_candles[1:max_bars]
-                simulation_horizon = max(1, max_bars - 1)
-                simulation_start_offset = 1
-        else:
+        fill_index = None
+        for candidate_index, candidate_candle in enumerate(future_candles[:max(1, int(limit_expiry_bars))]):
+            candidate_open = float(candidate_candle.open)
+            marketable = (direction == "LONG" and candidate_open <= planned_entry) or (direction == "SHORT" and candidate_open >= planned_entry)
+            touched = (float(candidate_candle.low) <= planned_entry) if direction == "LONG" else (float(candidate_candle.high) >= planned_entry)
+            if marketable:
+                fill_index = candidate_index
+                fill_candle = candidate_candle
+                fill_open = candidate_open
+                entry = fill_open
+                entry_type = "MARKETABLE_LIMIT"
+                simulation_start_offset = candidate_index
+                simulation_candles = future_candles[candidate_index:candidate_index + max_bars]
+                simulation_horizon = max_bars
+                break
+            if touched:
+                fill_index = candidate_index
+                fill_candle = candidate_candle
+                fill_open = candidate_open
+                entry = planned_entry
+                entry_type = "LIMIT"
+                fill_stop_hit = (float(fill_candle.low) <= stop) if direction == "LONG" else (float(fill_candle.high) >= stop)
+                if fill_stop_hit:
+                    simulation_start_offset = candidate_index
+                    simulation_candles = future_candles[candidate_index:candidate_index + 1]
+                    simulation_horizon = 1
+                else:
+                    simulation_start_offset = candidate_index + 1
+                    simulation_candles = future_candles[candidate_index + 1:candidate_index + max_bars]
+                    simulation_horizon = max(1, max_bars - 1)
+                break
             fallback_ok, _, _ = market_fallback_check(
-                fill_open, planned_entry, stop, targets[0], direction,
+                candidate_open, planned_entry, stop, targets[0], direction,
                 {"atr": candidate.get("atr")}, maker_fee_rate=maker_fee,
                 taker_fee_rate=taker_fee, spread_rate=spread_rate, slippage_rate=slippage_rate,
             )
-            if not fallback_ok:
-                return None
-            # Same bounded next-open MARKET fallback as the SMC replay.
-            entry = fill_open
-            entry_type = "MARKET_FALLBACK"
-            simulation_candles = future_candles[:max_bars]
-            simulation_horizon = max_bars
+            if fallback_ok:
+                fill_index = candidate_index
+                fill_candle = candidate_candle
+                fill_open = candidate_open
+                entry = fill_open
+                entry_type = "MARKET_FALLBACK"
+                simulation_start_offset = candidate_index
+                simulation_candles = future_candles[candidate_index:candidate_index + max_bars]
+                simulation_horizon = max_bars
+                break
+        if fill_index is None:
+            return None
     elif planned_type == "MARKET":
+        fill_index = 0
+        fill_candle = future_candles[0]
+        fill_open = float(fill_candle.open)
         entry = fill_open
         entry_type = "MARKET"
         shift = fill_open - planned_entry
         stop += shift
         targets = [value + shift for value in targets]
+        simulation_start_offset = 0
         simulation_candles = future_candles[:max_bars]
         simulation_horizon = max_bars
     else:
@@ -239,7 +256,9 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
         "entry": round(entry, 10), "entry_type": entry_type,
         "stop_loss": round(stop, 10), "average_exit": outcome.get("average_exit"),
         "exit_reason": outcome.get("exit_reason"),
-        "bars_held": full_exit_index + 1, "closed_at_ms": exit_time_ms,
+        "fill_time_ms": entry_time_ms, "fill_offset": fill_index,
+        "bars_held": full_exit_index - fill_index + 1,
+        "bars_until_exit": full_exit_index + 1, "closed_at_ms": exit_time_ms,
         "cost_model_id": (
             f"shared_fill_partial{weight_label}_maker{maker_fee:.6f}_taker{taker_fee:.6f}_"
             f"spread{spread_rate:.6f}_slip{slippage_rate:.6f}_adverse_funding_v3"
