@@ -14,7 +14,7 @@ from textual.widgets import Footer, Header, Input, RichLog, Static
 
 from data_engine import exchange
 from universe_engine import select_symbols
-from utils.signal_card import build_signal_card, format_card_text
+from utils.signal_card import build_signal_card, build_selected_strategy_card, format_card_text
 
 
 _SYMBOL_INPUT_RE = re.compile(r"[A-Z0-9]{2,24}(?:/USDT(?::USDT)?)?\Z")
@@ -364,6 +364,7 @@ class AtlasTUIApp(App):
                 lines.append(f"SMC ağırlıklı net RR: {selected.get('estimated_net_rr')} — gerçek fill/slippage garantisi değildir.")
             for reason in selected.get("reasons") or []:
                 lines.append(f"• {reason}")
+        lines.extend(["", "ORTAK İŞLEM KARTI", format_card_text(build_selected_strategy_card(result))])
         lines.extend([
             "",
             f"Seçim: {report.get('selection_method', 'N/A')} | doğrulanmış deneysel aday: {report.get('validated_candidate_count', 0)}",
@@ -458,21 +459,17 @@ class AtlasTUIApp(App):
                 errors.append(f"{symbol}: {error_text}")
                 continue
             raw = outcome["result"]
-            signal_data = raw.get("signal") or {}
-            analysis_data = raw.get("analysis") or {}
-            entry_data = analysis_data.get("entry") or {}
-            direction = str(signal_data.get("signal") or "").upper()
+            # Single-symbol analysis and bulk ranking consume the same selected plan.
+            card = build_selected_strategy_card(raw) if isinstance(raw.get("strategy_lab"), dict) else build_signal_card(raw)
+            direction = str(card.get("direction") or "").upper()
             if direction == "LONG":
                 diagnostics["long"] += 1
             elif direction == "SHORT":
                 diagnostics["short"] += 1
-            if entry_data.get("entry_too_far"):
+            if card.get("entry_distance_label") == "FAR" or (card.get("entry_distance_atr") is not None and card.get("entry_distance_atr") > 3):
                 diagnostics["entry_too_far"] += 1
-            if entry_data.get("entry_zone_crossed"):
-                diagnostics["entry_zone_crossed"] += 1
-            if not entry_data.get("entry"):
+            if not card.get("entry"):
                 diagnostics["no_entry"] += 1
-            card = build_signal_card(raw)
             pending_limit = card.get("decision_action") in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and card.get("entry_type") == "LIMIT" and card.get("direction") in {"LONG", "SHORT"} and bool(card.get("entry")) and bool(card.get("stop_loss")) and bool(card.get("tp_levels"))
             executable_market = card.get("decision_action") in {"EXECUTE", "EXECUTE_WITH_CAUTION"} and card.get("entry_type") == "MARKET" and card.get("direction") in {"LONG", "SHORT"}
             if not (executable_market or pending_limit):
