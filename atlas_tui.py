@@ -349,6 +349,8 @@ class AtlasTUIApp(App):
                 f"TP1: {selected.get('tp1')} | TP2: {selected.get('tp2')} | TP3: {selected.get('tp3')}",
                 f"Brüt RR: {selected.get('rr_tp1')} / {selected.get('rr_tp2')} / {selected.get('rr_tp3')}",
             ])
+            if selected.get("entry_reference"):
+                lines.append(f"Giriş fiyatı kaynağı: {selected.get('entry_reference')}")
             if selected.get("estimated_net_rr_tp1") is not None:
                 lines.append(f"TP1 net RR (yalnız ücret tahmini): {selected.get('estimated_net_rr_tp1')} — spread/slippage dahil değildir.")
             if selected.get("estimated_net_rr") is not None:
