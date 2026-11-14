@@ -1,4 +1,4 @@
-from motor_ablation import DisabledMotor, _compare, _snapshot_for_index
+from motor_ablation import DisabledMotor, _compare, _snapshot_for_index, _sample_indices
 
 
 class _Candle:
@@ -41,3 +41,13 @@ def test_ablation_comparison_distinguishes_decision_and_geometry_changes():
     assert comparison["decision_changed"] is True
     assert comparison["plan_changed"] is True
     assert comparison["changed_fields"] == ["action", "entry"]
+
+
+def test_default_ablation_samples_are_spread_across_loaded_history():
+    assert _sample_indices(999, 3) == [299, 649, 999]
+    assert _sample_indices(999, 1) == [999]
+
+
+def test_explicit_ablation_step_keeps_fixed_recent_spacing():
+    assert _sample_indices(999, 3, step=96) == [807, 903, 999]
+    assert _sample_indices(200, 3) == []
