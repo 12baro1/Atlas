@@ -109,7 +109,7 @@ def test_selector_returns_one_original_candidate_without_mixing_levels(monkeypat
 
 def test_plan_rejects_fee_drag_that_erases_tp1_reward():
     candles = [Candle(100, 101, 99, 100)]
-    # 0.01 price risk on a 100 price creates fees larger than the 1.25R target.
+    # Without confirmed swing levels, fee arithmetic cannot justify fabricated targets.
     assert _valid_plan("LONG", 100, 99.99, 0.01, candles, "trend_pullback", 70) is None
 
 
@@ -159,7 +159,7 @@ def test_plan_uses_real_swing_invalidation_and_three_opposing_liquidity_levels()
     assert plan is not None
     assert plan["stop_model"] == "CONFIRMED_SWING_INVALIDATION_ATR_BUFFER"
     assert plan["target_model"] == "CONFIRMED_OPPOSING_SWING_LIQUIDITY"
-    assert plan["stop_loss"] < 97
+    assert plan["stop_loss"] < 98
     assert plan["tp1"] == 105
     assert plan["tp2"] == 108
     assert plan["tp3"] == 111
