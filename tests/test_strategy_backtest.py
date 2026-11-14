@@ -1,4 +1,5 @@
 from strategy_backtest import simulate_candidate, _snapshot_at
+from backtest_runner import BacktestRunner
 
 
 def candidate(direction="LONG", entry_type="MARKET"):
@@ -170,3 +171,37 @@ def test_strategy_snapshot_uses_decision_close_not_next_bar_open():
     assert snapshot["current_price"] == 100.0
     assert snapshot["current_price_source"] == "BACKTEST_DECISION_15M_CLOSE"
     assert snapshot["current_price_timestamp_ms"] == bars[0].time + 900_000
+
+
+def test_smc_and_strategy_replays_share_marketable_limit_fill_cost_and_funding():
+    bar_time = 1_700_000_000_000
+    bars = [Bar(99.0, 103.0, 98.5, 102.0, time=bar_time)]
+    funding = [{"timestamp": bar_time + 900_000, "value": 0.001}]
+    fees = {
+        "maker_fee": 0.0002, "taker_fee": 0.00055,
+        "spread_rate": 0.0002, "slippage_rate": 0.0003,
+    }
+    strategy = simulate_candidate(
+        candidate(entry_type="LIMIT"), bars, funding_events=funding, **fees
+    )
+    runner = BacktestRunner(
+        maker_fee_rate=fees["maker_fee"], taker_fee_rate=fees["taker_fee"],
+        spread_rate=fees["spread_rate"], slippage_rate=fees["slippage_rate"],
+        tp_weights={"tp1": 0.5, "tp2": 0.3, "tp3": 0.2},
+    )
+    smc = runner._to_trade(
+        {
+            "decision": {"action": "EXECUTE"},
+            "signal": {"signal": "LONG"},
+            "risk": {"entry": 100.0, "stop_loss": 98.0, "tp1": 102.5, "tp2": 104.0, "tp3": 106.0},
+            "analysis": {"entry": {"entry_type": "LIMIT"}},
+        },
+        bars, entry_index=0, funding_records=funding,
+    )
+    assert strategy is not None and smc is not None
+    assert strategy["entry"] == smc["entry"] == 99.0
+    assert strategy["entry_type"] == smc["entry_type"] == "MARKETABLE_LIMIT"
+    assert strategy["gross_r"] == smc["gross_rr"]
+    assert strategy["trading_cost_r"] == smc["execution_cost_rr"]
+    assert strategy["funding_cost_r"] == smc["funding_cost_r"]
+    assert strategy["net_r"] == smc["net_rr"]
