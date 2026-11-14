@@ -206,7 +206,7 @@ def simulate_trade_partial(
                 )
                 realized_rr += remaining * rr_stop
                 closed_frac = 1.0
-            exit_reason = ("STOP_AND_TARGET_SAME_BAR_STOP_FIRST" if target_touched_same_bar else "STOP") if reached_tp == 0 else "TRAILING_STOP"
+            exit_reason = "STOP" if reached_tp == 0 else "TRAILING_STOP"
             exit_offset = candle_offset
             exit_price = stop_fill
             exit_notional += remaining * stop_fill
