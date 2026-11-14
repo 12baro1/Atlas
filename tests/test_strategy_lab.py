@@ -365,3 +365,16 @@ def test_directional_movement_and_efficiency_ratio_measure_trend_quality():
     assert dmi["plus_di"] > dmi["minus_di"]
     assert strategy_lab._efficiency_ratio([float(i) for i in range(25)], 20) == 1.0
 
+def test_market_regime_requires_trend_strength_and_directional_efficiency():
+    import strategy_lab
+
+    rising = [
+        Candle(100.0 + i, 101.5 + i, 99.5 + i, 101.0 + i, volume=100.0)
+        for i in range(80)
+    ]
+    regime = strategy_lab._regime({"4h": rising})
+    assert regime["label"] == "TREND"
+    assert regime["trend"] == "BULLISH"
+    assert regime["adx"] >= 18.0
+    assert regime["efficiency_ratio"] >= 0.25
+
