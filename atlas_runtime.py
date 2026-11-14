@@ -430,7 +430,6 @@ class AtlasRuntime:
                             smc_result=result,
                             performance_by_strategy=self.strategy_outcome_journal.performance_snapshot(
                                 symbol=symbol,
-                                regime=(result.get("strategy_lab") or {}).get("regime", {}).get("label"),
                             ),
                         )
                     if result is None:
