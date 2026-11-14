@@ -3,6 +3,7 @@ import math
 import os
 import ccxt
 from core.candle import Candle
+from sector_universe import configured_sector_peers
 
 # Bybit API olmadan sadece public veri için exchange oluştur
 exchange = ccxt.bybit({
@@ -192,6 +193,16 @@ def get_market_data(symbol, force_refresh=False):
 
     for timeframe, c_limit in TIMEFRAMES.items():
         data[timeframe] = fetch_candles(symbol, timeframe, c_limit, force_refresh=force_refresh)
+
+    data["sector_peer_universe"] = {}
+    for peer_symbol in configured_sector_peers(symbol):
+        try:
+            data["sector_peer_universe"][peer_symbol] = {
+                "4h": fetch_candles(peer_symbol, "4h", 200, force_refresh=force_refresh)
+            }
+        except Exception:
+            # Sector peers are optional; BTC/ETH benchmark remains available.
+            continue
 
     # Use a fresh ticker snapshot for MARKET reference entries. If unavailable,
     # the strategy lab explicitly falls back to the last closed 15m close.
