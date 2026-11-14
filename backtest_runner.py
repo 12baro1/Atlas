@@ -992,7 +992,7 @@ class BacktestRunner:
                 outcome = simulate_trade_partial(
                     entry=entry_price, stop_loss=stop, targets=tps,
                     future_candles=future, direction=signal_dir,
-                    tp_weights=self.tp_weights, max_holding_bars=self.max_holding_bars,
+                    tp_weights=trade_tp_weights, max_holding_bars=self.max_holding_bars,
                 )
             else:
                 outcome = simulate_trade(
