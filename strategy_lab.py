@@ -645,8 +645,11 @@ def _orderflow_momentum(data):
 
     last = candles[-1]
     close, opened = _value(last, "close"), _value(last, "open")
+    quality = _candle_quality(last)
     entry = _current_price(data)
-    if close is None or opened is None or entry is None:
+    if close is None or opened is None or entry is None or quality is None:
+        return None
+    if int(flow.get("trade_count") or 0) < 20:
         return None
     absorption = _absorption_proxy(flow, last, atr)
     direction = None
@@ -656,10 +659,12 @@ def _orderflow_momentum(data):
     elif absorption == "SELLER_FLOW_ABSORBED":
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif imbalance >= 0.18 and trade_delta >= 0.12 and close > opened and entry >= opened:
+    elif (imbalance >= 0.18 and trade_delta >= 0.12 and close > opened and entry >= opened
+          and quality["body_ratio"] >= 0.30 and quality["close_location"] >= 0.65):
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif imbalance <= -0.18 and trade_delta <= -0.12 and close < opened and entry <= opened:
+    elif (imbalance <= -0.18 and trade_delta <= -0.12 and close < opened and entry <= opened
+          and quality["body_ratio"] >= 0.30 and quality["close_location"] <= 0.35):
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
@@ -672,18 +677,21 @@ def _orderflow_momentum(data):
     if plan:
         plan["reasons"] = [
             f"Depth-weighted order-book notional imbalance={imbalance:+.2f}",
-            f"Recent taker notional delta={trade_delta:+.2f}",
-            f"Spread={spread_pct:.4f}%",
+            f"Recent taker notional delta={trade_delta:+.2f} across {int(flow.get('trade_count') or 0)} trades",
+            f"Spread={spread_pct:.4f}%; bid/ask depth notional={flow.get('bid_notional')}/{flow.get('ask_notional')}",
+            f"15m candle body={quality['body_ratio']:.2f}; close-location={quality['close_location']:.2f}",
         ]
         plan["data_quality"] = "ABSORPTION_PROXY" if absorption else "FRESH_BOOK_AND_NOTIONAL_TRADE_FLOW"
         if absorption:
-            plan["reasons"].append(f"Absorption proxy: {absorption}")
+            plan["reasons"].append(f"Absorption proxy: {absorption}; passive absorption is inferred, not directly observed")
         plan["orderflow_metrics"] = {
             "bid_notional": flow.get("bid_notional"),
             "ask_notional": flow.get("ask_notional"),
             "trade_delta": trade_delta,
             "spread_pct": spread_pct,
             "trade_count": flow.get("trade_count"),
+            "candle_body_ratio": round(quality["body_ratio"], 3),
+            "candle_close_location": round(quality["close_location"], 3),
             "absorption_proxy": absorption,
         }
     return plan
