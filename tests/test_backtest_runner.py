@@ -1156,3 +1156,25 @@ def test_runner_exposes_only_asof_funding_records_to_analysis():
     assert stats["funding_data_quality"]["funding"] == "HISTORICAL"
     assert stats["microstructure_data_quality"]["analysis_samples"] == 2
     assert stats["microstructure_data_quality"]["archived_snapshots"] == 0
+
+
+def test_smc_replay_uses_same_max_holding_time_exit_as_strategy_replay():
+    runner = BacktestRunner(
+        maker_fee_rate=0.0, taker_fee_rate=0.0, spread_rate=0.0, slippage_rate=0.0,
+        tp_weights={"tp1": 0.5, "tp2": 0.3, "tp3": 0.2}, max_holding_bars=2,
+    )
+    candles = [
+        _candle(0, 100.0, 101.0, 99.0, 101.0),
+        _candle(900_000, 101.0, 101.5, 100.5, 101.0),
+    ]
+    result = {
+        "decision": {"action": "EXECUTE"},
+        "signal": {"signal": "LONG"},
+        "risk": {"entry": 100.0, "stop_loss": 98.0, "tp1": 110.0, "tp2": 120.0, "tp3": 130.0},
+        "analysis": {"entry": {"entry_type": "MARKET"}},
+    }
+    trade = runner._to_trade(result, candles, entry_index=0)
+    assert trade is not None
+    assert trade["exit_reason"] == "TIME_EXIT"
+    assert trade["gross_rr"] == 0.5
+    assert trade["net_rr"] == 0.5
