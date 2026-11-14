@@ -133,57 +133,32 @@ class AtlasTUIApp(App):
     SUB_TITLE = "7-strategy terminal | local-only | no AI | no Telegram"
 
     CSS = """
-    Screen {
-        background: #080e17;
-        color: #d7e0eb;
-    }
-    Header {
-        background: #101b2a;
-        color: #d7e0eb;
-    }
-    Footer {
-        background: #101b2a;
-        color: #8fa3b8;
-    }
-    #main {
-        height: 1fr;
-        padding: 1 2;
-    }
+    Screen { background: #070d16; color: #dce7f2; }
+    Header { background: #101c2b; color: #dce7f2; }
+    Footer { background: #101c2b; color: #9aafc4; }
+    #main { height: 1fr; padding: 0 1; }
     #brand {
-        height: 3;
-        content-align: left middle;
-        padding: 0 2;
-        background: #101b2a;
-        color: #55c8ff;
-        border: round #24445d;
-        text-style: bold;
+        height: 3; content-align: left middle; padding: 0 1;
+        background: #102033; color: #67d3ff; border: round #2d5975; text-style: bold;
     }
     #help {
-        height: 4;
-        margin-top: 1;
-        padding: 0 2;
-        background: #0d1724;
-        border-left: tall #55c8ff;
-        color: #9fb2c7;
+        height: 3; margin-top: 1; padding: 0 1;
+        background: #0d1826; border-left: tall #55c8ff; color: #b4c5d6;
     }
+    #overview {
+        height: 6; margin-top: 1; padding: 0 1;
+        background: #0c1724; border: round #29445d; color: #b8cadb;
+    }
+    #status { height: 1; margin-top: 1; padding: 0 1; color: #67d3ff; text-style: bold; }
     #output {
-        height: 1fr;
-        margin-top: 1;
-        padding: 1 2;
-        background: #0b1420;
-        border: round #29445d;
-        overflow-y: auto;
+        height: 1fr; margin-top: 0; padding: 1;
+        background: #080f19; border: round #35536b; color: #dce7f2; overflow-y: auto;
     }
     #command {
-        dock: bottom;
-        height: 3;
-        margin: 1 0 0 0;
-        border: round #55c8ff;
-        background: #101b2a;
+        dock: bottom; height: 3; margin: 1 0 0 0;
+        border: round #55c8ff; background: #101c2b;
     }
-    #command:focus {
-        border: round #8bdcff;
-    }
+    #command:focus { border: round #a0e3ff; }
     """
 
     BINDINGS = [
@@ -206,11 +181,18 @@ class AtlasTUIApp(App):
         with Vertical(id="main"):
             yield Static("ATLAS  /  PROFESSIONAL TRADING TERMINAL     •     7 STRATEJİ / TEK KARAR", id="brand")
             yield Static(
-                "ANALİZ     BTC / ETH / BRC yaz\n"
-                "TARAMA     50 analiz et  •  en iyi 5 işlem  •  tüm piyasayı tara\n"
-                "KONTROL    performans  •  likidite BTC  •  yardım",
+                "ANALİZ  BTC / ETH / BRC     TARAMA  50 analiz et / en iyi 5 işlem\\n"
+                "RAPOR  performans / öğrenme     ARAÇ  likidite BTC / yardım",
                 id="help",
             )
+            yield Static(
+                "STRATEJİ MOTORLARI\\n"
+                "01 Trend Pullback   02 Volatility Breakout   03 Mean Reversion\\n"
+                "04 Order-flow        05 Liquidation Cascade   06 Relative Strength\\n"
+                "07 Integrated SMC   →   ORTAK FİLTRE   →   TEK KARAR",
+                id="overview",
+            )
+            yield Static("HAZIR  |  Analiz bekleniyor — henüz piyasa verisi çekilmedi", id="status")
             yield RichLog(
                 id="output",
                 wrap=True,
@@ -222,7 +204,8 @@ class AtlasTUIApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._show("Hazır. Analiz başlatmak için coin sembolünü veya 'işlem ver' yaz.")
+        self._set_status("HAZIR  |  Komut bekleniyor")
+        self._show("ATLAS HAZIR\\n\\nCoin analizi veya piyasa taraması başlat.\\n\\nKomut örnekleri: BTC  •  50 analiz et  •  en iyi 5 işlem")
         self.query_one("#command", Input).focus()
         if self.initial_symbol:
             self._start_command(self.initial_symbol)
@@ -246,6 +229,9 @@ class AtlasTUIApp(App):
         output = self.query_one("#output", RichLog)
         output.clear()
         output.write(message, scroll_end=True)
+
+    def _set_status(self, message: str) -> None:
+        self.query_one("#status", Static).update(message)
 
     def _start_command(self, command: str) -> None:
         if self._busy:
@@ -570,4 +556,5 @@ class AtlasTUIApp(App):
 
     def _finish(self, message: str) -> None:
         self._show(message)
+        self._set_status("TAMAMLANDI  |  Sonuç panelde gösteriliyor")
         self._busy = False
