@@ -56,7 +56,7 @@ def test_selected_experimental_plan_becomes_executable_canonical_card():
     assert card["strategy_id"] == "trend_pullback"
     rendered = format_card_text(card)
     assert "İŞLEME GİR" in rendered
-    assert "Trend Following + Pullback" in rendered
+    assert "Strateji  : Trend Following + Pullback" in rendered
 
 
 def test_selected_limit_plan_is_pending_not_immediate_entry():
