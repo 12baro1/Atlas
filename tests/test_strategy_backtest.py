@@ -279,3 +279,36 @@ def test_pending_limit_fill_after_multiple_bars_matches_smc_expiry_and_time_exit
     assert strategy["entry"] == smc["entry"] == 100.0
     assert strategy["gross_r"] == smc["gross_rr"]
     assert abs(strategy["net_r"] - smc["net_rr"]) < 1e-4
+
+
+def test_pre_fill_target_touches_rebase_targets_identically():
+    bars = [
+        Bar(100.0, 103.0, 99.0, 102.0, time=1_700_300_000_000),
+        Bar(105.0, 105.5, 104.5, 105.0, time=1_700_300_900_000),
+        Bar(101.0, 102.0, 99.5, 101.0, time=1_700_301_800_000),
+        Bar(101.0, 107.0, 100.5, 106.5, time=1_700_302_700_000),
+    ]
+    plan = candidate(entry_type="LIMIT")
+    strategy = simulate_candidate(
+        plan, bars[1:], maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
+        max_bars=2, limit_expiry_bars=3, signal_candle=bars[0],
+    )
+    runner = BacktestRunner(
+        maker_fee_rate=0, taker_fee_rate=0, spread_rate=0, slippage_rate=0,
+        tp_weights=_configured_partial_tp_weights(),
+        limit_expiry_bars=3, max_holding_bars=2,
+    )
+    smc = runner._to_trade(
+        {
+            "decision": {"action": "EXECUTE"},
+            "signal": {"signal": "LONG"},
+            "risk": {"entry": 100.0, "stop_loss": 98.0, "tp1": 102.5, "tp2": 104.0, "tp3": 106.0},
+            "analysis": {"entry": {"entry_type": "LIMIT"}},
+        },
+        bars, entry_index=1,
+    )
+    assert strategy is not None and smc is not None
+    assert strategy["target_rebased_after_pre_fill_touch"] is True
+    assert strategy["entry_type"] == smc["entry_type"] == "LIMIT"
+    assert strategy["gross_r"] == smc["gross_rr"] == 3.0
+    assert abs(strategy["net_r"] - smc["net_rr"]) < 1e-4
