@@ -425,11 +425,13 @@ class AtlasRuntime:
                     if result is not None:
                         # Seven independent strategy evaluations share the same closed market snapshot.
                         # The existing SMC result is preserved as strategy 7, never rewritten.
+                        strategy_regime = self.strategy_lab.classify_regime(data).get("label")
                         result["strategy_lab"] = self.strategy_lab.analyze(
                             data,
                             smc_result=result,
                             performance_by_strategy=self.strategy_outcome_journal.performance_snapshot(
                                 symbol=symbol,
+                                regime=strategy_regime,
                             ),
                         )
                     if result is None:
