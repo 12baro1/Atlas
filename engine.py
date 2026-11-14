@@ -1197,6 +1197,8 @@ class AtlasEngine:
                 "thesis": selected_candidate.get("reasoning"),
                 "supporting_evidence": selected_candidate.get("supporting_evidence", []),
                 "opposing_evidence": selected_candidate.get("opposing_evidence", []),
+                "supporting_event_ids": selected_candidate.get("supporting_event_ids", []),
+                "opposing_event_ids": selected_candidate.get("opposing_event_ids", []),
                 "market_context": selected_candidate.get("market_context", []),
             }
             # The main engine's selected candidate is the only setup.
