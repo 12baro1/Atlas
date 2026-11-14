@@ -27,7 +27,7 @@ from strategy_lab import SevenStrategyLab
 from strategy_outcome_journal import StrategyOutcomeJournal
 from historical_derivatives import load_historical_derivatives
 from microstructure_archive import snapshot_at as archived_microstructure_at
-from backtest_runner import simulate_trade_partial, market_fallback_check
+from backtest_runner import simulate_trade_partial, market_fallback_check, rebase_remaining_targets
 from execution_costs import realized_trade_cost, adverse_funding_cost_r
 
 
@@ -116,7 +116,7 @@ def _directional_r(direction, entry, exit_price, risk):
 
 def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee=0.00055,
                        spread_rate=0.0002, slippage_rate=0.0003, max_bars=32,
-                       limit_expiry_bars=8, funding_events=()):
+                       limit_expiry_bars=8, funding_events=(), signal_candle=None):
     """Replay a selected plan through the same fill/exit/cost contract as SMC backtest."""
     direction = str(candidate.get("direction") or "").upper()
     if direction not in {"LONG", "SHORT"} or not future_candles:
@@ -139,6 +139,27 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
             return None
 
     planned_type = str(candidate.get("entry_type") or "MARKET").upper()
+    tp_weights = candidate.get("partial_exit_weights") or _configured_partial_tp_weights()
+    plan_state = {
+        "entry": planned_entry, "stop_loss": stop,
+        "tp1": candidate.get("tp1"), "tp2": candidate.get("tp2"), "tp3": candidate.get("tp3"),
+        "target_rebased_weights": dict(tp_weights) if isinstance(tp_weights, dict) else {},
+    }
+    if planned_type == "LIMIT" and signal_candle is not None:
+        signal_target_hit = any(
+            (float(signal_candle.high) >= target if direction == "LONG" else float(signal_candle.low) <= target)
+            for target in targets
+        )
+        if signal_target_hit:
+            rebased, _ = rebase_remaining_targets(
+                plan_state, direction, signal_candle, tp_weights=tp_weights,
+                maker_fee_rate=maker_fee, taker_fee_rate=taker_fee,
+                spread_rate=spread_rate, slippage_rate=slippage_rate,
+            )
+            if not rebased:
+                return None
+            targets = [float(plan_state[key]) for key in ("tp1", "tp2", "tp3") if plan_state.get(key) is not None]
+            tp_weights = plan_state["target_rebased_weights"]
     simulation_start_offset = 0
     fill_index = 0
     if planned_type == "LIMIT":
@@ -180,6 +201,23 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
             )
             if fallback_ok:
                 fill_index = candidate_index
+            target_already_hit = any(
+                (float(candidate_candle.high) >= target if direction == "LONG" else float(candidate_candle.low) <= target)
+                for target in targets
+            )
+            if target_already_hit:
+                rebased, _ = rebase_remaining_targets(
+                    plan_state, direction, candidate_candle, tp_weights=tp_weights,
+                    maker_fee_rate=maker_fee, taker_fee_rate=taker_fee,
+                    spread_rate=spread_rate, slippage_rate=slippage_rate,
+                )
+                if not rebased:
+                    return None
+                targets = [float(plan_state[key]) for key in ("tp1", "tp2", "tp3") if plan_state.get(key) is not None]
+                tp_weights = plan_state["target_rebased_weights"]
+                if not targets:
+                    return None
+
                 fill_candle = candidate_candle
                 fill_open = candidate_open
                 entry = fill_open
@@ -255,6 +293,7 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
         "cost_r": round(cost_r, 8), "net_r": round(net_r, 8),
         "entry": round(entry, 10), "entry_type": entry_type,
         "stop_loss": round(stop, 10), "average_exit": outcome.get("average_exit"),
+        "target_rebased_after_pre_fill_touch": bool(plan_state.get("target_rebased_after_pre_fill_touch")),
         "exit_reason": outcome.get("exit_reason"),
         "fill_time_ms": entry_time_ms, "fill_offset": fill_index,
         "bars_held": full_exit_index - fill_index + 1,
@@ -379,6 +418,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
                 max_bars=max_holding_bars,
                 limit_expiry_bars=limit_expiry_bars,
                 funding_events=history.get("funding_records") or [],
+                signal_candle=candles[index],
             )
             if outcome is None:
                 continue
