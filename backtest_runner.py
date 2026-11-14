@@ -192,6 +192,10 @@ def simulate_trade_partial(
             stop_touched = high >= trailing_stop
             stop_fill = opened if stop_gap else trailing_stop
 
+        target_touched_same_bar = any(
+            (high >= target if is_long else low <= target)
+            for _, target in levels
+        )
         if stop_touched:
             remaining = 1.0 - closed_frac
             if remaining > 0.0:
@@ -202,7 +206,7 @@ def simulate_trade_partial(
                 )
                 realized_rr += remaining * rr_stop
                 closed_frac = 1.0
-            exit_reason = "STOP" if reached_tp == 0 else "TRAILING_STOP"
+            exit_reason = ("STOP_AND_TARGET_SAME_BAR_STOP_FIRST" if target_touched_same_bar else "STOP") if reached_tp == 0 else "TRAILING_STOP"
             exit_offset = candle_offset
             exit_price = stop_fill
             exit_notional += remaining * stop_fill
