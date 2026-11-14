@@ -221,7 +221,6 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     if not validation["eligible"]:
         return None
     plan["risk_plan"] = validation["risk_plan"]
-    plan["estimated_net_rr_tp1"] = validation["weighted_net_rr"]
     plan["estimated_net_rr"] = validation["weighted_net_rr"]
     return plan
 
