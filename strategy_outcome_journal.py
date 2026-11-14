@@ -43,7 +43,7 @@ class StrategyOutcomeJournal:
         self._records = records
         return records
 
-    def record_outcome(self, *, strategy_id, trade_id, run_id, run_created_at_ms, split, net_r, gross_r, cost_r, cost_model_id, closed_at_ms, costs_included, symbol="UNKNOWN", source_revision="unknown", regime="UNKNOWN"):
+    def record_outcome(self, *, strategy_id, trade_id, run_id, run_created_at_ms, split, net_r, gross_r, cost_r, cost_model_id, closed_at_ms, costs_included, symbol="UNKNOWN", source_revision="unknown", regime="UNKNOWN", funding_pnl_r=0.0):
         strategy = str(strategy_id or "").strip()
         identifier = str(trade_id or "").strip()
         replay_id = str(run_id or "").strip()
@@ -52,6 +52,7 @@ class StrategyOutcomeJournal:
             result_r = float(net_r)
             gross_result_r = float(gross_r)
             cost_result_r = float(cost_r)
+            funding_result_r = float(funding_pnl_r)
             closed_at = int(closed_at_ms)
             run_created = int(run_created_at_ms)
         except (TypeError, ValueError, OverflowError):
@@ -60,12 +61,11 @@ class StrategyOutcomeJournal:
             return {"accepted": False, "reason": "invalid_strategy_trade_or_split"}
         model_id = str(cost_model_id or "").strip()
         if (
-            not all(math.isfinite(value) for value in (result_r, gross_result_r, cost_result_r))
+            not all(math.isfinite(value) for value in (result_r, gross_result_r, cost_result_r, funding_result_r))
             or closed_at <= 0
             or run_created <= 0
             or costs_included is not True
             or not model_id
-            or cost_result_r < 0
             or abs(result_r - (gross_result_r - cost_result_r)) > 1e-5
         ):
             return {"accepted": False, "reason": "outcome_requires_reconciled_gross_cost_net_r_and_cost_model"}
@@ -79,6 +79,8 @@ class StrategyOutcomeJournal:
             "net_r": round(result_r, 8),
             "gross_r": round(gross_result_r, 8),
             "cost_r": round(cost_result_r, 8),
+            "trading_cost_r": round(cost_result_r + funding_result_r, 8),
+            "funding_pnl_r": round(funding_result_r, 8),
             "cost_model_id": model_id,
             "closed_at_ms": closed_at,
             "costs_included": True,
@@ -126,6 +128,7 @@ class StrategyOutcomeJournal:
         for filename in (
             "strategy_lab.py", "strategy_performance.py",
             "strategy_backtest.py", "strategy_outcome_journal.py",
+            "historical_derivatives.py", "microstructure_archive.py",
             "data_engine.py", "orderbook_engine.py", "engine.py",
             "risk_engine.py", "rr_engine.py", "dynamic_tp_engine.py",
             "timing.py", "utils/signal_card.py",
