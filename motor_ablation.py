@@ -241,6 +241,16 @@ def run_ablation(symbol, days=14, samples=3, step=None, motors=None, output_path
             "decision_changed": sum(bool(item.get("decision_changed")) for item in completed),
             "plan_changed": sum(bool(item.get("plan_changed")) for item in completed),
             "consumed_event_ids": sorted({event_id for item in outcomes for event_id in item.get("consumed_event_ids", [])}),
+            "baseline_executable_trades": sum(bool((item.get("outcome_sensitivity") or {}).get("baseline_executable")) for item in completed),
+            "ablated_executable_trades": sum(bool((item.get("outcome_sensitivity") or {}).get("ablated_executable")) for item in completed),
+            "tradeability_changed": sum(bool((item.get("outcome_sensitivity") or {}).get("tradeability_changed")) for item in completed),
+            "mean_delta_net_rr": (
+                round(sum((item.get("outcome_sensitivity") or {}).get("delta_net_rr") for item in completed
+                          if (item.get("outcome_sensitivity") or {}).get("delta_net_rr") is not None)
+                      / sum((item.get("outcome_sensitivity") or {}).get("delta_net_rr") is not None for item in completed), 4)
+                if any((item.get("outcome_sensitivity") or {}).get("delta_net_rr") is not None for item in completed)
+                else None
+            ),
         }
     report = {
         "schema_version": 1, "symbol": symbol, "days": int(days),
@@ -248,6 +258,9 @@ def run_ablation(symbol, days=14, samples=3, step=None, motors=None, output_path
         "sample_indices": indices,
         "sample_step_bars": [indices[i] - indices[i - 1] for i in range(1, len(indices))],
         "sampling_mode": "fixed_step" if step is not None else "evenly_spaced_across_loaded_history",
+        "max_holding_bars": int(max_holding_bars),
+        "limit_expiry_bars": int(limit_expiry_bars),
+        "outcome_measurement": "single-trade counterfactual using the shared SMC replay fill, cost and funding simulator; not a portfolio backtest",
         "decision_time_basis": "closed 15m candle close; closed HTF candles only",
         "data_quality": derivatives.get("derivatives_data_quality", {}) if include_derivatives else {"derivatives": "DISABLED"},
         "microstructure_coverage": {
@@ -274,11 +287,16 @@ def main():
     parser.add_argument("--step", type=int, default=None, help="Optional fixed bars between samples; default spreads samples across the loaded history")
     parser.add_argument("--motors", help="Comma-separated motor names; default: all ablatable specialist motors")
     parser.add_argument("--output", default="reports/motor_ablation.json")
+    parser.add_argument("--max-holding-bars", type=int, default=32)
+    parser.add_argument("--limit-expiry-bars", type=int, default=8)
     parser.add_argument("--no-derivatives", action="store_true")
     args = parser.parse_args()
     motors = [item.strip() for item in args.motors.split(",") if item.strip()] if args.motors else None
-    report = run_ablation(args.symbol, days=args.days, samples=args.samples, step=args.step,
-                          motors=motors, output_path=args.output, include_derivatives=not args.no_derivatives)
+    report = run_ablation(
+        args.symbol, days=args.days, samples=args.samples, step=args.step,
+        motors=motors, output_path=args.output, include_derivatives=not args.no_derivatives,
+        max_holding_bars=args.max_holding_bars, limit_expiry_bars=args.limit_expiry_bars,
+    )
     print(f"Motor ablation | {report['symbol']} | {report['samples']} samples")
     for name, metrics in sorted(report["motor_summary"].items()):
         decision_changed = metrics["decision_changed"]
