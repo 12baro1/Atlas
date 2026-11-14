@@ -284,7 +284,12 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
             continue
         next_open = float(candles[index + 1].open)
         snapshot = _snapshot_at(history, index, next_open)
-        smc_result = engine.analyze(snapshot)
+        try:
+            smc_result = engine.analyze(snapshot)
+        except Exception:
+            # Keep the six independent evaluators alive if a legacy SMC replay
+            # step encounters an isolated historical-data edge case.
+            smc_result = None
         report = lab.analyze(snapshot, smc_result=smc_result)
         calls += 1
         for candidate in report.get("strategies") or []:
