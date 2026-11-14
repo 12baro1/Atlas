@@ -17,6 +17,27 @@ from config import Config
 _ORDERBOOK_ENGINE = OrderBookEngine()
 
 
+def _configured_partial_tp_weights():
+    raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2")
+    if isinstance(raw, dict):
+        values = [raw.get(f"tp{i}", 1.0) for i in range(1, 4)]
+    elif isinstance(raw, str):
+        values = raw.split(",")
+    elif isinstance(raw, (list, tuple)):
+        values = list(raw)
+    else:
+        values = []
+    weights = {}
+    for index in range(3):
+        value = values[index] if index < len(values) else 1.0
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            number = 0.0
+        weights[f"tp{index + 1}"] = number if math.isfinite(number) and number > 0 else 0.0
+    return weights if sum(weights.values()) > 0 else {"tp1": 1.0, "tp2": 1.0, "tp3": 1.0}
+
+
 STRATEGY_NAMES = {
     "trend_pullback": "Trend Following + Pullback",
     "volatility_breakout": "Volatility Breakout",
@@ -143,6 +164,7 @@ def _risk_validate_candidate(candidate):
         risk = {
             "entry_type": str(candidate.get("entry_type") or "MARKET").upper(),
             "side": str(candidate.get("direction") or "").upper(),
+            "atr": candidate.get("atr"),
             "risk_setup_valid": True,
             "minimum_net_rr": float(Config.MINIMUM_NET_RR),
             "risk_percent_base": float(Config.RISK_PERCENT),
@@ -209,7 +231,7 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     plan = {
         "status": "CANDIDATE", "strategy_id": source, "strategy": STRATEGY_NAMES[source],
         "direction": direction, "entry_type": str(entry_type or "MARKET").upper(),
-        "entry_reference": entry_reference, "entry": round(entry, 10),
+        "entry_reference": entry_reference, "entry": round(entry, 10), "atr": round(atr, 10),
         "stop_loss": round(stop, 10), "tp1": round(targets[0], 10),
         "tp2": round(targets[1], 10), "tp3": round(targets[2], 10),
         "rr_tp1": round(rr_values[0], 4), "rr_tp2": round(rr_values[1], 4),
@@ -221,6 +243,7 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     if not validation["eligible"]:
         return None
     plan["risk_plan"] = validation["risk_plan"]
+    plan["partial_exit_weights"] = validation["risk_plan"].get("partial_exit_weights") or _configured_partial_tp_weights()
     plan["estimated_net_rr"] = validation["weighted_net_rr"]
     return plan
 
@@ -749,6 +772,13 @@ def _smc_candidate(result):
         "reasons": ["Mevcut Atlas SMC karar motoru EXECUTE üretti"],
     }
     plan["estimated_net_rr"] = card.get("net_rr")
+    source_risk = result.get("risk") or {}
+    plan["partial_exit_weights"] = (
+        source_risk.get("target_rebased_weights")
+        or source_risk.get("partial_exit_weights")
+        or _configured_partial_tp_weights()
+    )
+    plan["atr"] = source_risk.get("atr")
     return plan
 
 
@@ -832,6 +862,7 @@ class SevenStrategyLab:
                 if not risk_validation["eligible"]:
                     continue
                 candidate["risk_plan"] = risk_validation["risk_plan"]
+                candidate["partial_exit_weights"] = risk_validation["risk_plan"].get("partial_exit_weights") or _configured_partial_tp_weights()
                 candidate["estimated_net_rr"] = risk_validation["weighted_net_rr"]
                 ranked = rank_validated_candidate(candidate, stats, candidate.get("regime_fit", 1.0))
                 if ranked:
