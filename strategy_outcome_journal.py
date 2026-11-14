@@ -1,0 +1,131 @@
+"""Persistent, strategy-isolated realized outcome journal.
+
+Only closed, realized outcomes with an explicit cost-inclusive net-R value can
+enter the performance gate. Backtest IS and untouched OOS samples stay separate.
+"""
+from __future__ import annotations
+
+import json
+import math
+import os
+import threading
+from collections import defaultdict
+
+
+VALID_STRATEGIES = {
+    "trend_pullback", "volatility_breakout", "mean_reversion",
+    "liquidation_cascade", "orderflow_momentum", "relative_strength", "smc",
+}
+
+
+class StrategyOutcomeJournal:
+    def __init__(self, path=None):
+        self.path = path or os.getenv("ATLAS_STRATEGY_OUTCOMES_PATH", "data/strategy_outcomes.jsonl")
+        self._lock = threading.RLock()
+        self._records = None
+
+    def _load(self):
+        if self._records is not None:
+            return self._records
+        records = []
+        try:
+            with open(self.path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        item = json.loads(line)
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(item, dict) and item.get("trade_id") and item.get("strategy_id") in VALID_STRATEGIES:
+                        records.append(item)
+        except FileNotFoundError:
+            pass
+        self._records = records
+        return records
+
+    def record_outcome(self, *, strategy_id, trade_id, split, net_r, closed_at_ms, costs_included, regime="UNKNOWN"):
+        strategy = str(strategy_id or "").strip()
+        identifier = str(trade_id or "").strip()
+        sample = str(split or "").lower()
+        try:
+            result_r = float(net_r)
+            closed_at = int(closed_at_ms)
+        except (TypeError, ValueError, OverflowError):
+            return {"accepted": False, "reason": "invalid_numeric_outcome"}
+        if strategy not in VALID_STRATEGIES or not identifier or sample not in {"is", "oos"}:
+            return {"accepted": False, "reason": "invalid_strategy_trade_or_split"}
+        if not math.isfinite(result_r) or closed_at <= 0 or costs_included is not True:
+            return {"accepted": False, "reason": "outcome_must_be_finite_closed_and_cost_adjusted"}
+
+        record = {
+            "strategy_id": strategy,
+            "trade_id": identifier,
+            "split": sample,
+            "net_r": round(result_r, 8),
+            "closed_at_ms": closed_at,
+            "costs_included": True,
+            "regime": str(regime or "UNKNOWN"),
+        }
+        with self._lock:
+            records = self._load()
+            if any(item.get("trade_id") == identifier for item in records):
+                return {"accepted": False, "reason": "duplicate_trade_id"}
+            parent = os.path.dirname(self.path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            records.append(record)
+        return {"accepted": True, "record": dict(record)}
+
+    @staticmethod
+    def _summarize(values):
+        count = len(values)
+        if not count:
+            return {
+                "trades": 0, "expectancy_r": None, "profit_factor": None,
+                "expectancy_std_r": None,
+            }
+        mean = sum(values) / count
+        wins = sum(value for value in values if value > 0)
+        losses = -sum(value for value in values if value < 0)
+        variance = sum((value - mean) ** 2 for value in values) / max(1, count - 1)
+        return {
+            "trades": count,
+            "expectancy_r": round(mean, 8),
+            "profit_factor": round(wins / losses, 8) if losses > 0 else (999.0 if wins > 0 else 0.0),
+            "expectancy_std_r": round(math.sqrt(variance), 8),
+        }
+
+    def performance_snapshot(self):
+        with self._lock:
+            records = list(self._load())
+        grouped = defaultdict(lambda: {"is": [], "oos": []})
+        for item in records:
+            if item.get("costs_included") is not True:
+                continue
+            split = item.get("split")
+            strategy = item.get("strategy_id")
+            if split in {"is", "oos"} and strategy in VALID_STRATEGIES:
+                try:
+                    value = float(item.get("net_r"))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if math.isfinite(value):
+                    grouped[strategy][split].append(value)
+
+        output = {}
+        for strategy, samples in grouped.items():
+            ins = self._summarize(samples["is"])
+            oos = self._summarize(samples["oos"])
+            output[strategy] = {
+                "is_trades": ins["trades"],
+                "is_expectancy_r": ins["expectancy_r"],
+                "is_profit_factor": ins["profit_factor"],
+                "is_expectancy_std_r": ins["expectancy_std_r"],
+                "oos_trades": oos["trades"],
+                "oos_expectancy_r": oos["expectancy_r"],
+                "oos_profit_factor": oos["profit_factor"],
+            }
+        return output
