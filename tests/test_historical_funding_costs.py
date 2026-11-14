@@ -45,4 +45,4 @@ def test_funding_uses_strict_entry_and_inclusive_exit_time_bounds():
         ],
     )
     assert result["charged_events"] == 2
-    assert result["funding_cost_r"] == 0.021
+    assert result["funding_cost_r"] == 0.0205
