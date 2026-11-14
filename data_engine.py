@@ -215,6 +215,9 @@ def get_market_data(symbol, force_refresh=False):
         data["current_price"] = data["15m"][-1].close
         data["current_price_timestamp_ms"] = int(data["15m"][-1].time) + 15 * 60 * 1000
 
+    # Take the snapshot clock after all optional feeds have been fetched so
+    # their exchange timestamps are never incorrectly classified as future.
+    data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
     return data
 
 
