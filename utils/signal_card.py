@@ -311,8 +311,12 @@ def build_selected_strategy_card(result):
         geometry_valid = stop > entry > targets[0] > targets[1] > targets[2]
     risk_distance = abs(entry - stop) if valid_numbers else 0.0
     risk_validation = selected.get("risk_validation") or {}
+    risk_plan = selected.get("risk_plan") or {}
     executable = (
         risk_validation.get("eligible") is True
+        and isinstance(risk_plan, dict)
+        and risk_plan.get("final_geometry_reconciled") is True
+        and risk_plan.get("risk_setup_valid") is True
         and geometry_valid and risk_distance > 0
         and entry_type in {"MARKET", "LIMIT"}
         and selected.get("status") == "CANDIDATE"
@@ -371,15 +375,15 @@ def build_selected_strategy_card(result):
         "synthetic_tp_targets": selected.get("target_model") == "R_MULTIPLE_FALLBACK",
         "stop_loss": _price(stop),
         "tp_levels": [_price(value) for value in targets],
-        "rr": rr_values[0],
-        "net_rr": estimated_net_rr,
-        "target_max_rr": rr_values[-1],
-        "weighted_rr": rr_values[0],
-        "weighted_net_rr": estimated_net_rr,
-        "partial_exit_weights": {},
-        "selected_tp": "tp1",
-        "position_size": None,
-        "capital_at_risk": None,
+        "rr": _num(risk_plan.get("weighted_rr")) or rr_values[0],
+        "net_rr": _num(risk_plan.get("weighted_net_rr")) if risk_plan.get("weighted_net_rr") is not None else estimated_net_rr,
+        "target_max_rr": _num(risk_plan.get("target_max_rr")) or rr_values[-1],
+        "weighted_rr": _num(risk_plan.get("weighted_rr")) or rr_values[0],
+        "weighted_net_rr": _num(risk_plan.get("weighted_net_rr")) if risk_plan.get("weighted_net_rr") is not None else estimated_net_rr,
+        "partial_exit_weights": risk_plan.get("partial_exit_weights") or {},
+        "selected_tp": risk_plan.get("selected_tp") or "weighted_partial_exit",
+        "position_size": _num(risk_plan.get("position_size")),
+        "capital_at_risk": _num(risk_plan.get("capital_at_risk")),
         "critical_blocks": [],
         "soft_adjustments": [],
         "bonuses": [],
