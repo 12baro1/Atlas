@@ -96,6 +96,8 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     # Bybit public-market fee proxy only; spread/slippage are not known here.
     fee_rate = 0.00055
     fee_r = (2.0 * fee_rate * entry) / risk
+    if 1.25 - fee_r < 0.80:
+        return None
     return {
         "status": "CANDIDATE",
         "strategy_id": source,
@@ -189,7 +191,10 @@ def _trend_pullback(data):
         stop = max(entry + 1.0 * atr, swing + 0.1 * atr)
     else:
         return None
-    plan = _valid_plan(direction, entry, stop, atr, h1, "trend_pullback", 78, entry_reference=_entry_reference(data))
+    trend_separation = abs(e20 - e50) / atr
+    pullback_distance = abs(entry - e1) / atr
+    strength = min(92.0, 65.0 + min(trend_separation * 5.0, 15.0) + max(0.0, 10.0 - pullback_distance * 8.0))
+    plan = _valid_plan(direction, entry, stop, atr, h1, "trend_pullback", strength, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = ["4H EMA20/EMA50 trend alignment", "1H EMA20 pullback and candle reclaim"]
     return plan
@@ -222,7 +227,11 @@ def _volatility_breakout(data):
         stop = entry + 1.5 * atr
     else:
         return None
-    plan = _valid_plan(direction, entry, stop, atr, candles, "volatility_breakout", 76, entry_reference=_entry_reference(data))
+    boundary = max(prior_highs) if direction == "LONG" else min(prior_lows)
+    volume_ratio = volume / average_volume if average_volume > 0 else 0.0
+    breakout_distance = abs(entry - boundary) / atr
+    strength = min(92.0, 65.0 + min(max(0.0, volume_ratio - 1.2) * 12.0, 15.0) + min(breakout_distance * 8.0, 10.0))
+    plan = _valid_plan(direction, entry, stop, atr, candles, "volatility_breakout", strength, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = ["1H 20-candle Donchian breakout", "Volume at least 1.2x prior 20-candle average"]
     return plan
@@ -257,7 +266,9 @@ def _mean_reversion(data, regime):
     entry = _current_price(data)
     if entry is None:
         return None
-    plan = _valid_plan(direction, entry, stop, atr, candles, "mean_reversion", 72, entry_reference=_entry_reference(data))
+    extremity = max(0.0, 42.0 - rsi) if direction == "LONG" else max(0.0, rsi - 58.0)
+    strength = min(88.0, 65.0 + min(extremity * 0.5, 12.0) + min(abs(close - prev_close) / atr * 4.0, 8.0))
+    plan = _valid_plan(direction, entry, stop, atr, candles, "mean_reversion", strength, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = ["15m Bollinger re-entry after outside close", f"RSI14={rsi:.1f}", "Range regime"]
     return plan
@@ -314,7 +325,8 @@ def _orderflow_momentum(data):
         stop = entry + 1.5 * atr
     else:
         return None
-    plan = _valid_plan(direction, entry, stop, atr, candles, "orderflow_momentum", 74, entry_reference=_entry_reference(data))
+    strength = min(92.0, 65.0 + min(abs(imbalance - 1.0) * 20.0, 15.0) + min(abs(buy_ratio - 0.5) * 40.0, 10.0))
+    plan = _valid_plan(direction, entry, stop, atr, candles, "orderflow_momentum", strength, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = [f"Top-10 order-book bid/ask quantity ratio={imbalance:.2f}", f"Recent taker buy ratio={buy_ratio:.2f}"]
         plan["data_quality"] = "LIVE_SNAPSHOT"
@@ -350,7 +362,8 @@ def _liquidation_cascade(data):
         stop = entry + 1.5 * atr
     else:
         return None
-    plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", 70, entry_reference=_entry_reference(data))
+    strength = min(92.0, 65.0 + min(abs(oi_change) * 400.0, 15.0) + min(impulse * 5.0, 10.0))
+    plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = [f"Open interest contraction={oi_change * 100:.2f}%", f"1H impulse={impulse:.2f} ATR", "Trade-flow confirmation"]
         plan["data_quality"] = "OI_CONTRACTION_PROXY_NOT_EXCHANGE_LIQUIDATION_FEED"
@@ -382,7 +395,8 @@ def _relative_strength(data):
     if entry is None or (direction == "LONG" and entry <= e20) or (direction == "SHORT" and entry >= e20):
         return None
     stop = entry - 1.5 * atr if direction == "LONG" else entry + 1.5 * atr
-    plan = _valid_plan(direction, entry, stop, atr, candles, "relative_strength", 68, entry_reference=_entry_reference(data))
+    strength = min(88.0, 65.0 + min(abs(relative) * 500.0, 20.0))
+    plan = _valid_plan(direction, entry, stop, atr, candles, "relative_strength", strength, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = [f"12x4H relative return vs {benchmark}={relative * 100:+.2f}%", f"Price/EMA20 alignment"]
     return plan
