@@ -16,7 +16,7 @@ import logging
 import math
 
 from config import Config
-from execution_costs import estimate_plan_cost, realized_trade_cost
+from execution_costs import estimate_plan_cost, realized_trade_cost, adverse_funding_cost_r
 
 logger = logging.getLogger("atlas.backtest_runner")
 
@@ -375,6 +375,9 @@ class BacktestRunner:
         self.tp2 = 0
         self.tp3 = 0
         self.net_rr = 0.0
+        self.funding_cost_r = 0.0
+        self.funding_events_charged = 0
+        self.funding_data_quality = {}
         # Diagnostic counters explain why historical analysis produces no trades.
         self.analysis_calls = 0
         self.empty_results = 0
@@ -444,10 +447,28 @@ class BacktestRunner:
                 for tf in ("15m", "1h", "4h", "1d", "1w")
             }
             window["symbol"] = data.get("symbol", "SYMBOL")
-            # Preserve comparison universes so SMT and peer-flow motors can
-            # build timestamp-aligned context during historical replay.
+            # Preserve comparison universes and only pre-decision derivatives/L2 data.
             if data.get("smt_universe"):
                 window["smt_universe"] = data["smt_universe"]
+            window["funding_records"] = [
+                item for item in (data.get("funding_records") or [])
+                if int(item.get("timestamp") or 0) <= decision_time_ms
+            ]
+            oi_records = [
+                item for item in (data.get("open_interest_records") or [])
+                if int(item.get("timestamp") or 0) <= decision_time_ms
+            ]
+            window["open_interest"] = [item["value"] for item in oi_records]
+            window["open_interest_timestamps_ms"] = [item["timestamp"] for item in oi_records]
+            window["funding_rate"] = [item["value"] for item in window["funding_records"]]
+            window["funding_rate_timestamps_ms"] = [item["timestamp"] for item in window["funding_records"]]
+            window["derivatives_data_quality"] = data.get("derivatives_data_quality", {})
+            try:
+                from microstructure_archive import snapshot_at
+                micro = snapshot_at(window["symbol"], decision_time_ms) or {}
+            except Exception:
+                micro = {}
+            window.update(micro)
 
             self.analysis_calls += 1
             result = self.analyze_fn(window) if self.analyze_fn else on_signal(window)
@@ -583,7 +604,7 @@ class BacktestRunner:
             open_before = self.open_trades
             unfilled_before = self.unfilled_limits
             candidates_before = self.candidate_signals
-            trade = self._to_trade(result, candles, idx + 1, lenient=lenient, signal_index=idx)
+            trade = self._to_trade(result, candles, idx + 1, lenient=lenient, signal_index=idx, funding_records=data.get("funding_records"))
             if self.candidate_signals > candidates_before and setup_identity is not None:
                 self.seen_setup_ids.add(setup_identity)
             if trade is not None:
@@ -724,7 +745,7 @@ class BacktestRunner:
         minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
         return net_rr >= minimum_net_rr, net_rr, "rr" if net_rr < minimum_net_rr else "ok"
 
-    def _to_trade(self, result, candles, entry_index, lenient=False, signal_index=None):
+    def _to_trade(self, result, candles, entry_index, lenient=False, signal_index=None, funding_records=None):
         """analyze çıktısından trade üretir; geçersizse None."""
         decision = (result or {}).get("decision") or {}
         signal = (result or {}).get("signal") or {}
@@ -1007,18 +1028,26 @@ class BacktestRunner:
             fee_rr = (cost_parts["entry_fee"] + cost_parts["exit_fee"]) / risk_distance if risk_distance > 0 else 0.0
             spread_slippage_rr = (cost_parts["spread"] + cost_parts["slippage"]) / risk_distance if risk_distance > 0 else 0.0
         # Preserve actual price-path R (including stop gaps) and subtract costs once.
-        net_rr = round(gross_rr - execution_cost_rr, 4)
-        entry_fee_rr = cost_parts.get("entry_fee", 0.0) / risk_distance if risk_distance > 0 else 0.0
-        exit_fee_rr = cost_parts.get("exit_fee", 0.0) / risk_distance if risk_distance > 0 else 0.0
-        spread_rr = cost_parts.get("spread", 0.0) / risk_distance if risk_distance > 0 else 0.0
-        slippage_rr = cost_parts.get("slippage", 0.0) / risk_distance if risk_distance > 0 else 0.0
-        cost_reconciliation_error_rr = (gross_rr - execution_cost_rr) - net_rr
-
         signal_index = max(0, int(signal_index if signal_index is not None else entry_index - 1))
         exit_offset = outcome.get("exit_offset")
         exit_index = (outcome_start_index + int(exit_offset)
                       if exit_offset is not None else None)
         exit_time = int(candles[exit_index].time) if exit_index is not None and exit_index < len(candles) else None
+        funding_result = adverse_funding_cost_r(
+            signal_dir, entry_price, risk_distance,
+            int(candles[fill_index].time),
+            int(candles[exit_index].time) + 15 * 60 * 1000 if exit_index is not None and exit_index < len(candles) else int(candles[fill_index].time),
+            candles=candles[fill_index:exit_index + 1] if exit_index is not None and exit_index < len(candles) else [candles[fill_index]],
+            funding_records=funding_records or (), timeframe_ms=15 * 60 * 1000,
+        )
+        funding_pnl_r = funding_result["funding_pnl_r"]
+        funding_cost_r = funding_result["funding_cost_r"]
+        net_rr = round(gross_rr - execution_cost_rr - funding_cost_r, 4)
+        entry_fee_rr = cost_parts.get("entry_fee", 0.0) / risk_distance if risk_distance > 0 else 0.0
+        exit_fee_rr = cost_parts.get("exit_fee", 0.0) / risk_distance if risk_distance > 0 else 0.0
+        spread_rr = cost_parts.get("spread", 0.0) / risk_distance if risk_distance > 0 else 0.0
+        slippage_rr = cost_parts.get("slippage", 0.0) / risk_distance if risk_distance > 0 else 0.0
+        cost_reconciliation_error_rr = (gross_rr - execution_cost_rr - funding_cost_r) - net_rr
         return {
             "signal_index": signal_index,
             "signal_time": int(candles[signal_index].time),
@@ -1087,7 +1116,11 @@ class BacktestRunner:
             "spread_cost_quote": round(cost_parts.get("spread", 0.0), 10),
             "slippage_cost_quote": round(cost_parts.get("slippage", 0.0), 10),
             "execution_cost_rr": round(execution_cost_rr, 4),
-            "cost_model": "per_fill_maker_taker_market_friction" if self.legacy_fee_rate is None else "round_trip_fee_plus_spread_slippage_proxy",
+            "funding_pnl_r": round(funding_pnl_r, 8),
+            "funding_cost_r": round(funding_cost_r, 8),
+            "funding_events_charged": funding_result["charged_events"],
+            "total_cost_rr": round(execution_cost_rr + funding_cost_r, 4),
+            "cost_model": ("per_fill_maker_taker_market_friction_plus_adverse_historical_funding" if self.legacy_fee_rate is None and funding_records else "per_fill_maker_taker_market_friction") if self.legacy_fee_rate is None else "round_trip_fee_plus_spread_slippage_proxy",
             "_w": net_rr > 0.0,
             "_tp": outcome.get("tp", 0),
             "_levels": outcome.get("levels") or [],
@@ -1107,6 +1140,8 @@ class BacktestRunner:
             elif level == 3:
                 self.tp3 += 1
         self.net_rr += trade.get("net_rr", 0.0)
+        self.funding_cost_r += trade.get("funding_cost_r", 0.0)
+        self.funding_events_charged += trade.get("funding_events_charged", 0)
 
     def performance_gate(self, minimum_trades=200, minimum_profit_factor=1.5,
                          maximum_drawdown_pct=10.0, risk_percent=1.0):
