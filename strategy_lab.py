@@ -89,10 +89,32 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     risk = entry - stop if direction == "LONG" else stop - entry
     if risk <= 0 or risk < 0.75 * atr or risk > 3.0 * atr:
         return None
+    # Prefer actual opposing swing-liquidity levels. Use transparent R-multiple
+    # fallback only when the supplied history does not contain three valid levels.
+    pivots = []
+    sample = list(candles or [])[-120:]
+    for index in range(2, len(sample) - 2):
+        high = _value(sample[index], "high")
+        low = _value(sample[index], "low")
+        if high is None or low is None:
+            continue
+        left_highs = [_value(item, "high") for item in sample[index - 2:index]]
+        right_highs = [_value(item, "high") for item in sample[index + 1:index + 3]]
+        left_lows = [_value(item, "low") for item in sample[index - 2:index]]
+        right_lows = [_value(item, "low") for item in sample[index + 1:index + 3]]
+        if all(value is not None for value in left_highs + right_highs) and all(high > value for value in left_highs + right_highs):
+            if direction == "LONG" and high > entry and (high - entry) / risk >= 1.25:
+                pivots.append(high)
+        if all(value is not None for value in left_lows + right_lows) and all(low < value for value in left_lows + right_lows):
+            if direction == "SHORT" and low < entry and (entry - low) / risk >= 1.25:
+                pivots.append(low)
     if direction == "LONG":
-        targets = [entry + risk * multiple for multiple in (1.25, 2.0, 3.0)]
+        structural = sorted(set(value for value in pivots if value > entry))
+        targets = structural[:3] if len(structural) >= 3 else [entry + risk * multiple for multiple in (1.25, 2.0, 3.0)]
     else:
-        targets = [entry - risk * multiple for multiple in (1.25, 2.0, 3.0)]
+        structural = sorted(set((value for value in pivots if value < entry)), reverse=True)
+        targets = structural[:3] if len(structural) >= 3 else [entry - risk * multiple for multiple in (1.25, 2.0, 3.0)]
+    target_model = "SWING_LIQUIDITY" if len(structural) >= 3 else "R_MULTIPLE_FALLBACK"
     if any(value <= 0 for value in targets):
         return None
     # Bybit public-market fee proxy only; spread/slippage are not known here.
@@ -119,7 +141,7 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
         "estimated_net_rr_tp1": round(1.25 - fee_r, 4),
         "estimated_net_rr_tp3": round(3.0 - fee_r, 4),
         "strength": round(float(strength), 2),
-        "target_model": "R_MULTIPLE",
+        "target_model": target_model,
         "experimental": source != "smc",
         "reasons": [],
     }
