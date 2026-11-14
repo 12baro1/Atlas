@@ -141,20 +141,11 @@ def test_experimental_candidate_is_not_selected_without_validated_performance(mo
 
 
 def test_plan_uses_opposing_swing_liquidity_when_three_levels_exist():
-    candles = [
-        Candle(100, 102, 99, 101),
-        Candle(101, 105, 100, 103),
-        Candle(103, 103, 100, 101),
-        Candle(101, 107, 100, 104),
-        Candle(104, 104, 101, 102),
-        Candle(102, 109, 101, 106),
-        Candle(106, 106, 102, 104),
-        Candle(104, 111, 103, 108),
-        Candle(108, 108, 104, 106),
-    ]
+    highs = [101, 102, 103, 105, 103, 102, 104, 105, 108, 106, 105, 107, 108, 111, 109, 108, 107]
+    candles = [Candle(100, high, 99, 101) for high in highs]
     plan = _valid_plan("LONG", 100, 98, 1, candles, "trend_pullback", 70)
 
     assert plan["target_model"] == "SWING_LIQUIDITY"
     assert plan["tp1"] == 105
-    assert plan["tp2"] == 107
-    assert plan["tp3"] == 109
+    assert plan["tp2"] == 108
+    assert plan["tp3"] == 111
