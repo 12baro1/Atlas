@@ -317,6 +317,43 @@ def simulate_trade_partial(
         "stop_gap_r": _num(stop_gap_r),
     }
 
+def market_fallback_check(opened, planned_entry, stop, tp1, direction, risk=None,
+                          legacy_fee_rate=None, maker_fee_rate=None,
+                          taker_fee_rate=None, spread_rate=None, slippage_rate=None):
+    """Shared gate for a missed LIMIT replaced by a nearby next-open MARKET."""
+    is_long = str(direction or "").upper() == "LONG"
+    if opened is None or planned_entry is None or stop is None or tp1 is None:
+        return False, 0.0, "missing_levels"
+    if (is_long and not (stop < opened < tp1)) or (not is_long and not (tp1 < opened < stop)):
+        return False, 0.0, "invalid_geometry"
+    distance = abs(opened - planned_entry)
+    distance_pct = distance / opened if opened > 0 else float("inf")
+    atr = _num((risk or {}).get("atr"))
+    distance_atr = distance / atr if atr and atr > 0 else None
+    max_pct = float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003))
+    max_atr = float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_ATR", 0.35))
+    if distance_pct > max_pct or (distance_atr is not None and distance_atr > max_atr):
+        return False, 0.0, "distance"
+    fallback_risk = abs(opened - stop)
+    fallback_reward = tp1 - opened if is_long else opened - tp1
+    if fallback_risk <= 0 or fallback_reward <= 0:
+        return False, 0.0, "invalid_geometry"
+    if legacy_fee_rate is not None:
+        cost = abs(opened) * float(legacy_fee_rate)
+    else:
+        cost = estimate_plan_cost(
+            entry_price=opened, targets={"tp1": tp1}, weights={"tp1": 1.0},
+            entry_type="MARKET",
+            maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002) if maker_fee_rate is None else maker_fee_rate),
+            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055) if taker_fee_rate is None else taker_fee_rate),
+            spread_rate=float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002) if spread_rate is None else spread_rate),
+            slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003) if slippage_rate is None else slippage_rate),
+        )["total"]
+    net_rr = (fallback_reward - cost) / fallback_risk
+    minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
+    return net_rr >= minimum_net_rr, net_rr, "rr" if net_rr < minimum_net_rr else "ok"
+
+
 class BacktestRunner:
     """Fiyat serisini ileri sararak engine sinyallerini tetikler ve sonuç toplar."""
 
@@ -730,40 +767,14 @@ class BacktestRunner:
         return True, "remaining_structural_targets_rebased"
 
     def _market_fallback_check(self, opened, planned_entry, stop, tp1, direction, risk):
-        """Check a next-open MARKET replacement for a missed LIMIT without chasing."""
-        is_long = direction == "LONG"
-        if opened is None or planned_entry is None or stop is None or tp1 is None:
-            return False, 0.0, "missing_levels"
-        if (is_long and not (stop < opened < tp1)) or (not is_long and not (tp1 < opened < stop)):
-            return False, 0.0, "invalid_geometry"
-        distance = abs(opened - planned_entry)
-        distance_pct = distance / opened if opened > 0 else float("inf")
-        atr = _num(risk.get("atr"))
-        distance_atr = distance / atr if atr and atr > 0 else None
-        max_pct = float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003))
-        max_atr = float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_ATR", 0.35))
-        if distance_pct > max_pct or (distance_atr is not None and distance_atr > max_atr):
-            return False, 0.0, "distance"
-        fallback_risk = abs(opened - stop)
-        fallback_reward = tp1 - opened if is_long else opened - tp1
-        if fallback_risk <= 0 or fallback_reward <= 0:
-            return False, 0.0, "invalid_geometry"
-        if self.legacy_fee_rate is not None:
-            cost = abs(opened) * self.legacy_fee_rate
-        else:
-            cost = estimate_plan_cost(
-                entry_price=opened,
-                targets={"tp1": tp1},
-                weights={"tp1": 1.0},
-                entry_type="MARKET",
-                maker_fee_rate=self.maker_fee_rate,
-                taker_fee_rate=self.taker_fee_rate,
-                spread_rate=self.spread_rate,
-                slippage_rate=self.slippage_rate,
-            )["total"]
-        net_rr = (fallback_reward - cost) / fallback_risk
-        minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
-        return net_rr >= minimum_net_rr, net_rr, "rr" if net_rr < minimum_net_rr else "ok"
+        return market_fallback_check(
+            opened, planned_entry, stop, tp1, direction, risk,
+            legacy_fee_rate=self.legacy_fee_rate,
+            maker_fee_rate=self.maker_fee_rate,
+            taker_fee_rate=self.taker_fee_rate,
+            spread_rate=self.spread_rate,
+            slippage_rate=self.slippage_rate,
+        )
 
     def _to_trade(self, result, candles, entry_index, lenient=False, signal_index=None, funding_records=None):
         """analyze çıktısından trade üretir; geçersizse None."""
