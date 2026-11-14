@@ -296,19 +296,20 @@ class AtlasTUIApp(App):
         return Panel(table, title="[bold]MARKET DETAILS[/bold]", border_style="bright_black")
 
     @staticmethod
-    def _chart_renderable(ohlcv, symbol="BTC/USDT:USDT"):
+    def _chart_renderable(ohlcv, symbol="BTC/USDT:USDT", max_bars=30):
         if not ohlcv:
             return Panel(
                 Text("Waiting for live OHLCV candles…", style="dim"),
                 title=f"[bold bright_green]LIVE CANDLE CHART  |  {symbol}  5m[/bold bright_green]",
                 border_style="green",
             )
-        candles = ohlcv[-48:]
+        max_bars = max(8, min(int(max_bars), 48))
+        candles = ohlcv[-max_bars:]
         lows = [float(row[3]) for row in candles]
         highs = [float(row[2]) for row in candles]
         low, high = min(lows), max(highs)
         span = max(high - low, 1e-12)
-        height = 12
+        height = 6
         grid = [[" " for _ in candles] for _ in range(height)]
         for x, row in enumerate(candles):
             opened, top, bottom, close = map(float, (row[1], row[2], row[3], row[4]))
@@ -363,8 +364,7 @@ class AtlasTUIApp(App):
         ])
         self._code_frame_index = 0
         self._set_status("BYBIT PUBLIC FEED  |  CONNECTING")
-        self._log_event("DECORATIVE SYSTEM TRACE  |  VISUAL ONLY — NOT EXECUTED LOGS")
-        self._log_event("Connecting to public market feed…")
+        self._log_event("SYSTEM READY  |  Analysis trace will appear when a command starts.")
         self.set_interval(0.22, self._animate_code_panel)
         self.query_one("#command", Input).focus()
         self._on_resize()
@@ -393,6 +393,8 @@ class AtlasTUIApp(App):
             pass
 
     def _animate_code_panel(self) -> None:
+        if not getattr(self, "_trace_active", False):
+            return
         try:
             panel = self.query_one("#events", RichLog)
             line = self._code_frames[self._code_frame_index % len(self._code_frames)]
@@ -448,7 +450,11 @@ class AtlasTUIApp(App):
             "volume": f"{volume:,.0f} USDT" if isinstance(volume, (int, float)) else "—",
         }
         self.query_one("#market", Static).update(self._market_renderable(tickers))
-        self.query_one("#chart", Static).update(self._chart_renderable(payload.get("candles") or [], payload.get("symbol")))
+        chart_width = self.query_one("#chart", Static).size.width
+        max_bars = max(8, min(48, chart_width - 8))
+        self.query_one("#chart", Static).update(
+            self._chart_renderable(payload.get("candles") or [], payload.get("symbol"), max_bars=max_bars)
+        )
         self.query_one("#details", Static).update(self._details_renderable(detail))
         if last is not None:
             self._set_status(f"BYBIT LIVE  |  {payload.get('symbol')}  |  LAST {fmt(last)}  |  REFRESH 5s")
@@ -526,12 +532,18 @@ class AtlasTUIApp(App):
             )
             return
         self._busy = True
+        self.query_one("#events", RichLog).clear()
+        self._code_frame_index = 0
+        self._log_event(f"ANALYSIS TRACE STARTED  |  {command.upper()}")
         self._motor_cycle_active = not _is_report_command(command)
+        self._trace_active = self._motor_cycle_active
         if _is_symbol_input(command):
             symbol = command.strip().upper()
             self._active_symbol = symbol if "/" in symbol else f"{symbol}/USDT:USDT"
             self.query_one("#chart", Static).update(self._chart_renderable([], self._active_symbol))
-            self._log_event(f"CHART SYMBOL CHANGED  |  {self._active_symbol}")
+            self.query_one("#events", RichLog).clear()
+            self._code_frame_index = 0
+            self._log_event(f"ANALYSIS TRACE STARTED  |  {self._active_symbol}")
             self._log_event(f"ANALYSIS START  |  {self._active_symbol}")
             self._request_market_refresh()
         elif _parse_scan_command(command) is not None:
@@ -831,3 +843,5 @@ class AtlasTUIApp(App):
             self._log_event("ANALYSIS COMPLETE  |  Seven strategy generators finished.")
         self._set_status("ANALYSIS COMPLETE  |  MARKET FEED CONTINUES")
         self._busy = False
+        self._trace_active = False
+        self._log_event("ANALYSIS TRACE PAUSED  |  Waiting for next command.")
