@@ -5,10 +5,10 @@ enter the performance gate. Backtest IS and untouched OOS samples stay separate.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
-import subprocess
 import threading
 from collections import defaultdict
 
@@ -115,15 +115,21 @@ class StrategyOutcomeJournal:
         }
 
     def current_revision(self):
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=os.path.dirname(os.path.abspath(__file__)),
-                capture_output=True, text=True, check=True,
-            )
-            return result.stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            return "unknown"
+        """Fingerprint strategy logic and replay code, excluding unrelated docs/UI commits."""
+        root = os.path.dirname(os.path.abspath(__file__))
+        digest = hashlib.sha256()
+        for filename in (
+            "strategy_lab.py", "strategy_performance.py",
+            "strategy_backtest.py", "strategy_outcome_journal.py",
+        ):
+            path = os.path.join(root, filename)
+            try:
+                with open(path, "rb") as handle:
+                    digest.update(filename.encode("utf-8"))
+                    digest.update(handle.read())
+            except OSError:
+                return "unknown"
+        return "sha256:" + digest.hexdigest()
 
     def performance_snapshot(self, symbol=None, regime=None, source_revision=None):
         with self._lock:
