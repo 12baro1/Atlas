@@ -1271,6 +1271,15 @@ class BacktestRunner:
             }
         return output
 
+    def _microstructure_quality(self):
+        samples = self.microstructure_samples
+        return {
+            "analysis_samples": samples,
+            "archived_snapshots": self.microstructure_snapshots,
+            "orderbook_snapshots": self.microstructure_orderbooks,
+            "trade_snapshots": self.microstructure_trade_snapshots,
+            "snapshot_coverage_pct": round(self.microstructure_snapshots / max(1, samples) * 100.0, 2),
+        }
     def statistics(self):
         if not self.total:
             return {
@@ -1338,6 +1347,7 @@ class BacktestRunner:
                 "total_funding_cost_r": 0,
                 "funding_events_charged": 0,
                 "funding_data_quality": dict(self.funding_data_quality),
+                "microstructure_data_quality": self._microstructure_quality(),
                 "entry_fee_rr": 0, "exit_fee_rr": 0, "spread_rr": 0, "slippage_rr": 0,
                 "tp1": 0, "tp2": 0, "tp3": 0,
                 "sample_base": "realized_closed_trades",
@@ -1448,6 +1458,7 @@ class BacktestRunner:
             "total_funding_cost_r": round(total_funding_cost_r, 4),
             "funding_events_charged": funding_events_charged,
             "funding_data_quality": dict(self.funding_data_quality),
+            "microstructure_data_quality": self._microstructure_quality(),
             "entry_fee_rr": round(sum(float(h.get("entry_fee_rr", 0.0) or 0.0) for h in self.history), 4),
             "exit_fee_rr": round(sum(float(h.get("exit_fee_rr", 0.0) or 0.0) for h in self.history), 4),
             "spread_rr": round(sum(float(h.get("spread_rr", 0.0) or 0.0) for h in self.history), 4),
