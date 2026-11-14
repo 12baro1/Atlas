@@ -104,3 +104,19 @@ Status: implementation specification. This document is not a claim that the stra
 6. Full regression, leakage audit, and out-of-sample report.
 
 Promotion requires passing the same acceptance gates for every strategy. No profitability guarantee is implied.
+
+## Follow-up implementation tranche (PR #115)
+
+Implemented on top of the professionalization branch:
+
+- Anchored expanding-window walk-forward reporting with five sequential test folds per strategy. Each fold reports prior-window training metrics and its next untouched test window. This is validation, not automated parameter tuning.
+- Timestamped historical Bybit OI and funding loaders with pagination, deduplication, time-window filtering, and explicit unsupported/unavailable states. No current-value substitution is allowed in replay.
+- Funding settlement cash flow is applied to simulated trades according to position direction. A positive funding rate is a debit to longs and a credit to shorts; net cost R may therefore be negative when funding credits exceed modeled execution costs.
+- Outcome persistence is blocked when historical funding is unavailable, so incomplete cost samples cannot enter the strategy performance gate.
+- Live order-book and recent-trade snapshots are archived locally as JSONL and replayed only when their timestamps precede the historical decision and meet freshness limits. This archive starts collecting from deployment onward; it cannot recreate past order books.
+- Historical liquidation analysis can use timestamped OI/funding plus archived trade flow, but remains a proxy and is not a true liquidation-event feed.
+
+- Relative Strength now estimates rolling 48-bar 4H beta and 12-bar residual alpha versus a timestamp-aligned BTC/ETH composite, optionally blended with a configured sector-peer basket. The same peer candles are loaded in historical replay.
+- Order Flow Momentum includes a conservative absorption proxy: aggressive taker delta that fails to move price while opposing displayed depth is dominant. It is labeled as a proxy, not true queue-level absorption.
+
+The exchange's historical order-book archive is not exposed by the current CCXT/Bybit path. Therefore complete historical book replay remains data-limited until an external historical L2 provider or a sufficiently long local archive is available. Fees, spread, and slippage remain assumptions. Unit tests were added; merge still requires a completed passing CI run and a local full-suite run.

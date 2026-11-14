@@ -434,8 +434,15 @@ def _orderflow_momentum(data):
     entry = _current_price(data)
     if close is None or opened is None or entry is None:
         return None
+    absorption = _absorption_proxy(flow, last, atr)
     direction = None
-    if imbalance >= 0.18 and trade_delta >= 0.12 and close > opened and entry >= opened:
+    if absorption == "BUYER_FLOW_ABSORBED":
+        direction = "SHORT"
+        stop = entry + 1.5 * atr
+    elif absorption == "SELLER_FLOW_ABSORBED":
+        direction = "LONG"
+        stop = entry - 1.5 * atr
+    elif imbalance >= 0.18 and trade_delta >= 0.12 and close > opened and entry >= opened:
         direction = "LONG"
         stop = entry - 1.5 * atr
     elif imbalance <= -0.18 and trade_delta <= -0.12 and close < opened and entry <= opened:
@@ -445,6 +452,8 @@ def _orderflow_momentum(data):
         return None
 
     strength = min(92.0, 65.0 + min(abs(imbalance) * 35.0, 15.0) + min(abs(trade_delta) * 25.0, 10.0))
+    if absorption:
+        strength = min(94.0, strength + 2.0)
     plan = _valid_plan(direction, entry, stop, atr, candles, "orderflow_momentum", strength, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = [
@@ -452,13 +461,16 @@ def _orderflow_momentum(data):
             f"Recent taker notional delta={trade_delta:+.2f}",
             f"Spread={spread_pct:.4f}%",
         ]
-        plan["data_quality"] = "FRESH_BOOK_AND_NOTIONAL_TRADE_FLOW"
+        plan["data_quality"] = "ABSORPTION_PROXY" if absorption else "FRESH_BOOK_AND_NOTIONAL_TRADE_FLOW"
+        if absorption:
+            plan["reasons"].append(f"Absorption proxy: {absorption}")
         plan["orderflow_metrics"] = {
             "bid_notional": flow.get("bid_notional"),
             "ask_notional": flow.get("ask_notional"),
             "trade_delta": trade_delta,
             "spread_pct": spread_pct,
             "trade_count": flow.get("trade_count"),
+            "absorption_proxy": absorption,
         }
     return plan
 
@@ -523,51 +535,148 @@ def _liquidation_cascade(data):
 
 
 def _relative_strength(data):
+    """Beta-adjusted relative strength versus market and optional sector peers."""
     candles = data.get("4h") or []
     closes = _series(candles)
     atr = _atr(candles)
-    if len(closes) < 15 or atr is None:
+    if len(closes) < 55 or atr is None:
         return None
     symbol = str(data.get("symbol") or "").upper()
     universe = data.get("correlation_universe") or {}
     benchmark_keys = ["ETH"] if symbol.startswith("BTC/") else ["BTC"] if symbol.startswith("ETH/") else ["BTC", "ETH"]
-    benchmark_returns = []
-    try:
-        own_time = int(candles[-1].time)
-    except (AttributeError, TypeError, ValueError, OverflowError):
-        return None
+
+    def returns_by_time(series):
+        output = {}
+        for previous, current in zip(series, series[1:]):
+            previous_close = _value(previous, "close")
+            current_close = _value(current, "close")
+            try:
+                timestamp = int(current.time)
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                continue
+            if previous_close and current_close and previous_close > 0:
+                value = current_close / previous_close - 1.0
+                if math.isfinite(value):
+                    output[timestamp] = value
+        return output
+
+    own_returns = returns_by_time(candles)
+    benchmark_maps = []
     for benchmark_key in benchmark_keys:
         benchmark_candles = universe.get(benchmark_key) or []
-        benchmark_closes = _series(benchmark_candles)
-        if len(benchmark_closes) < 15:
+        if len(benchmark_candles) < 55:
             return None
-        try:
-            benchmark_time = int(benchmark_candles[-1].time)
-        except (AttributeError, TypeError, ValueError, OverflowError):
-            return None
-        if abs(own_time - benchmark_time) > 4 * 60 * 60 * 1000:
-            return None
-        benchmark_returns.append(benchmark_closes[-1] / benchmark_closes[-13] - 1.0)
-    own_return = closes[-1] / closes[-13] - 1.0
-    benchmark_return = sum(benchmark_returns) / len(benchmark_returns)
-    relative = own_return - benchmark_return
+        benchmark_maps.append(returns_by_time(benchmark_candles))
+    common_times = set(own_returns)
+    for values in benchmark_maps:
+        common_times.intersection_update(values)
+    if len(common_times) < 48:
+        return None
+
+    market_by_time = {
+        timestamp: sum(values[timestamp] for values in benchmark_maps) / len(benchmark_maps)
+        for timestamp in common_times
+    }
+    sector_maps = []
+    for frames in (data.get("sector_peer_universe") or {}).values():
+        peer_candles = frames.get("4h") if isinstance(frames, dict) else frames
+        if peer_candles and len(peer_candles) >= 55:
+            sector_maps.append(returns_by_time(peer_candles))
+    sector_coverage = {}
+    if len(sector_maps) >= 2:
+        for timestamp in common_times:
+            peer_values = [values[timestamp] for values in sector_maps if timestamp in values]
+            if len(peer_values) >= 2:
+                sector_coverage[timestamp] = sum(peer_values) / len(peer_values)
+    use_sector = len(sector_maps) >= 2 and len(sector_coverage) >= int(len(common_times) * 0.70)
+    aligned_times = sorted(
+        timestamp for timestamp in common_times
+        if not use_sector or timestamp in sector_coverage
+    )
+    benchmark_returns = [
+        0.70 * market_by_time[timestamp] + 0.30 * sector_coverage[timestamp]
+        if use_sector else market_by_time[timestamp]
+        for timestamp in aligned_times
+    ]
+    asset_returns = [own_returns[timestamp] for timestamp in aligned_times]
+    if len(asset_returns) < 48:
+        return None
+
+    # Estimate beta over the prior 48 closed 4H return observations.
+    beta_asset = asset_returns[-48:]
+    beta_market = benchmark_returns[-48:]
+    mean_asset = sum(beta_asset) / len(beta_asset)
+    mean_market = sum(beta_market) / len(beta_market)
+    variance = sum((value - mean_market) ** 2 for value in beta_market)
+    if variance <= 1e-12:
+        return None
+    covariance = sum(
+        (asset_value - mean_asset) * (market_value - mean_market)
+        for asset_value, market_value in zip(beta_asset, beta_market)
+    )
+    beta = covariance / variance
+    if not math.isfinite(beta) or abs(beta) > 5.0:
+        return None
+
+    own_return_12 = sum(asset_returns[-12:])
+    benchmark_return_12 = sum(benchmark_returns[-12:])
+    residual_alpha = own_return_12 - beta * benchmark_return_12
     e20 = _ema(closes, 20)
     if e20 is None:
         return None
-    direction = "LONG" if relative >= 0.02 and closes[-1] > e20 else "SHORT" if relative <= -0.02 and closes[-1] < e20 else None
+    direction = (
+        "LONG" if residual_alpha >= 0.02 and closes[-1] > e20
+        else "SHORT" if residual_alpha <= -0.02 and closes[-1] < e20
+        else None
+    )
     if not direction:
         return None
     entry = _current_price(data)
     if entry is None or (direction == "LONG" and entry <= e20) or (direction == "SHORT" and entry >= e20):
         return None
     stop = entry - 1.5 * atr if direction == "LONG" else entry + 1.5 * atr
-    strength = min(88.0, 65.0 + min(abs(relative) * 500.0, 20.0))
+    strength = min(90.0, 64.0 + min(abs(residual_alpha) * 450.0, 22.0) + min(abs(beta) * 2.0, 4.0))
     plan = _valid_plan(direction, entry, stop, atr, candles, "relative_strength", strength, entry_reference=_entry_reference(data))
     if plan:
         benchmark_label = "/".join(benchmark_keys)
-        plan["reasons"] = [f"12x4H relative return vs {benchmark_label} composite={relative * 100:+.2f}%", "Price/EMA20 alignment"]
+        sector_label = f" + sector peers ({len(sector_maps)})" if use_sector else ""
+        plan["reasons"] = [
+            f"12x4H beta-adjusted residual alpha={residual_alpha * 100:+.2f}%",
+            f"Estimated beta={beta:.2f} vs {benchmark_label}{sector_label}",
+            "Absolute EMA20 trend confirmation",
+        ]
+        plan["relative_strength_metrics"] = {
+            "beta": round(beta, 4),
+            "residual_alpha_12x4h": round(residual_alpha, 6),
+            "market_return_12x4h": round(benchmark_return_12, 6),
+            "sector_peers_used": len(sector_maps) if use_sector else 0,
+        }
     return plan
 
+
+def _absorption_proxy(flow, candle, atr):
+    """Infer passive absorption from aggressive trade delta plus stalled price.
+
+    This is a snapshot proxy, not proof of hidden liquidity or queue replenishment.
+    """
+    if not isinstance(flow, dict) or not atr or atr <= 0:
+        return None
+    try:
+        delta = float(flow.get("trade_delta") or 0.0)
+        imbalance = float(flow.get("imbalance") or 0.0)
+        opened = _value(candle, "open")
+        close = _value(candle, "close")
+        trade_count = int(flow.get("trade_count") or 0)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if None in (opened, close) or trade_count < 20:
+        return None
+    price_progress = (close - opened) / atr
+    if delta >= 0.18 and abs(price_progress) <= 0.15 and imbalance <= -0.10:
+        return "BUYER_FLOW_ABSORBED"
+    if delta <= -0.18 and abs(price_progress) <= 0.15 and imbalance >= 0.10:
+        return "SELLER_FLOW_ABSORBED"
+    return None
 
 def _smc_candidate(result):
     if not isinstance(result, dict):
