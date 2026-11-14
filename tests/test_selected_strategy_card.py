@@ -26,13 +26,14 @@ def _candidate(**overrides):
         "entry_type": "MARKET",
         "entry": 100.0,
         "stop_loss": 98.0,
-        "tp1": 102.5,
-        "tp2": 104.0,
-        "tp3": 106.0,
+        "tp1": 104.0,
+        "tp2": 106.0,
+        "tp3": 108.0,
         "strength": 78.0,
         "experimental": True,
         "target_model": "SWING_LIQUIDITY",
         "reasons": ["4H trend aligned", "1H pullback reclaimed"],
+        "risk_validation": {"eligible": True, "weighted_net_rr": 2.5},
     }
     payload.update(overrides)
     return payload
@@ -45,7 +46,7 @@ def test_selected_experimental_plan_becomes_executable_canonical_card():
     assert card["entry_type"] == "MARKET"
     assert card["entry"] == 100.0
     assert card["stop_loss"] == 98.0
-    assert card["tp_levels"] == [102.5, 104.0, 106.0]
+    assert card["tp_levels"] == [104.0, 106.0, 108.0]
     assert card["strategy_id"] == "trend_pullback"
     rendered = format_card_text(card)
     assert "İŞLEME GİR" in rendered
@@ -81,7 +82,7 @@ def test_missing_selected_plan_does_not_fall_back_to_smc_execute():
 def test_selected_short_plan_preserves_directional_price_geometry():
     card = build_selected_strategy_card(_result(_candidate(
         direction="SHORT", entry=100.0, stop_loss=102.0,
-        tp1=97.5, tp2=96.0, tp3=94.0,
+        tp1=96.0, tp2=94.0, tp3=92.0,
     )))
     assert card["direction"] == "SHORT"
     assert card["stop_loss"] > card["entry"] > card["tp_levels"][0]
