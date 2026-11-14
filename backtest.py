@@ -1230,6 +1230,8 @@ def main():
         parser.error("--step must be greater than zero")
     if args.limit_expiry_bars <= 0:
         parser.error("--limit-expiry-bars must be greater than zero")
+    if args.max_holding_bars <= 0:
+        parser.error("--max-holding-bars must be greater than zero")
     if args.walk_forward and (args.chunk_days <= 0 or math.ceil(args.days / args.chunk_days) < 2):
         parser.error("--walk-forward için en az iki parça oluşturacak --chunk-days gerekli")
 
