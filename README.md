@@ -55,6 +55,37 @@ Belirli bir sembolle doğrudan açmak için:
 ./atlas ETH
 ```
 
+## VPS üzerinde sürekli canlı analiz servisi
+
+Sunucu servisi, terminal arayüzünü açmadan aynı `AtlasRuntime` ve `AtlasEngine` analiz hattını arka planda çalıştırır. Tek coin analizindeki yedi strateji, ortak analiz servisleri ve tek karar mekanizması değiştirilmez. Varsayılan sembol sınırı yoktur; Bybit'teki desteklenen aktif USDT perpetual piyasalarının tamamı taranır. İstersen `.env` içinde `ATLAS_MAX_SYMBOLS` ile kendin sınır koyabilirsin.
+
+```bash
+cd ~/Atlas
+cp .env.example .env
+# İsteğe bağlı ayarları .env içinde düzenle.
+source .venv/bin/activate
+python -m pytest -q tests/test_atlas_service.py
+mkdir -p ~/.config/systemd/user
+cp deploy/atlas.service ~/.config/systemd/user/atlas.service
+systemctl --user daemon-reload
+systemctl --user enable --now atlas.service
+```
+
+SSH oturumu kapandıktan ve VPS yeniden başladıktan sonra da kullanıcı servisi çalışsın diye bir kez:
+```bash
+sudo loginctl enable-linger administrator
+```
+
+Durum ve günlükler:
+```bash
+systemctl --user status atlas.service
+journalctl --user -u atlas.service -f
+systemctl --user restart atlas.service
+systemctl --user stop atlas.service
+```
+
+Servis, depodaki mevcut analiz ayarlarını ve isteğe bağlı entegrasyonları korur. Atlas'ın mevcut güvenlik davranışı gereği otomatik emir gönderimi kapalıdır; bu dağıtım yalnızca analiz ve sinyal üretimi içindir.
+
 ## Kullanım
 
 Atlas açıldığında komut alanına sembol veya desteklenen komutlardan birini yaz:
