@@ -127,7 +127,7 @@ class StateEngine:
         }
         self.save()
 
-    def store_active_setup(self, symbol, result):
+    def store_active_setup(self, symbol, result, data=None):
         """Persist the last executable setup independently from the rolling analysis cache."""
         if not isinstance(result, dict):
             return None
@@ -145,6 +145,11 @@ class StateEngine:
             or (result.get("journal") or {}).get("id")
         )
         snapshot["created_at"] = int(time.time() * 1000)
+        candles = (data or {}).get("15m") or []
+        try:
+            snapshot["last_candle_time"] = int(candles[-1].time) if candles else None
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            snapshot["last_candle_time"] = None
         self.state.setdefault("active_setups", {})[str(symbol)] = snapshot
         self.save()
         return snapshot
@@ -155,6 +160,11 @@ class StateEngine:
         if not isinstance(active, dict):
             return None
         created_at = int(active.get("created_at") or 0)
+        last_candle_time = active.get("last_candle_time")
+        try:
+            last_candle_time = int(last_candle_time) if last_candle_time is not None else created_at
+        except (TypeError, ValueError, OverflowError):
+            last_candle_time = created_at
         now_ms = int(time.time() * 1000)
         if expiry_hours > 0 and created_at and now_ms - created_at > int(expiry_hours * 3600 * 1000):
             self.clear_active_setup(symbol, reason="expired")
@@ -174,7 +184,7 @@ class StateEngine:
                 candle_time = int(candle.time)
             except (AttributeError, TypeError, ValueError, OverflowError):
                 continue
-            if candle_time > created_at:
+            if candle_time > last_candle_time:
                 created_candles.append(candle)
         for candle in created_candles:
             try:
