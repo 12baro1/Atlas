@@ -93,7 +93,7 @@ def generate(data):
         cvd_evidence = cumulative_volume_delta(data.get("trade_flow_history") or [])
     evidence = build_orderflow_evidence(trades, book, candles, liquidation_events)
     footprint = shared_analytics.get("footprint") or evidence.get("footprint") or {}
-    cvd_direction = cvd_evidence.get("direction") if cvd_evidence.get("state") == "AVAILABLE" else None
+    cvd_direction = cvd_evidence.get("direction") if cvd_evidence.get("state") in {"AVAILABLE", "FRESH"} else None
 
     # Footprint must confirm the aggressive flow behind the setup. For an
     # absorption reversal, it confirms the absorbed aggressor rather than the
