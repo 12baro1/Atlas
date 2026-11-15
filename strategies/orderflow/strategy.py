@@ -83,9 +83,14 @@ def generate(data):
     liquidation_events = data.get("liquidation_events") or []
     absorption = _absorption_proxy(flow, last, atr)
     shared_analytics = data.get("shared_market_evidence") or {}
-    cvd_evidence = shared_analytics.get("cvd") or cumulative_volume_delta(
-        data.get("trade_flow_history") or []
-    )
+    if shared_analytics:
+        shared_cvd = shared_analytics.get("cvd") or {}
+        cvd_evidence = (
+            shared_cvd if shared_cvd.get("state") == "FRESH"
+            else {"state": "UNAVAILABLE", "reason": "SHARED_CVD_NOT_FRESH"}
+        )
+    else:
+        cvd_evidence = cumulative_volume_delta(data.get("trade_flow_history") or [])
     evidence = build_orderflow_evidence(trades, book, candles, liquidation_events)
     footprint = shared_analytics.get("footprint") or evidence.get("footprint") or {}
     cvd_direction = cvd_evidence.get("direction") if cvd_evidence.get("state") == "AVAILABLE" else None
