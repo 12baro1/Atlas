@@ -59,6 +59,8 @@ from setup_reasoning_engine import SetupReasoningEngine
 from atlas_main_engine import AtlasMainEngine, MotorProxy
 from smt_engine import SMTDivergenceEngine
 from statistics_engine import StatisticsEngine
+from trace_context import ensure_trace, record_stage
+from trace_context import trace_id as _trace_id
 from trade_manager import TradeManager
 from trade_journal import TradeJournal
 from trend_engine import TrendEngine
@@ -235,6 +237,9 @@ class AtlasEngine:
 
     def analyze(self, data):
         """Route every market analysis through the single main engine."""
+        # Trace kimliği burada yalnızca eksikse üretilir; data_engine ile
+        # başlatılan aynı analiz aynı kimliği taşır.
+        ensure_trace(data)
         return self.main_engine.analyze(data, pipeline=self._analyze_with_motors)
 
     def _analyze_with_motors(self, data):
@@ -243,6 +248,10 @@ class AtlasEngine:
 
         symbol = data.get("symbol", "UNKNOWN")
         candles = data["15m"]
+        # Aktif setup yaşam döngüsü (TP1/SL/timeout) state engine tarafından
+        # değerlendirilir; ama varlığı artık yeni analizi DURDURMAZ. Aşağıda
+        # yedi strateji, ortak filtre ve tek karar mekanizması yeniden çalışır.
+        active_setup = None
         if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)):
             active_setup = self.state_engine.get_active_setup(
                 symbol,
@@ -250,12 +259,21 @@ class AtlasEngine:
                 expiry_hours=float(getattr(Config, "SIGNAL_ACTIVE_SETUP_EXPIRY_HOURS", 24)),
             )
             if active_setup is not None:
-                self.logger.info("Active setup restored | symbol=%s signal=%s", symbol, (active_setup.get("signal") or {}).get("signal"))
-                return active_setup
+                self.logger.info(
+                    "Active setup retained; fresh analysis continues | symbol=%s active_signal=%s",
+                    symbol, (active_setup.get("signal") or {}).get("signal"),
+                )
         # Any fresh non-candle input can change the decision without a new 15m close.
         # Do not restore a candle-only cache when order flow, derivatives, news or
         # cross-market context is present, even if the order-book request failed.
-        if (not _has_dynamic_market_context(data)) and bool(getattr(Config, "STATE_ENGINE_ENABLED", True)) and bool(getattr(Config, "INCREMENTAL_ANALYSIS_ENABLED", True)):
+        # Aktif setup varken önbellek geri yükleme atlanır: yeni analiz her zaman
+        # yedi stratejiyi yeniden çalıştırmalı.
+        if (
+            active_setup is None
+            and (not _has_dynamic_market_context(data))
+            and bool(getattr(Config, "STATE_ENGINE_ENABLED", True))
+            and bool(getattr(Config, "INCREMENTAL_ANALYSIS_ENABLED", True))
+        ):
             cached = self._restore_incremental_if_unchanged(symbol, candles)
             if cached is not None:
                 cached_analysis = cached.get("analysis") if isinstance(cached, dict) else None
@@ -455,6 +473,19 @@ class AtlasEngine:
                 "setup_quality": execution_state.get("setup_quality") or {},
             },
         }
+        invoked_motors = sorted(
+            name for name, count in self.main_engine.motor_call_counts.items() if count
+        )
+        record_stage(
+            data,
+            "SPECIALIST_MOTORS",
+            timestamp_ms=data.get("snapshot_timestamp_ms"),
+            source="ATLAS_MAIN_ENGINE",
+            freshness="UNKNOWN",
+            availability="AVAILABLE" if invoked_motors else "UNAVAILABLE",
+            reason=None if invoked_motors else "NO_SPECIALIST_MOTOR_INVOKED",
+            detail={"invoked_motors": invoked_motors, "call_total": sum(self.main_engine.motor_call_counts.values())},
+        )
         strategy_report = self.strategy_lab.analyze(data, smc_result=smc_raw)
         selected = strategy_report.get("selected")
         if isinstance(selected, dict):
@@ -536,6 +567,21 @@ class AtlasEngine:
                 "decision_authority": "SEVEN_STRATEGY_SELECTOR",
                 "selected_strategy_id": None,
             }
+        record_stage(
+            data,
+            "FINAL_DECISION",
+            timestamp_ms=data.get("snapshot_timestamp_ms"),
+            source="ATLAS_DECISION_ENGINE",
+            freshness="UNKNOWN",
+            availability=decision_state.get("action"),
+            decision=decision_state.get("action"),
+            strategy=(selected.get("strategy_id") if isinstance(selected, dict) else None),
+            filter_result={
+                "raw_setup_count": strategy_report.get("candidate_count", 0),
+                "common_filter_passed_count": strategy_report.get("validated_candidate_count", 0),
+                "selected_strategy_id": (selected.get("strategy_id") if isinstance(selected, dict) else None),
+            },
+        )
 
         analysis = self._compose_analysis(
             structure_state=structure_state,
@@ -567,6 +613,7 @@ class AtlasEngine:
         )
         analysis["journal"] = journal_snapshot
 
+        trace_id = _trace_id(data)
         result_payload = {
             "symbol": symbol,
             "analysis": analysis,
@@ -577,7 +624,39 @@ class AtlasEngine:
             "journal": journal_snapshot,
             "decision": decision_state,
             "strategy_lab": strategy_report,
+            # Uçtan uca izlenebilirlik: aynı analizde trace kimliği sabittir.
+            "trace_id": trace_id,
+            "trace": data.get("trace"),
         }
+        # Aktif işlem yeni analiz sonucundan AYRI tutulur. Bu payload her zaman
+        # yeni analizin sonucudur; eski setup asla yeni sinyal gibi gösterilmez.
+        if isinstance(active_setup, dict):
+            active_risk = active_setup.get("risk") or {}
+            result_payload["active_setup"] = {
+                "restored": True,
+                "reason": "previous_setup_still_active",
+                "signal": (active_setup.get("signal") or {}).get("signal"),
+                "entry": active_risk.get("entry"),
+                "stop_loss": active_risk.get("stop_loss"),
+                "tp1": active_risk.get("tp1"),
+                "created_at": active_setup.get("created_at"),
+                "trace_id": active_setup.get("trace_id"),
+            }
+            decision_state["active_setup_restored"] = True
+        record_stage(
+            data,
+            "SIGNAL_OUTPUT",
+            timestamp_ms=data.get("snapshot_timestamp_ms"),
+            source="ATLAS_ENGINE",
+            availability="AVAILABLE",
+            decision=decision_state.get("action"),
+            strategy=(selected.get("strategy_id") if isinstance(selected, dict) else None),
+            filter_result={
+                "raw_setup_count": strategy_report.get("candidate_count", 0),
+                "common_filter_passed_count": strategy_report.get("validated_candidate_count", 0),
+            },
+            detail={"signal": execution_state["signal"].get("signal")},
+        )
 
         self.scanner.add(symbol, result_payload)
         self.statistics.record_payload(result_payload)
@@ -587,7 +666,16 @@ class AtlasEngine:
         if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)):
             self.state_engine.update_analysis_state(symbol, data, result_payload)
             if decision_state.get("action") in ("EXECUTE", "EXECUTE_WITH_CAUTION"):
-                self.state_engine.store_active_setup(symbol, result_payload, data=data)
+                # Aktif işlem yanlışlıkla silinmez veya değiştirilmez: yalnızca
+                # aktif setup yokken yeni EXECUTE sonucu aktif setup olur.
+                # Varsa yeni analiz sonucu ayrı olarak analysis cache'te kalır.
+                if active_setup is None:
+                    self.state_engine.store_active_setup(symbol, result_payload, data=data)
+                else:
+                    self.logger.info(
+                        "Active setup preserved; new result kept separate | symbol=%s new_action=%s",
+                        symbol, decision_state.get("action"),
+                    )
             self.state_engine.sync_open_positions(self.position.open_positions())
         if execution_state["signal"].get("signal") in ["LONG", "SHORT"] and decision_state.get("action") in ["EXECUTE", "EXECUTE_WITH_CAUTION"]:
             self.cooldown.register_signal(symbol, execution_state["signal"].get("signal"))

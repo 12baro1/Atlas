@@ -340,6 +340,10 @@ class Config:
     INCREMENTAL_WARMUP_CANDLES = int(os.getenv("ATLAS_INCREMENTAL_WARMUP_CANDLES", "250"))
     SIGNAL_ACTIVE_SETUP_EXPIRY_HOURS = float(os.getenv("ATLAS_SIGNAL_ACTIVE_SETUP_EXPIRY_HOURS", "24"))
 
+    # WebSocket ilk geçerli snapshot bekleme süresi (ms). Sınırlıdır: sonsuz
+    # bekleme yoktur, süre dolarsa REST fallback devreye girer.
+    WS_FIRST_SNAPSHOT_TIMEOUT_MS = float(os.getenv("ATLAS_WS_FIRST_SNAPSHOT_TIMEOUT_MS", "2500"))
+
     # Macro / correlation / cooldown / learning
     ECONOMIC_NEWS_FILTER_ENABLED = os.getenv("ATLAS_ECONOMIC_NEWS_FILTER_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
     ECONOMIC_NEWS_EVENTS_FILE = os.getenv("ATLAS_ECONOMIC_NEWS_EVENTS_FILE", "economic_events.json")

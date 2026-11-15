@@ -2,14 +2,36 @@
 
 Uses websocket-client when installed. REST remains a fallback. The collector
 records only exchange messages actually received; no synthetic history.
+
+Kaynak ayrımı bağlantı durumundan değil, gerçekten kullanılan veriden gelir:
+her veri türünün (orderbook, trades, liquidation) kaynağı ayrı etiketlenir ve
+sadece taze/geçerli veriler "WEBSOCKET" olarak işaretlenir.
 """
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
 from collections import deque
+
+# Standalone use: bounded wait for the first exchange messages after connect.
+# Never infinite; configurable via ATLAS_WS_FIRST_SNAPSHOT_TIMEOUT_MS.
+DEFAULT_FIRST_SNAPSHOT_WAIT_MS = 2500.0
+MAX_FIRST_SNAPSHOT_WAIT_MS = 15000.0
+
+
+def configured_first_snapshot_wait_ms():
+    """Return the configured bounded wait for the first valid snapshot (ms)."""
+    raw = os.getenv("ATLAS_WS_FIRST_SNAPSHOT_TIMEOUT_MS", str(DEFAULT_FIRST_SNAPSHOT_WAIT_MS))
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_FIRST_SNAPSHOT_WAIT_MS
+    if not math.isfinite(value) or value <= 0:
+        return 0.0
+    return min(value, MAX_FIRST_SNAPSHOT_WAIT_MS)
 
 
 class BybitPublicStream:
@@ -145,8 +167,36 @@ class BybitPublicStream:
                     except (KeyError, TypeError, ValueError, OverflowError):
                         continue
 
-    def snapshot(self, now_ms=None):
+    def _await_first_message(self, timeout_seconds):
+        """Bounded wait for the first exchange message. Returns as soon as one
+        message arrives or the deadline passes; never blocks forever."""
+        timeout_seconds = max(0.0, float(timeout_seconds or 0.0))
+        if timeout_seconds <= 0:
+            return self._has_any_message()
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if self._has_any_message():
+                return True
+            remaining = deadline - time.monotonic()
+            time.sleep(min(0.02, max(0.0, remaining)))
+        return self._has_any_message()
+
+    def _has_any_message(self):
+        with self._lock:
+            return self._last_message_ms is not None
+
+    def snapshot(self, now_ms=None, wait_ms=None):
+        """Return a fresh per-feed snapshot.
+
+        wait_ms: bounded first-snapshot wait. The connection alone never marks
+        data as WebSocket-sourced; only actually received, fresh data does.
+        """
         now = int(now_ms or time.time() * 1000)
+        if wait_ms is None:
+            wait_ms = configured_first_snapshot_wait_ms()
+        if wait_ms and wait_ms > 0:
+            self._await_first_message(float(wait_ms) / 1000.0)
+            now = int(now_ms) if now_ms is not None else int(time.time() * 1000)
         with self._lock:
             bids = sorted(self._book.get("bids", {}).items(), reverse=True)[:50]
             asks = sorted(self._book.get("asks", {}).items())[:50]
@@ -161,10 +211,15 @@ class BybitPublicStream:
                 "last_message_timestamp_ms": last_msg,
                 "orderbook": {"bids": bids, "asks": asks, "timestamp": book_ts} if fresh_book else None,
                 "orderbook_timestamp_ms": book_ts if fresh_book else None,
+                # Kaynak etiketi yalnızca gerçekten kullanılan taze veri için.
+                "orderbook_source": "WEBSOCKET" if fresh_book else "UNAVAILABLE",
                 "recent_trades": fresh_trades,
                 "recent_trades_timestamp_ms": max((x["timestamp_ms"] for x in fresh_trades), default=None),
+                "recent_trades_source": "WEBSOCKET" if fresh_trades else "UNAVAILABLE",
                 "trade_flow_history": self._minute_batches(trades, now),
-                "liquidation_events": fresh_liquidations}
+                "trade_flow_history_source": "WEBSOCKET" if trades else "UNAVAILABLE",
+                "liquidation_events": fresh_liquidations,
+                "liquidation_events_source": "WEBSOCKET" if fresh_liquidations else "UNAVAILABLE"}
 
     @staticmethod
     def _minute_batches(trades, now_ms):
