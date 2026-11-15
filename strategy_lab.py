@@ -11,6 +11,7 @@ from statistics import median
 
 from orderbook_engine import OrderBookEngine
 from risk_engine import RiskEngine
+from decision_engine import DecisionEngine
 from config import Config
 from shared.market_structure_services import (trend_structure, displacement, volatility_regime, breakout_acceptance, statistical_deviation, rsi_divergence)
 from strategies.smc.submotors import dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, narrative as smc_narrative
@@ -394,6 +395,11 @@ def _setup_diagnostic(strategy_id, data, regime):
 class SevenStrategyLab:
     """Run six independent generators plus one integrated SMC setup generator."""
 
+    def __init__(self, decision_engine=None):
+        # The main engine injects its one decision authority. Standalone use
+        # remains supported for strategy-lab tests and research tooling.
+        self.decision_engine = decision_engine or DecisionEngine()
+
     @analysis_scope
     def classify_regime(self, data):
         """Expose the same regime classifier used by analyze for scoped statistics."""
@@ -524,17 +530,7 @@ class SevenStrategyLab:
         # Stage 3: one deterministic authority selects exactly one complete
         # candidate. No strategy can bypass the common filter or win via an
         # unvalidated historical-performance promotion flag.
-        def selection_key(item):
-            net_rr = item.get("estimated_net_rr")
-            try:
-                net_rr = float(net_rr)
-            except (TypeError, ValueError, OverflowError):
-                net_rr = 0.0
-            strength = float(item.get("strength") or 0.0)
-            regime_fit = float(item.get("regime_fit") or 0.0)
-            return (round(net_rr, 6), round(strength * regime_fit, 4), item["strategy_id"])
-
-        selected = max(eligible, key=selection_key) if eligible else None
+        selected = self.decision_engine.select_strategy_candidate(eligible)
         for candidate in eligible:
             candidate["selected"] = candidate is selected
             if candidate is selected:
