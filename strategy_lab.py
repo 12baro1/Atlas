@@ -13,9 +13,11 @@ from orderbook_engine import OrderBookEngine
 from risk_engine import RiskEngine
 from decision_engine import DecisionEngine
 from config import Config
+from trace_context import ensure_trace, record_stage, trace_id
 from shared.market_structure_services import (trend_structure, displacement, volatility_regime, breakout_acceptance, statistical_deviation, rsi_divergence)
 from strategies.smc.submotors import dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, narrative as smc_narrative
 from shared.microstructure_services import cumulative_volume_delta, liquidation_events, beta_stability, relative_volume
+from shared.market_data_services import market_feed_evidence
 from strategies.orderflow.analytics import build_footprint, liquidity_walls, build_orderflow_evidence
 from shared.analysis_context import analysis_scope, cached_analysis
 from shared.analysis_services import (
@@ -321,6 +323,83 @@ def _regime_fit(strategy_id, regime):
     return fit
 
 
+# Strateji başına gerçekten okunan veri türleri. Kullanılmayan veri asla
+# kullanılmış gibi gösterilmez; buradaki eşleme yalnızca rapor içindir ve
+# stratejilerin karar mantığını etkilemez.
+STRATEGY_FEEDS = {
+    "trend_pullback": ("candles",),
+    "volatility_breakout": ("candles",),
+    "mean_reversion": ("candles",),
+    "liquidation_cascade": ("candles", "open_interest", "funding_rate", "recent_trades", "liquidation_events"),
+    "orderflow_momentum": ("candles", "orderbook", "recent_trades", "trade_flow_history", "footprint", "liquidation_events"),
+    "relative_strength": ("candles", "correlation_universe"),
+    # SMC bütünleşik uzman dünyasını kullanır: orderbook/trades akışı, türev
+    # bağlamı ve mum serisi uzman motorlara ortak kanıt olarak gider.
+    "smc": ("candles", "orderbook", "recent_trades", "open_interest", "funding_rate"),
+}
+
+_SETUP_PRODUCED_STATUSES = {
+    "RAW_SETUP", "FILTERED_SETUP", "SELECTED", "FILTERED_NOT_SELECTED", "BLOCKED_COMMON_FILTER",
+}
+
+
+def _setup_produced(status):
+    return status in _SETUP_PRODUCED_STATUSES
+
+
+def _common_filter_result(status):
+    if status in {"SELECTED", "FILTERED_NOT_SELECTED"}:
+        return "PASSED"
+    if status == "BLOCKED_COMMON_FILTER":
+        return "REJECTED"
+    return "NOT_REACHED"
+
+
+def _strategy_data_usage(strategy_id, data):
+    """Bir stratejinin veri kullanım raporunu üretir (gözlemsel, karara etki etmez)."""
+    evidence = market_feed_evidence(data)
+    used_feeds = STRATEGY_FEEDS.get(strategy_id, ())
+    feeds = {}
+    for name, feed in evidence["feeds"].items():
+        if name not in used_feeds:
+            feeds[name] = {"used": False, "status": "NOT_USED"}
+            continue
+        entry = dict(feed)
+        entry["used"] = True
+        feeds[name] = entry
+    # Footprint yalnızca orderflow stratejisinin okuduğu bir türemedir; yürütülen
+    # işlemler (recent trades) üzerinden hesaplanır, başka bir kaynaktan üretilmez.
+    if "footprint" in used_feeds:
+        try:
+            from strategies.orderflow.analytics import build_footprint as _build_footprint
+            footprint = _build_footprint(data.get("recent_trades") or [])
+            state = footprint.get("state") if isinstance(footprint, dict) else None
+            levels = footprint.get("levels") if isinstance(footprint, dict) else None
+            feeds["footprint"] = {
+                "used": True,
+                "source": _source_for_footprint(data),
+                "status": state or "UNKNOWN",
+                "samples": len(levels or {}),
+            }
+        except Exception:
+            feeds["footprint"] = {"used": True, "status": "UNKNOWN", "reason": "FOOTPRINT_EVIDENCE_ERROR"}
+    if "candles" in used_feeds and feeds.get("candles", {}).get("status") == "UNAVAILABLE":
+        feeds["candles"]["reason"] = feeds["candles"].get("reason") or "INCOMPLETE_OHLCV_TIMEFRAMES"
+    return {
+        "strategy_id": strategy_id,
+        "strategy": STRATEGY_NAMES[strategy_id],
+        "feeds": feeds,
+        "microstructure_source": evidence.get("microstructure_source"),
+        "trace_id": (data.get("trace_id") if isinstance(data, dict) else None),
+    }
+
+
+def _source_for_footprint(data):
+    # Footprint yürütülen işlemlerden türetilir; işlem kaynağı ne ise o.
+    source = str(data.get("recent_trades_source") or "").upper()
+    return source or "UNAVAILABLE"
+
+
 def _setup_diagnostic(strategy_id, data, regime):
     """Explain why a native generator returned no setup without changing its rules."""
     def candles(tf):
@@ -358,11 +437,16 @@ def _setup_diagnostic(strategy_id, data, regime):
         checks.append(history("1h", 21))
         oi = data.get("open_interest") or []
         oi_times = data.get("open_interest_timestamps_ms") or []
-        if len(oi) < 2:
-            checks.append(f"MISSING_DATA: open_interest history has {len(oi)} points; at least 2 timestamped observations are required.")
-        if len(oi_times) < 2:
-            checks.append("MISSING_DATA: open_interest_timestamps_ms has fewer than 2 timestamps; a single OI snapshot cannot establish contraction.")
-        if len(oi) >= 2 and len(oi_times) >= 2 and data.get("snapshot_timestamp_ms"):
+        aligned_pairs = sum(1 for stamp, value in zip(oi_times, oi) if stamp is not None and value is not None)
+        if len(oi) < 2 or len(oi_times) < 2 or aligned_pairs < 2:
+            # Tek anlık OI snapshot'ı tarihsel değişim kuramaz; açıkça raporlanır.
+            checks.append(
+                "MISSING_DATA: INSUFFICIENT_OI_HISTORY - "
+                f"open_interest has {len(oi)} value(s) with open_interest_timestamps_ms aligned to {aligned_pairs} "
+                "timestamped observation(s); at least 2 timestamped observations are required. "
+                "A single OI snapshot cannot establish contraction."
+            )
+        elif len(oi) >= 2 and len(oi_times) >= 2 and data.get("snapshot_timestamp_ms"):
             checks.append("CONDITION_NOT_MET: timestamped OI contraction <=-1.5%, >=1.0 ATR impulse, >=1.25x relative volume, directional candle close, taker-flow and funding context did not align.")
     elif strategy_id == "orderflow_momentum":
         if not isinstance(data.get("orderbook"), dict):
@@ -408,7 +492,21 @@ class SevenStrategyLab:
     @analysis_scope
     def analyze(self, data, smc_result=None, performance_by_strategy=None):
         """Run seven independent setup generators, one shared filter, one selector."""
+        ensure_trace(data)
         regime = _regime(data)
+        record_stage(
+            data,
+            "SHARED_MARKET_EVIDENCE",
+            timestamp_ms=data.get("snapshot_timestamp_ms"),
+            source="SHARED_ANALYSIS_SERVICES",
+            freshness="UNKNOWN",
+            availability="AVAILABLE",
+            detail={
+                "regime": regime.get("label"),
+                "regime_trend": regime.get("trend"),
+                "note": "Shared services produce market evidence only; strategy decisions stay in each generator.",
+            },
+        )
         evaluators = {
             "trend_pullback": lambda: _trend_pullback(data),
             "volatility_breakout": lambda: _volatility_breakout(data),
@@ -442,14 +540,39 @@ class SevenStrategyLab:
                         "rejection_stage": "STRATEGY_GENERATOR",
                         "rejection_reasons": [reason],
                     })
+                    record_stage(
+                        data,
+                        "STRATEGY_SETUP",
+                        timestamp_ms=data.get("snapshot_timestamp_ms"),
+                        source=f"STRATEGY:{strategy_id}",
+                        freshness="UNKNOWN",
+                        availability="UNAVAILABLE",
+                        reason=reason,
+                        strategy=strategy_id,
+                        filter_result="NOT_REACHED",
+                        decision=None,
+                    )
                     continue
                 candidate = dict(candidate)
                 candidate["strategy_id"] = strategy_id
                 candidate["strategy"] = STRATEGY_NAMES[strategy_id]
                 candidate["status"] = "RAW_SETUP"
+                # Gözlemlenebilirlik: adayın kurulum kimliği (aynı analizde benzersiz).
+                candidate["setup_id"] = "setup-{}-{:02d}".format(strategy_id, len(generated) + 1)
                 candidate["regime_fit"] = round(_regime_fit(strategy_id, regime), 3)
                 generated.append(candidate)
                 results.append(candidate)
+                record_stage(
+                    data,
+                    "STRATEGY_SETUP",
+                    timestamp_ms=data.get("snapshot_timestamp_ms"),
+                    source=f"STRATEGY:{strategy_id}",
+                    freshness="UNKNOWN",
+                    availability="AVAILABLE",
+                    strategy=strategy_id,
+                    setup_id=candidate["setup_id"],
+                    detail={"direction": candidate.get("direction"), "entry_type": candidate.get("entry_type")},
+                )
             except Exception as exc:
                 results.append({
                     "strategy_id": strategy_id,
@@ -457,10 +580,37 @@ class SevenStrategyLab:
                     "status": "ERROR",
                     "reason": f"{type(exc).__name__}: {exc}",
                 })
+                record_stage(
+                    data,
+                    "STRATEGY_SETUP",
+                    timestamp_ms=data.get("snapshot_timestamp_ms"),
+                    source=f"STRATEGY:{strategy_id}",
+                    freshness="UNKNOWN",
+                    availability="ERROR",
+                    reason=f"{type(exc).__name__}: {exc}",
+                    strategy=strategy_id,
+                    filter_result="NOT_REACHED",
+                )
 
         # Stage 2: the only shared eligibility gate. All seven strategies
         # arrive here under identical rules. It owns geometry, stop-risk,
         # execution friction, and minimum net-RR checks.
+        def _record_common_filter(candidate, filter_result, reason=None):
+            # Gözlemlenebilirlik: her adayın ortak filtre sonucu trace'e yazılır.
+            record_stage(
+                data,
+                "COMMON_FILTER",
+                timestamp_ms=data.get("snapshot_timestamp_ms"),
+                source="COMMON_FILTER",
+                freshness="UNKNOWN",
+                availability="AVAILABLE" if filter_result == "PASSED" else "REJECTED",
+                reason=reason,
+                strategy=candidate.get("strategy_id"),
+                setup_id=candidate.get("setup_id"),
+                filter_result=filter_result,
+                decision=None,
+            )
+
         eligible = []
         for candidate in generated:
             direction = str(candidate.get("direction") or "").upper()
@@ -480,6 +630,7 @@ class SevenStrategyLab:
                 candidate["status"] = "BLOCKED_COMMON_FILTER"
                 candidate["rejection_stage"] = "COMMON_FILTER"
                 candidate["rejection_reasons"] = ["INVALID_OR_INCONSISTENT_SETUP_GEOMETRY"]
+                _record_common_filter(candidate, "REJECTED", "INVALID_OR_INCONSISTENT_SETUP_GEOMETRY")
                 continue
 
             # Execution eligibility also belongs to this one shared gate.
@@ -504,6 +655,7 @@ class SevenStrategyLab:
                 candidate["status"] = "BLOCKED_COMMON_FILTER"
                 candidate["rejection_stage"] = "COMMON_FILTER"
                 candidate["rejection_reasons"] = [execution_rejection]
+                _record_common_filter(candidate, "REJECTED", execution_rejection)
                 continue
 
             validation = _risk_validate_candidate(candidate)
@@ -516,6 +668,10 @@ class SevenStrategyLab:
                 candidate["rejection_reasons"] = [
                     validation.get("reason") or "COMMON_RISK_FILTER_REJECTED"
                 ]
+                _record_common_filter(
+                    candidate, "REJECTED",
+                    validation.get("reason") or "COMMON_RISK_FILTER_REJECTED",
+                )
                 continue
 
             risk_plan = validation["risk_plan"] or {}
@@ -526,6 +682,7 @@ class SevenStrategyLab:
             candidate["estimated_net_rr"] = validation.get("weighted_net_rr")
             candidate["status"] = "FILTERED_SETUP"
             eligible.append(candidate)
+            _record_common_filter(candidate, "PASSED")
 
         # Stage 3: one deterministic authority selects exactly one complete
         # candidate. No strategy can bypass the common filter or win via an
@@ -560,9 +717,39 @@ class SevenStrategyLab:
                 "selected": item is selected,
             })
 
+        # Veri kullanım raporu: yalnızca gözlemlenebilirlik. Seçim bittikten
+        # sonra, her stratejinin NİHAİ durumu üzerinden üretilir ve strateji
+        # kararlarını ya da birbirlerinin sonuçlarını etkilemez.
+        final_by_strategy = {}
+        for item in results:
+            final_by_strategy[item["strategy_id"]] = item
+        data_usage = []
+        for strategy_id in evaluators:
+            row = _strategy_data_usage(strategy_id, data)
+            item = final_by_strategy.get(strategy_id) or {}
+            status = item.get("status")
+            row["status"] = status
+            row["setup_produced"] = _setup_produced(status)
+            row["common_filter_result"] = _common_filter_result(status)
+            if status == "BLOCKED_COMMON_FILTER":
+                row["filter_reasons"] = list(item.get("rejection_reasons") or [])
+            elif status == "FILTERED_NOT_SELECTED":
+                row["filter_reasons"] = [
+                    "SINGLE_DECISION: " + " ".join(item.get("rejection_reasons") or [])
+                ]
+            else:
+                row["filter_reasons"] = []
+            if row["setup_produced"]:
+                row["missing_reason"] = None
+            else:
+                reasons = [item.get("reason")] + list(item.get("rejection_reasons") or [])
+                row["missing_reason"] = next((text for text in reasons if text), None)
+            data_usage.append(row)
+
         return {
             "version": 3,
             "symbol": data.get("symbol"),
+            "trace_id": trace_id(data),
             "pipeline": ["SEVEN_INDEPENDENT_GENERATORS", "ONE_COMMON_FILTER", "ONE_FINAL_DECISION"],
             "diagnostics": {
                 "strategy_count": len(diagnostic_rows),
@@ -577,6 +764,7 @@ class SevenStrategyLab:
             },
             "regime": regime,
             "strategies": results,
+            "data_usage": data_usage,
             "candidate_count": len(generated),
             "validated_candidate_count": len(eligible),
             "selected": selected,

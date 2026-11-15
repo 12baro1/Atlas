@@ -144,6 +144,8 @@ class StateEngine:
             (result.get("journal") or {}).get("signal_id")
             or (result.get("journal") or {}).get("id")
         )
+        # Gözlemlenebilirlik: aktif setup hangi analiz (trace) tarafından üretildi.
+        snapshot["trace_id"] = result.get("trace_id") if isinstance(result, dict) else None
         snapshot["created_at"] = int(time.time() * 1000)
         candles = (data or {}).get("15m") or []
         try:

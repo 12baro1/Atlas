@@ -4,6 +4,7 @@ import os
 import ccxt
 from core.candle import Candle
 from sector_universe import configured_sector_peers
+from trace_context import ensure_trace, record_stage
 
 # Bybit API olmadan sadece public veri için exchange oluştur
 exchange = ccxt.bybit({
@@ -109,28 +110,55 @@ def invalidate_all():
 
 def get_market_data(symbol, force_refresh=False):
     data = {"symbol": symbol}
+    # Trace kimliği analiz başında bir kez üretilir; tüm aşamalar aynı kimliği taşır.
+    ensure_trace(data)
     # Start one shared public stream per symbol; REST remains the fallback.
+    from config import Config
     stream_snapshot = {}
     try:
         from strategies.orderflow.websocket_collector import BybitPublicStream
         stream = BybitPublicStream.for_symbol(symbol)
         stream.start()
-        stream_snapshot = stream.snapshot(int(exchange.milliseconds()))
+        # İlk geçerli snapshot için sınırlı bekleme: ilk mesajlar gelmeden
+        # snapshot almak orderbook/trade verisini boş bırakırdı. Sonsuz
+        # bekleme yoktur; süre dolarsa REST fallback kullanılır.
+        stream_snapshot = stream.snapshot(
+            int(exchange.milliseconds()),
+            wait_ms=float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)),
+        )
     except Exception:
         stream_snapshot = {}
+    record_stage(
+        data,
+        "DATA_COLLECTION",
+        source="BYBIT_V5_PUBLIC_WEBSOCKET",
+        timestamp_ms=int(exchange.milliseconds()),
+        availability="AVAILABLE" if stream_snapshot.get("last_message_timestamp_ms") else "UNAVAILABLE",
+        freshness="FRESH" if stream_snapshot.get("last_message_timestamp_ms") else "NO_MESSAGE",
+        reason=None if stream_snapshot.get("last_message_timestamp_ms") else "WS_NO_FIRST_MESSAGE_BEFORE_TIMEOUT",
+        detail={
+            "ws_connected": bool(stream_snapshot.get("connected")),
+            "wait_ms": float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)),
+        },
+    )
     # Public Bybit REST order-book snapshot; optional fallback.
     data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
     data["orderbook_timestamp_ms"] = None
+    data["orderbook_source"] = "UNAVAILABLE"
     try:
         data["orderbook"] = exchange.fetch_order_book(symbol, limit=50)
         book_timestamp = data["orderbook"].get("timestamp") if isinstance(data["orderbook"], dict) else None
         data["orderbook_timestamp_ms"] = int(book_timestamp) if book_timestamp is not None else int(exchange.milliseconds())
     except Exception:
         data["orderbook"] = None
+    book_age_ms = None
+    if data["orderbook_timestamp_ms"] is not None:
+        book_age_ms = max(0, data["snapshot_timestamp_ms"] - data["orderbook_timestamp_ms"])
 
     # Recent executed trades provide taker buy/sell delta. This is a short
     # rolling sample, not a historical cumulative-volume-delta series.
     data["recent_trades_timestamp_ms"] = None
+    data["recent_trades_source"] = "UNAVAILABLE"
     try:
         data["recent_trades"] = exchange.fetch_trades(symbol, limit=200)
         valid_trade_times = [
@@ -140,22 +168,71 @@ def get_market_data(symbol, force_refresh=False):
         data["recent_trades_timestamp_ms"] = max(valid_trade_times) if valid_trade_times else None
     except Exception:
         data["recent_trades"] = None
+    trades_age_ms = None
+    if data["recent_trades_timestamp_ms"] is not None:
+        trades_age_ms = max(0, data["snapshot_timestamp_ms"] - data["recent_trades_timestamp_ms"])
 
-    # Prefer fresh WebSocket L2/trades and actual liquidation events.
+    # Prefer fresh WebSocket L2/trades and actual liquidation events. Kaynak
+    # etiketi yalnızca gerçekten kullanılan taze veriden gelir; bağlantı
+    # kurulması tek başına WebSocket verisinin kullanıldığı anlamına gelmez.
     if stream_snapshot.get("orderbook") is not None:
         data["orderbook"] = stream_snapshot["orderbook"]
         data["orderbook_timestamp_ms"] = stream_snapshot.get("orderbook_timestamp_ms")
+        data["orderbook_source"] = "WEBSOCKET"
+    elif data.get("orderbook"):
+        data["orderbook_source"] = "REST"
     if stream_snapshot.get("recent_trades"):
         data["recent_trades"] = stream_snapshot["recent_trades"]
         data["recent_trades_timestamp_ms"] = stream_snapshot.get("recent_trades_timestamp_ms")
+        data["recent_trades_source"] = "WEBSOCKET"
+    elif data.get("recent_trades"):
+        data["recent_trades_source"] = "REST"
     data["trade_flow_history"] = stream_snapshot.get("trade_flow_history") or []
+    data["trade_flow_history_source"] = stream_snapshot.get("trade_flow_history_source") or "UNAVAILABLE"
     data["liquidation_events"] = stream_snapshot.get("liquidation_events") or []
-    data["microstructure_source"] = stream_snapshot.get("source") if stream_snapshot.get("connected") else "REST_FALLBACK"
+    data["liquidation_events_source"] = stream_snapshot.get("liquidation_events_source") or "UNAVAILABLE"
+    websocket_used = any(
+        data.get(key) == "WEBSOCKET"
+        for key in ("orderbook_source", "recent_trades_source", "liquidation_events_source")
+    )
+    rest_used = any(
+        data.get(key) == "REST"
+        for key in ("orderbook_source", "recent_trades_source")
+    )
+    if websocket_used and rest_used:
+        data["microstructure_source"] = "MIXED_WEBSOCKET_AND_REST"
+    elif websocket_used:
+        data["microstructure_source"] = "WEBSOCKET"
+    elif rest_used:
+        data["microstructure_source"] = "REST_FALLBACK"
+    else:
+        data["microstructure_source"] = "UNAVAILABLE"
+
+    for feed_name, availability, age_ms, reason in (
+        ("orderbook", data["orderbook_source"], book_age_ms,
+         None if data.get("orderbook") else "NO_ORDERBOOK_SNAPSHOT"),
+        ("recent_trades", data["recent_trades_source"], trades_age_ms,
+         None if data.get("recent_trades") else "NO_RECENT_TRADES"),
+        ("liquidation_events", data["liquidation_events_source"], None,
+         None if data["liquidation_events"] else "NO_EXCHANGE_LIQUIDATION_FEED"),
+    ):
+        record_stage(
+            data,
+            "DATA_COLLECTION",
+            source=availability,
+            timestamp_ms=data["snapshot_timestamp_ms"],
+            freshness=("FRESH" if (age_ms is not None and age_ms <= 30000) else
+                       "STALE" if age_ms is not None else "UNKNOWN"),
+            availability=availability,
+            reason=reason,
+            detail={"feed": feed_name, "age_ms": age_ms},
+        )
 
     # Derivatives context is optional: unsupported endpoints or exchange
     # hiccups must not break OHLCV analysis.
     data["open_interest"] = []
     data["open_interest_timestamps_ms"] = []
+    data["open_interest_source"] = "UNAVAILABLE"
     fetch_oi = getattr(exchange, "fetch_open_interest_history", None)
     if callable(fetch_oi):
         try:
@@ -176,6 +253,10 @@ def get_market_data(symbol, force_refresh=False):
             ]
         except Exception:
             data["open_interest"] = []
+            data["open_interest_timestamps_ms"] = []
+    if data["open_interest"]:
+        # Tarihsel OI serisi (zaman damgalı gözlemler) REST'ten geldi.
+        data["open_interest_source"] = "REST"
     if not data["open_interest"]:
         fetch_oi_snapshot = getattr(exchange, "fetch_open_interest", None)
         if callable(fetch_oi_snapshot):
@@ -183,11 +264,15 @@ def get_market_data(symbol, force_refresh=False):
                 snapshot = fetch_oi_snapshot(symbol) or {}
                 value = snapshot.get("openInterestValue") or snapshot.get("openInterestAmount")
                 if value is not None:
+                    # Tek anlık snapshot: zaman damgasız. Tarihsel OI serisiyle
+                    # ayrı tutulur; OI değişimi bundan hesaplanamaz.
                     data["open_interest"] = [float(value)]
+                    data["open_interest_source"] = "REST_SNAPSHOT_ONLY"
             except Exception:
                 pass
 
     data["funding_rate"] = []
+    data["funding_rate_source"] = "UNAVAILABLE"
     fetch_funding_history = getattr(exchange, "fetch_funding_rate_history", None)
     if callable(fetch_funding_history):
         try:
@@ -200,6 +285,8 @@ def get_market_data(symbol, force_refresh=False):
             ]
         except Exception:
             data["funding_rate"] = []
+    if data["funding_rate"]:
+        data["funding_rate_source"] = "REST"
     if not data["funding_rate"]:
         fetch_funding = getattr(exchange, "fetch_funding_rate", None)
         if callable(fetch_funding):
@@ -208,11 +295,56 @@ def get_market_data(symbol, force_refresh=False):
                 value = snapshot.get("fundingRate")
                 if value is not None:
                     data["funding_rate"] = [float(value)]
+                    data["funding_rate_source"] = "REST_SNAPSHOT_ONLY"
             except Exception:
                 pass
+    record_stage(
+        data,
+        "DATA_COLLECTION",
+        source=data["open_interest_source"],
+        timestamp_ms=data["snapshot_timestamp_ms"],
+        freshness="FRESH" if data["open_interest_timestamps_ms"] else "UNKNOWN",
+        availability=("AVAILABLE" if data["open_interest_timestamps_ms"] else
+                      "INSUFFICIENT_OI_HISTORY" if data["open_interest"] else "UNAVAILABLE"),
+        reason=("NO_TIMESTAMPED_OI_OBSERVATIONS" if data["open_interest"] and not data["open_interest_timestamps_ms"]
+                else None if data["open_interest"] else "OI_HISTORY_UNAVAILABLE"),
+        detail={"feed": "open_interest", "samples": len(data["open_interest"]),
+                "timestamped_samples": min(len(data["open_interest"]), len(data["open_interest_timestamps_ms"]))},
+    )
+    record_stage(
+        data,
+        "DATA_COLLECTION",
+        source=data["funding_rate_source"],
+        timestamp_ms=data["snapshot_timestamp_ms"],
+        freshness="FRESH" if data["funding_rate"] else "UNKNOWN",
+        availability="AVAILABLE" if data["funding_rate"] else "UNAVAILABLE",
+        reason=None if data["funding_rate"] else "FUNDING_RATE_UNAVAILABLE",
+        detail={"feed": "funding_rate", "samples": len(data["funding_rate"])},
+    )
 
     for timeframe, c_limit in TIMEFRAMES.items():
         data[timeframe] = fetch_candles(symbol, timeframe, c_limit, force_refresh=force_refresh)
+
+    # DataEngine normalizasyonu: _fetch yalnızca tamamen kapanmış, geçerli ve
+    # sıralı mumları tutar; oluşmakta olan mum analiz dışıdır.
+    candle_counts = {tf: len(data.get(tf) or []) for tf in TIMEFRAMES}
+    last_15m_age_ms = None
+    if data.get("15m"):
+        try:
+            last_15m_age_ms = max(0, int(exchange.milliseconds()) - (int(data["15m"][-1].time) + 15 * 60 * 1000))
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            last_15m_age_ms = None
+    record_stage(
+        data,
+        "DATA_NORMALIZATION",
+        source="BYBIT_PUBLIC_REST",
+        timestamp_ms=int(exchange.milliseconds()),
+        freshness=("FRESH" if last_15m_age_ms is not None and last_15m_age_ms <= 30 * 60 * 1000
+                   else "STALE" if last_15m_age_ms is not None else "UNKNOWN"),
+        availability="AVAILABLE" if all(candle_counts.get(tf) for tf in ("1w", "1d", "4h", "15m")) else "UNAVAILABLE",
+        reason=None if all(candle_counts.get(tf) for tf in ("1w", "1d", "4h", "15m")) else "INCOMPLETE_OHLCV_TIMEFRAMES",
+        detail={"candle_counts": candle_counts, "last_closed_15m_age_ms": last_15m_age_ms},
+    )
 
     data["sector_peer_universe"] = {}
     for peer_symbol in configured_sector_peers(symbol):
@@ -251,6 +383,19 @@ def get_market_data(symbol, force_refresh=False):
     # Take the snapshot clock after all optional feeds have been fetched so
     # their exchange timestamps are never incorrectly classified as future.
     data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
+    record_stage(
+        data,
+        "DATA_SOURCE",
+        source="BYBIT_PUBLIC_MARKET_DATA",
+        timestamp_ms=data["snapshot_timestamp_ms"],
+        freshness=("FRESH" if data.get("current_price_source") == "BYBIT_TICKER" else "UNKNOWN"),
+        availability=("AVAILABLE" if bool(data.get("15m")) else "UNAVAILABLE"),
+        reason=None if bool(data.get("15m")) else "NO_OHLCV_CANDLES",
+        detail={
+            "current_price_source": data.get("current_price_source"),
+            "microstructure_source": data.get("microstructure_source"),
+        },
+    )
     if os.getenv("ATLAS_MICROSTRUCTURE_ARCHIVE_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}:
         try:
             from microstructure_archive import record_snapshot

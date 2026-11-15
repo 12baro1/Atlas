@@ -7,27 +7,38 @@ def generate(data):
     from strategy_lab import _atr, _value, _candle_quality, _relative_volume, _trade_flow, _current_price, _valid_plan, _entry_reference, _structure_candle_sets, liquidation_events
     """Detect a liquidation-like deleveraging impulse; OI is a proxy, not event data."""
     candles = data.get("1h") or []
-    oi = data.get("open_interest") or []
+    oi_raw = data.get("open_interest") or []
+    oi_times_raw = data.get("open_interest_timestamps_ms") or []
     atr = _atr(candles)
-    if len(candles) < 21 or len(oi) < 2 or atr is None:
+    if len(candles) < 21 or atr is None:
         return None
-    try:
-        previous_oi, current_oi = float(oi[-2]), float(oi[-1])
-    except (TypeError, ValueError, OverflowError):
+    # OI gözlemleri yalnızca zaman damgasıyla hizalı çiftlerden kurulur.
+    # Sonradan eklenen zaman damgasız anlık snapshot tarihsel seriye karışmaz;
+    # böylece değer/timestamp dizin kayması değişimi bozamaz.
+    aligned = []
+    for stamp, value in zip(oi_times_raw, oi_raw):
+        try:
+            stamp = int(stamp)
+            value = float(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(value):
+            aligned.append((stamp, value))
+    aligned.sort(key=lambda pair: pair[0])
+    # Zaman damgası olmayan trailing snapshot ayrı tutulur (tarihsel seriye girmez).
+    oi_snapshot_value = oi_raw[len(oi_times_raw)] if len(oi_raw) > len(oi_times_raw) else None
+    if len(aligned) < 2:
         return None
+    previous_ms, previous_oi = aligned[-2]
+    current_ms, current_oi = aligned[-1]
     if previous_oi <= 0 or not math.isfinite(previous_oi) or not math.isfinite(current_oi):
         return None
-    oi_times = data.get("open_interest_timestamps_ms") or []
     now_ms = int(data.get("snapshot_timestamp_ms") or 0)
-    if len(oi_times) < 2 or not now_ms:
+    if not now_ms:
         return None
-    try:
-        previous_oi_ms, current_oi_ms = int(oi_times[-2]), int(oi_times[-1])
-    except (TypeError, ValueError, OverflowError):
+    if not (0 <= now_ms - current_ms <= 2 * 60 * 60 * 1000):
         return None
-    if not (0 <= now_ms - current_oi_ms <= 2 * 60 * 60 * 1000):
-        return None
-    if not (0 < current_oi_ms - previous_oi_ms <= 3 * 60 * 60 * 1000):
+    if not (0 < current_ms - previous_ms <= 3 * 60 * 60 * 1000):
         return None
     oi_change = (current_oi - previous_oi) / previous_oi
     last = candles[-1]
@@ -79,6 +90,8 @@ def generate(data):
         plan["liquidation_metrics"] = {"exchange_events": event_evidence,
                                       "event_class": "SHORT_SQUEEZE_PROXY" if direction == "SHORT" else "LONG_SQUEEZE_PROXY",
                                       "oi_change_pct": round(oi_change * 100, 3),
+                                      "oi_history_samples": len(aligned),
+                                      "oi_snapshot_value": oi_snapshot_value,
                                       "impulse_atr": round(impulse, 3),
                                       "relative_volume": round(relative_volume, 3),
                                       "taker_buy_notional_ratio": round(buy_ratio, 3),

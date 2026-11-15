@@ -108,6 +108,81 @@ def _is_supported_input(value: str) -> bool:
     )
 
 
+_FEED_LABELS_TR = {
+    "candles": "Mumlar",
+    "orderbook": "Orderbook",
+    "recent_trades": "Recent trades",
+    "trade_flow_history": "CVD",
+    "footprint": "Footprint",
+    "liquidation_events": "Likidasyon",
+    "open_interest": "Open Interest",
+    "funding_rate": "Funding",
+    "correlation_universe": "Korelasyon",
+}
+
+_FILTER_RESULT_LABELS_TR = {
+    "PASSED": "ortak filtre: geçti",
+    "REJECTED": "ortak filtre: reddedildi",
+    "NOT_REACHED": "ortak filtre: erişilmedi",
+}
+
+
+def _add_data_usage_section(lines, report):
+    """Strateji başına veri kullanım bölümünü ekler (gözlemsel, salt okunur).
+
+    Rapor yalnızca gerçekten kullanılan veriyi gösterir; kullanılmayan veri
+    türleri "KULLANILMADI" olarak işaretlenir ve asla kullanılmış gibi
+    görünmez. Bu bölüm karar mantığını etkilemez.
+    """
+    rows = report.get("data_usage")
+    if not isinstance(rows, list) or not rows:
+        return
+    lines.extend(["", "VERİ KULLANIM RAPORU"])
+    summary_source = next(
+        (row.get("microstructure_source") for row in rows
+         if isinstance(row, dict) and row.get("microstructure_source")),
+        None,
+    )
+    if summary_source:
+        lines.append(f"Mikroyapı kaynak özeti: {summary_source}")
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = row.get("strategy") or row.get("strategy_id") or "UNKNOWN"
+        setup_state = "üretildi" if row.get("setup_produced") else "üretmedi"
+        filter_text = _FILTER_RESULT_LABELS_TR.get(
+            str(row.get("common_filter_result") or "").upper(),
+            "ortak filtre: bilinmiyor",
+        )
+        lines.append(f"▸ {name} — setup {setup_state} | {filter_text}")
+        for feed_name, feed in (row.get("feeds") or {}).items():
+            if not isinstance(feed, dict):
+                continue
+            label = _FEED_LABELS_TR.get(feed_name, feed_name)
+            if not feed.get("used"):
+                lines.append(f"  {label}: KULLANILMADI")
+                continue
+            parts = [f"{feed.get('status') or 'UNKNOWN'} | kaynak: {feed.get('source') or 'UNKNOWN'}"]
+            try:
+                if feed.get("age_ms") is not None:
+                    parts.append(f"yaş: {int(feed['age_ms'])} ms")
+            except (TypeError, ValueError, OverflowError):
+                pass
+            if feed.get("samples") is not None:
+                parts.append(f"örnek: {feed['samples']}")
+            if feed.get("timestamped_samples") is not None:
+                parts.append(f"zaman damgalı: {feed['timestamped_samples']}")
+            if feed.get("snapshot_only_samples"):
+                parts.append(f"yaprak snapshot: {feed['snapshot_only_samples']}")
+            if feed.get("reason"):
+                parts.append(f"neden: {feed['reason']}")
+            lines.append(f"  {label}: {' | '.join(parts)}")
+        for reason in row.get("filter_reasons") or []:
+            lines.append(f"  filtre: {reason}")
+        if row.get("missing_reason"):
+            lines.append(f"  eksik/koşul nedeni: {row['missing_reason']}")
+
+
 def _best_symbols(limit=DEFAULT_SCAN_LIMIT):
     if limit is not None:
         limit = _normalize_scan_limit(limit)
@@ -634,8 +709,10 @@ class AtlasTUIApp(App):
         result = outcome.get("result") or {}
         report = result.get("strategy_lab") or {}
         regime = report.get("regime") or {}
+        trace = result.get("trace_id") or report.get("trace_id")
         lines = [
             f"7 STRATEJİ ANALİZİ | {result.get('symbol') or outcome.get('symbol') or 'UNKNOWN'}",
+            f"Trace: {trace or 'yok'}",
             f"Piyasa rejimi: {regime.get('label', 'UNKNOWN')} | Yön: {regime.get('trend', 'NEUTRAL')}",
             "",
             "STRATEJİ SONUÇLARI",
@@ -688,6 +765,16 @@ class AtlasTUIApp(App):
                 lines.append(f"Maliyet sonrası ağırlıklı net RR: {selected.get('estimated_net_rr')} — gerçek fill/slippage garantisi değildir.")
             for reason in selected.get("reasons") or []:
                 lines.append(f"• {reason}")
+        _add_data_usage_section(lines, report)
+        active_setup = result.get("active_setup")
+        if isinstance(active_setup, dict) and active_setup.get("restored"):
+            lines.extend([
+                "",
+                "AKTİF İŞLEM (ayrı takip)",
+                "Not: yukarıdaki kart yeni analizin sonucudur; aktif işlem bu sonuca dönüştürülmedi ve üzerine yazılmadı.",
+                f"Sinyal: {active_setup.get('signal') or 'UNKNOWN'} | Giriş: {active_setup.get('entry')} | SL: {active_setup.get('stop_loss')} | TP1: {active_setup.get('tp1')}",
+                f"Açılış: {active_setup.get('created_at') or 'bilinmiyor'} | kurulum trace: {active_setup.get('trace_id') or 'yok'}",
+            ])
         lines.extend(["", "ORTAK İŞLEM KARTI", format_card_text(build_selected_strategy_card(result))])
         lines.extend([
             "",
