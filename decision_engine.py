@@ -20,6 +20,34 @@ class DecisionEngine:
     def __init__(self):
         self.rr_engine = RREngine()
 
+    def select_strategy_candidate(self, candidates):
+        """Select one already-filtered strategy setup; this is the sole ranking authority."""
+        eligible = [
+            item for item in (candidates or [])
+            if isinstance(item, dict) and item.get("status") == "FILTERED_SETUP"
+        ]
+        if not eligible:
+            return None
+
+        def rank(item):
+            def finite(value, default=0.0):
+                try:
+                    number = float(value)
+                except (TypeError, ValueError, OverflowError):
+                    return default
+                return number if math.isfinite(number) else default
+
+            net_rr = finite(item.get("estimated_net_rr"))
+            strength = finite(item.get("strength"))
+            regime_fit = finite(item.get("regime_fit"))
+            return (
+                round(net_rr, 6),
+                round(strength * regime_fit, 4),
+                str(item.get("strategy_id") or ""),
+            )
+
+        return max(eligible, key=rank)
+
     def decide(self, analysis=None, **kwargs):
         """Bundle tabanlı karar üretir; eski kwargs tabanlı çağrıları da destekler."""
         context = self._normalize_context(analysis, kwargs)
