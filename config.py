@@ -338,6 +338,7 @@ class Config:
     STATE_ENGINE_FILE = os.getenv("ATLAS_STATE_ENGINE_FILE", "atlas_state.json")
     INCREMENTAL_ANALYSIS_ENABLED = os.getenv("ATLAS_INCREMENTAL_ANALYSIS_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
     INCREMENTAL_WARMUP_CANDLES = int(os.getenv("ATLAS_INCREMENTAL_WARMUP_CANDLES", "250"))
+    SIGNAL_ACTIVE_SETUP_EXPIRY_HOURS = float(os.getenv("ATLAS_SIGNAL_ACTIVE_SETUP_EXPIRY_HOURS", "24"))
 
     # Macro / correlation / cooldown / learning
     ECONOMIC_NEWS_FILTER_ENABLED = os.getenv("ATLAS_ECONOMIC_NEWS_FILTER_ENABLED", "1").strip().lower() in {"1", "true", "yes"}

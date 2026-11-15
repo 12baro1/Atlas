@@ -241,6 +241,15 @@ class AtlasEngine:
 
         symbol = data.get("symbol", "UNKNOWN")
         candles = data["15m"]
+        if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)):
+            active_setup = self.state_engine.get_active_setup(
+                symbol,
+                candles=candles,
+                expiry_hours=float(getattr(Config, "SIGNAL_ACTIVE_SETUP_EXPIRY_HOURS", 24)),
+            )
+            if active_setup is not None:
+                self.logger.info("Active setup restored | symbol=%s signal=%s", symbol, (active_setup.get("signal") or {}).get("signal"))
+                return active_setup
         # Any fresh non-candle input can change the decision without a new 15m close.
         # Do not restore a candle-only cache when order flow, derivatives, news or
         # cross-market context is present, even if the order-book request failed.
@@ -575,6 +584,8 @@ class AtlasEngine:
 
         if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)):
             self.state_engine.update_analysis_state(symbol, data, result_payload)
+            if decision_state.get("action") in ("EXECUTE", "EXECUTE_WITH_CAUTION"):
+                self.state_engine.store_active_setup(symbol, result_payload, data=data)
             self.state_engine.sync_open_positions(self.position.open_positions())
         if execution_state["signal"].get("signal") in ["LONG", "SHORT"] and decision_state.get("action") in ["EXECUTE", "EXECUTE_WITH_CAUTION"]:
             self.cooldown.register_signal(symbol, execution_state["signal"].get("signal"))

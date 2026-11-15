@@ -15,7 +15,7 @@ class StateEngine:
     def __init__(self, path="atlas_state.json"):
         self.path = Path(path)
         self._lock = threading.Lock()
-        self.state = {"version": self.VERSION, "symbols": {}, "open_positions": {}, "updated_at": None}
+        self.state = {"version": self.VERSION, "symbols": {}, "open_positions": {}, "active_setups": {}, "updated_at": None}
         self.load()
 
     def load(self):
@@ -37,6 +37,13 @@ class StateEngine:
                     self.state["open_positions"] = {
                         str(key): value
                         for key, value in positions.items()
+                        if isinstance(value, dict)
+                    }
+                active_setups = payload.get("active_setups")
+                if isinstance(active_setups, dict):
+                    self.state["active_setups"] = {
+                        str(symbol): value
+                        for symbol, value in active_setups.items()
                         if isinstance(value, dict)
                     }
                 updated_at = payload.get("updated_at")
@@ -119,6 +126,96 @@ class StateEngine:
             "updated_at": int(time.time() * 1000),
         }
         self.save()
+
+    def store_active_setup(self, symbol, result, data=None):
+        """Persist the last executable setup independently from the rolling analysis cache."""
+        if not isinstance(result, dict):
+            return None
+        decision = result.get("decision") or {}
+        signal = result.get("signal") or {}
+        if decision.get("action") not in ("EXECUTE", "EXECUTE_WITH_CAUTION"):
+            return None
+        if signal.get("signal") not in ("LONG", "SHORT"):
+            return None
+        snapshot = self._compact_result(result)
+        if not snapshot:
+            return None
+        snapshot["signal_id"] = (
+            (result.get("journal") or {}).get("signal_id")
+            or (result.get("journal") or {}).get("id")
+        )
+        snapshot["created_at"] = int(time.time() * 1000)
+        candles = (data or {}).get("15m") or []
+        try:
+            snapshot["last_candle_time"] = int(candles[-1].time) if candles else None
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            snapshot["last_candle_time"] = None
+        self.state.setdefault("active_setups", {})[str(symbol)] = snapshot
+        self.save()
+        return snapshot
+
+    def get_active_setup(self, symbol, candles=None, expiry_hours=24):
+        """Restore an active setup until TP1, SL, or its bounded lifetime is reached."""
+        active = self.state.setdefault("active_setups", {}).get(str(symbol))
+        if not isinstance(active, dict):
+            return None
+        created_at = int(active.get("created_at") or 0)
+        last_candle_time = active.get("last_candle_time")
+        try:
+            last_candle_time = int(last_candle_time) if last_candle_time is not None else created_at
+        except (TypeError, ValueError, OverflowError):
+            last_candle_time = created_at
+        now_ms = int(time.time() * 1000)
+        if expiry_hours > 0 and created_at and now_ms - created_at > int(expiry_hours * 3600 * 1000):
+            self.clear_active_setup(symbol, reason="expired")
+            return None
+
+        signal = active.get("signal") or {}
+        risk = active.get("risk") or {}
+        side = str(signal.get("signal") or "").upper()
+        try:
+            stop = float(risk.get("stop_loss"))
+        except (TypeError, ValueError, OverflowError):
+            stop = None
+        try:
+            tp1 = float(risk.get("tp1") or (active.get("dynamic_tp") or {}).get("tp1"))
+        except (TypeError, ValueError, OverflowError):
+            tp1 = None
+        created_candles = []
+        for candle in candles or []:
+            try:
+                candle_time = int(candle.time)
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                continue
+            if candle_time > last_candle_time:
+                created_candles.append(candle)
+        for candle in created_candles:
+            try:
+                high = float(candle.high)
+                low = float(candle.low)
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                continue
+            stop_hit = stop is not None and ((side == "LONG" and low <= stop) or (side == "SHORT" and high >= stop))
+            tp1_hit = tp1 is not None and ((side == "LONG" and high >= tp1) or (side == "SHORT" and low <= tp1))
+            if stop_hit or tp1_hit:
+                reason = "stop_reached" if stop_hit else "tp1_reached"
+                self.clear_active_setup(symbol, reason=reason)
+                return None
+
+        restored = dict(active)
+        restored["symbol"] = str(symbol)
+        restored["active_setup"] = {"restored": True, "reason": "previous_setup_still_active"}
+        decision = dict(restored.get("decision") or {})
+        decision["active_setup_restored"] = True
+        decision["reason"] = "Önceki setup hâlâ aktif; yeni setup üretilmedi."
+        restored["decision"] = decision
+        return restored
+
+    def clear_active_setup(self, symbol, reason=None):
+        removed = self.state.setdefault("active_setups", {}).pop(str(symbol), None)
+        if removed is not None:
+            self.save()
+        return {"cleared": removed is not None, "reason": reason}
 
     def sync_open_positions(self, positions):
         self.state["open_positions"] = {
