@@ -1,4 +1,6 @@
-"""Single integrated SMC candidate adapter; specialist motors remain evidence-only."""\n\ndef generate(result, data=None):
+"""Single integrated SMC candidate adapter; specialist motors remain evidence-only."""
+
+def generate(result, data=None):
     from strategy_lab import math, STRATEGY_NAMES, _value, _configured_partial_tp_weights, trend_structure, displacement, dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, smc_narrative
     """Build the single SMC setup from the integrated SMC specialist world.
 
@@ -108,4 +110,4 @@
         },
     }
     plan["reasons"].append(f"SMC narrative evidence {narrative_info['evidence_count']}/5; diagnostic only")
-    return plan\n
+    return plan
