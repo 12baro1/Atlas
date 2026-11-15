@@ -76,8 +76,26 @@ def footprint_directional_evidence(footprint, direction, min_imbalance=0.08):
         return {"state": "UNAVAILABLE", "confirmed": False}
     imbalance = (buy - sell) / total
     aligned = imbalance >= min_imbalance if direction == "LONG" else imbalance <= -min_imbalance
-    return {"state": "AVAILABLE", "confirmed": bool(aligned), "imbalance": round(imbalance, 4),
-            "buy_notional": buy, "sell_notional": sell, "price_levels": len(levels)}
+    aligned_notional = 0.0
+    aligned_levels = 0
+    for row in levels.values():
+        if not isinstance(row, dict):
+            continue
+        level_buy = _number(row.get("buy_notional")) or 0.0
+        level_sell = _number(row.get("sell_notional")) or 0.0
+        level_total = level_buy + level_sell
+        if level_total <= 0:
+            continue
+        level_delta = (level_buy - level_sell) / level_total
+        level_aligned = level_delta >= min_imbalance if direction == "LONG" else level_delta <= -min_imbalance
+        if level_aligned:
+            aligned_levels += 1
+            aligned_notional += level_total
+    aligned_share = aligned_notional / total
+    confirmed = bool(aligned and aligned_levels >= 2 and aligned_share >= 0.55)
+    return {"state": "AVAILABLE", "confirmed": confirmed, "imbalance": round(imbalance, 4),
+            "buy_notional": buy, "sell_notional": sell, "price_levels": len(levels),
+            "aligned_levels": aligned_levels, "aligned_notional_share": round(aligned_share, 4)}
 
 
 def opposing_liquidity_wall(orderbook, direction, entry, atr, proximity_atr=0.20, size_multiple=2.5):
