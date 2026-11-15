@@ -63,6 +63,7 @@ def test_notify_if_elite_skips_invalid_entry_before_sending(monkeypatch):
     engine = AtlasEngine()
     import engine as engine_module
     monkeypatch.setattr(engine_module.Config, "TELEGRAM_ENABLED", True)
+    monkeypatch.setattr(engine_module.Config, "TELEGRAM_ASYNC_SEND", False)
 
     called = {"count": 0}
 
