@@ -63,6 +63,10 @@ def test_footprint_directional_confirmation_uses_executed_notional():
     footprint = build_footprint([
         {"price": 100, "size": 2, "side": "BUY"},
         {"price": 100, "size": 1, "side": "SELL"},
+        {"price": 101, "size": 2, "side": "BUY"},
+        {"price": 101, "size": 1, "side": "SELL"},
+        {"price": 102, "size": 2, "side": "BUY"},
+        {"price": 102, "size": 1, "side": "SELL"},
     ])
     assert footprint_directional_evidence(footprint, "LONG")["confirmed"] is True
     assert footprint_directional_evidence(footprint, "SHORT")["confirmed"] is False
@@ -148,11 +152,11 @@ def test_orderflow_generator_uses_footprint_and_blocks_nearby_wall(monkeypatch):
     })
 
     trades = [
-        {"timestamp_ms": 100000, "price": 100.0, "size": 1.0, "side": "BUY"}
-        for _ in range(15)
+        {"timestamp_ms": 100000, "price": price, "size": 1.0, "side": "BUY"}
+        for price in (100.0, 100.1, 100.2) for _ in range(5)
     ] + [
-        {"timestamp_ms": 100000, "price": 100.0, "size": 1.0, "side": "SELL"}
-        for _ in range(5)
+        {"timestamp_ms": 100000, "price": price, "size": 1.0, "side": "SELL"}
+        for price, count in ((100.0, 2), (100.1, 2), (100.2, 1)) for _ in range(count)
     ]
     data = {
         "orderbook": {
