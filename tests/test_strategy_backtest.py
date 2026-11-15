@@ -312,3 +312,61 @@ def test_pre_fill_target_touches_rebase_targets_identically():
     assert strategy["entry_type"] == smc["entry_type"] == "LIMIT"
     assert strategy["gross_r"] == smc["gross_rr"] == 3.0
     assert abs(strategy["net_r"] - smc["net_rr"]) < 1e-4
+
+
+from strategy_backtest import _empty_pipeline_metrics, _accumulate_pipeline_metrics
+
+
+def test_backtest_counts_raw_common_filter_and_selected_stages_per_strategy():
+    metrics = {"smc": _empty_pipeline_metrics(), "trend_pullback": _empty_pipeline_metrics()}
+    report = {
+        "diagnostics": {
+            "strategies": [
+                {
+                    "strategy_id": "smc", "status": "SELECTED", "selected": True,
+                    "rejection_stage": None, "rejection_reasons": [],
+                },
+                {
+                    "strategy_id": "trend_pullback", "status": "BLOCKED_COMMON_FILTER",
+                    "selected": False, "rejection_stage": "COMMON_FILTER",
+                    "rejection_reasons": ["NET_RR_TOO_LOW", "EXECUTION_COST_TOO_HIGH"],
+                },
+            ]
+        }
+    }
+
+    _accumulate_pipeline_metrics(metrics, report)
+
+    assert metrics["smc"]["analysis_snapshots"] == 1
+    assert metrics["smc"]["raw_setups"] == 1
+    assert metrics["smc"]["common_filter_passed"] == 1
+    assert metrics["smc"]["common_filter_rejected"] == 0
+    assert metrics["smc"]["selected"] == 1
+
+    trend = metrics["trend_pullback"]
+    assert trend["analysis_snapshots"] == 1
+    assert trend["raw_setups"] == 1
+    assert trend["common_filter_passed"] == 0
+    assert trend["common_filter_rejected"] == 1
+    assert trend["selected"] == 0
+    assert trend["rejection_stage_counts"] == {"COMMON_FILTER": 1}
+    assert trend["rejection_reason_counts"] == {
+        "NET_RR_TOO_LOW": 1, "EXECUTION_COST_TOO_HIGH": 1,
+    }
+
+
+def test_backtest_pipeline_metrics_count_generator_no_setup_without_calling_it_raw():
+    metrics = {"orderflow_momentum": _empty_pipeline_metrics()}
+    _accumulate_pipeline_metrics(metrics, {
+        "diagnostics": {"strategies": [{
+            "strategy_id": "orderflow_momentum", "status": "MISSING_DATA",
+            "selected": False, "rejection_stage": "STRATEGY_GENERATOR",
+            "reason": "MISSING_DATA: orderbook",
+        }]}
+    })
+    row = metrics["orderflow_momentum"]
+    assert row["analysis_snapshots"] == 1
+    assert row["raw_setups"] == 0
+    assert row["common_filter_passed"] == 0
+    assert row["common_filter_rejected"] == 0
+    assert row["status_counts"] == {"MISSING_DATA": 1}
