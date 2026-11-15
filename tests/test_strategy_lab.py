@@ -378,3 +378,42 @@ def test_market_regime_requires_trend_strength_and_directional_efficiency():
     assert regime["adx"] >= 18.0
     assert regime["efficiency_ratio"] >= 0.25
 
+
+
+
+def test_directional_movement_uses_wilder_recursive_smoothing():
+    import strategy_lab
+
+    candles = []
+    price = 100.0
+    for index in range(40):
+        opened = price
+        close = price + (1.0 if index < 20 else 0.2)
+        candles.append(Candle(opened, close + 0.5, opened - 0.2, close))
+        price = close
+
+    result = strategy_lab._directional_movement(candles, period=14)
+    assert result is not None
+    assert result["method"] == "WILDER_SMOOTHED"
+    assert result["period"] == 14
+    assert result["plus_di"] > result["minus_di"]
+
+
+def test_structural_geometry_rejects_malformed_ohlc_bars():
+    malformed = [
+        Candle(100.0, 99.0, 98.0, 98.5),  # open above high
+        Candle(100.0, 102.0, 101.0, 100.5),  # close below low
+        Candle(100.0, 102.0, 103.0, 101.0),  # high below low
+    ]
+    for candle in malformed:
+        assert strategy_lab._valid_ohlc(candle) is False
+        assert _valid_plan(
+            "LONG", 100.0, 98.0, 1.0, [candle],
+            "trend_pullback", 70.0,
+        ) is None
+
+
+def test_structural_geometry_accepts_well_formed_ohlc_bars():
+    import strategy_lab
+
+    assert strategy_lab._valid_ohlc(Candle(100.0, 103.0, 98.0, 102.0)) is True
