@@ -51,8 +51,16 @@ def generate(data):
     impulse = abs(close - opened) / atr
     direction = None
     funding_values = data.get("funding_rate") or []
+    shared_funding = shared_evidence.get("funding") or {}
     try:
-        funding = float(funding_values[-1]) if funding_values else 0.0
+        if shared_evidence:
+            funding = (
+                float(shared_funding["latest"])
+                if shared_funding.get("state") == "FRESH" and shared_funding.get("latest") is not None
+                else 0.0
+            )
+        else:
+            funding = float(funding_values[-1]) if funding_values else 0.0
     except (TypeError, ValueError, OverflowError):
         funding = 0.0
     if not math.isfinite(funding):
@@ -74,7 +82,24 @@ def generate(data):
         stop = entry + 1.5 * atr
     else:
         return None
+    event_evidence = liquidation_events(data.get("liquidation_events") or [], now_ms=now_ms)
+    event_direction = None
+    event_alignment = "UNAVAILABLE"
+    if event_evidence.get("state") == "AVAILABLE":
+        long_liquidations = float(event_evidence.get("buy_liquidation_notional") or 0.0)
+        short_liquidations = float(event_evidence.get("sell_liquidation_notional") or 0.0)
+        if short_liquidations > long_liquidations:
+            event_direction = "LONG"
+        elif long_liquidations > short_liquidations:
+            event_direction = "SHORT"
+        if event_direction:
+            event_alignment = "ALIGNED" if event_direction == direction else "OPPOSING"
+
     strength = min(92.0, 65.0 + min(abs(oi_change) * 400.0, 15.0) + min(impulse * 5.0, 10.0))
+    if event_alignment == "ALIGNED":
+        strength = min(95.0, strength + 3.0)
+    elif event_alignment == "OPPOSING":
+        strength = max(55.0, strength - 2.0)
     plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
         plan["reasons"] = [
@@ -85,8 +110,9 @@ def generate(data):
             "Liquidation-side interpretation is an OI/flow proxy, not exchange liquidation-event data",
         ]
         plan["data_quality"] = "OI_CONTRACTION_PROXY_NOT_EXCHANGE_LIQUIDATION_FEED"
-        event_evidence = liquidation_events(data.get("liquidation_events") or [], now_ms=now_ms)
         plan["liquidation_metrics"] = {"exchange_events": event_evidence,
+                                      "event_direction": event_direction,
+                                      "event_alignment": event_alignment,
                                       "event_class": "SHORT_SQUEEZE_PROXY" if direction == "SHORT" else "LONG_SQUEEZE_PROXY",
                                       "oi_change_pct": round(oi_change * 100, 3),
                                       "impulse_atr": round(impulse, 3),
