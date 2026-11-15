@@ -75,6 +75,18 @@ Atlas açıldığında komut alanına sembol veya desteklenen komutlardan birini
 
 Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Geçerli koşulları sağlayan kurulum yoksa Atlas sinyal üretmeyebilir.
 
+## Order Flow veri akışı
+
+`strategies/orderflow/` altında Order Flow'a özel veri bileşenleri bulunur:
+
+- `websocket_collector.py`: Bybit V5 public linear akışından L2 order book, public trades ve liquidation event mesajlarını toplar.
+- `analytics.py`: gerçekleşen agresör notional'ından CVD ve footprint, L2'den görüntülenen liquidity wall, trade/candle verisinden açıkça proxy olarak etiketlenen absorption kanıtı üretir.
+- `strategy_lab.py` içindeki Order Flow Momentum adayı, taze order book ve taker trade delta yanında arşivlenmiş CVD yönünü de devam işlemlerinde kullanır. CVD ters yöndeyse continuation adayı oluşturmaz. CVD geçmişi yoksa `UNAVAILABLE` kalır; geçmiş veri uydurulmaz.
+- WebSocket collector'ın tuttuğu trade akışı ve liquidation olayları yalnızca alındıkları zaman damgalarıyla raporlanır. Geçmiş L2/trade verisi geriye dönük oluşturulamaz.
+- Absorption ve liquidity wall sonuçları kesin emir niyeti değildir: absorption bir çıkarım, wall ise iptal edilebilir görüntülenen derinliktir.
+
+WebSocket istemcisi kurulmamışsa veya bağlantı kurulamıyorsa Atlas mevcut REST fallback ile analiz yapar. Bu durumda gerçek zamanlı WebSocket kapsamı varmış gibi kabul edilmez.
+
 ## 7 strateji analizi
 
 Tek coin komutunda Atlas aynı kapanmış piyasa verisi üzerinde 6 yeni stratejiyi ve mevcut SMC kararını bağımsız değerlendirir. Her stratejinin giriş/stop/hedef geometrisi ayrı tutulur. Yeni motorların adayları yalnızca setup gücü puanıyla seçilmez: stratejiye özel, maliyet sonrası IS/OOS performansı, minimum örneklem ve expectancy güven sınırı doğrulanmadan SMC'nin önüne geçemez. Doğrulanmış deneysel edge yoksa SMC adayı varsa o gösterilir; SMC de yoksa seçilmiş plan üretilmez. Yeni motorların hedefleri yeterli swing likiditesi varsa yapısal seviyelerden, yoksa açıkça etiketlenmiş R-katı fallback ile hesaplanır.
