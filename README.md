@@ -213,3 +213,6 @@ Komisyon, spread ve slippage hâlâ parametreli yürütme varsayımlarıdır; ge
 - `shared/analysis_services.py`: OHLCV doğrulama, seri çıkarımı, EMA, Wilder ATR/ADX, RSI, VWAP, Bollinger, yönsel hareket ve mum anatomisi gibi strateji-nötr hesaplamaların tek kaynağıdır.
 - `shared/analysis_context.py`: her `SevenStrategyLab.analyze()` çağrısında izole bir memoization bağlamı açar. Aynı kapanmış mum nesneleri ve parametrelerle istenen hesaplamalar stratejiler arasında yeniden kullanılabilir; yeni sembol/snapshot analizinde cache temiz başlar.
 - `strategy_lab.py` bu servisleri eski yardımcı adlarıyla dışa aktarmaya devam eder; böylece strateji adaptörlerinin uyumluluğu korunurken hesaplama sahipliği `shared/` katmanına taşınır.
+
+- `shared/market_structure_services.py`: trend structure, displacement, volatility regime, breakout acceptance, statistical deviation and RSI divergence evidence. The SMC package continues to own its SMC-specific submotors; generic structure/displacement evidence is shared.
+- `shared/microstructure_services.py`: timestamped CVD, liquidation-event validation, beta stability and relative-volume calculations. The legacy top-level modules remain compatibility re-exports, while strategy generators import the shared implementations through the lab.
