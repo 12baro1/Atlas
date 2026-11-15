@@ -44,7 +44,7 @@ def test_shared_evidence_tracks_each_source_independently():
     assert result["orderbook"]["imbalance"] > 0
     assert result["trades"]["trade_count"] == 2
     assert result["trades"]["delta_ratio"] > 0
-    assert result["cvd"]["state"] == "AVAILABLE"
+    assert result["cvd"]["state"] == "FRESH"
     assert result["cvd"]["net_delta"] == 100.0
     assert result["footprint"]["state"] == "AVAILABLE"
     assert result["liquidity_walls"]["state"] == "AVAILABLE"
@@ -63,10 +63,14 @@ def test_shared_evidence_marks_stale_and_future_feeds_without_hiding_them():
         "orderbook_timestamp_ms": now - 20_000,
         "recent_trades": [{"price": 100, "size": 1, "side": "BUY"}],
         "recent_trades_timestamp_ms": now + 1_000,
+        "trade_flow_history": [
+            {"timestamp_ms": now - 600_000, "buy_notional": 100.0, "sell_notional": 50.0},
+        ],
     })
 
     assert result["orderbook"]["state"] == "STALE"
     assert result["trades"]["state"] == "INVALID_FUTURE_TIMESTAMP"
+    assert result["cvd"]["state"] == "STALE"
 
 
 def test_single_open_interest_snapshot_is_not_misrepresented_as_history():
