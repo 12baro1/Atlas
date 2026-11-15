@@ -502,7 +502,7 @@ def _strategy_data_usage(strategy_id, data, smc_result=None):
     relevant_sources = {
         key: value for key, value in sources.items()
         if key in {
-            "ohlcv", "orderbook", "trades", "liquidations",
+            "ohlcv", "orderbook", "trades", "cvd", "liquidations",
             "open_interest", "funding",
         }
     }
