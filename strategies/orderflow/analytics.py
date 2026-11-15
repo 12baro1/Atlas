@@ -4,7 +4,10 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 
+from shared.analysis_context import cached_analysis
 
+
+@cached_analysis
 def _number(value):
     try:
         result = float(value)
@@ -13,6 +16,7 @@ def _number(value):
     return result if math.isfinite(result) else None
 
 
+@cached_analysis
 def build_cvd(trades):
     """Build timestamp-ordered cumulative taker delta from actual public trades."""
     rows = []
@@ -40,6 +44,7 @@ def build_cvd(trades):
             "series": series} if series else {"state": "UNAVAILABLE", "reason": "NO_VALID_AGGRESSOR_TRADES"}
 
 
+@cached_analysis
 def build_footprint(trades, price_step=0.0):
     """Aggregate executed buy/sell notional by observed price level."""
     step = _number(price_step) or 0.0
@@ -59,6 +64,7 @@ def build_footprint(trades, price_step=0.0):
     return {"state": "AVAILABLE", "levels": dict(levels)} if levels else {"state": "UNAVAILABLE"}
 
 
+@cached_analysis
 def absorption_evidence(trades, candles, min_imbalance=0.20):
     """Conservative absorption proxy: aggressive delta opposed by candle close.
 
@@ -84,6 +90,7 @@ def absorption_evidence(trades, candles, min_imbalance=0.20):
             "disclaimer": "Public trade/candle inference only; passive absorption is not directly observable"}
 
 
+@cached_analysis
 def liquidity_walls(orderbook, top_n=20):
     """Rank displayed L2 depth concentrations; walls are not executed liquidity."""
     if not isinstance(orderbook, dict):
@@ -103,6 +110,7 @@ def liquidity_walls(orderbook, top_n=20):
             "disclaimer": "Displayed resting orders may be cancelled; not proof of support/resistance"}
 
 
+@cached_analysis
 def build_orderflow_evidence(trades, orderbook, candles=(), liquidation_events=()):
     return {"cvd": build_cvd(trades), "footprint": build_footprint(trades),
             "absorption": absorption_evidence(trades, candles),
