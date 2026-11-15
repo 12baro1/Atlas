@@ -585,7 +585,7 @@ class AtlasEngine:
         if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)):
             self.state_engine.update_analysis_state(symbol, data, result_payload)
             if decision_state.get("action") in ("EXECUTE", "EXECUTE_WITH_CAUTION"):
-                self.state_engine.store_active_setup(symbol, result_payload)
+                self.state_engine.store_active_setup(symbol, result_payload, data=data)
             self.state_engine.sync_open_positions(self.position.open_positions())
         if execution_state["signal"].get("signal") in ["LONG", "SHORT"] and decision_state.get("action") in ["EXECUTE", "EXECUTE_WITH_CAUTION"]:
             self.cooldown.register_signal(symbol, execution_state["signal"].get("signal"))
