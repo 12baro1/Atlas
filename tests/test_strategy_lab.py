@@ -579,9 +579,9 @@ def test_decision_engine_selects_only_common_filter_passed_candidates():
 def test_each_strategy_reports_its_own_market_input_availability():
     report = SevenStrategyLab().analyze({
         "symbol": "BTC/USDT:USDT",
-        "15m": [Candle(100, 101, 99, 100)],
-        "1h": [Candle(100, 101, 99, 100)],
-        "4h": [Candle(100, 101, 99, 100)],
+        "15m": [Candle(100, 101, 99, 100) for _ in range(25)],
+        "1h": [Candle(100, 101, 99, 100) for _ in range(30)],
+        "4h": [Candle(100, 101, 99, 100) for _ in range(60)],
         "open_interest": [1000.0],
         "open_interest_timestamps_ms": [1_700_000_000_000],
         "funding_rate": [0.0001],
