@@ -6,9 +6,6 @@ import math
 from shared.analysis_context import cached_analysis
 
 
-import math
-
-
 @cached_analysis
 def _finite(value):
     try:
