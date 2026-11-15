@@ -38,7 +38,8 @@ def test_breakout_acceptance_distinguishes_close_from_wick_sweep():
 def test_statistical_deviation_excludes_current_observation():
     result = statistical_deviation([1.0] * 20 + [5.0], 20)
     assert result["state"] == "EXTREME"
-    assert result["zscore"] > 0
+    assert result["direction"] == "ABOVE_MEAN"
+    assert result["zscore"] is None
 
 
 def test_trend_structure_returns_explicit_insufficient_history():
