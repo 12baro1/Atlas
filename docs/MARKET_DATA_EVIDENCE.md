@@ -40,8 +40,8 @@ filter and the single decision selector remain downstream.
 - A socket being connected does not make an empty book/trade/liquidation feed
   available.
 - Order book freshness is 15 seconds; recent trade freshness is 30 seconds;
-  liquidation event freshness is 15 minutes; OI freshness is 2 hours; funding
-  freshness is 8 hours.
+  CVD freshness is 5 minutes; liquidation event freshness is 15 minutes; OI
+  freshness is 2 hours; funding freshness is 8 hours.
 - A single OI snapshot is not OI history and cannot establish contraction.
 - Missing timestamps are not replaced with fabricated historical observations.
 - Bybit `allLiquidation` field `S` is position side: `Buy` means a long position
