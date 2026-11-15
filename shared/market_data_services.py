@@ -150,7 +150,7 @@ def _series_evidence(values, timestamps, now_ms, max_age_ms):
               "latest_timestamp_ms": parsed[-1][0], "age_ms": freshness["age_ms"],
               "latest": parsed[-1][1]}
     if len(parsed) >= 2 and parsed[-2][1] != 0:
-        result["change_pct"] = (parsed[-1][1] / parsed[-2][1] - 1.0) * 100
+        result["change_pct"] = round((parsed[-1][1] / parsed[-2][1] - 1.0) * 100, 6)
     return result
 
 
