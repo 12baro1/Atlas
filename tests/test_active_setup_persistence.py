@@ -45,9 +45,15 @@ class ActiveSetupPersistenceTests(unittest.TestCase):
         self.assertIsNone(self.engine.get_active_setup("BTC/USDT:USDT", candles=[candle]))
         self.assertIsNone(self.engine.state["active_setups"].get("BTC/USDT:USDT"))
 
-    def test_final_target_hit_clears_active_setup(self):
+    def test_tp1_hit_clears_active_setup(self):
         self.engine.store_active_setup("BTC/USDT:USDT", self.result())
-        candle = SimpleNamespace(time=9999999999999, high=116.0, low=99.0)
+        candle = SimpleNamespace(time=9999999999999, high=106.0, low=99.0)
+        self.assertIsNone(self.engine.get_active_setup("BTC/USDT:USDT", candles=[candle]))
+        self.assertIsNone(self.engine.state["active_setups"].get("BTC/USDT:USDT"))
+
+    def test_short_tp1_hit_clears_active_setup(self):
+        self.engine.store_active_setup("BTC/USDT:USDT", self.result(side="SHORT", stop=105.0, tp3=85.0))
+        candle = SimpleNamespace(time=9999999999999, high=101.0, low=94.0)
         self.assertIsNone(self.engine.get_active_setup("BTC/USDT:USDT", candles=[candle]))
 
     def test_non_executable_analysis_does_not_create_active_setup(self):
