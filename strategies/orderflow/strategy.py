@@ -1,4 +1,6 @@
-"""Independent orderflow_momentum setup generator."""\n\ndef generate(data):
+"""Independent orderflow_momentum setup generator."""
+
+def generate(data):
     from strategy_lab import _atr, _ORDERBOOK_ENGINE, _value, _candle_quality, _current_price, _absorption_proxy, _valid_plan, _entry_reference, _structure_candle_sets, displacement, cumulative_volume_delta, build_footprint, liquidity_walls
     book = data.get("orderbook")
     candles = data.get("15m") or []
@@ -89,4 +91,4 @@
             "absorption_proxy": absorption,
             "displacement": displacement(candles, atr),
         }
-    return plan\n
+    return plan
