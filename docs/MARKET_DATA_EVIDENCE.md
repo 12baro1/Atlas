@@ -54,9 +54,12 @@ filter and the single decision selector remain downstream.
 ## Diagnostics
 
 Each strategy result now includes `data_usage`:
-- `generator_inputs`: whether the strategy's native input fields were present.
+- `generator_inputs`: whether each native input meets its minimum history,
+  freshness or sample-size requirement.
+- `analysis_features`: the concrete indicator/evidence families used by that
+  strategy's own generator.
 - `shared_source_status`: source-level status and provenance from the shared evidence
-  snapshot.
+  snapshot, including CVD freshness.
 
 This is availability/provenance telemetry, not an extra shared strategy filter. A
 strategy may still reject a setup because its native pattern conditions do not align.
