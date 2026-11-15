@@ -192,9 +192,22 @@ def _liquidity_wall_evidence(book, top_n=20):
     }
 
 
-def _cvd_evidence(trade_flow_history):
+def _cvd_evidence(trade_flow_history, now_ms):
     from shared.microstructure_services import cumulative_volume_delta
-    return cumulative_volume_delta(trade_flow_history or [])
+    result = cumulative_volume_delta(trade_flow_history or [])
+    if result.get("state") != "AVAILABLE":
+        return result
+    try:
+        latest = max(int(item["timestamp_ms"]) for item in result.get("series") or [])
+        age = int(now_ms) - latest
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return {"state": "INVALID_DATA", "reason": "CVD_TIMESTAMP_INVALID"}
+    result["latest_timestamp_ms"] = latest
+    result["age_ms"] = age
+    result["state"] = "FRESH" if 0 <= age <= 300_000 else (
+        "INVALID_FUTURE_TIMESTAMP" if age < 0 else "STALE"
+    )
+    return result
 
 
 def build_shared_market_evidence(data):
@@ -227,7 +240,7 @@ def build_shared_market_evidence(data):
     liquidations = _liquidation_evidence(data.get("liquidation_events") or [], now_ms)
     footprint = _footprint_evidence(data.get("recent_trades") or [])
     liquidity_walls = _liquidity_wall_evidence(data.get("orderbook"))
-    cvd = _cvd_evidence(data.get("trade_flow_history") or [])
+    cvd = _cvd_evidence(data.get("trade_flow_history") or [], now_ms)
 
     candle_counts = {
         timeframe: len(data.get(timeframe) or [])
@@ -245,6 +258,9 @@ def build_shared_market_evidence(data):
             "trades": {"state": trades.get("state", "UNAVAILABLE"),
                        "source": (data.get("data_provenance") or {}).get("recent_trades", "UNKNOWN"),
                        "timestamp_ms": data.get("recent_trades_timestamp_ms")},
+            "cvd": {"state": cvd.get("state", "UNAVAILABLE"),
+                    "source": (data.get("data_provenance") or {}).get("trade_flow_history", "UNKNOWN"),
+                    "timestamp_ms": cvd.get("latest_timestamp_ms")},
             "liquidations": {"state": liquidations["state"],
                              "source": (data.get("data_provenance") or {}).get("liquidations", "UNKNOWN")},
             "open_interest": {"state": oi["state"], "source": (data.get("data_provenance") or {}).get("open_interest", "UNKNOWN")},
