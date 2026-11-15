@@ -240,6 +240,7 @@ def get_market_data(symbol, force_refresh=False):
                 data["data_provenance"]["funding_rate"] = "BYBIT_REST_HISTORY"
         except Exception:
             data["funding_rate"] = []
+            data["funding_rate_timestamps_ms"] = []
     if not data["funding_rate"]:
         fetch_funding = getattr(exchange, "fetch_funding_rate", None)
         if callable(fetch_funding):
@@ -296,6 +297,14 @@ def get_market_data(symbol, force_refresh=False):
     # Take the snapshot clock after all optional feeds have been fetched so
     # their exchange timestamps are never incorrectly classified as future.
     data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
+    feed_sources = set(data["data_provenance"].values()) - {"UNAVAILABLE"}
+    if "BYBIT_V5_PUBLIC_WEBSOCKET" in feed_sources:
+        data["microstructure_source"] = (
+            "MIXED" if any(source.startswith("BYBIT_REST") for source in feed_sources)
+            else "WEBSOCKET"
+        )
+    else:
+        data["microstructure_source"] = "REST_FALLBACK"
     if os.getenv("ATLAS_MICROSTRUCTURE_ARCHIVE_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}:
         try:
             from microstructure_archive import record_snapshot
