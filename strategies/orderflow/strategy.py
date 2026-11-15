@@ -27,7 +27,7 @@ def _absorption_proxy(flow, candle, atr):
 
 
 def generate(data):
-    from strategy_lab import _atr, _ORDERBOOK_ENGINE, _value, _candle_quality, _current_price, _valid_plan, _entry_reference, _structure_candle_sets, displacement, cumulative_volume_delta, build_footprint, liquidity_walls
+    from strategy_lab import _atr, _ORDERBOOK_ENGINE, _value, _candle_quality, _current_price, _valid_plan, _entry_reference, _structure_candle_sets, displacement, cumulative_volume_delta, build_footprint, liquidity_walls, build_orderflow_evidence
     book = data.get("orderbook")
     candles = data.get("15m") or []
     atr = _atr(candles)
@@ -68,6 +68,10 @@ def generate(data):
     # WebSocket history exists, contradictory cumulative aggressor flow blocks
     # continuation entries; unavailable history is reported, never fabricated.
     cvd_evidence = cumulative_volume_delta(data.get("trade_flow_history") or [])
+    orderflow_evidence = build_orderflow_evidence(
+        data.get("recent_trades") or [], book, candles,
+        data.get("liquidation_events") or [],
+    )
     cvd_direction = cvd_evidence.get("direction") if cvd_evidence.get("state") == "AVAILABLE" else None
     direction = None
     if absorption == "BUYER_FLOW_ABSORBED":
@@ -105,8 +109,10 @@ def generate(data):
             plan["reasons"].append(f"Absorption proxy: {absorption}; passive absorption is inferred, not directly observed")
         plan["orderflow_metrics"] = {
             "cvd": cvd_evidence,
-            "footprint": build_footprint(data.get("recent_trades") or []),
-            "liquidity_walls": liquidity_walls(book),
+            "footprint": orderflow_evidence.get("footprint"),
+            "liquidity_walls": orderflow_evidence.get("liquidity_walls"),
+            "recent_trade_cvd": orderflow_evidence.get("cvd"),
+            "exchange_liquidations": orderflow_evidence.get("liquidations"),
             "bid_notional": flow.get("bid_notional"),
             "ask_notional": flow.get("ask_notional"),
             "trade_delta": trade_delta,
