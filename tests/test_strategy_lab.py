@@ -56,7 +56,7 @@ def test_smc_is_kept_as_independent_seventh_strategy(monkeypatch):
         "tp1": 102.0, "tp2": 104.0, "tp3": 106.0,
         "strength": 90.0, "experimental": False, "reasons": ["existing SMC"],
     }
-    monkeypatch.setattr(strategy_lab, "_smc_candidate", lambda result: dict(smc_plan))
+    monkeypatch.setattr(strategy_lab, "_smc_candidate", lambda result, data=None: dict(smc_plan))
     monkeypatch.setattr(strategy_lab, "_risk_validate_candidate", lambda plan: {
         "eligible": True, "reason": None, "weighted_net_rr": 2.5,
         "risk_plan": {"final_geometry_reconciled": True, "risk_setup_valid": True,
