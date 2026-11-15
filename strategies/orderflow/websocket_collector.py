@@ -129,8 +129,9 @@ class BybitPublicStream:
             elif topic.startswith("publicTrade."):
                 for row in data if isinstance(data, list) else []:
                     try:
+                        size = float(row["v"])
                         self._trades.append({"timestamp_ms": int(row.get("T") or message.get("ts")),
-                                             "price": float(row["p"]), "size": float(row["v"]),
+                                             "price": float(row["p"]), "size": size, "amount": size,
                                              "side": str(row["S"]).upper(), "trade_id": row.get("i")})
                     except (KeyError, TypeError, ValueError, OverflowError):
                         continue
