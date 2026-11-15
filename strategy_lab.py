@@ -60,8 +60,14 @@ def _value(candle, name):
 
 
 def _series(candles, field="close"):
-    values = [_value(item, field) for item in (candles or [])]
-    return [value for value in values if value is not None]
+    """Return an aligned numeric series; never compress gaps in candle history."""
+    sample = list(candles or [])
+    if field == "close" and any(not _valid_ohlc(item) for item in sample):
+        return []
+    values = [_value(item, field) for item in sample]
+    if any(value is None for value in values):
+        return []
+    return values
 
 
 def _ema(values, period):
@@ -96,34 +102,54 @@ def _atr(candles, period=14):
 
 
 def _adx(candles, period=14):
-    if len(candles) < period * 2 + 1:
+    """Return ADX using Wilder-smoothed TR/+DM/-DM and Wilder-smoothed DX."""
+    sample = list(candles or [])
+    if period <= 0 or len(sample) < period * 2 + 1:
         return None
-    plus_dm = []
-    minus_dm = []
-    true_ranges = []
-    for previous, current in zip(candles[-(period * 2 + 1):-1], candles[-(period * 2):]):
-        high = _value(current, "high")
-        low = _value(current, "low")
-        prev_high = _value(previous, "high")
-        prev_low = _value(previous, "low")
+
+    true_ranges, plus_dm, minus_dm = [], [], []
+    for previous, current in zip(sample[:-1], sample[1:]):
+        high, low = _value(current, "high"), _value(current, "low")
+        prev_high, prev_low = _value(previous, "high"), _value(previous, "low")
         prev_close = _value(previous, "close")
         if None in (high, low, prev_high, prev_low, prev_close):
             return None
-        up = high - prev_high
-        down = prev_low - low
-        plus_dm.append(up if up > down and up > 0 else 0.0)
-        minus_dm.append(down if down > up and down > 0 else 0.0)
+        if high < low or prev_high < prev_low:
+            return None
+        upward = high - prev_high
+        downward = prev_low - low
+        plus_dm.append(upward if upward > downward and upward > 0 else 0.0)
+        minus_dm.append(downward if downward > upward and downward > 0 else 0.0)
         true_ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+
+    if len(true_ranges) < period * 2:
+        return None
+    tr_smooth = sum(true_ranges[:period])
+    plus_smooth = sum(plus_dm[:period])
+    minus_smooth = sum(minus_dm[:period])
     dx_values = []
-    for index in range(len(true_ranges) - period + 1):
-        tr = sum(true_ranges[index:index + period])
-        if tr <= 0:
-            continue
-        plus = 100.0 * sum(plus_dm[index:index + period]) / tr
-        minus = 100.0 * sum(minus_dm[index:index + period]) / tr
-        denominator = plus + minus
-        dx_values.append(100.0 * abs(plus - minus) / denominator if denominator > 0 else 0.0)
-    return sum(dx_values[-period:]) / min(period, len(dx_values)) if dx_values else None
+
+    for index in range(period - 1, len(true_ranges)):
+        if index >= period:
+            tr_smooth = tr_smooth - tr_smooth / period + true_ranges[index]
+            plus_smooth = plus_smooth - plus_smooth / period + plus_dm[index]
+            minus_smooth = minus_smooth - minus_smooth / period + minus_dm[index]
+        if tr_smooth <= 0:
+            return None
+        plus_di = 100.0 * plus_smooth / tr_smooth
+        minus_di = 100.0 * minus_smooth / tr_smooth
+        denominator = plus_di + minus_di
+        dx_values.append(
+            100.0 * abs(plus_di - minus_di) / denominator
+            if denominator > 0 else 0.0
+        )
+
+    if len(dx_values) < period:
+        return None
+    adx_value = sum(dx_values[:period]) / period
+    for dx in dx_values[period:]:
+        adx_value = (adx_value * (period - 1) + dx) / period
+    return adx_value if math.isfinite(adx_value) else None
 
 
 def _valid_ohlc(candle):
