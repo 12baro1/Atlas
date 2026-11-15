@@ -14,6 +14,9 @@ def test_shared_evidence_tracks_each_source_independently():
             {"price": 100, "size": 1, "side": "SELL"},
         ],
         "recent_trades_timestamp_ms": now - 2_000,
+        "trade_flow_history": [
+            {"timestamp_ms": now - 60_000, "buy_notional": 200.0, "sell_notional": 100.0},
+        ],
         "liquidation_events": [
             {"timestamp_ms": now - 1_000, "notional": 500, "side": "BUY"},
             {"timestamp_ms": now - 1_000, "notional": 100, "side": "SELL"},
@@ -41,6 +44,10 @@ def test_shared_evidence_tracks_each_source_independently():
     assert result["orderbook"]["imbalance"] > 0
     assert result["trades"]["trade_count"] == 2
     assert result["trades"]["delta_ratio"] > 0
+    assert result["cvd"]["state"] == "AVAILABLE"
+    assert result["cvd"]["net_delta"] == 100.0
+    assert result["footprint"]["state"] == "AVAILABLE"
+    assert result["liquidity_walls"]["state"] == "AVAILABLE"
     assert result["liquidations"]["long_liquidation_notional"] == 500
     assert result["open_interest"]["change_pct"] == -3.0
     assert result["funding"]["latest"] == 0.0001
