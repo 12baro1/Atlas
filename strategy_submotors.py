@@ -129,7 +129,11 @@ def statistical_deviation(values, lookback=20):
     variance = sum((x-mean)**2 for x in baseline) / lookback
     sigma = math.sqrt(variance)
     if sigma <= 0:
-        return {"state": "FLAT", "zscore": 0.0}
+        if sample[-1] == mean:
+            return {"state": "FLAT", "zscore": 0.0, "mean": mean, "sigma": 0.0}
+        return {"state": "EXTREME", "zscore": None,
+                "direction": "ABOVE_MEAN" if sample[-1] > mean else "BELOW_MEAN",
+                "mean": mean, "sigma": 0.0}
     z = (sample[-1]-mean)/sigma
     return {"state": "EXTREME" if abs(z) >= 2 else "NORMAL",
             "zscore": round(z, 4), "mean": mean, "sigma": sigma}
@@ -139,7 +143,7 @@ def rsi_divergence(candles, rsi_values, lookback=40):
     """Detect regular divergence using confirmed local price/RSI pivots."""
     bars = list(candles or [])[-lookback:]
     rsis = list(rsi_values or [])[-lookback:]
-    if len(bars) != len(rsis) or len(bars) < 9 or any(not isinstance(x, (int,float)) or not math.isfinite(x) for x in rsis):
+    if len(bars) != len(rsis) or len(bars) < 9 or any(x is not None and (not isinstance(x, (int,float)) or not math.isfinite(x)) for x in rsis):
         return {"state": "UNAVAILABLE"}
     lows, highs = [], []
     for i in range(2, len(bars)-2):
@@ -148,6 +152,8 @@ def rsi_divergence(candles, rsi_values, lookback=40):
         ls = [_number(x, "low") for x in bars[i-2:i] + bars[i+1:i+3]]
         if h is None or l is None or any(x is None for x in hs+ls):
             return {"state": "INVALID_DATA"}
+        if rsis[i] is None:
+            continue
         if l < min(ls): lows.append((l, rsis[i]))
         if h > max(hs): highs.append((h, rsis[i]))
     if len(lows) >= 2 and lows[-1][0] < lows[-2][0] and lows[-1][1] > lows[-2][1]:
