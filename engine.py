@@ -71,6 +71,8 @@ from utils.structure_labels import label_swings
 DYNAMIC_ANALYSIS_INPUT_KEYS = (
     "orderbook",
     "recent_trades",
+    "trade_flow_history",
+    "liquidation_events",
     "open_interest",
     "funding_rate",
     "economic_events",
