@@ -1,3 +1,6 @@
+import math
+
+
 """Independent liquidation_cascade setup generator."""
 
 def generate(data):
