@@ -32,3 +32,20 @@ def test_shared_services_still_work_without_active_analysis_scope():
     assert relative_volume(20, [10] * 20)["ratio"] == 2.0
     assert displacement([], 1.0)["state"] == "UNAVAILABLE"
     assert volatility_regime([], period=14)["state"] == "UNAVAILABLE"
+
+
+def test_orderflow_evidence_bundle_is_reused_for_same_snapshot():
+    from strategies.orderflow.analytics import build_orderflow_evidence
+
+    trades = [
+        {"timestamp": 1000+i, "price": 100.0+i, "amount": 0.1, "side": "buy" if i % 2 else "sell"}
+        for i in range(25)
+    ]
+    book = {"bids": [[99.0, 2.0]], "asks": [[101.0, 1.5]]}
+    candles = []
+    with AnalysisContext() as context:
+        first = build_orderflow_evidence(trades, book, candles, [])
+        count = context.computation_count
+        second = build_orderflow_evidence(trades, book, candles, [])
+        assert first == second
+        assert context.computation_count == count
