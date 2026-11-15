@@ -22,8 +22,8 @@ def test_cvd_does_not_infer_missing_trade_sides():
 
 def test_liquidation_feed_rejects_invalid_and_filters_stale():
     result = liquidation_events([
-        {"timestamp_ms": 1000, "notional": 10, "side": "BUY"},
-        {"timestamp_ms": 99000, "notional": 5, "side": "SELL"},
+        {"timestamp_ms": 99000, "notional": 10, "side": "BUY"},
+        {"timestamp_ms": 1000, "notional": 5, "side": "SELL"},
     ], now_ms=100000, max_age_ms=5000)
     assert result["state"] == "AVAILABLE"
     assert result["events"] == 1
