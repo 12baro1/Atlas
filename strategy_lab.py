@@ -413,7 +413,8 @@ def _strategy_data_usage(strategy_id, data, smc_result=None):
     for field in fields:
         value = data.get(field)
         if field == "current_price":
-            available = value is not None
+            # _current_price falls back to the last fully closed 15m candle.
+            available = value is not None or bool(data.get("15m"))
         elif field == "orderbook":
             available = isinstance(value, dict) and bool(value.get("bids")) and bool(value.get("asks"))
         elif field.endswith("_timestamps_ms"):
