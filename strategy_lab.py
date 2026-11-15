@@ -72,15 +72,21 @@ def _ema(values, period):
 
 
 def _atr(candles, period=14):
-    if len(candles) < period + 1:
+    """Return Wilder-smoothed ATR using all available closed bars."""
+    sample = list(candles or [])
+    if period <= 0 or len(sample) < period + 1:
         return None
     ranges = []
-    for previous, current in zip(candles[-(period + 1):-1], candles[-period:]):
+    for previous, current in zip(sample[:-1], sample[1:]):
         high, low, prev_close = _value(current, "high"), _value(current, "low"), _value(previous, "close")
-        if high is None or low is None or prev_close is None:
+        if high is None or low is None or prev_close is None or high < low:
             return None
         ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
-    value = sum(ranges) / len(ranges) if ranges else None
+    if len(ranges) < period:
+        return None
+    value = sum(ranges[:period]) / period
+    for current_range in ranges[period:]:
+        value = (value * (period - 1) + current_range) / period
     return value if value and math.isfinite(value) and value > 0 else None
 
 
@@ -210,14 +216,22 @@ def _efficiency_ratio(values, period=20):
 
 
 def _rsi(values, period=14):
-    if len(values) < period + 1:
+    """Return Wilder RSI, seeded by the first period and recursively smoothed."""
+    sample = [float(value) for value in (values or [])]
+    if period <= 0 or len(sample) < period + 1 or any(not math.isfinite(v) for v in sample):
         return None
-    changes = [right - left for left, right in zip(values[-(period + 1):-1], values[-period:])]
-    gains = sum(max(change, 0.0) for change in changes) / period
-    losses = sum(max(-change, 0.0) for change in changes) / period
-    if losses <= 0:
-        return 100.0 if gains > 0 else 50.0
-    return 100.0 - 100.0 / (1.0 + gains / losses)
+    changes = [right - left for left, right in zip(sample, sample[1:])]
+    gains = [max(change, 0.0) for change in changes]
+    losses = [max(-change, 0.0) for change in changes]
+    average_gain = sum(gains[:period]) / period
+    average_loss = sum(losses[:period]) / period
+    for index in range(period, len(changes)):
+        average_gain = (average_gain * (period - 1) + gains[index]) / period
+        average_loss = (average_loss * (period - 1) + losses[index]) / period
+    if average_loss <= 0:
+        return 100.0 if average_gain > 0 else 50.0
+    relative_strength = average_gain / average_loss
+    return 100.0 - 100.0 / (1.0 + relative_strength)
 
 
 
