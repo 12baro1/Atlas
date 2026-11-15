@@ -500,6 +500,10 @@ def test_extracted_strategy_packages_are_the_live_generators():
     from strategies.trend import generate as trend_generate
     from strategies.breakout import generate as breakout_generate
     from strategies.mean_reversion import generate as mean_reversion_generate
+    from strategies.orderflow.strategy import generate as orderflow_generate
+    from strategies.liquidation.strategy import generate as liquidation_generate
+    from strategies.relative_strength.strategy import generate as relative_strength_generate
+    from strategies.smc.strategy import generate as smc_generate
     import strategy_lab
 
     assert strategy_lab._trend_pullback({}) is None
@@ -508,3 +512,11 @@ def test_extracted_strategy_packages_are_the_live_generators():
     assert trend_generate({}) is None
     assert breakout_generate({}) is None
     assert mean_reversion_generate({}, {"label": "UNKNOWN"}) is None
+    assert strategy_lab._orderflow_momentum({}) is None
+    assert strategy_lab._liquidation_cascade({}) is None
+    assert strategy_lab._relative_strength({}) is None
+    assert strategy_lab._smc_candidate({}) is None
+    assert orderflow_generate({}) is None
+    assert liquidation_generate({}) is None
+    assert relative_strength_generate({}) is None
+    assert smc_generate({}) is None
