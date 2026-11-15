@@ -84,7 +84,23 @@ systemctl --user restart atlas.service
 systemctl --user stop atlas.service
 ```
 
-Servis, depodaki mevcut analiz ayarlarını ve isteğe bağlı entegrasyonları korur. Atlas'ın mevcut güvenlik davranışı gereği otomatik emir gönderimi kapalıdır; bu dağıtım yalnızca analiz ve sinyal üretimi içindir.
+Servis, yedi stratejili analiz hattını değiştirmez. VPS modunda eski otomatik Telegram sinyal bildirimi ve eski Telegram polling kapalı tutulur; yeni Telegram entegrasyonu yalnızca tanınan grup komutlarına cevap verir, kendi kendine sinyal göndermez. Otomatik emir gönderimi de kapalıdır.
+
+### Telegram grup komutları
+
+Botu gruba ekledikten sonra BotFather üzerinden `/setprivacy` → botu seç → **Disable** yap. Bu ayar, botun gruptaki düz `BTC` mesajını görebilmesi için gereklidir.
+
+VPS'deki `.env` dosyasına şu ayarları ekle:
+
+```env
+ATLAS_TELEGRAM_COMMANDS_ENABLED=1
+ATLAS_TELEGRAM_BOT_TOKEN=
+ATLAS_TELEGRAM_CHAT_ID=
+```
+
+Token'ı depoya veya sohbetlere yazma. `ATLAS_TELEGRAM_CHAT_ID` yalnızca izin verilen grubun ID'si olmalıdır. Bot diğer sohbetleri ve tanınmayan grup mesajlarını sessizce yok sayar.
+
+Desteklenen örnekler: `BTC`, `ETH`, `en iyi 5 işlem`, `50 analiz et`, `tüm piyasayı tara`, `likidite BTC`, `performans`, `öğrenme`, `yardım`. Uzun taramalar tamamlanana kadar sonraki komutlar sırada bekler.
 
 ## Kullanım
 
