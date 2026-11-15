@@ -515,28 +515,10 @@ def _relative_strength(data):
     return generate(data)
 
 def _absorption_proxy(flow, candle, atr):
-    """Infer passive absorption from aggressive trade delta plus stalled price.
+    from strategies.orderflow.strategy import _absorption_proxy as infer_absorption
+    return infer_absorption(flow, candle, atr)
 
-    This is a snapshot proxy, not proof of hidden liquidity or queue replenishment.
-    """
-    if not isinstance(flow, dict) or not atr or atr <= 0:
-        return None
-    try:
-        delta = float(flow.get("trade_delta") or 0.0)
-        imbalance = float(flow.get("imbalance") or 0.0)
-        opened = _value(candle, "open")
-        close = _value(candle, "close")
-        trade_count = int(flow.get("trade_count") or 0)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    if None in (opened, close) or trade_count < 20:
-        return None
-    price_progress = (close - opened) / atr
-    if delta >= 0.18 and abs(price_progress) <= 0.15 and imbalance <= -0.10:
-        return "BUYER_FLOW_ABSORBED"
-    if delta <= -0.18 and abs(price_progress) <= 0.15 and imbalance >= 0.10:
-        return "SELLER_FLOW_ABSORBED"
-    return None
+
 
 def _smc_candidate(result, data=None):
     from strategies.smc.strategy import generate
