@@ -87,8 +87,8 @@ def test_liquidation_pressure_requires_material_real_event_imbalance():
 
     trades = [{"price": 100, "size": 1, "side": "BUY"} for _ in range(10)]
     events = [
-        {"side": "SELL", "notional": 180, "timestamp_ms": 1000},
-        {"side": "BUY", "notional": 10, "timestamp_ms": 1000},
+        {"side": "BUY", "notional": 180, "timestamp_ms": 1000},
+        {"side": "SELL", "notional": 10, "timestamp_ms": 1000},
     ]
     result = liquidation_pressure(events, trades)
     assert result["state"] == "AVAILABLE"
