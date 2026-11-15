@@ -117,6 +117,15 @@ def _adx(candles, period=14):
     return sum(dx_values[-period:]) / min(period, len(dx_values)) if dx_values else None
 
 
+def _valid_ohlc(candle):
+    """Reject malformed OHLC bars before they can create pivots or indicators."""
+    values = [_value(candle, key) for key in ("open", "high", "low", "close")]
+    if any(value is None or value <= 0 for value in values):
+        return False
+    opened, high, low, close = values
+    return low <= min(opened, close) <= max(opened, close) <= high and high > low
+
+
 def _candle_quality(candle):
     """Normalized candle anatomy; scale-invariant across symbols and prices."""
     opened, high, low, close = (_value(candle, key) for key in ("open", "high", "low", "close"))
@@ -292,6 +301,9 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     swing_highs, swing_lows = [], []
     for candle_set in candle_sets:
         sample = list(candle_set or [])[-120:]
+        # Invalid OHLC data must never manufacture a structural stop or target.
+        if any(not _valid_ohlc(item) for item in sample):
+            return None
         for index in range(2, len(sample) - 2):
             high = _value(sample[index], "high")
             low = _value(sample[index], "low")
