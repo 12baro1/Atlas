@@ -58,3 +58,33 @@ def test_archive_prunes_old_rows_to_configured_size_limit(tmp_path, monkeypatch)
     assert 0 < len(rows) < 20
     latest = snapshot_at(symbol, start + 19_000)
     assert latest["orderbook"] == {"bids": [[100, 1]], "asks": [[101, 1]]}
+
+
+def test_archive_filters_stale_and_malformed_microstructure_rows(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLAS_MICROSTRUCTURE_ARCHIVE_DIR", str(tmp_path))
+    now = 10_000_000
+    payload = {
+        "snapshot_timestamp_ms": now,
+        "orderbook_timestamp_ms": now,
+        "recent_trades_timestamp_ms": now,
+        "orderbook": {"bids": [[99, 1]], "asks": [[101, 1]]},
+        "recent_trades": [],
+        "trade_flow_history": [
+            {"timestamp_ms": now - 1_000, "buy_notional": 10, "sell_notional": 2},
+            {"timestamp_ms": "bad", "buy_notional": 1, "sell_notional": 0},
+            {"timestamp_ms": now - 7 * 60 * 60 * 1000, "buy_notional": 1, "sell_notional": 0},
+            {"timestamp_ms": now + 1, "buy_notional": 1, "sell_notional": 0},
+        ],
+        "liquidation_events": [
+            {"timestamp_ms": now - 1_000, "notional": 100},
+            {"timestamp_ms": None, "notional": 200},
+            {"timestamp_ms": now - 16 * 60 * 1000, "notional": 300},
+        ],
+    }
+    assert record_snapshot("BTC/USDT:USDT", payload) is True
+    result = snapshot_at("BTC/USDT:USDT", now)
+    assert result is not None
+    assert len(result["trade_flow_history"]) == 1
+    assert result["trade_flow_history"][0]["buy_notional"] == 10
+    assert len(result["liquidation_events"]) == 1
+    assert result["liquidation_events"][0]["notional"] == 100
