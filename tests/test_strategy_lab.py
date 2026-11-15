@@ -417,3 +417,48 @@ def test_structural_geometry_accepts_well_formed_ohlc_bars():
     import strategy_lab
 
     assert strategy_lab._valid_ohlc(Candle(100.0, 103.0, 98.0, 102.0)) is True
+
+
+
+def test_atr_uses_wilder_smoothing_across_full_history():
+    import strategy_lab
+
+    candles = []
+    close = 100.0
+    for index in range(25):
+        opened = close
+        close += 1.0 if index < 15 else 0.0
+        candles.append(Candle(opened, max(opened, close) + 1.0,
+                              min(opened, close) - 1.0, close))
+    actual = strategy_lab._atr(candles, period=14)
+    ranges = [
+        max(
+            candle.high - candle.low,
+            abs(candle.high - previous.close),
+            abs(candle.low - previous.close),
+        )
+        for previous, candle in zip(candles[:-1], candles[1:])
+    ]
+    expected = sum(ranges[:14]) / 14
+    for current in ranges[14:]:
+        expected = (expected * 13 + current) / 14
+    assert actual == expected
+
+
+def test_rsi_uses_wilder_smoothing_and_handles_flat_series():
+    import strategy_lab
+
+    values = [100.0]
+    for index in range(30):
+        values.append(values[-1] + (2.0 if index < 14 else -0.5))
+    actual = strategy_lab._rsi(values, period=14)
+    gains = [max(right - left, 0.0) for left, right in zip(values, values[1:])]
+    losses = [max(left - right, 0.0) for left, right in zip(values, values[1:])]
+    avg_gain = sum(gains[:14]) / 14
+    avg_loss = sum(losses[:14]) / 14
+    for index in range(14, len(gains)):
+        avg_gain = (avg_gain * 13 + gains[index]) / 14
+        avg_loss = (avg_loss * 13 + losses[index]) / 14
+    expected = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    assert actual == expected
+    assert strategy_lab._rsi([10.0] * 20, period=14) == 50.0
