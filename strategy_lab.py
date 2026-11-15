@@ -14,7 +14,7 @@ from risk_engine import RiskEngine
 from config import Config
 from strategy_submotors import (trend_structure, displacement, volatility_regime, breakout_acceptance, statistical_deviation, rsi_divergence)
 from smc_submotors import dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, narrative as smc_narrative
-from microstructure_submotors import cumulative_volume_delta, liquidation_events
+from microstructure_submotors import cumulative_volume_delta, liquidation_events, beta_stability, relative_volume
 
 _ORDERBOOK_ENGINE = OrderBookEngine()
 
@@ -971,6 +971,8 @@ def _relative_strength(data):
             "residual_volatility_4h": round(residual_volatility, 6),
             "market_return_12x4h": round(benchmark_return_12, 6),
             "sector_peers_used": len(sector_maps) if use_sector else 0,
+            "beta_stability": beta_stability(asset_returns, benchmark_returns, 24),
+            "relative_volume": relative_volume(_value(candles[-1], "volume"), [_value(x, "volume") for x in candles[-21:-1]]),
             "volatility_regime": volatility_regime(candles),
         }
     return plan
