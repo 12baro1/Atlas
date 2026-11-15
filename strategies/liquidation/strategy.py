@@ -19,6 +19,12 @@ def generate(data):
         return None
     oi_times = data.get("open_interest_timestamps_ms") or []
     now_ms = int(data.get("snapshot_timestamp_ms") or 0)
+    shared_evidence = data.get("shared_market_evidence") or {}
+    shared_oi = shared_evidence.get("open_interest") or {}
+    if shared_evidence and (
+        shared_oi.get("state") != "FRESH" or int(shared_oi.get("count") or 0) < 2
+    ):
+        return None
     if len(oi_times) < 2 or not now_ms:
         return None
     try:
@@ -29,7 +35,11 @@ def generate(data):
         return None
     if not (0 < current_oi_ms - previous_oi_ms <= 3 * 60 * 60 * 1000):
         return None
-    oi_change = (current_oi - previous_oi) / previous_oi
+    oi_change = (
+        float(shared_oi["change_pct"]) / 100.0
+        if shared_evidence and shared_oi.get("change_pct") is not None
+        else (current_oi - previous_oi) / previous_oi
+    )
     last = candles[-1]
     close, opened = _value(last, "close"), _value(last, "open")
     quality = _candle_quality(last)
