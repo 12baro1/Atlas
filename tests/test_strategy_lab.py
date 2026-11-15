@@ -400,6 +400,8 @@ def test_directional_movement_uses_wilder_recursive_smoothing():
 
 
 def test_structural_geometry_rejects_malformed_ohlc_bars():
+    import strategy_lab
+
     malformed = [
         Candle(100.0, 99.0, 98.0, 98.5),  # open above high
         Candle(100.0, 102.0, 101.0, 100.5),  # close below low
