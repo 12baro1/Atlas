@@ -41,3 +41,20 @@ def test_analysis_context_is_isolated_and_cleared_on_exit():
         context.get_or_compute(("x",), lambda: 1)
         assert context.computation_count == 1
     assert context.computation_count == 0
+
+
+def test_shared_atr_is_reused_for_same_candle_snapshot():
+    from types import SimpleNamespace
+    from shared.analysis_services import _atr
+
+    candles = [
+        SimpleNamespace(open=100 + i, high=102 + i, low=99 + i,
+                        close=101 + i, volume=10 + i)
+        for i in range(20)
+    ]
+    with AnalysisContext() as context:
+        first = _atr(candles, period=14)
+        computations_after_first = context.computation_count
+        second = _atr(candles, period=14)
+        assert second == first
+        assert context.computation_count == computations_after_first
