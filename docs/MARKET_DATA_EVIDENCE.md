@@ -3,7 +3,8 @@
 Atlas receives several independent public market feeds. A connected socket is not
 proof that every subscribed topic has delivered a usable snapshot. The authoritative
 per-feed provenance is stored in `data_provenance`; derived status and age are
-available in `shared_market_evidence`.
+available in `shared_market_evidence`. The service also derives timestamped CVD,
+executed-trade footprint, and displayed L2 liquidity-wall summaries once per snapshot.
 
 ## Raw feeds
 
