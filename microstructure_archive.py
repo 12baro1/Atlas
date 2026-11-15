@@ -109,6 +109,17 @@ def record_snapshot(symbol, data):
     return True
 
 
+def _is_fresh_at(item, asof_ms, max_age_ms):
+    if not isinstance(item, dict):
+        return False
+    try:
+        stamp = int(item.get("timestamp_ms") or 0)
+        age = int(asof_ms) - stamp
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return stamp > 0 and 0 <= age <= max_age_ms
+
+
 def snapshot_at(symbol, asof_ms, *, book_max_age_ms=15_000, trades_max_age_ms=30_000):
     """Return the newest archived feed snapshot available at or before asof_ms."""
     path = _path(symbol)
@@ -141,9 +152,9 @@ def snapshot_at(symbol, asof_ms, *, book_max_age_ms=15_000, trades_max_age_ms=30
     book_ms = int(row.get("orderbook_timestamp_ms") or 0)
     trades_ms = int(row.get("recent_trades_timestamp_ms") or 0)
     history = [item for item in (row.get("trade_flow_history") or [])
-               if isinstance(item, dict) and 0 <= int(asof_ms) - int(item.get("timestamp_ms") or 0) <= 6 * 60 * 60 * 1000]
+               if _is_fresh_at(item, asof_ms, 6 * 60 * 60 * 1000)]
     events = [item for item in (row.get("liquidation_events") or [])
-              if isinstance(item, dict) and 0 <= int(asof_ms) - int(item.get("timestamp_ms") or 0) <= 15 * 60 * 1000]
+              if _is_fresh_at(item, asof_ms, 15 * 60 * 1000)]
     return {
         "orderbook": row.get("orderbook") if 0 <= asof_ms - book_ms <= book_max_age_ms else None,
         "orderbook_timestamp_ms": book_ms or None,
