@@ -514,10 +514,14 @@ def _strategy_data_usage(strategy_id, data, smc_result=None):
             available = bool(value)
             status = "AVAILABLE" if available else "UNAVAILABLE"
         elif field == "correlation_universe":
-            available = isinstance(value, dict) and all(
+            has_universe = isinstance(value, dict) and bool(value)
+            available = has_universe and all(
                 len(value.get(key) or []) >= 55 for key in benchmark_keys
             )
-            status = "AVAILABLE" if available else "INSUFFICIENT_HISTORY"
+            status = (
+                "AVAILABLE" if available else
+                "INSUFFICIENT_HISTORY" if has_universe else "UNAVAILABLE"
+            )
         elif field == "sector_peer_universe":
             available = isinstance(value, dict) and bool(value)
             status = "AVAILABLE" if available else "OPTIONAL_UNAVAILABLE"
