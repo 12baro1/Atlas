@@ -143,9 +143,9 @@ def liquidation_pressure(events, recent_trades, min_share=0.65, min_trade_notion
         return {"state": "AVAILABLE", "direction": None, "confirmed": False,
                 "dominant_share": round(dominant_share, 4), "trade_notional_ratio": round(relative_size, 4),
                 "events": valid, "buy_liquidation_notional": buy_liq, "sell_liquidation_notional": sell_liq}
-    # Bybit liquidation side is the forced order side: sell liquidations close longs;
-    # buy liquidations close shorts. The candidate is a contrarian exhaustion setup.
-    direction = "LONG" if sell_liq > buy_liq else "SHORT"
+    # Bybit S is the liquidated position side: Buy means a long was liquidated,
+    # Sell means a short was liquidated. The candidate fades the exhausted side.
+    direction = "LONG" if buy_liq > sell_liq else "SHORT"
     return {"state": "AVAILABLE", "direction": direction, "confirmed": True,
             "dominant_share": round(dominant_share, 4), "trade_notional_ratio": round(relative_size, 4),
             "events": valid, "buy_liquidation_notional": buy_liq, "sell_liquidation_notional": sell_liq}
