@@ -82,9 +82,12 @@ def generate(data):
     trades = data.get("recent_trades") or []
     liquidation_events = data.get("liquidation_events") or []
     absorption = _absorption_proxy(flow, last, atr)
-    cvd_evidence = cumulative_volume_delta(data.get("trade_flow_history") or [])
+    shared_analytics = data.get("shared_market_evidence") or {}
+    cvd_evidence = shared_analytics.get("cvd") or cumulative_volume_delta(
+        data.get("trade_flow_history") or []
+    )
     evidence = build_orderflow_evidence(trades, book, candles, liquidation_events)
-    footprint = evidence.get("footprint") or {}
+    footprint = shared_analytics.get("footprint") or evidence.get("footprint") or {}
     cvd_direction = cvd_evidence.get("direction") if cvd_evidence.get("state") == "AVAILABLE" else None
 
     # Footprint must confirm the aggressive flow behind the setup. For an
@@ -170,7 +173,7 @@ def generate(data):
             "cvd": cvd_evidence,
             "footprint": footprint,
             "footprint_confirmation": footprint_confirmation,
-            "liquidity_walls": evidence.get("liquidity_walls"),
+            "liquidity_walls": shared_analytics.get("liquidity_walls") or evidence.get("liquidity_walls"),
             "opposing_wall_risk": wall,
             "recent_trade_cvd": evidence.get("cvd"),
             "exchange_liquidations": evidence.get("liquidations"),
