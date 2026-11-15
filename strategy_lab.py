@@ -514,6 +514,7 @@ class SevenStrategyLab:
                     "strategy": STRATEGY_NAMES[strategy_id],
                     "status": "ERROR",
                     "reason": f"{type(exc).__name__}: {exc}",
+                    "data_usage": _strategy_data_usage(strategy_id, data, smc_result),
                 })
 
         # Stage 2: the only shared eligibility gate. All seven strategies
