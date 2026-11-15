@@ -410,20 +410,59 @@ def _strategy_data_usage(strategy_id, data, smc_result=None):
     """Expose actual generator input availability without imposing shared gates."""
     fields = _STRATEGY_INPUT_FIELDS.get(strategy_id, ())
     inputs = {}
+    minimum_candles = {
+        "trend_pullback": {"4h": 60, "1h": 30},
+        "volatility_breakout": {"1h": 45},
+        "mean_reversion": {"15m": 25},
+        "liquidation_cascade": {"1h": 21},
+        "orderflow_momentum": {"15m": 15},
+        "relative_strength": {"4h": 55},
+        "smc": {"15m": 1, "1h": 1, "4h": 1, "1d": 1, "1w": 1},
+    }.get(strategy_id, {})
+    symbol = str(data.get("symbol") or "").upper()
+    benchmark_keys = (
+        ["ETH"] if symbol.startswith("BTC/") else
+        ["BTC"] if symbol.startswith("ETH/") else ["BTC", "ETH"]
+    )
     for field in fields:
         value = data.get(field)
-        if field == "current_price":
+        if field in minimum_candles:
+            available = len(value or []) >= minimum_candles[field]
+            status = "AVAILABLE" if available else "INSUFFICIENT_HISTORY"
+        elif field == "current_price":
             # _current_price falls back to the last fully closed 15m candle.
             available = value is not None or bool(data.get("15m"))
+            status = "AVAILABLE" if available else "UNAVAILABLE"
         elif field == "orderbook":
             available = isinstance(value, dict) and bool(value.get("bids")) and bool(value.get("asks"))
+            status = "AVAILABLE" if available else "UNAVAILABLE"
+        elif field == "open_interest":
+            available = len(value or []) >= 2
+            status = "AVAILABLE" if available else "INSUFFICIENT_HISTORY"
+        elif field == "open_interest_timestamps_ms":
+            available = len(value or []) >= 2
+            status = "AVAILABLE" if available else "INSUFFICIENT_HISTORY"
+        elif field == "recent_trades":
+            available = len(value or []) >= 20
+            status = "AVAILABLE" if available else "INSUFFICIENT_DATA"
         elif field.endswith("_timestamps_ms"):
             available = bool(value)
-        elif field in {"correlation_universe", "sector_peer_universe", "smt_universe"}:
+            status = "AVAILABLE" if available else "UNAVAILABLE"
+        elif field == "correlation_universe":
+            available = isinstance(value, dict) and all(
+                len(value.get(key) or []) >= 55 for key in benchmark_keys
+            )
+            status = "AVAILABLE" if available else "INSUFFICIENT_HISTORY"
+        elif field == "sector_peer_universe":
             available = isinstance(value, dict) and bool(value)
+            status = "AVAILABLE" if available else "OPTIONAL_UNAVAILABLE"
+        elif field in {"smt_universe"}:
+            available = isinstance(value, dict) and bool(value)
+            status = "AVAILABLE" if available else "OPTIONAL_UNAVAILABLE"
         else:
             available = bool(value)
-        inputs[field] = "AVAILABLE" if available else "UNAVAILABLE"
+            status = "AVAILABLE" if available else "UNAVAILABLE"
+        inputs[field] = status
     if strategy_id == "smc":
         inputs["smc_specialist_result"] = (
             "AVAILABLE" if isinstance(smc_result, dict) and smc_result else "UNAVAILABLE"
