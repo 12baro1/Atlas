@@ -13,7 +13,7 @@ from orderbook_engine import OrderBookEngine
 from risk_engine import RiskEngine
 from config import Config
 from strategy_submotors import (trend_structure, displacement, volatility_regime, breakout_acceptance, statistical_deviation, rsi_divergence)
-from smc_submotors import dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, narrative as smc_narrative
+from strategies.smc.submotors import dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, narrative as smc_narrative
 from microstructure_submotors import cumulative_volume_delta, liquidation_events, beta_stability, relative_volume
 from strategies.orderflow.analytics import build_footprint, liquidity_walls
 
