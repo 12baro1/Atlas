@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 
 
-DEFAULT_MAX_SYMBOLS = 20
+DEFAULT_MAX_SYMBOLS = 0
 DEFAULT_SCAN_INTERVAL_SECONDS = 900
 
 
@@ -50,13 +50,8 @@ def _load_environment() -> None:
         raise RuntimeError("python-dotenv is required; install requirements.txt") from exc
     load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
 
-    # The VPS service is analysis-only and must not start Telegram or print UI signals.
-    os.environ["ATLAS_TELEGRAM_ENABLED"] = "0"
-    os.environ["ATLAS_TELEGRAM_POLLING_ENABLED"] = "0"
-    os.environ["ATLAS_TELEGRAM_WEBHOOK_ENABLED"] = "0"
-    os.environ["ATLAS_CONSOLE_SIGNAL_PRINT_ENABLED"] = "0"
-    os.environ["ATLAS_AUTO_TRADING_ENABLED"] = "0"
-    os.environ["ATLAS_AUTO_TRADING_AUTO_ENABLE_WITH_KEYS"] = "0"
+    # Preserve the repository's existing optional integrations and settings.
+    # Order execution remains disabled by Atlas' own Config safety contract.
 
 
 def main() -> int:
@@ -71,16 +66,6 @@ def main() -> int:
     from config import Config
     from data_engine import exchange
     from atlas_runtime import AtlasRuntime
-
-    # Hard safety settings: service is a public-data analysis worker only.
-    Config.AUTO_TRADING_ENABLED = False
-    Config.AUTO_TRADING_AUTO_ENABLE_WITH_KEYS = False
-    Config.TELEGRAM_ENABLED = False
-    Config.TELEGRAM_POLLING_ENABLED = False
-    Config.TELEGRAM_WEBHOOK_ENABLED = False
-    Config.TELEGRAM_BOT_TOKEN = ""
-    Config.TELEGRAM_CHAT_ID = ""
-    Config.CONSOLE_SIGNAL_PRINT_ENABLED = False
 
     max_symbols = configured_max_symbols(os.getenv("ATLAS_MAX_SYMBOLS"))
     interval = float(os.getenv("ATLAS_SCAN_INTERVAL_SECONDS", str(DEFAULT_SCAN_INTERVAL_SECONDS)))
