@@ -223,15 +223,13 @@ def build_shared_market_evidence(data):
     book_freshness = _freshness(data.get("orderbook_timestamp_ms"), now_ms, 15_000)
     if book["state"] == "AVAILABLE":
         book["freshness"] = book_freshness
-        if book_freshness["state"] != "FRESH":
-            book["state"] = book_freshness["state"]
+        book["state"] = book_freshness["state"]
 
     trades = _trade_evidence(data.get("recent_trades"))
     trade_freshness = _freshness(data.get("recent_trades_timestamp_ms"), now_ms, 30_000)
     if trades["state"] == "AVAILABLE":
         trades["freshness"] = trade_freshness
-        if trade_freshness["state"] != "FRESH":
-            trades["state"] = trade_freshness["state"]
+        trades["state"] = trade_freshness["state"]
 
     oi = _series_evidence(data.get("open_interest") or [],
                           data.get("open_interest_timestamps_ms") or [], now_ms, 2 * 60 * 60 * 1000)
