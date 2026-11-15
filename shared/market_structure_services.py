@@ -6,13 +6,8 @@ strategies, or make portfolio decisions.
 from __future__ import annotations
 
 import math
-from statistics import median
 
 from shared.analysis_context import cached_analysis
-
-
-import math
-from statistics import median
 
 
 @cached_analysis
