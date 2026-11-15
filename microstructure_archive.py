@@ -73,7 +73,7 @@ def record_snapshot(symbol, data):
     trades = data.get("recent_trades")
     flow_history = data.get("trade_flow_history")
     liquidations = data.get("liquidation_events")
-    if not isinstance(book, dict) and not isinstance(trades, list) and not isinstance(flow_history, list) and not isinstance(liquidations, list):
+    if not isinstance(book, dict) and not isinstance(trades, list) and not flow_history and not liquidations:
         return False
     timestamp = int(data.get("snapshot_timestamp_ms") or 0)
     if timestamp <= 0:
