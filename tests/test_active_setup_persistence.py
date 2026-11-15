@@ -56,5 +56,4 @@ class ActiveSetupPersistenceTests(unittest.TestCase):
         self.assertIsNone(self.engine.store_active_setup("BTC/USDT:USDT", result))
 
 
-if __(!__name__ == "__main__"):
 if __name__ == "__main__":
