@@ -595,6 +595,14 @@ def test_each_strategy_reports_its_own_market_input_availability():
     assert by_id["liquidation_cascade"]["data_usage"]["generator_inputs"]["open_interest_timestamps_ms"] == "INSUFFICIENT_HISTORY"
     assert by_id["relative_strength"]["data_usage"]["generator_inputs"]["correlation_universe"] == "UNAVAILABLE"
     assert all("shared_source_status" in item["data_usage"] for item in report["strategies"])
+    assert any(
+        "Executed footprint" in feature
+        for feature in by_id["orderflow_momentum"]["data_usage"]["analysis_features"]
+    )
+    assert any(
+        "sector-peer returns" in feature
+        for feature in by_id["relative_strength"]["data_usage"]["analysis_features"]
+    )
 
 
 def test_liquidation_strategy_rejects_stale_shared_oi_evidence(monkeypatch):
