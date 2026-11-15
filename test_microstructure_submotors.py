@@ -42,4 +42,4 @@ def test_beta_stability_reports_regime_change():
 
 def test_relative_volume_requires_real_history():
     assert relative_volume(100, [100] * 5)["state"] == "UNAVAILABLE"
-    assert relative_volume(200, [100] * 10)["state"] == "NORMAL"
+    assert relative_volume(200, [100] * 10)["state"] == "HIGH"
