@@ -13,6 +13,7 @@ from orderbook_engine import OrderBookEngine
 from risk_engine import RiskEngine
 from config import Config
 from strategy_submotors import (trend_structure, displacement, volatility_regime, breakout_acceptance, statistical_deviation, rsi_divergence)
+from smc_submotors import dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, narrative as smc_narrative
 
 _ORDERBOOK_ENGINE = OrderBookEngine()
 
@@ -994,7 +995,7 @@ def _absorption_proxy(flow, candle, atr):
         return "SELLER_FLOW_ABSORBED"
     return None
 
-def _smc_candidate(result):
+def _smc_candidate(result, data=None):
     """Build the single SMC setup from the integrated SMC specialist world.
 
     This adapter reads the pre-selector SMC entry/risk geometry. It deliberately
@@ -1043,6 +1044,25 @@ def _smc_candidate(result):
         reasons.insert(0, str(reasoning["thesis"]))
     if not reasons:
         reasons = ["Integrated SMC specialist evidence"]
+    # SMC submotors enrich specialist evidence but never veto or select trades.
+    data = data if isinstance(data, dict) else {}
+    smc_candles = data.get("15m") or []
+    htf_candles = data.get("4h") or data.get("1h") or []
+    price = _value(smc_candles[-1], "close") if smc_candles else entry
+    structure_info = trend_structure(htf_candles)
+    range_info = dealing_range(htf_candles, price)
+    draw_info = liquidity_draw(htf_candles, direction)
+    analysis_zones = []
+    for key in ("orderblocks", "order_blocks", "fvg", "fvg_zones", "poi", "zones"):
+        value = analysis.get(key)
+        if isinstance(value, list):
+            analysis_zones.extend(value)
+    fresh_poi = poi_freshness(analysis_zones, price, smc_candles)
+    breaker_info = breaker_validation(analysis.get("orderblocks") or analysis.get("order_blocks") or [], smc_candles)
+    reclaim_info = reclaim_acceptance(smc_candles, entry, direction)
+    inducement_info = inducement_proxy(htf_candles, direction)
+    displacement_info = displacement(smc_candles, source_risk.get("atr") or 0)
+    narrative_info = smc_narrative(direction, structure_info, range_info, draw_info, displacement_info, fresh_poi)
     plan = {
         "status": "RAW_SETUP",
         "strategy_id": "smc",
@@ -1071,7 +1091,19 @@ def _smc_candidate(result):
             or _configured_partial_tp_weights()
         ),
         "atr": source_risk.get("atr"),
+        "smc_evidence": {
+            "market_structure": structure_info,
+            "dealing_range": range_info,
+            "liquidity_draw": draw_info,
+            "poi_freshness": fresh_poi,
+            "breaker_validation": breaker_info,
+            "reclaim_acceptance": reclaim_info,
+            "inducement_proxy": inducement_info,
+            "displacement": displacement_info,
+            "narrative": narrative_info,
+        },
     }
+    plan["reasons"].append(f"SMC narrative evidence {narrative_info['evidence_count']}/5; diagnostic only")
     return plan
 
 
@@ -1181,7 +1213,7 @@ class SevenStrategyLab:
             "liquidation_cascade": lambda: _liquidation_cascade(data),
             "orderflow_momentum": lambda: _orderflow_momentum(data),
             "relative_strength": lambda: _relative_strength(data),
-            "smc": lambda: _smc_candidate(smc_result),
+            "smc": lambda: _smc_candidate(smc_result, data),
         }
 
         # Stage 1: each strategy only creates its own setup. No common risk,
