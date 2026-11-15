@@ -141,7 +141,8 @@ class AtlasEngine:
         # Testlerde sahte sınıf enjekte edebilmek için sınıf referansı tutulur.
         self.structure_engine_cls = structure_engine_cls or MarketStructureEngine
         self.logger = logging.getLogger("atlas.engine")
-        self.strategy_lab = SevenStrategyLab()
+        self.decision = DecisionEngine()
+        self.strategy_lab = SevenStrategyLab(decision_engine=self.decision)
 
         # Structure ve seviye motorları
         self.bos = BOSEngine()
@@ -172,7 +173,6 @@ class AtlasEngine:
         self.cisd = CISDEngine()
         self.volume_profile = VolumeProfileEngine()
         self.institutional = InstitutionalAnalysisEngine()
-        self.decision = DecisionEngine()
         self.setup_quality = SetupQualityEngine()
         self.setup_reasoner = SetupReasoningEngine()
         self.state_engine = StateEngine(getattr(Config, "STATE_ENGINE_FILE", "atlas_state.json"))
