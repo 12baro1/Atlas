@@ -72,15 +72,21 @@ def _ema(values, period):
 
 
 def _atr(candles, period=14):
-    if len(candles) < period + 1:
+    """Return Wilder-smoothed ATR using all available closed bars."""
+    sample = list(candles or [])
+    if period <= 0 or len(sample) < period + 1:
         return None
     ranges = []
-    for previous, current in zip(candles[-(period + 1):-1], candles[-period:]):
+    for previous, current in zip(sample[:-1], sample[1:]):
         high, low, prev_close = _value(current, "high"), _value(current, "low"), _value(previous, "close")
-        if high is None or low is None or prev_close is None:
+        if high is None or low is None or prev_close is None or high < low:
             return None
         ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
-    value = sum(ranges) / len(ranges) if ranges else None
+    if len(ranges) < period:
+        return None
+    value = sum(ranges[:period]) / period
+    for current_range in ranges[period:]:
+        value = (value * (period - 1) + current_range) / period
     return value if value and math.isfinite(value) and value > 0 else None
 
 
@@ -115,6 +121,15 @@ def _adx(candles, period=14):
         denominator = plus + minus
         dx_values.append(100.0 * abs(plus - minus) / denominator if denominator > 0 else 0.0)
     return sum(dx_values[-period:]) / min(period, len(dx_values)) if dx_values else None
+
+
+def _valid_ohlc(candle):
+    """Reject malformed OHLC bars before they can create pivots or indicators."""
+    values = [_value(candle, key) for key in ("open", "high", "low", "close")]
+    if any(value is None or value <= 0 for value in values):
+        return False
+    opened, high, low, close = values
+    return low <= min(opened, close) <= max(opened, close) <= high and high > low
 
 
 def _candle_quality(candle):
@@ -154,12 +169,12 @@ def _relative_volume(candles, lookback=20):
 
 
 def _directional_movement(candles, period=14):
-    """Return latest +DI/-DI from a Wilder-style period window."""
+    """Return +DI/-DI using Wilder's seeded and recursively smoothed sums."""
     sample = list(candles or [])
-    if len(sample) < period + 1:
+    if period <= 0 or len(sample) < period + 1:
         return None
-    plus_dm, minus_dm, true_ranges = [], [], []
-    for previous, current in zip(sample[-(period + 1):-1], sample[-period:]):
+    true_ranges, plus_dm, minus_dm = [], [], []
+    for previous, current in zip(sample[:-1], sample[1:]):
         high, low = _value(current, "high"), _value(current, "low")
         prev_high, prev_low = _value(previous, "high"), _value(previous, "low")
         prev_close = _value(previous, "close")
@@ -169,12 +184,22 @@ def _directional_movement(candles, period=14):
         plus_dm.append(up if up > down and up > 0 else 0.0)
         minus_dm.append(down if down > up and down > 0 else 0.0)
         true_ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
-    tr_sum = sum(true_ranges)
-    if tr_sum <= 0:
+    if len(true_ranges) < period:
+        return None
+    tr_smooth = sum(true_ranges[:period])
+    plus_smooth = sum(plus_dm[:period])
+    minus_smooth = sum(minus_dm[:period])
+    for index in range(period, len(true_ranges)):
+        tr_smooth = tr_smooth - tr_smooth / period + true_ranges[index]
+        plus_smooth = plus_smooth - plus_smooth / period + plus_dm[index]
+        minus_smooth = minus_smooth - minus_smooth / period + minus_dm[index]
+    if tr_smooth <= 0:
         return None
     return {
-        "plus_di": 100.0 * sum(plus_dm) / tr_sum,
-        "minus_di": 100.0 * sum(minus_dm) / tr_sum,
+        "plus_di": 100.0 * plus_smooth / tr_smooth,
+        "minus_di": 100.0 * minus_smooth / tr_smooth,
+        "method": "WILDER_SMOOTHED",
+        "period": period,
     }
 
 
@@ -191,14 +216,22 @@ def _efficiency_ratio(values, period=20):
 
 
 def _rsi(values, period=14):
-    if len(values) < period + 1:
+    """Return Wilder RSI, seeded by the first period and recursively smoothed."""
+    sample = [float(value) for value in (values or [])]
+    if period <= 0 or len(sample) < period + 1 or any(not math.isfinite(v) for v in sample):
         return None
-    changes = [right - left for left, right in zip(values[-(period + 1):-1], values[-period:])]
-    gains = sum(max(change, 0.0) for change in changes) / period
-    losses = sum(max(-change, 0.0) for change in changes) / period
-    if losses <= 0:
-        return 100.0 if gains > 0 else 50.0
-    return 100.0 - 100.0 / (1.0 + gains / losses)
+    changes = [right - left for left, right in zip(sample, sample[1:])]
+    gains = [max(change, 0.0) for change in changes]
+    losses = [max(-change, 0.0) for change in changes]
+    average_gain = sum(gains[:period]) / period
+    average_loss = sum(losses[:period]) / period
+    for index in range(period, len(changes)):
+        average_gain = (average_gain * (period - 1) + gains[index]) / period
+        average_loss = (average_loss * (period - 1) + losses[index]) / period
+    if average_loss <= 0:
+        return 100.0 if average_gain > 0 else 50.0
+    relative_strength = average_gain / average_loss
+    return 100.0 - 100.0 / (1.0 + relative_strength)
 
 
 
@@ -282,6 +315,9 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     swing_highs, swing_lows = [], []
     for candle_set in candle_sets:
         sample = list(candle_set or [])[-120:]
+        # Invalid OHLC data must never manufacture a structural stop or target.
+        if any(not _valid_ohlc(item) for item in sample):
+            return None
         for index in range(2, len(sample) - 2):
             high = _value(sample[index], "high")
             low = _value(sample[index], "low")
