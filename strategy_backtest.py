@@ -345,6 +345,71 @@ def _walk_forward_summary(rows, start_ms, end_ms, folds=5):
         })
     return output
 
+
+STRATEGY_IDS = (
+    "trend_pullback", "volatility_breakout", "mean_reversion",
+    "liquidation_cascade", "orderflow_momentum", "relative_strength", "smc",
+)
+
+
+def _empty_pipeline_metrics():
+    return {
+        "analysis_snapshots": 0,
+        "raw_setups": 0,
+        "common_filter_passed": 0,
+        "common_filter_rejected": 0,
+        "selected": 0,
+        "status_counts": {},
+        "rejection_stage_counts": {},
+        "rejection_reason_counts": {},
+    }
+
+
+def _accumulate_pipeline_metrics(metrics_by_strategy, report):
+    """Count every strategy's generator/filter/selection exposure per snapshot."""
+    diagnostics = report.get("diagnostics") if isinstance(report, dict) else None
+    rows = diagnostics.get("strategies") if isinstance(diagnostics, dict) else None
+    if not isinstance(rows, list):
+        return
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        strategy_id = row.get("strategy_id")
+        if strategy_id not in metrics_by_strategy:
+            continue
+        metrics = metrics_by_strategy[strategy_id]
+        metrics["analysis_snapshots"] += 1
+        status = str(row.get("status") or "UNKNOWN")
+        statuses = metrics["status_counts"]
+        statuses[status] = statuses.get(status, 0) + 1
+
+        # The live report changes raw candidates' status after filtering and
+        # selection. These terminal statuses preserve the original pipeline
+        # stage without relying on mutable candidate objects.
+        if status in {"BLOCKED_COMMON_FILTER", "SELECTED", "FILTERED_NOT_SELECTED"}:
+            metrics["raw_setups"] += 1
+        if status in {"SELECTED", "FILTERED_NOT_SELECTED"}:
+            metrics["common_filter_passed"] += 1
+        elif status == "BLOCKED_COMMON_FILTER":
+            metrics["common_filter_rejected"] += 1
+        if row.get("selected") is True or status == "SELECTED":
+            metrics["selected"] += 1
+
+        stage = row.get("rejection_stage")
+        if stage:
+            stage = str(stage)
+            stages = metrics["rejection_stage_counts"]
+            stages[stage] = stages.get(stage, 0) + 1
+        reasons = row.get("rejection_reasons") or []
+        if not reasons and row.get("reason"):
+            reasons = [row["reason"]]
+        for reason in reasons:
+            key = str(reason)
+            counts = metrics["rejection_reason_counts"]
+            counts[key] = counts.get(key, 0) + 1
+
+
 def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
                                 limit_expiry_bars=8, maker_fee=0.0002, taker_fee=0.00055,
                                 spread_rate=0.0002, slippage_rate=0.0003,
@@ -386,6 +451,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
     if persist_outcomes and not funding_available:
         persistence_block_reason = "Historical funding series unavailable; cost-complete outcomes were not persisted."
     all_outcomes = defaultdict(list)
+    pipeline_metrics = {strategy_id: _empty_pipeline_metrics() for strategy_id in STRATEGY_IDS}
     active_until = -1
     calls = 0
     for index in range(300, len(candles) - 1, max(1, int(step))):
@@ -407,6 +473,7 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
             calls += 1
             continue
         calls += 1
+        _accumulate_pipeline_metrics(pipeline_metrics, report)
         # Replay only the one setup that passed the same common filter and
         # single-decision selector used by live analysis. Never open seven
         # simultaneous strategy trades from one market snapshot.
@@ -459,16 +526,18 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
             )
 
     results = {}
-    for strategy_id in (
-        "trend_pullback", "volatility_breakout", "mean_reversion",
-        "liquidation_cascade", "orderflow_momentum", "relative_strength", "smc",
-    ):
+    for strategy_id in STRATEGY_IDS:
         rows = all_outcomes.get(strategy_id, [])
         results[strategy_id] = {
             "IS": _summarize([item for item in rows if item["split"] == "is"]),
             "OOS": _summarize([item for item in rows if item["split"] == "oos"]),
             "all": _summarize(rows),
             "trades": rows,
+            "pipeline": {
+                **pipeline_metrics[strategy_id],
+                "realized_trades": len(rows),
+                "trade_sample_scope": "ONLY_WHEN_THIS_STRATEGY_WON_THE_SHARED_SINGLE_SETUP_SELECTION",
+            },
             "walk_forward": _walk_forward_summary(rows, evaluation_start, evaluation_end),
         }
     return {
@@ -479,6 +548,15 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
         "evaluation_start_ms": evaluation_start,
         "is_cutoff_ms": is_cutoff,
         "results": results,
+        "pipeline_diagnostics": {
+            "strategies": {key: value for key, value in pipeline_metrics.items()},
+            "selection_policy": "one selected setup per market snapshot; only selected setups are replayed",
+            "interpretation_warning": (
+                "Per-strategy realized trade metrics are conditional on winning the shared selector. "
+                "They are not independent counterfactual strategy backtests and must not be compared "
+                "as unbiased standalone strategy profitability."
+            ),
+        },
         "performance_records": journal.performance_snapshot(
             symbol=symbol,
             source_revision=revision,
