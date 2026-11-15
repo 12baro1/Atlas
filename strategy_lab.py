@@ -12,6 +12,7 @@ from statistics import median
 from orderbook_engine import OrderBookEngine
 from risk_engine import RiskEngine
 from config import Config
+from strategy_submotors import (trend_structure, displacement, volatility_regime, breakout_acceptance, statistical_deviation, rsi_divergence)
 
 _ORDERBOOK_ENGINE = OrderBookEngine()
 
@@ -490,6 +491,8 @@ def _trend_pullback(data):
         return None
     trend_separation = abs(e20 - e50) / atr
     pullback_distance = abs(entry - e1) / atr
+    structure_evidence = trend_structure(h4)
+    impulse_evidence = displacement(h1, atr)
     if (direction == "LONG" and trend_slope <= 0) or (direction == "SHORT" and trend_slope >= 0):
         return None
     strength = min(92.0, 60.0 + min(trend_separation * 5.0, 10.0)
@@ -506,7 +509,9 @@ def _trend_pullback(data):
             f"1H EMA20 pullback reclaim; body={quality['body_ratio']:.2f}; close-location={quality['close_location']:.2f}",
         ]
         plan["trend_metrics"] = {"adx": round(adx_value, 2), **{key: round(value, 2) for key, value in directional.items()},
-                                 "efficiency_ratio": round(efficiency, 3), "pullback_distance_atr": round(pullback_distance, 3)}
+                                 "efficiency_ratio": round(efficiency, 3), "pullback_distance_atr": round(pullback_distance, 3),
+                                 "structure": structure_evidence, "displacement": impulse_evidence}
+        plan["reasons"].append(f"Structure motor={structure_evidence['state']} (quality={structure_evidence['quality']:.2f}); displacement={impulse_evidence.get('state')}")
     return plan
 
 
@@ -524,6 +529,8 @@ def _volatility_breakout(data):
         if band:
             bandwidths.append((band[2] - band[0]) / max(band[1], 1e-12))
     prior_band = _bollinger(closes[-21:-1])
+    volatility_evidence = volatility_regime(candles)
+    breakout_evidence = breakout_acceptance(candles, 20)
     if not bandwidths or prior_band is None:
         return None
     prior_width = (prior_band[2] - prior_band[0]) / max(prior_band[1], 1e-12)
@@ -544,13 +551,13 @@ def _volatility_breakout(data):
         return None
     upper_boundary, lower_boundary = max(prior_highs), min(prior_lows)
     direction = None
-    if (close > upper_boundary and entry >= close and entry <= upper_boundary + atr
+    if (close > upper_boundary and breakout_evidence.get("state") == "ACCEPTED" and breakout_evidence.get("direction") == "LONG" and entry >= close and entry <= upper_boundary + atr
             and volume_ratio >= 1.30 and quality["direction"] == "BULLISH"
             and quality["body_ratio"] >= 0.50 and quality["close_location"] >= 0.75
             and quality["range"] >= 0.75 * atr):
         direction = "LONG"
         stop = entry - 1.5 * atr
-    elif (close < lower_boundary and entry <= close and entry >= lower_boundary - atr
+    elif (close < lower_boundary and breakout_evidence.get("state") == "ACCEPTED" and breakout_evidence.get("direction") == "SHORT" and entry <= close and entry >= lower_boundary - atr
             and volume_ratio >= 1.30 and quality["direction"] == "BEARISH"
             and quality["body_ratio"] >= 0.50 and quality["close_location"] <= 0.25
             and quality["range"] >= 0.75 * atr):
@@ -574,7 +581,8 @@ def _volatility_breakout(data):
                                     "relative_volume": round(volume_ratio, 3),
                                     "candle_body_ratio": round(quality["body_ratio"], 3),
                                     "candle_range_atr": round(quality["range"] / atr, 3),
-                                    "breakout_distance_atr": round(breakout_distance, 3)}
+                                    "breakout_distance_atr": round(breakout_distance, 3),
+                                    "acceptance": breakout_evidence, "volatility_regime": volatility_evidence}
     return plan
 
 
@@ -588,6 +596,8 @@ def _mean_reversion(data, regime):
         return None
     previous_bands = _bollinger(closes[:-1])
     previous_rsi = _rsi(closes[:-1])
+    deviation_evidence = statistical_deviation(closes, 20)
+    divergence_evidence = rsi_divergence(candles, [_rsi(closes[:i+1]) for i in range(len(closes))])
     if previous_bands is None or previous_rsi is None:
         return None
     lower, _, upper = bands
@@ -635,7 +645,8 @@ def _mean_reversion(data, regime):
         ]
         plan["mean_reversion_metrics"] = {"rsi": round(rsi, 2), "prior_rsi": round(previous_rsi, 2),
                                           "vwap_distance_atr": round(vwap_distance_atr, 3),
-                                          "rejection_wick_ratio": round(rejection_wick, 3)}
+                                          "rejection_wick_ratio": round(rejection_wick, 3),
+                                          "statistical_deviation": deviation_evidence, "rsi_divergence": divergence_evidence}
     return plan
 
 
@@ -741,6 +752,7 @@ def _orderflow_momentum(data):
             "candle_body_ratio": round(quality["body_ratio"], 3),
             "candle_close_location": round(quality["close_location"], 3),
             "absorption_proxy": absorption,
+            "displacement": displacement(candles, atr),
         }
     return plan
 
@@ -816,7 +828,8 @@ def _liquidation_cascade(data):
             "Liquidation-side interpretation is an OI/flow proxy, not exchange liquidation-event data",
         ]
         plan["data_quality"] = "OI_CONTRACTION_PROXY_NOT_EXCHANGE_LIQUIDATION_FEED"
-        plan["liquidation_metrics"] = {"oi_change_pct": round(oi_change * 100, 3),
+        plan["liquidation_metrics"] = {"event_class": "SHORT_SQUEEZE_PROXY" if direction == "SHORT" else "LONG_SQUEEZE_PROXY",
+                                      "oi_change_pct": round(oi_change * 100, 3),
                                       "impulse_atr": round(impulse, 3),
                                       "relative_volume": round(relative_volume, 3),
                                       "taker_buy_notional_ratio": round(buy_ratio, 3),
@@ -952,6 +965,7 @@ def _relative_strength(data):
             "residual_volatility_4h": round(residual_volatility, 6),
             "market_return_12x4h": round(benchmark_return_12, 6),
             "sector_peers_used": len(sector_maps) if use_sector else 0,
+            "volatility_regime": volatility_regime(candles),
         }
     return plan
 
