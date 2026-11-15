@@ -392,6 +392,57 @@ def _setup_diagnostic(strategy_id, data, regime):
     return checks[0] if len(checks) == 1 else " | ".join(checks)
 
 
+_STRATEGY_INPUT_FIELDS = {
+    "trend_pullback": ("4h", "1h", "current_price"),
+    "volatility_breakout": ("1h", "current_price"),
+    "mean_reversion": ("15m", "current_price"),
+    "liquidation_cascade": ("1h", "open_interest", "open_interest_timestamps_ms",
+                            "recent_trades", "funding_rate", "liquidation_events"),
+    "orderflow_momentum": ("15m", "orderbook", "orderbook_timestamp_ms",
+                           "recent_trades", "recent_trades_timestamp_ms",
+                           "trade_flow_history", "liquidation_events"),
+    "relative_strength": ("4h", "correlation_universe", "sector_peer_universe"),
+    "smc": ("15m", "1h", "4h", "1d", "1w", "smt_universe"),
+}
+
+
+def _strategy_data_usage(strategy_id, data, smc_result=None):
+    """Expose actual generator input availability without imposing shared gates."""
+    fields = _STRATEGY_INPUT_FIELDS.get(strategy_id, ())
+    inputs = {}
+    for field in fields:
+        value = data.get(field)
+        if field == "current_price":
+            available = value is not None
+        elif field == "orderbook":
+            available = isinstance(value, dict) and bool(value.get("bids")) and bool(value.get("asks"))
+        elif field.endswith("_timestamps_ms"):
+            available = bool(value)
+        elif field in {"correlation_universe", "sector_peer_universe", "smt_universe"}:
+            available = isinstance(value, dict) and bool(value)
+        else:
+            available = bool(value)
+        inputs[field] = "AVAILABLE" if available else "UNAVAILABLE"
+    if strategy_id == "smc":
+        inputs["smc_specialist_result"] = (
+            "AVAILABLE" if isinstance(smc_result, dict) and smc_result else "UNAVAILABLE"
+        )
+    shared = data.get("shared_market_evidence") or {}
+    sources = shared.get("sources") or {}
+    relevant_sources = {
+        key: value for key, value in sources.items()
+        if key in {
+            "ohlcv", "orderbook", "trades", "liquidations",
+            "open_interest", "funding",
+        }
+    }
+    return {
+        "generator_inputs": inputs,
+        "shared_source_status": relevant_sources,
+        "note": "Availability/provenance diagnostics; strategies retain independent setup rules.",
+    }
+
+
 class SevenStrategyLab:
     """Run six independent generators plus one integrated SMC setup generator."""
 
@@ -408,6 +459,10 @@ class SevenStrategyLab:
     @analysis_scope
     def analyze(self, data, smc_result=None, performance_by_strategy=None):
         """Run seven independent setup generators, one shared filter, one selector."""
+        if not isinstance(data.get("shared_market_evidence"), dict):
+            from shared.market_data_services import build_shared_market_evidence
+            data = dict(data)
+            data["shared_market_evidence"] = build_shared_market_evidence(data)
         regime = _regime(data)
         evaluators = {
             "trend_pullback": lambda: _trend_pullback(data),
@@ -441,6 +496,7 @@ class SevenStrategyLab:
                         "reason": reason,
                         "rejection_stage": "STRATEGY_GENERATOR",
                         "rejection_reasons": [reason],
+                        "data_usage": _strategy_data_usage(strategy_id, data, smc_result),
                     })
                     continue
                 candidate = dict(candidate)
@@ -448,6 +504,7 @@ class SevenStrategyLab:
                 candidate["strategy"] = STRATEGY_NAMES[strategy_id]
                 candidate["status"] = "RAW_SETUP"
                 candidate["regime_fit"] = round(_regime_fit(strategy_id, regime), 3)
+                candidate["data_usage"] = _strategy_data_usage(strategy_id, data, smc_result)
                 generated.append(candidate)
                 results.append(candidate)
             except Exception as exc:
