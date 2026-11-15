@@ -171,8 +171,8 @@ def absorption_evidence(trades, candles, min_imbalance=0.20):
     except (AttributeError, TypeError, ValueError, OverflowError):
         return {"state": "UNAVAILABLE"}
     imbalance = (buy - sell) / total
-    label = "BUYER_FLOW_ABSORBED_PROXY" if imbalance >= min_imbalance and close < opened else \\
-            "SELLER_FLOW_ABSORBED_PROXY" if imbalance <= -min_imbalance and close > opened else "NONE"
+    label = ("BUYER_FLOW_ABSORBED_PROXY" if imbalance >= min_imbalance and close < opened else
+             "SELLER_FLOW_ABSORBED_PROXY" if imbalance <= -min_imbalance and close > opened else "NONE")
     return {"state": "AVAILABLE", "classification": label, "buy_sell_imbalance": round(imbalance, 4),
             "disclaimer": "Public trade/candle inference only; passive absorption is not directly observable"}
 
