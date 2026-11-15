@@ -19,7 +19,12 @@ def _key_part(value):
     if isinstance(value, float):
         return ("float", value.hex()) if math.isfinite(value) else ("float", repr(value))
     if isinstance(value, (list, tuple)):
-        return (type(value).__name__, tuple(_key_part(item) for item in value))
+        if all(item is None or isinstance(item, (str, bytes, int, float, bool)) for item in value):
+            return (type(value).__name__, tuple(_key_part(item) for item in value))
+        # Candle/model collections are stable for the duration of one analysis
+        # call. Identity avoids walking thousands of bars just to form a cache key.
+        return (type(value).__name__, id(value), len(value),
+                id(value[0]) if value else None, id(value[-1]) if value else None)
     if isinstance(value, dict):
         return ("dict", tuple(sorted((str(key), _key_part(item)) for key, item in value.items())))
     # Candle/model instances are treated as immutable during one analysis pass.
