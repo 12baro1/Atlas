@@ -206,3 +206,10 @@ python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
 - Liquidation Cascade, gerçek liquidation-event akışı değildir; tarihsel OI/funding ve varsa arşivlenmiş trade-flow ile sınırlı bir proxy'dir.
 
 Komisyon, spread ve slippage hâlâ parametreli yürütme varsayımlarıdır; gerçek emir gerçekleşme fiyatı değildir. Walk-forward çıktısı kârlılık garantisi veya parametre optimizasyonu anlamına gelmez.
+
+
+### Ortak analiz servisleri
+
+- `shared/analysis_services.py`: OHLCV doğrulama, seri çıkarımı, EMA, Wilder ATR/ADX, RSI, VWAP, Bollinger, yönsel hareket ve mum anatomisi gibi strateji-nötr hesaplamaların tek kaynağıdır.
+- `shared/analysis_context.py`: her `SevenStrategyLab.analyze()` çağrısında izole bir memoization bağlamı açar. Aynı kapanmış mum nesneleri ve parametrelerle istenen hesaplamalar stratejiler arasında yeniden kullanılabilir; yeni sembol/snapshot analizinde cache temiz başlar.
+- `strategy_lab.py` bu servisleri eski yardımcı adlarıyla dışa aktarmaya devam eder; böylece strateji adaptörlerinin uyumluluğu korunurken hesaplama sahipliği `shared/` katmanına taşınır.
