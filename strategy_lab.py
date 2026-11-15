@@ -15,6 +15,7 @@ from config import Config
 from strategy_submotors import (trend_structure, displacement, volatility_regime, breakout_acceptance, statistical_deviation, rsi_divergence)
 from smc_submotors import dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, narrative as smc_narrative
 from microstructure_submotors import cumulative_volume_delta, liquidation_events, beta_stability, relative_volume
+from strategies.orderflow.analytics import build_footprint, liquidity_walls
 
 _ORDERBOOK_ENGINE = OrderBookEngine()
 
@@ -734,6 +735,11 @@ def _orderflow_momentum(data):
     if int(flow.get("trade_count") or 0) < 20:
         return None
     absorption = _absorption_proxy(flow, last, atr)
+    # CVD is a strategy input, not just a report metric. When a timestamped
+    # WebSocket history exists, contradictory cumulative aggressor flow blocks
+    # continuation entries; unavailable history is reported, never fabricated.
+    cvd_evidence = cumulative_volume_delta(data.get("trade_flow_history") or [])
+    cvd_direction = cvd_evidence.get("direction") if cvd_evidence.get("state") == "AVAILABLE" else None
     direction = None
     if absorption == "BUYER_FLOW_ABSORBED":
         direction = "SHORT"
@@ -742,11 +748,13 @@ def _orderflow_momentum(data):
         direction = "LONG"
         stop = entry - 1.5 * atr
     elif (imbalance >= 0.18 and trade_delta >= 0.12 and close > opened and entry >= opened
-          and quality["body_ratio"] >= 0.30 and quality["close_location"] >= 0.65):
+          and quality["body_ratio"] >= 0.30 and quality["close_location"] >= 0.65
+          and cvd_direction != "SELL_DOMINANT"):
         direction = "LONG"
         stop = entry - 1.5 * atr
     elif (imbalance <= -0.18 and trade_delta <= -0.12 and close < opened and entry <= opened
-          and quality["body_ratio"] >= 0.30 and quality["close_location"] <= 0.35):
+          and quality["body_ratio"] >= 0.30 and quality["close_location"] <= 0.35
+          and cvd_direction != "BUY_DOMINANT"):
         direction = "SHORT"
         stop = entry + 1.5 * atr
     else:
@@ -766,9 +774,10 @@ def _orderflow_momentum(data):
         plan["data_quality"] = "ABSORPTION_PROXY" if absorption else "FRESH_BOOK_AND_NOTIONAL_TRADE_FLOW"
         if absorption:
             plan["reasons"].append(f"Absorption proxy: {absorption}; passive absorption is inferred, not directly observed")
-        cvd_evidence = cumulative_volume_delta(data.get("trade_flow_history") or [])
         plan["orderflow_metrics"] = {
             "cvd": cvd_evidence,
+            "footprint": build_footprint(data.get("recent_trades") or []),
+            "liquidity_walls": liquidity_walls(book),
             "bid_notional": flow.get("bid_notional"),
             "ask_notional": flow.get("ask_notional"),
             "trade_delta": trade_delta,
