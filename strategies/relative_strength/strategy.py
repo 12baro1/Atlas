@@ -1,3 +1,6 @@
+import math
+
+
 """Independent beta-adjusted relative_strength setup generator."""
 
 def generate(data):
