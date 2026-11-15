@@ -1,0 +1,20 @@
+[Unit]
+Description=Atlas seven-strategy live market analysis
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Atlas
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-%h/Atlas/.env
+ExecStart=%h/Atlas/.venv/bin/python %h/Atlas/atlas_service.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

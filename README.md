@@ -55,6 +55,53 @@ Belirli bir sembolle doğrudan açmak için:
 ./atlas ETH
 ```
 
+## VPS üzerinde sürekli canlı analiz servisi
+
+Sunucu servisi, terminal arayüzünü açmadan aynı `AtlasRuntime` ve `AtlasEngine` analiz hattını arka planda çalıştırır. Tek coin analizindeki yedi strateji, ortak analiz servisleri ve tek karar mekanizması değiştirilmez. Varsayılan sembol sınırı yoktur; Bybit'teki desteklenen aktif USDT perpetual piyasalarının tamamı taranır. İstersen `.env` içinde `ATLAS_MAX_SYMBOLS` ile kendin sınır koyabilirsin.
+
+```bash
+cd ~/Atlas
+cp .env.example .env
+# İsteğe bağlı ayarları .env içinde düzenle.
+source .venv/bin/activate
+python -m pytest -q tests/test_atlas_service.py
+mkdir -p ~/.config/systemd/user
+cp deploy/atlas.service ~/.config/systemd/user/atlas.service
+systemctl --user daemon-reload
+systemctl --user enable --now atlas.service
+```
+
+SSH oturumu kapandıktan ve VPS yeniden başladıktan sonra da kullanıcı servisi çalışsın diye bir kez:
+```bash
+sudo loginctl enable-linger administrator
+```
+
+Durum ve günlükler:
+```bash
+systemctl --user status atlas.service
+journalctl --user -u atlas.service -f
+systemctl --user restart atlas.service
+systemctl --user stop atlas.service
+```
+
+Servis, yedi stratejili analiz hattını değiştirmez. VPS modunda eski otomatik Telegram sinyal bildirimi ve eski Telegram polling kapalı tutulur; yeni Telegram entegrasyonu yalnızca tanınan grup komutlarına cevap verir, kendi kendine sinyal göndermez. Otomatik emir gönderimi de kapalıdır.
+
+### Telegram grup komutları
+
+Botu gruba ekledikten sonra BotFather üzerinden `/setprivacy` → botu seç → **Disable** yap. Bu ayar, botun gruptaki düz `BTC` mesajını görebilmesi için gereklidir.
+
+VPS'deki `.env` dosyasına şu ayarları ekle:
+
+```env
+ATLAS_TELEGRAM_COMMANDS_ENABLED=1
+ATLAS_TELEGRAM_BOT_TOKEN=
+ATLAS_TELEGRAM_CHAT_ID=
+```
+
+Token'ı depoya veya sohbetlere yazma. `ATLAS_TELEGRAM_CHAT_ID` yalnızca izin verilen grubun ID'si olmalıdır. Bot diğer sohbetleri ve tanınmayan grup mesajlarını sessizce yok sayar.
+
+Desteklenen örnekler: `BTC`, `ETH`, `en iyi 5 işlem`, `50 analiz et`, `tüm piyasayı tara`, `likidite BTC`, `performans`, `öğrenme`, `yardım`. Uzun taramalar tamamlanana kadar sonraki komutlar sırada bekler.
+
 ## Kullanım
 
 Atlas açıldığında komut alanına sembol veya desteklenen komutlardan birini yaz:
