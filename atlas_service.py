@@ -50,9 +50,6 @@ def _load_environment() -> None:
         raise RuntimeError("python-dotenv is required; install requirements.txt") from exc
     load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
 
-    # Preserve the repository's existing optional integrations and settings.
-    # Order execution remains disabled by Atlas' own Config safety contract.
-
 
 def main() -> int:
     _load_environment()
@@ -66,6 +63,13 @@ def main() -> int:
     from config import Config
     from data_engine import exchange
     from atlas_runtime import AtlasRuntime
+    from telegram_command_service import create_telegram_command_service
+
+    # The VPS Telegram integration is command/reply only. Never enable the
+    # legacy automatic signal notifier or its independent polling integration.
+    Config.TELEGRAM_ENABLED = False
+    Config.TELEGRAM_POLLING_ENABLED = False
+    Config.TELEGRAM_WEBHOOK_ENABLED = False
 
     max_symbols = configured_max_symbols(os.getenv("ATLAS_MAX_SYMBOLS"))
     interval = float(os.getenv("ATLAS_SCAN_INTERVAL_SECONDS", str(DEFAULT_SCAN_INTERVAL_SECONDS)))
@@ -79,6 +83,10 @@ def main() -> int:
         raise RuntimeError("No active USDT perpetual swap symbols were found on Bybit")
 
     runtime = AtlasRuntime(symbols=symbols, logger=logger, full_scan=True)
+    telegram_commands = create_telegram_command_service(runtime, logger=logger)
+    if telegram_commands is not None:
+        runtime.attach_telegram_service(telegram_commands)
+
     stop_event = threading.Event()
 
     def request_stop(signum, _frame):
@@ -101,6 +109,8 @@ def main() -> int:
     logger.info("Selected symbols: %s", ", ".join(symbols))
 
     runtime.start(daemon=True)
+    if telegram_commands is not None:
+        telegram_commands.start()
     last_cycle = 0
     try:
         while not stop_event.wait(5):
