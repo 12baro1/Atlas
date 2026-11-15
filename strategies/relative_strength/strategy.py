@@ -1,4 +1,6 @@
-"""Independent beta-adjusted relative_strength setup generator."""\n\ndef generate(data):
+"""Independent beta-adjusted relative_strength setup generator."""
+
+def generate(data):
     from strategy_lab import _series, _atr, _value, _ema, _current_price, _valid_plan, _entry_reference, _structure_candle_sets, beta_stability, relative_volume, volatility_regime
     """Beta-adjusted relative strength versus market and optional sector peers."""
     candles = data.get("4h") or []
@@ -131,4 +133,4 @@
             "relative_volume": relative_volume(_value(candles[-1], "volume"), [_value(x, "volume") for x in candles[-21:-1]]),
             "volatility_regime": volatility_regime(candles),
         }
-    return plan\n
+    return plan
