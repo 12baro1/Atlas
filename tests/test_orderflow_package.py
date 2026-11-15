@@ -180,3 +180,18 @@ def test_orderflow_generator_uses_footprint_and_blocks_nearby_wall(monkeypatch):
     data["current_price"] = 100.8
     data["orderbook"]["asks"] = [[101, 20], [102, 1], [103, 1]]
     assert generate(data) is None
+
+
+def test_orderflow_rejects_stale_shared_book_or_trade_evidence():
+    from strategies.orderflow.strategy import generate
+
+    assert generate({
+        "shared_market_evidence": {
+            "sources": {
+                "orderbook": {"state": "STALE"},
+                "trades": {"state": "FRESH"},
+            }
+        },
+        "orderbook": {"bids": [[99, 1]], "asks": [[101, 1]]},
+        "recent_trades": [{"price": 100, "size": 1, "side": "BUY"}],
+    }) is None
