@@ -419,6 +419,8 @@ def _strategy_data_usage(strategy_id, data, smc_result=None):
         "relative_strength": {"4h": 55},
         "smc": {"15m": 1, "1h": 1, "4h": 1, "1d": 1, "1w": 1},
     }.get(strategy_id, {})
+    shared_snapshot = data.get("shared_market_evidence") or {}
+    shared_sources = shared_snapshot.get("sources") or {}
     symbol = str(data.get("symbol") or "").upper()
     benchmark_keys = (
         ["ETH"] if symbol.startswith("BTC/") else
@@ -434,17 +436,37 @@ def _strategy_data_usage(strategy_id, data, smc_result=None):
             available = value is not None or bool(data.get("15m"))
             status = "AVAILABLE" if available else "UNAVAILABLE"
         elif field == "orderbook":
-            available = isinstance(value, dict) and bool(value.get("bids")) and bool(value.get("asks"))
-            status = "AVAILABLE" if available else "UNAVAILABLE"
+            source_state = (shared_sources.get("orderbook") or {}).get("state")
+            available = (
+                source_state == "FRESH" if source_state is not None
+                else isinstance(value, dict) and bool(value.get("bids")) and bool(value.get("asks"))
+            )
+            status = "AVAILABLE" if available else source_state or "UNAVAILABLE"
         elif field == "open_interest":
-            available = len(value or []) >= 2
-            status = "AVAILABLE" if available else "INSUFFICIENT_HISTORY"
+            oi_evidence = shared_snapshot.get("open_interest") or {}
+            available = (
+                oi_evidence.get("state") == "FRESH" and int(oi_evidence.get("count") or 0) >= 2
+                if shared_snapshot else len(value or []) >= 2
+            )
+            status = "AVAILABLE" if available else oi_evidence.get("state") or "INSUFFICIENT_HISTORY"
         elif field == "open_interest_timestamps_ms":
             available = len(value or []) >= 2
             status = "AVAILABLE" if available else "INSUFFICIENT_HISTORY"
         elif field == "recent_trades":
-            available = len(value or []) >= 20
-            status = "AVAILABLE" if available else "INSUFFICIENT_DATA"
+            trade_evidence = shared_snapshot.get("trades") or {}
+            valid_count = int(trade_evidence.get("trade_count") or 0)
+            available = (
+                trade_evidence.get("state") == "FRESH" and valid_count >= 20
+                if shared_snapshot else len(value or []) >= 20
+            )
+            status = "AVAILABLE" if available else trade_evidence.get("state") or "INSUFFICIENT_DATA"
+        elif field == "funding_rate":
+            funding_evidence = shared_snapshot.get("funding") or {}
+            available = (
+                funding_evidence.get("state") == "FRESH"
+                if shared_snapshot and value else bool(value)
+            )
+            status = "AVAILABLE" if available else funding_evidence.get("state") or "UNAVAILABLE"
         elif field.endswith("_timestamps_ms"):
             available = bool(value)
             status = "AVAILABLE" if available else "UNAVAILABLE"
