@@ -169,19 +169,15 @@ def test_backtest_coverage_accepts_listing_limited_weekly_warmup(capsys):
 
 
 def test_backtest_coverage_rejects_late_start():
-    """Exchange'in gerçek veri sınırlaması (örn. Bybit 15m ~7 gun) nedeniyle
-    baslangic araligi simdiden hata degil, uyarı olarak raporlanir ve mevcut
-    gercek veriyle devam edilir. Sahte veri uretilmez."""
+    """Missing requested history must fail instead of mislabeling partial data."""
     now_ms = 2_000_000_000_000
     data = _complete_coverage_data(days=2, now_ms=now_ms)
     data["4h"] = data["4h"][10:]
 
-    # Baslangic araligi eksik olduysa da fonksiyon hata firlatmamali,
-    # mevcut gercek veriyle calismaya devam etmeli.
-    result = backtest._validate_backtest_coverage(
-        data, "BTC/USDT:USDT", days=2, now_ms=now_ms
-    )
-    assert result["4h"]["count"] >= 0
+    with pytest.raises(RuntimeError, match="istenen tarih aralığının başlangıcı eksik"):
+        backtest._validate_backtest_coverage(
+            data, "BTC/USDT:USDT", days=2, now_ms=now_ms
+        )
 
 
 def test_backtest_coverage_rejects_large_internal_gap():
@@ -225,7 +221,9 @@ def test_fetch_history_clears_transient_error_after_success(monkeypatch):
 
     assert len(candles) == 1
     assert candles[0].time == 60_000
-    assert calls["count"] == 2
+    # A successful short page is followed by one empty page to prove the
+    # requested interval is exhausted; the transient error is not retried.
+    assert calls["count"] == 3
 
 
 
@@ -253,7 +251,8 @@ def test_fetch_history_uses_binance_fallback_after_bybit_geoblock(monkeypatch):
 
     assert len(candles) == 1
     assert calls["bybit"] == 1
-    assert calls["fallback"] == 1
+    # The fallback provider is paged until it returns an empty page.
+    assert calls["fallback"] == 2
     assert "Binance USD-M Futures" in backtest._history_provider_name
 
 
