@@ -71,7 +71,9 @@ def _prune_if_needed(path, now_ms):
 def record_snapshot(symbol, data):
     book = data.get("orderbook")
     trades = data.get("recent_trades")
-    if not isinstance(book, dict) and not isinstance(trades, list):
+    flow_history = data.get("trade_flow_history")
+    liquidations = data.get("liquidation_events")
+    if not isinstance(book, dict) and not isinstance(trades, list) and not isinstance(flow_history, list) and not isinstance(liquidations, list):
         return False
     timestamp = int(data.get("snapshot_timestamp_ms") or 0)
     if timestamp <= 0:
@@ -83,6 +85,8 @@ def record_snapshot(symbol, data):
         "recent_trades_timestamp_ms": data.get("recent_trades_timestamp_ms"),
         "orderbook": book if isinstance(book, dict) else None,
         "recent_trades": trades if isinstance(trades, list) else None,
+        "trade_flow_history": flow_history if isinstance(flow_history, list) else [],
+        "liquidation_events": liquidations if isinstance(liquidations, list) else [],
     }
     path = _path(symbol)
     with _LOCK:
@@ -136,10 +140,16 @@ def snapshot_at(symbol, asof_ms, *, book_max_age_ms=15_000, trades_max_age_ms=30
     row = best[1]
     book_ms = int(row.get("orderbook_timestamp_ms") or 0)
     trades_ms = int(row.get("recent_trades_timestamp_ms") or 0)
+    history = [item for item in (row.get("trade_flow_history") or [])
+               if isinstance(item, dict) and 0 <= int(asof_ms) - int(item.get("timestamp_ms") or 0) <= 6 * 60 * 60 * 1000]
+    events = [item for item in (row.get("liquidation_events") or [])
+              if isinstance(item, dict) and 0 <= int(asof_ms) - int(item.get("timestamp_ms") or 0) <= 15 * 60 * 1000]
     return {
         "orderbook": row.get("orderbook") if 0 <= asof_ms - book_ms <= book_max_age_ms else None,
         "orderbook_timestamp_ms": book_ms or None,
         "recent_trades": row.get("recent_trades") if 0 <= asof_ms - trades_ms <= trades_max_age_ms else None,
         "recent_trades_timestamp_ms": trades_ms or None,
+        "trade_flow_history": history,
+        "liquidation_events": events,
         "microstructure_snapshot_timestamp_ms": best[0],
     }
