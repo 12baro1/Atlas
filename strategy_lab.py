@@ -448,7 +448,11 @@ def _strategy_data_usage(strategy_id, data, smc_result=None):
                 oi_evidence.get("state") == "FRESH" and int(oi_evidence.get("count") or 0) >= 2
                 if shared_snapshot else len(value or []) >= 2
             )
-            status = "AVAILABLE" if available else oi_evidence.get("state") or "INSUFFICIENT_HISTORY"
+            status = (
+                "AVAILABLE" if available else
+                "INSUFFICIENT_HISTORY" if int(oi_evidence.get("count") or len(value or [])) < 2
+                else oi_evidence.get("state") or "INSUFFICIENT_HISTORY"
+            )
         elif field == "open_interest_timestamps_ms":
             available = len(value or []) >= 2
             status = "AVAILABLE" if available else "INSUFFICIENT_HISTORY"
@@ -459,7 +463,11 @@ def _strategy_data_usage(strategy_id, data, smc_result=None):
                 trade_evidence.get("state") == "FRESH" and valid_count >= 20
                 if shared_snapshot else len(value or []) >= 20
             )
-            status = "AVAILABLE" if available else trade_evidence.get("state") or "INSUFFICIENT_DATA"
+            status = (
+                "AVAILABLE" if available else
+                "INSUFFICIENT_DATA" if valid_count < 20
+                else trade_evidence.get("state") or "INSUFFICIENT_DATA"
+            )
         elif field == "funding_rate":
             funding_evidence = shared_snapshot.get("funding") or {}
             available = (
