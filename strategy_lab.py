@@ -16,6 +16,7 @@ from strategy_submotors import (trend_structure, displacement, volatility_regime
 from strategies.smc.submotors import dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, narrative as smc_narrative
 from microstructure_submotors import cumulative_volume_delta, liquidation_events, beta_stability, relative_volume
 from strategies.orderflow.analytics import build_footprint, liquidity_walls
+from shared.analysis_context import analysis_scope, cached_analysis
 
 _ORDERBOOK_ENGINE = OrderBookEngine()
 
@@ -52,6 +53,7 @@ STRATEGY_NAMES = {
 }
 
 
+@cached_analysis
 def _value(candle, name):
     try:
         value = float(getattr(candle, name))
@@ -60,6 +62,7 @@ def _value(candle, name):
     return value if math.isfinite(value) else None
 
 
+@cached_analysis
 def _series(candles, field="close"):
     """Return an aligned numeric series; never compress gaps in candle history."""
     sample = list(candles or [])
@@ -71,6 +74,7 @@ def _series(candles, field="close"):
     return values
 
 
+@cached_analysis
 def _ema(values, period):
     if len(values) < period:
         return None
@@ -81,6 +85,7 @@ def _ema(values, period):
     return result
 
 
+@cached_analysis
 def _atr(candles, period=14):
     """Return Wilder-smoothed ATR using all available closed bars."""
     sample = list(candles or [])
@@ -102,6 +107,7 @@ def _atr(candles, period=14):
 
 
 
+@cached_analysis
 def _adx(candles, period=14):
     """Return ADX using Wilder-smoothed TR/+DM/-DM and Wilder-smoothed DX."""
     sample = list(candles or [])
@@ -148,6 +154,7 @@ def _adx(candles, period=14):
     return adx_value if math.isfinite(adx_value) else None
 
 
+@cached_analysis
 def _valid_ohlc(candle):
     """Reject malformed OHLC bars before they can create pivots or indicators."""
     values = [_value(candle, key) for key in ("open", "high", "low", "close")]
@@ -157,6 +164,7 @@ def _valid_ohlc(candle):
     return low <= min(opened, close) <= max(opened, close) <= high and high > low
 
 
+@cached_analysis
 def _candle_quality(candle):
     """Normalized candle anatomy; scale-invariant across symbols and prices."""
     opened, high, low, close = (_value(candle, key) for key in ("open", "high", "low", "close"))
@@ -174,6 +182,7 @@ def _candle_quality(candle):
     }
 
 
+@cached_analysis
 def _relative_volume(candles, lookback=20):
     """Last-bar volume relative to the median of preceding closed bars."""
     sample = list(candles or [])
@@ -193,6 +202,7 @@ def _relative_volume(candles, lookback=20):
     return ratio if math.isfinite(ratio) else None
 
 
+@cached_analysis
 def _directional_movement(candles, period=14):
     """Return +DI/-DI using Wilder's seeded and recursively smoothed sums."""
     sample = list(candles or [])
@@ -228,6 +238,7 @@ def _directional_movement(candles, period=14):
     }
 
 
+@cached_analysis
 def _efficiency_ratio(values, period=20):
     """Kaufman-style directional efficiency, from 0 (chop) to 1 (one-way)."""
     if len(values) < period + 1:
@@ -240,6 +251,7 @@ def _efficiency_ratio(values, period=20):
     return result if math.isfinite(result) else None
 
 
+@cached_analysis
 def _rsi(values, period=14):
     """Return Wilder RSI, seeded by the first period and recursively smoothed."""
     sample = [float(value) for value in (values or [])]
@@ -261,6 +273,7 @@ def _rsi(values, period=14):
 
 
 
+@cached_analysis
 def _vwap(candles):
     numerator = denominator = 0.0
     for candle in candles or []:
@@ -276,6 +289,7 @@ def _vwap(candles):
     value = numerator / denominator
     return value if math.isfinite(value) and value > 0 else None
 
+@cached_analysis
 def _bollinger(values, period=20, deviations=2.0):
     if len(values) < period:
         return None
@@ -410,6 +424,7 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
     plan["partial_exit_weights"] = _configured_partial_tp_weights()
     return plan
 
+@cached_analysis
 def _current_price(data):
     try:
         value = float(data.get("current_price"))
@@ -421,10 +436,12 @@ def _current_price(data):
     return _value(candles[-1], "close") if candles else None
 
 
+@cached_analysis
 def _entry_reference(data):
     return str(data.get("current_price_source") or "LAST_CLOSED_15M_FALLBACK")
 
 
+@cached_analysis
 def _structure_candle_sets(data):
     """Return available OHLCV series separately, preserving timeframe identity."""
     return [
@@ -434,6 +451,7 @@ def _structure_candle_sets(data):
     ]
 
 
+@cached_analysis
 def _regime(data):
     candles = data.get("4h") or []
     closes = _series(candles)
@@ -478,6 +496,7 @@ def _volatility_breakout(data):
 def _mean_reversion(data, regime):
     from strategies.mean_reversion import generate
     return generate(data, regime)
+@cached_analysis
 def _trade_flow(data):
     """Return recent taker buy ratio using notional-weighted exchange trades."""
     trades = data.get("recent_trades") or []
@@ -514,6 +533,7 @@ def _relative_strength(data):
     from strategies.relative_strength.strategy import generate
     return generate(data)
 
+@cached_analysis
 def _absorption_proxy(flow, candle, atr):
     from strategies.orderflow.strategy import _absorption_proxy as infer_absorption
     return infer_absorption(flow, candle, atr)
@@ -616,10 +636,12 @@ def _setup_diagnostic(strategy_id, data, regime):
 class SevenStrategyLab:
     """Run six independent generators plus one integrated SMC setup generator."""
 
+    @analysis_scope
     def classify_regime(self, data):
         """Expose the same regime classifier used by analyze for scoped statistics."""
         return _regime(data)
 
+    @analysis_scope
     def analyze(self, data, smc_result=None, performance_by_strategy=None):
         """Run seven independent setup generators, one shared filter, one selector."""
         regime = _regime(data)
