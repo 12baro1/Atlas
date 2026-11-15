@@ -18,8 +18,8 @@ set -uo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"
 
-PYTHON="${PYTHON:-venv/bin/python}"
-MAIN="${MAIN:-main.py}"
+PYTHON="${PYTHON:-.venv/bin/python}"
+MAIN="${MAIN:-atlas_service.py}"
 RUN_DIR="${RUN_DIR:-run}"
 PID_FILE="${RUN_DIR}/atlas_bot.pid"
 LOG_FILE="${LOG_DIR:-${RUN_DIR}/atlas_bot.log}"
@@ -31,7 +31,7 @@ MAX_BACKOFF_SECONDS="${MAX_BACKOFF_SECONDS:-300}"
 
 # Süper döngü öncesi ortam ayarları (env veya boştaki ayarlarla ezilebilir)
 DEFAULT_SCAN_INTERVAL="${ATLAS_SCAN_INTERVAL_SECONDS:-900}"
-DEFAULT_MAX_SYMBOLS="${ATLAS_MAX_SYMBOLS:-100}"
+DEFAULT_MAX_SYMBOLS="${ATLAS_MAX_SYMBOLS:-0}"
 
 mkdir -p "$RUN_DIR"
 
