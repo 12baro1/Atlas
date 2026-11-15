@@ -129,10 +129,10 @@ class TelegramCommandService:
                         break
                     self._handle_update(update)
             except requests.RequestException as exc:
-                self.logger.warning("Telegram polling network error: %s", exc)
+                self.logger.warning("Telegram polling network error (%s)", type(exc).__name__)
                 self.stop_flag.wait(3)
             except Exception:
-                self.logger.exception("Telegram polling error")
+                self.logger.error("Telegram polling error")
                 self.stop_flag.wait(3)
         self.logger.info("Telegram command polling stopped")
 
@@ -149,7 +149,7 @@ class TelegramCommandService:
         try:
             result = self.execute_command(command)
         except Exception:
-            self.logger.exception("Telegram command failed: %s", command[:80])
+            self.logger.error("Telegram command failed: %s", command[:80])
             result = "Komut işlenirken hata oluştu. VPS günlüklerini kontrol et."
         for part in split_message(result):
             if self.stop_flag.is_set():
@@ -161,7 +161,7 @@ class TelegramCommandService:
                     timeout=10,
                 )
             except Exception:
-                self.logger.exception("Telegram command reply could not be sent")
+                self.logger.error("Telegram command reply could not be sent")
                 break
 
     def execute_command(self, command: str) -> str:
