@@ -464,3 +464,113 @@ def test_rsi_uses_wilder_smoothing_and_handles_flat_series():
     expected = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
     assert actual == expected
     assert strategy_lab._rsi([10.0] * 20, period=14) == 50.0
+
+
+
+def test_adx_uses_wilder_smoothing_and_rejects_invalid_period():
+    import strategy_lab
+
+    candles = []
+    price = 100.0
+    for index in range(80):
+        step = 1.0 if index < 30 else (0.25 if index % 3 else -0.1)
+        opened = price
+        close = price + step
+        candles.append(Candle(opened, max(opened, close) + 0.5,
+                              min(opened, close) - 0.5, close, volume=100.0))
+        price = close
+
+    result = strategy_lab._adx(candles, period=14)
+    assert result is not None
+    assert 0.0 <= result <= 100.0
+    assert strategy_lab._adx(candles, period=0) is None
+    assert strategy_lab._adx(candles[:28], period=14) is None
+
+
+def test_close_series_fails_closed_instead_of_compressing_bad_candles():
+    import strategy_lab
+
+    valid = Candle(100.0, 102.0, 99.0, 101.0, volume=100.0)
+    malformed = Candle(100.0, 99.0, 98.0, 98.5, volume=100.0)
+    assert strategy_lab._series([valid, malformed]) == []
+    assert strategy_lab._series([valid, valid]) == [101.0, 101.0]
+
+
+def test_extracted_strategy_packages_are_the_live_generators():
+    from strategies.trend import generate as trend_generate
+    from strategies.breakout import generate as breakout_generate
+    from strategies.mean_reversion import generate as mean_reversion_generate
+    from strategies.orderflow.strategy import generate as orderflow_generate
+    from strategies.liquidation.strategy import generate as liquidation_generate
+    from strategies.relative_strength.strategy import generate as relative_strength_generate
+    from strategies.smc.strategy import generate as smc_generate
+    import strategy_lab
+
+    assert strategy_lab._trend_pullback({}) is None
+    assert strategy_lab._volatility_breakout({}) is None
+    assert strategy_lab._mean_reversion({}, {"label": "UNKNOWN"}) is None
+    assert trend_generate({}) is None
+    assert breakout_generate({}) is None
+    assert mean_reversion_generate({}, {"label": "UNKNOWN"}) is None
+    assert strategy_lab._orderflow_momentum({}) is None
+    assert strategy_lab._liquidation_cascade({}) is None
+    assert strategy_lab._relative_strength({}) is None
+    assert strategy_lab._smc_candidate({}) is None
+    assert orderflow_generate({}) is None
+    assert liquidation_generate({}) is None
+    assert relative_strength_generate({}) is None
+    assert smc_generate({}) is None
+
+
+def test_seven_strategy_selector_uses_injected_decision_engine_once(monkeypatch):
+    import strategy_lab
+
+    class RecordingDecisionEngine:
+        def __init__(self):
+            self.calls = []
+
+        def select_strategy_candidate(self, candidates):
+            self.calls.append(list(candidates))
+            return max(candidates, key=lambda item: item["estimated_net_rr"])
+
+    decision_engine = RecordingDecisionEngine()
+    plan = {
+        "direction": "LONG", "entry_type": "LIMIT", "entry": 100.0,
+        "stop_loss": 98.0, "tp1": 104.0, "tp2": 106.0, "tp3": 108.0,
+        "strength": 80.0, "reasons": ["test"],
+    }
+    monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(plan))
+    monkeypatch.setattr(strategy_lab, "_risk_validate_candidate", lambda candidate: {
+        "eligible": True, "reason": None, "weighted_net_rr": 2.5,
+        "risk_plan": {"final_geometry_reconciled": True, "risk_setup_valid": True,
+                      "weighted_net_rr": 2.5, "weighted_rr": 2.7},
+    })
+
+    lab = strategy_lab.SevenStrategyLab(decision_engine=decision_engine)
+    report = lab.analyze({"symbol": "BTC/USDT:USDT", "current_price": 1000.0})
+
+    assert len(decision_engine.calls) == 1
+    assert len(decision_engine.calls[0]) == 1
+    assert decision_engine.calls[0][0]["strategy_id"] == "trend_pullback"
+    assert report["selected"]["strategy_id"] == "trend_pullback"
+
+
+def test_decision_engine_selects_only_common_filter_passed_candidates():
+    from decision_engine import DecisionEngine
+
+    engine = DecisionEngine()
+    blocked = {
+        "strategy_id": "blocked", "status": "BLOCKED_COMMON_FILTER",
+        "estimated_net_rr": 99.0, "strength": 100.0, "regime_fit": 1.0,
+    }
+    first = {
+        "strategy_id": "trend", "status": "FILTERED_SETUP",
+        "estimated_net_rr": 2.1, "strength": 90.0, "regime_fit": 0.9,
+    }
+    second = {
+        "strategy_id": "smc", "status": "FILTERED_SETUP",
+        "estimated_net_rr": 2.4, "strength": 70.0, "regime_fit": 0.8,
+    }
+
+    assert engine.select_strategy_candidate([blocked, first, second]) is second
+    assert engine.select_strategy_candidate([blocked]) is None

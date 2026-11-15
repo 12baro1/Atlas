@@ -109,7 +109,16 @@ def invalidate_all():
 
 def get_market_data(symbol, force_refresh=False):
     data = {"symbol": symbol}
-    # Public Bybit order-book snapshot; optional so OHLCV analysis survives API hiccups.
+    # Start one shared public stream per symbol; REST remains the fallback.
+    stream_snapshot = {}
+    try:
+        from strategies.orderflow.websocket_collector import BybitPublicStream
+        stream = BybitPublicStream.for_symbol(symbol)
+        stream.start()
+        stream_snapshot = stream.snapshot(int(exchange.milliseconds()))
+    except Exception:
+        stream_snapshot = {}
+    # Public Bybit REST order-book snapshot; optional fallback.
     data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
     data["orderbook_timestamp_ms"] = None
     try:
@@ -131,6 +140,17 @@ def get_market_data(symbol, force_refresh=False):
         data["recent_trades_timestamp_ms"] = max(valid_trade_times) if valid_trade_times else None
     except Exception:
         data["recent_trades"] = None
+
+    # Prefer fresh WebSocket L2/trades and actual liquidation events.
+    if stream_snapshot.get("orderbook") is not None:
+        data["orderbook"] = stream_snapshot["orderbook"]
+        data["orderbook_timestamp_ms"] = stream_snapshot.get("orderbook_timestamp_ms")
+    if stream_snapshot.get("recent_trades"):
+        data["recent_trades"] = stream_snapshot["recent_trades"]
+        data["recent_trades_timestamp_ms"] = stream_snapshot.get("recent_trades_timestamp_ms")
+    data["trade_flow_history"] = stream_snapshot.get("trade_flow_history") or []
+    data["liquidation_events"] = stream_snapshot.get("liquidation_events") or []
+    data["microstructure_source"] = stream_snapshot.get("source") if stream_snapshot.get("connected") else "REST_FALLBACK"
 
     # Derivatives context is optional: unsupported endpoints or exchange
     # hiccups must not break OHLCV analysis.

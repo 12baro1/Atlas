@@ -75,6 +75,18 @@ Atlas açıldığında komut alanına sembol veya desteklenen komutlardan birini
 
 Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Geçerli koşulları sağlayan kurulum yoksa Atlas sinyal üretmeyebilir.
 
+## Order Flow veri akışı
+
+`strategies/orderflow/` altında Order Flow'a özel veri bileşenleri bulunur:
+
+- `websocket_collector.py`: Bybit V5 public linear akışından L2 order book, public trades ve liquidation event mesajlarını toplar.
+- `analytics.py`: gerçekleşen agresör notional'ından CVD ve footprint, L2'den görüntülenen liquidity wall, trade/candle verisinden açıkça proxy olarak etiketlenen absorption kanıtı üretir.
+- `strategy_lab.py` içindeki Order Flow Momentum adayı, taze order book ve taker trade delta yanında arşivlenmiş CVD yönünü de devam işlemlerinde kullanır. CVD ters yöndeyse continuation adayı oluşturmaz. CVD geçmişi yoksa `UNAVAILABLE` kalır; geçmiş veri uydurulmaz.
+- WebSocket collector'ın tuttuğu trade akışı ve liquidation olayları yalnızca alındıkları zaman damgalarıyla raporlanır. Geçmiş L2/trade verisi geriye dönük oluşturulamaz.
+- Absorption ve liquidity wall sonuçları kesin emir niyeti değildir: absorption bir çıkarım, wall ise iptal edilebilir görüntülenen derinliktir.
+
+WebSocket istemcisi kurulmamışsa veya bağlantı kurulamıyorsa Atlas mevcut REST fallback ile analiz yapar. Bu durumda gerçek zamanlı WebSocket kapsamı varmış gibi kabul edilmez.
+
 ## 7 strateji analizi
 
 Tek coin komutunda Atlas aynı kapanmış piyasa verisi üzerinde 6 yeni stratejiyi ve mevcut SMC kararını bağımsız değerlendirir. Her stratejinin giriş/stop/hedef geometrisi ayrı tutulur. Yeni motorların adayları yalnızca setup gücü puanıyla seçilmez: stratejiye özel, maliyet sonrası IS/OOS performansı, minimum örneklem ve expectancy güven sınırı doğrulanmadan SMC'nin önüne geçemez. Doğrulanmış deneysel edge yoksa SMC adayı varsa o gösterilir; SMC de yoksa seçilmiş plan üretilmez. Yeni motorların hedefleri yeterli swing likiditesi varsa yapısal seviyelerden, yoksa açıkça etiketlenmiş R-katı fallback ile hesaplanır.
@@ -194,3 +206,13 @@ python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
 - Liquidation Cascade, gerçek liquidation-event akışı değildir; tarihsel OI/funding ve varsa arşivlenmiş trade-flow ile sınırlı bir proxy'dir.
 
 Komisyon, spread ve slippage hâlâ parametreli yürütme varsayımlarıdır; gerçek emir gerçekleşme fiyatı değildir. Walk-forward çıktısı kârlılık garantisi veya parametre optimizasyonu anlamına gelmez.
+
+
+### Ortak analiz servisleri
+
+- `shared/analysis_services.py`: OHLCV doğrulama, seri çıkarımı, EMA, Wilder ATR/ADX, RSI, VWAP, Bollinger, yönsel hareket ve mum anatomisi gibi strateji-nötr hesaplamaların tek kaynağıdır.
+- `shared/analysis_context.py`: her `SevenStrategyLab.analyze()` çağrısında izole bir memoization bağlamı açar. Aynı kapanmış mum nesneleri ve parametrelerle istenen hesaplamalar stratejiler arasında yeniden kullanılabilir; yeni sembol/snapshot analizinde cache temiz başlar.
+- `strategy_lab.py` bu servisleri eski yardımcı adlarıyla dışa aktarmaya devam eder; böylece strateji adaptörlerinin uyumluluğu korunurken hesaplama sahipliği `shared/` katmanına taşınır.
+
+- `shared/market_structure_services.py`: trend structure, displacement, volatility regime, breakout acceptance, statistical deviation and RSI divergence evidence. The SMC package continues to own its SMC-specific submotors; generic structure/displacement evidence is shared.
+- `shared/microstructure_services.py`: timestamped CVD, liquidation-event validation, beta stability and relative-volume calculations. The legacy top-level modules remain compatibility re-exports, while strategy generators import the shared implementations through the lab.
