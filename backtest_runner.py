@@ -482,6 +482,8 @@ class BacktestRunner:
         self.microstructure_trade_snapshots = 0
         # Diagnostic counters explain why historical analysis produces no trades.
         self.analysis_calls = 0
+        # Strategy-level diagnostics are observational only; they never affect selection.
+        self.strategy_observations = {}
         self.empty_results = 0
         self.raw_long_signals = 0
         self.raw_short_signals = 0
@@ -527,6 +529,62 @@ class BacktestRunner:
             maker_fee_rate=None if self.legacy_fee_rate is not None else self.maker_fee_rate,
             taker_fee_rate=None if self.legacy_fee_rate is not None else self.taker_fee_rate,
         )
+
+    def _record_strategy_diagnostics(self, result):
+        """Accumulate the live seven-strategy report without changing its decision."""
+        if not isinstance(result, dict):
+            return
+        report = result.get("strategy_lab")
+        if not isinstance(report, dict):
+            report = ((result.get("analysis") or {}).get("strategy_lab") or {})
+        if not isinstance(report, dict):
+            return
+        diagnostics = report.get("diagnostics") or {}
+        for row in diagnostics.get("strategies") or []:
+            if not isinstance(row, dict):
+                continue
+            strategy_id = str(row.get("strategy_id") or "UNKNOWN")
+            item = self.strategy_observations.setdefault(strategy_id, {
+                "evaluations": 0, "raw_setups": 0, "common_filter_passed": 0,
+                "selected": 0, "common_filter_rejected": 0, "no_setup": 0,
+            })
+            item["evaluations"] += 1
+            status = str(row.get("status") or "").upper()
+            stage = str(row.get("rejection_stage") or "").upper()
+            if row.get("direction") in {"LONG", "SHORT"}:
+                item["raw_setups"] += 1
+            if status in {"FILTERED_SETUP", "FILTERED_NOT_SELECTED", "SELECTED"}:
+                item["common_filter_passed"] += 1
+            if status == "SELECTED" or row.get("selected") is True:
+                item["selected"] += 1
+            if stage == "COMMON_FILTER":
+                item["common_filter_rejected"] += 1
+            if not row.get("direction") and status not in {"BLOCKED_COMMON_FILTER"}:
+                item["no_setup"] += 1
+
+    def strategy_performance_breakdown(self):
+        """Per-strategy generation, common-filter, selection and realized trade metrics."""
+        output = {}
+        for strategy_id, observations in self.strategy_observations.items():
+            trades = [trade for trade in self.history
+                      if str(trade.get("strategy_id") or "UNKNOWN") == strategy_id]
+            output[strategy_id] = {
+                **dict(observations),
+                "filled_trades": len(trades),
+                **self._trade_metrics(trades),
+            }
+        # Preserve visibility for selected/traded strategies even if no diagnostics were emitted.
+        for trade in self.history:
+            strategy_id = str(trade.get("strategy_id") or "UNKNOWN")
+            if strategy_id not in output:
+                trades = [item for item in self.history
+                          if str(item.get("strategy_id") or "UNKNOWN") == strategy_id]
+                output[strategy_id] = {
+                    "evaluations": 0, "raw_setups": 0, "common_filter_passed": 0,
+                    "selected": 0, "common_filter_rejected": 0, "no_setup": 0,
+                    "filled_trades": len(trades), **self._trade_metrics(trades),
+                }
+        return output
 
     def run(self, data, on_signal=None, step=1, lenient=False):
         """data: {'15m': [Candle,...], '1h': [...], ...} -> her mum sonrası analiz + simülasyon.
@@ -588,6 +646,7 @@ class BacktestRunner:
             if not result:
                 self.empty_results += 1
                 continue
+            self._record_strategy_diagnostics(result)
             signal = (result.get("signal") or {}) if isinstance(result, dict) else {}
             decision = (result.get("decision") or {}) if isinstance(result, dict) else {}
             signal_dir = str(signal.get("signal", "")).upper()
@@ -1071,7 +1130,16 @@ class BacktestRunner:
         spread_rr = cost_parts.get("spread", 0.0) / risk_distance if risk_distance > 0 else 0.0
         slippage_rr = cost_parts.get("slippage", 0.0) / risk_distance if risk_distance > 0 else 0.0
         cost_reconciliation_error_rr = (gross_rr - execution_cost_rr - funding_cost_r) - net_rr
+        strategy_report = (result or {}).get("strategy_lab") or analysis.get("strategy_lab") or {}
+        selected_strategy_id = (
+            strategy_report.get("diagnostics", {}).get("selected_strategy_id")
+            or ((strategy_report.get("selected") or {}).get("strategy_id"))
+            or decision.get("selected_strategy_id")
+            or signal.get("strategy_id")
+            or "UNKNOWN"
+        )
         return {
+            "strategy_id": str(selected_strategy_id),
             "signal_index": signal_index,
             "signal_time": int(candles[signal_index].time),
             "entry_index": fill_index,
@@ -1365,6 +1433,7 @@ class BacktestRunner:
                 "direction_breakdown": self.direction_breakdown(),
                 "mtf_trade_breakdown": self.mtf_trade_breakdown(),
                 "segment_breakdown": self.segment_breakdown(),
+                "strategy_performance_breakdown": self.strategy_performance_breakdown(),
             }
         wins = self.wins
         losses = self.total - wins
@@ -1483,6 +1552,7 @@ class BacktestRunner:
             "direction_breakdown": self.direction_breakdown(),
             "mtf_trade_breakdown": self.mtf_trade_breakdown(),
             "segment_breakdown": self.segment_breakdown(),
+            "strategy_performance_breakdown": self.strategy_performance_breakdown(),
         }
 
 
