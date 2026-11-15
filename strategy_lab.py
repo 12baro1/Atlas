@@ -392,6 +392,41 @@ def _setup_diagnostic(strategy_id, data, regime):
     return checks[0] if len(checks) == 1 else " | ".join(checks)
 
 
+_STRATEGY_ANALYSIS_FEATURES = {
+    "trend_pullback": (
+        "4H EMA20/EMA50, Wilder ADX/DMI and directional efficiency",
+        "1H EMA20 pullback/reclaim, ATR and candle structure",
+    ),
+    "volatility_breakout": (
+        "1H Bollinger bandwidth compression and 20-bar close acceptance",
+        "Relative volume, ATR and breakout candle anatomy",
+    ),
+    "mean_reversion": (
+        "15m Bollinger re-entry, RSI reversal slope and VWAP deviation",
+        "Range-regime and rejection-wick confirmation",
+    ),
+    "liquidation_cascade": (
+        "Timestamped OI contraction, 1H ATR impulse and relative volume",
+        "Recent taker flow and fresh funding context",
+        "Real exchange liquidation events as optional directional confluence",
+    ),
+    "orderflow_momentum": (
+        "Fresh L2 order-book imbalance, spread and recent taker trades",
+        "Executed footprint and fresh timestamped CVD",
+        "Opposing displayed liquidity wall and real liquidation pressure",
+        "15m candle anatomy and absorption proxy (not direct passive-fill observation)",
+    ),
+    "relative_strength": (
+        "Aligned 4H returns versus BTC/ETH benchmarks",
+        "Configured sector-peer returns, rolling beta stability and residual alpha",
+    ),
+    "smc": (
+        "Closed multi-timeframe market structure and liquidity evidence",
+        "SMC-owned specialist submotors for OB/FVG/OTE, breakers and reclaim narrative",
+    ),
+}
+
+
 _STRATEGY_INPUT_FIELDS = {
     "trend_pullback": ("4h", "1h", "current_price"),
     "volatility_breakout": ("1h", "current_price"),
@@ -508,6 +543,7 @@ def _strategy_data_usage(strategy_id, data, smc_result=None):
     }
     return {
         "generator_inputs": inputs,
+        "analysis_features": list(_STRATEGY_ANALYSIS_FEATURES.get(strategy_id, ())),
         "shared_source_status": relevant_sources,
         "note": "Availability/provenance diagnostics; strategies retain independent setup rules.",
     }
