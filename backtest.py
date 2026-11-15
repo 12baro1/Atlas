@@ -270,10 +270,16 @@ def _fetch_history(symbol, timeframe, since_ms, limit=1000):
         candles.extend(
             Candle(time=c[0], open=c[1], high=c[2], low=c[3], close=c[4], volume=c[5]) for c in batch
         )
-        last_time = batch[-1][0]
-        if last_time <= cursor or len(batch) < limit:
+        # Exchanges may cap each response below the requested limit (for
+        # example, return 200 rows for limit=1000). A short page is not the
+        # end of history: keep paging until the provider returns no newer rows.
+        last_time = max(int(row[0]) for row in batch)
+        if last_time < cursor:
             break
-        cursor = last_time + 1
+        next_cursor = last_time + 1
+        if next_cursor <= cursor:
+            break
+        cursor = next_cursor
         time.sleep(0.05)
     seen = set()
     ordered = []
@@ -305,7 +311,12 @@ def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None,
 
         if use_cache:
             cached = _load_cached_candles(symbol, tf, since, now)
-            if cached is not None:
+            cache_complete = (
+                bool(cached)
+                and cached[0].time <= since + 2 * duration_ms
+                and cached[-1].time + duration_ms >= now - 2 * duration_ms
+            )
+            if cache_complete:
                 data[tf] = cached
                 logging.info(
                     "%s %s -> %s candles (cache) (history %.1f days)",
@@ -315,6 +326,11 @@ def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None,
                     history_days,
                 )
                 continue
+            if cached is not None:
+                logging.warning(
+                    "%s %s cache eksik (%s mum); istenen tarih aralığı yeniden indiriliyor.",
+                    symbol, tf, len(cached),
+                )
 
         fetch_limit = limit + 2 if tf == "1w" else limit
         candles = _fetch_history(
@@ -417,17 +433,14 @@ def _validate_backtest_coverage(data, symbol, days, now_ms, listing_time_ms=None
 
         first_open = min(c.time for c in candles)
         last_close = max(c.time + duration for c in candles)
-        # Candle boundaries are timeframe-aligned. Exchange provider may not
-        # cover the full requested history (e.g. Bybit 15m is limited to the
-        # most recent ~1000 candles). Use whatever real data is available
-        # instead of fabricating history; the warmup floor is enforced
-        # separately in _validate_backtest_history.
+        # A partial history must never be presented as the requested backtest.
+        # Listing-date-limited markets are handled by effective_start above.
         if first_open > effective_start + 2 * duration:
-            logging.warning(
-                "%s %s: istenen baslangic (%s) ile mevcut ilk mum (%s) arasinda "
-                "aralik var; mevcut gerçek veriyle devam ediliyor.",
-                symbol, tf, time.strftime("%Y-%m-%d %H:%M", time.gmtime(effective_start / 1000)),
-                time.strftime("%Y-%m-%d %H:%M", time.gmtime(first_open / 1000)),
+            missing_days = (first_open - effective_start) / 86_400_000
+            raise RuntimeError(
+                f"{symbol} {tf}: istenen tarih aralığının başlangıcı eksik "
+                f"({missing_days:.2f} gün veri yok). Backtest durduruldu; "
+                "kısmi veriyle istenen gün sayısı raporlanmayacak."
             )
         if last_close < now - 2 * duration:
             stale_days = (now - last_close) / 86_400_000

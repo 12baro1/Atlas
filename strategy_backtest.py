@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import logging
 import math
 import time
 from collections import defaultdict
@@ -15,6 +16,7 @@ from collections import defaultdict
 from backtest import (
     TIMEFRAME_DURATION_MS,
     _disable_backtest_live_features,
+    _market_listing_time_ms,
     attach_historical_smt_universe,
     load_historical,
     _effective_now_ms,
@@ -416,10 +418,22 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
                                 persist_outcomes=False):
     _disable_backtest_live_features()
     now_ms = int(time.time() * 1000)
-    history = load_historical(symbol, days=days, now_ms=now_ms)
+    try:
+        listing_time_ms = _market_listing_time_ms(symbol)
+    except RuntimeError as exc:
+        listing_time_ms = None
+        logging.warning(
+            "%s listing tarihi doğrulanamadı; istenen geçmişin tamamı zorunlu: %s",
+            symbol, exc,
+        )
+    history = load_historical(
+        symbol, days=days, now_ms=now_ms, listing_time_ms=listing_time_ms
+    )
     _validate_backtest_history(history, symbol)
     effective_now = _effective_now_ms(history)
-    _validate_backtest_coverage(history, symbol, days, effective_now)
+    _validate_backtest_coverage(
+        history, symbol, days, effective_now, listing_time_ms=listing_time_ms
+    )
     attach_historical_smt_universe(history, days, effective_now)
     candles = history.get("15m") or []
     if len(candles) < 320:
@@ -608,6 +622,19 @@ def main():
             )
     if report.get("persistence_block_reason"):
         print(f"KAYIT ENGELLENDİ | {report['persistence_block_reason']}")
+    print("PIPELINE DIAGNOSTICS | strateji bazında setup ve filtre akışı")
+    for strategy_id, payload in report["results"].items():
+        pipeline = payload["pipeline"]
+        statuses = ", ".join(
+            f"{status}={count}"
+            for status, count in sorted(pipeline["status_counts"].items())
+        ) or "durum kaydı yok"
+        print(
+            f"  {strategy_id}: analiz={pipeline['analysis_snapshots']} "
+            f"raw={pipeline['raw_setups']} filtre_geçti={pipeline['common_filter_passed']} "
+            f"filtre_red={pipeline['common_filter_rejected']} "
+            f"seçildi={pipeline['selected']} | {statuses}"
+        )
     for strategy_id, payload in report["results"].items():
         print(f"WALK-FORWARD | {strategy_id}")
         for fold in payload["walk_forward"]:

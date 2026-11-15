@@ -17,7 +17,6 @@ from trace_context import ensure_trace, record_stage, trace_id
 from shared.market_structure_services import (trend_structure, displacement, volatility_regime, breakout_acceptance, statistical_deviation, rsi_divergence)
 from strategies.smc.submotors import dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, narrative as smc_narrative
 from shared.microstructure_services import cumulative_volume_delta, liquidation_events, beta_stability, relative_volume
-from shared.market_data_services import market_feed_evidence
 from strategies.orderflow.analytics import build_footprint, liquidity_walls, build_orderflow_evidence
 from shared.analysis_context import analysis_scope, cached_analysis
 from shared.analysis_services import (
@@ -323,21 +322,8 @@ def _regime_fit(strategy_id, regime):
     return fit
 
 
-# Strateji başına gerçekten okunan veri türleri. Kullanılmayan veri asla
-# kullanılmış gibi gösterilmez; buradaki eşleme yalnızca rapor içindir ve
-# stratejilerin karar mantığını etkilemez.
-STRATEGY_FEEDS = {
-    "trend_pullback": ("candles",),
-    "volatility_breakout": ("candles",),
-    "mean_reversion": ("candles",),
-    "liquidation_cascade": ("candles", "open_interest", "funding_rate", "recent_trades", "liquidation_events"),
-    "orderflow_momentum": ("candles", "orderbook", "recent_trades", "trade_flow_history", "footprint", "liquidation_events"),
-    "relative_strength": ("candles", "correlation_universe"),
-    # SMC bütünleşik uzman dünyasını kullanır: orderbook/trades akışı, türev
-    # bağlamı ve mum serisi uzman motorlara ortak kanıt olarak gider.
-    "smc": ("candles", "orderbook", "recent_trades", "open_interest", "funding_rate"),
-}
-
+# Strateji başına veri kullanım raporu upstream `_STRATEGY_INPUT_FIELDS`
+# eşlemesiyle üretilir; yalnızca stratejinin gerçekten okuduğu alanlar raporlanır.
 _SETUP_PRODUCED_STATUSES = {
     "RAW_SETUP", "FILTERED_SETUP", "SELECTED", "FILTERED_NOT_SELECTED", "BLOCKED_COMMON_FILTER",
 }
@@ -353,51 +339,6 @@ def _common_filter_result(status):
     if status == "BLOCKED_COMMON_FILTER":
         return "REJECTED"
     return "NOT_REACHED"
-
-
-def _strategy_data_usage(strategy_id, data):
-    """Bir stratejinin veri kullanım raporunu üretir (gözlemsel, karara etki etmez)."""
-    evidence = market_feed_evidence(data)
-    used_feeds = STRATEGY_FEEDS.get(strategy_id, ())
-    feeds = {}
-    for name, feed in evidence["feeds"].items():
-        if name not in used_feeds:
-            feeds[name] = {"used": False, "status": "NOT_USED"}
-            continue
-        entry = dict(feed)
-        entry["used"] = True
-        feeds[name] = entry
-    # Footprint yalnızca orderflow stratejisinin okuduğu bir türemedir; yürütülen
-    # işlemler (recent trades) üzerinden hesaplanır, başka bir kaynaktan üretilmez.
-    if "footprint" in used_feeds:
-        try:
-            from strategies.orderflow.analytics import build_footprint as _build_footprint
-            footprint = _build_footprint(data.get("recent_trades") or [])
-            state = footprint.get("state") if isinstance(footprint, dict) else None
-            levels = footprint.get("levels") if isinstance(footprint, dict) else None
-            feeds["footprint"] = {
-                "used": True,
-                "source": _source_for_footprint(data),
-                "status": state or "UNKNOWN",
-                "samples": len(levels or {}),
-            }
-        except Exception:
-            feeds["footprint"] = {"used": True, "status": "UNKNOWN", "reason": "FOOTPRINT_EVIDENCE_ERROR"}
-    if "candles" in used_feeds and feeds.get("candles", {}).get("status") == "UNAVAILABLE":
-        feeds["candles"]["reason"] = feeds["candles"].get("reason") or "INCOMPLETE_OHLCV_TIMEFRAMES"
-    return {
-        "strategy_id": strategy_id,
-        "strategy": STRATEGY_NAMES[strategy_id],
-        "feeds": feeds,
-        "microstructure_source": evidence.get("microstructure_source"),
-        "trace_id": (data.get("trace_id") if isinstance(data, dict) else None),
-    }
-
-
-def _source_for_footprint(data):
-    # Footprint yürütülen işlemlerden türetilir; işlem kaynağı ne ise o.
-    source = str(data.get("recent_trades_source") or "").upper()
-    return source or "UNAVAILABLE"
 
 
 def _setup_diagnostic(strategy_id, data, regime):
@@ -476,6 +417,167 @@ def _setup_diagnostic(strategy_id, data, regime):
     return checks[0] if len(checks) == 1 else " | ".join(checks)
 
 
+_STRATEGY_ANALYSIS_FEATURES = {
+    "trend_pullback": (
+        "4H EMA20/EMA50, Wilder ADX/DMI and directional efficiency",
+        "1H EMA20 pullback/reclaim, ATR and candle structure",
+    ),
+    "volatility_breakout": (
+        "1H Bollinger bandwidth compression and 20-bar close acceptance",
+        "Relative volume, ATR and breakout candle anatomy",
+    ),
+    "mean_reversion": (
+        "15m Bollinger re-entry, RSI reversal slope and VWAP deviation",
+        "Range-regime and rejection-wick confirmation",
+    ),
+    "liquidation_cascade": (
+        "Timestamped OI contraction, 1H ATR impulse and relative volume",
+        "Recent taker flow and fresh funding context",
+        "Real exchange liquidation events as optional directional confluence",
+    ),
+    "orderflow_momentum": (
+        "Fresh L2 order-book imbalance, spread and recent taker trades",
+        "Executed footprint and fresh timestamped CVD",
+        "Opposing displayed liquidity wall and real liquidation pressure",
+        "15m candle anatomy and absorption proxy (not direct passive-fill observation)",
+    ),
+    "relative_strength": (
+        "Aligned 4H returns versus BTC/ETH benchmarks",
+        "Configured sector-peer returns, rolling beta stability and residual alpha",
+    ),
+    "smc": (
+        "Closed multi-timeframe market structure and liquidity evidence",
+        "SMC-owned specialist submotors for OB/FVG/OTE, breakers and reclaim narrative",
+    ),
+}
+
+
+_STRATEGY_INPUT_FIELDS = {
+    "trend_pullback": ("4h", "1h", "current_price"),
+    "volatility_breakout": ("1h", "current_price"),
+    "mean_reversion": ("15m", "current_price"),
+    "liquidation_cascade": ("1h", "open_interest", "open_interest_timestamps_ms",
+                            "recent_trades", "funding_rate", "liquidation_events"),
+    "orderflow_momentum": ("15m", "orderbook", "orderbook_timestamp_ms",
+                           "recent_trades", "recent_trades_timestamp_ms",
+                           "trade_flow_history", "liquidation_events"),
+    "relative_strength": ("4h", "correlation_universe", "sector_peer_universe"),
+    "smc": ("15m", "1h", "4h", "1d", "1w", "smt_universe"),
+}
+
+
+def _strategy_data_usage(strategy_id, data, smc_result=None):
+    """Expose actual generator input availability without imposing shared gates."""
+    fields = _STRATEGY_INPUT_FIELDS.get(strategy_id, ())
+    inputs = {}
+    minimum_candles = {
+        "trend_pullback": {"4h": 60, "1h": 30},
+        "volatility_breakout": {"1h": 45},
+        "mean_reversion": {"15m": 25},
+        "liquidation_cascade": {"1h": 21},
+        "orderflow_momentum": {"15m": 15},
+        "relative_strength": {"4h": 55},
+        "smc": {"15m": 1, "1h": 1, "4h": 1, "1d": 1, "1w": 1},
+    }.get(strategy_id, {})
+    shared_snapshot = data.get("shared_market_evidence") or {}
+    shared_sources = shared_snapshot.get("sources") or {}
+    symbol = str(data.get("symbol") or "").upper()
+    benchmark_keys = (
+        ["ETH"] if symbol.startswith("BTC/") else
+        ["BTC"] if symbol.startswith("ETH/") else ["BTC", "ETH"]
+    )
+    for field in fields:
+        value = data.get(field)
+        if field in minimum_candles:
+            available = len(value or []) >= minimum_candles[field]
+            status = "AVAILABLE" if available else "INSUFFICIENT_HISTORY"
+        elif field == "current_price":
+            # _current_price falls back to the last fully closed 15m candle.
+            available = value is not None or bool(data.get("15m"))
+            status = "AVAILABLE" if available else "UNAVAILABLE"
+        elif field == "orderbook":
+            source_state = (shared_sources.get("orderbook") or {}).get("state")
+            available = (
+                source_state == "FRESH" if source_state is not None
+                else isinstance(value, dict) and bool(value.get("bids")) and bool(value.get("asks"))
+            )
+            status = "AVAILABLE" if available else source_state or "UNAVAILABLE"
+        elif field == "open_interest":
+            oi_evidence = shared_snapshot.get("open_interest") or {}
+            available = (
+                oi_evidence.get("state") == "FRESH" and int(oi_evidence.get("count") or 0) >= 2
+                if shared_snapshot else len(value or []) >= 2
+            )
+            status = (
+                "AVAILABLE" if available else
+                "INSUFFICIENT_HISTORY" if int(oi_evidence.get("count") or len(value or [])) < 2
+                else oi_evidence.get("state") or "INSUFFICIENT_HISTORY"
+            )
+        elif field == "open_interest_timestamps_ms":
+            available = len(value or []) >= 2
+            status = "AVAILABLE" if available else "INSUFFICIENT_HISTORY"
+        elif field == "recent_trades":
+            trade_evidence = shared_snapshot.get("trades") or {}
+            valid_count = int(trade_evidence.get("trade_count") or 0)
+            available = (
+                trade_evidence.get("state") == "FRESH" and valid_count >= 20
+                if shared_snapshot else len(value or []) >= 20
+            )
+            status = (
+                "AVAILABLE" if available else
+                "INSUFFICIENT_DATA" if valid_count < 20
+                else trade_evidence.get("state") or "INSUFFICIENT_DATA"
+            )
+        elif field == "funding_rate":
+            funding_evidence = shared_snapshot.get("funding") or {}
+            available = (
+                funding_evidence.get("state") == "FRESH"
+                if shared_snapshot and value else bool(value)
+            )
+            status = "AVAILABLE" if available else funding_evidence.get("state") or "UNAVAILABLE"
+        elif field.endswith("_timestamps_ms"):
+            available = bool(value)
+            status = "AVAILABLE" if available else "UNAVAILABLE"
+        elif field == "correlation_universe":
+            has_universe = isinstance(value, dict) and bool(value)
+            available = has_universe and all(
+                len(value.get(key) or []) >= 55 for key in benchmark_keys
+            )
+            status = (
+                "AVAILABLE" if available else
+                "INSUFFICIENT_HISTORY" if has_universe else "UNAVAILABLE"
+            )
+        elif field == "sector_peer_universe":
+            available = isinstance(value, dict) and bool(value)
+            status = "AVAILABLE" if available else "OPTIONAL_UNAVAILABLE"
+        elif field in {"smt_universe"}:
+            available = isinstance(value, dict) and bool(value)
+            status = "AVAILABLE" if available else "OPTIONAL_UNAVAILABLE"
+        else:
+            available = bool(value)
+            status = "AVAILABLE" if available else "UNAVAILABLE"
+        inputs[field] = status
+    if strategy_id == "smc":
+        inputs["smc_specialist_result"] = (
+            "AVAILABLE" if isinstance(smc_result, dict) and smc_result else "UNAVAILABLE"
+        )
+    shared = data.get("shared_market_evidence") or {}
+    sources = shared.get("sources") or {}
+    relevant_sources = {
+        key: value for key, value in sources.items()
+        if key in {
+            "ohlcv", "orderbook", "trades", "cvd", "liquidations",
+            "open_interest", "funding",
+        }
+    }
+    return {
+        "generator_inputs": inputs,
+        "analysis_features": list(_STRATEGY_ANALYSIS_FEATURES.get(strategy_id, ())),
+        "shared_source_status": relevant_sources,
+        "note": "Availability/provenance diagnostics; strategies retain independent setup rules.",
+    }
+
+
 class SevenStrategyLab:
     """Run six independent generators plus one integrated SMC setup generator."""
 
@@ -493,6 +595,10 @@ class SevenStrategyLab:
     def analyze(self, data, smc_result=None, performance_by_strategy=None):
         """Run seven independent setup generators, one shared filter, one selector."""
         ensure_trace(data)
+        if not isinstance(data.get("shared_market_evidence"), dict):
+            from shared.market_data_services import build_shared_market_evidence
+            data = dict(data)
+            data["shared_market_evidence"] = build_shared_market_evidence(data)
         regime = _regime(data)
         record_stage(
             data,
@@ -539,6 +645,7 @@ class SevenStrategyLab:
                         "reason": reason,
                         "rejection_stage": "STRATEGY_GENERATOR",
                         "rejection_reasons": [reason],
+                        "data_usage": _strategy_data_usage(strategy_id, data, smc_result),
                     })
                     record_stage(
                         data,
@@ -560,6 +667,7 @@ class SevenStrategyLab:
                 # Gözlemlenebilirlik: adayın kurulum kimliği (aynı analizde benzersiz).
                 candidate["setup_id"] = "setup-{}-{:02d}".format(strategy_id, len(generated) + 1)
                 candidate["regime_fit"] = round(_regime_fit(strategy_id, regime), 3)
+                candidate["data_usage"] = _strategy_data_usage(strategy_id, data, smc_result)
                 generated.append(candidate)
                 results.append(candidate)
                 record_stage(
@@ -579,6 +687,7 @@ class SevenStrategyLab:
                     "strategy": STRATEGY_NAMES[strategy_id],
                     "status": "ERROR",
                     "reason": f"{type(exc).__name__}: {exc}",
+                    "data_usage": _strategy_data_usage(strategy_id, data, smc_result),
                 })
                 record_stage(
                     data,
@@ -718,19 +827,23 @@ class SevenStrategyLab:
             })
 
         # Veri kullanım raporu: yalnızca gözlemlenebilirlik. Seçim bittikten
-        # sonra, her stratejinin NİHAİ durumu üzerinden üretilir ve strateji
-        # kararlarını ya da birbirlerinin sonuçlarını etkilemez.
-        final_by_strategy = {}
-        for item in results:
-            final_by_strategy[item["strategy_id"]] = item
+        # sonra, her stratejinin NİHAİ durumu, jeneratör girdi durumu ve ortak
+        # filtre sonucu birleştirilir; karar mantığını etkilemez.
         data_usage = []
-        for strategy_id in evaluators:
-            row = _strategy_data_usage(strategy_id, data)
-            item = final_by_strategy.get(strategy_id) or {}
+        for item in results:
             status = item.get("status")
-            row["status"] = status
-            row["setup_produced"] = _setup_produced(status)
-            row["common_filter_result"] = _common_filter_result(status)
+            usage = item.get("data_usage") or {}
+            row = {
+                "strategy_id": item["strategy_id"],
+                "strategy": item.get("strategy") or STRATEGY_NAMES[item["strategy_id"]],
+                "status": status,
+                "setup_produced": _setup_produced(status),
+                "common_filter_result": _common_filter_result(status),
+                "trace_id": trace_id(data),
+                "generator_inputs": dict(usage.get("generator_inputs") or {}),
+                "analysis_features": list(usage.get("analysis_features") or []),
+                "shared_source_status": dict(usage.get("shared_source_status") or {}),
+            }
             if status == "BLOCKED_COMMON_FILTER":
                 row["filter_reasons"] = list(item.get("rejection_reasons") or [])
             elif status == "FILTERED_NOT_SELECTED":

@@ -1,11 +1,13 @@
 """Veri kullanım raporu + OI geçmişi testleri.
 
 Kapsam:
-- market_feed_evidence: kaynak ayrımı, OI snapshot vs timestamped geçmiş.
-- STRATEGY_FEEDS eşlemesi: kullanılmayan veri kullanılmış gösterilmez.
-- Liquidation stratejisi: yalnızca hizalı zaman damgalı OI çiftlerinden
-  kontraksiyon; tek snapshot kurulum üretemez ve açıkça gerekçelendirilir.
-- TUI veri kullanım bölümü: kullanılmayan veri "KULLANILMADI" görünür.
+- build_shared_market_evidence: kaynak ayrımı, OI snapshot vs timestamped geçmiş.
+- Strateji veri kullanım raporu: yalnızca okunan girdiler raporlanır,
+  okunmayan veri asla kullanılmış gibi gösterilmez.
+- Liquidation stratejisi: yalnızca FRESH ve en az 2 zaman damgalı OI
+  gözleminden kontraksiyon; tek snapshot kurulum üretemez ve açıkça
+  gerekçelendirilir; zaman damgasız trailing snapshot fail-closed olur.
+- TUI veri kullanım bölümü: kaynak/durum/filtre/eksik neden satırları.
 """
 import os
 import sys
@@ -15,9 +17,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
-from shared.market_data_services import market_feed_evidence
+from shared.market_data_services import build_shared_market_evidence
 from strategies.liquidation.strategy import generate as liquidation_generate
-from strategy_lab import SevenStrategyLab, STRATEGY_FEEDS, _strategy_data_usage, _setup_diagnostic
+from strategy_lab import SevenStrategyLab, _setup_diagnostic
 from atlas_tui import _add_data_usage_section
 
 
@@ -48,7 +50,7 @@ def impulse_candle():
     return Candle(93.5, 100.4, 93.2, 100, volume=140.0)
 
 
-def liquidation_data(now_ms, oi_values, oi_times, snapshot_extra=None):
+def liquidation_data(now_ms, oi_values, oi_times, extra_fields=None):
     data = {
         "symbol": SYMBOL,
         "current_price": 100.0,
@@ -59,6 +61,7 @@ def liquidation_data(now_ms, oi_values, oi_times, snapshot_extra=None):
         "open_interest_timestamps_ms": list(oi_times),
         "open_interest_source": "REST" if oi_times else "REST_SNAPSHOT_ONLY",
         "funding_rate": [0.0001],
+        "funding_rate_timestamps_ms": [now_ms - 60_000],
         "funding_rate_source": "REST",
         "recent_trades": [
             {"amount": 2.0, "price": 100.0, "side": "buy"} for _ in range(25)
@@ -67,140 +70,138 @@ def liquidation_data(now_ms, oi_values, oi_times, snapshot_extra=None):
         "liquidation_events": [],
         "liquidation_events_source": "UNAVAILABLE",
     }
-    if snapshot_extra is not None:
-        data["open_interest"] = list(oi_values) + [snapshot_extra]
+    if extra_fields:
+        data.update(extra_fields)
+    # data_engine, türetilmiş ortak kanıtı ekler; strateji bunu tüketir.
+    data["shared_market_evidence"] = build_shared_market_evidence(data)
     return data
 
 
-# --- market_feed_evidence -----------------------------------------------------
+# --- build_shared_market_evidence: OI ayrımı --------------------------------------
 
-def test_feed_evidence_reports_orderbook_source_and_freshness():
+def test_evidence_separates_oi_history_from_snapshot_only():
     now = int(time.time() * 1000)
-    evidence = market_feed_evidence({
-        "symbol": SYMBOL,
-        "snapshot_timestamp_ms": now,
-        "orderbook": {"bids": [["100", "1"]] * 3, "asks": [["101", "1"]] * 3, "timestamp": now - 1000},
-        "orderbook_source": "WEBSOCKET",
-    })
-
-    book = evidence["feeds"]["orderbook"]
-    assert book["source"] == "WEBSOCKET"
-    assert book["status"] == "AVAILABLE"
-    assert book["samples"] == 6
-    assert book["age_ms"] == 1000
-    assert book["freshness"] == "FRESH"
-
-
-def test_feed_evidence_separates_oi_history_from_snapshot_only():
-    now = int(time.time() * 1000)
-    aligned = market_feed_evidence({
+    aligned = build_shared_market_evidence({
         "symbol": SYMBOL,
         "snapshot_timestamp_ms": now,
         "open_interest": [1000.0, 950.0],
         "open_interest_timestamps_ms": [now - 7_200_000, now - 60_000],
-        "open_interest_source": "REST",
     })
-    oi = aligned["feeds"]["open_interest"]
-    assert oi["status"] == "AVAILABLE"
-    assert oi["source"] == "REST"
-    assert oi["timestamped_samples"] == 2
-    assert oi["snapshot_only_samples"] == 0
+    oi = aligned["open_interest"]
+    assert oi["state"] == "FRESH"
+    assert oi["count"] == 2
+    assert oi["change_pct"] == pytest.approx(-5.0)
 
-    snapshot_only = market_feed_evidence({
+    snapshot_only = build_shared_market_evidence({
         "symbol": SYMBOL,
         "snapshot_timestamp_ms": now,
         "open_interest": [1000.0],
-        "open_interest_timestamps_ms": [],
-        "open_interest_source": "REST_SNAPSHOT_ONLY",
+        "open_interest_timestamps_ms": [now - 60_000],
     })
-    oi = snapshot_only["feeds"]["open_interest"]
-    assert oi["status"] == "INSUFFICIENT_OI_HISTORY"
-    assert oi["source"] == "REST_SNAPSHOT_ONLY"
-    assert oi["timestamped_samples"] == 0
-    assert oi["snapshot_only_samples"] == 1
-    assert oi["reason"] == "SINGLE_OI_SNAPSHOT_CANNOT_ESTABLISH_CONTRACTION"
+    oi = snapshot_only["open_interest"]
+    assert oi["state"] == "FRESH"
+    assert oi["count"] == 1
+    # Tek gözlem değişim yüzdesi ÜRETMEZ: snapshot asla geçmiş gibi gösterilmez.
+    assert "change_pct" not in oi
 
-    mixed = market_feed_evidence({
+
+def test_evidence_fails_closed_on_misaligned_oi_series():
+    now = int(time.time() * 1000)
+    result = build_shared_market_evidence({
         "symbol": SYMBOL,
         "snapshot_timestamp_ms": now,
         "open_interest": [1000.0, 950.0, 940.0],
         "open_interest_timestamps_ms": [now - 7_200_000, now - 60_000],
-        "open_interest_source": "REST",
     })
-    oi = mixed["feeds"]["open_interest"]
-    assert oi["timestamped_samples"] == 2
-    assert oi["snapshot_only_samples"] == 1
-    assert oi["status"] == "AVAILABLE"
+    assert result["open_interest"]["state"] == "MISSING_TIMESTAMPS"
+    assert "change_pct" not in result["open_interest"]
 
 
-def test_feed_evidence_marks_missing_feeds_with_reasons():
+def test_evidence_marks_missing_feeds_without_hiding_them():
     now = int(time.time() * 1000)
-    evidence = market_feed_evidence({"symbol": SYMBOL, "snapshot_timestamp_ms": now})
-    feeds = evidence["feeds"]
+    evidence = build_shared_market_evidence({"symbol": SYMBOL, "snapshot_timestamp_ms": now})
+    sources = evidence["sources"]
 
-    assert feeds["orderbook"]["status"] == "UNAVAILABLE"
-    assert feeds["orderbook"]["reason"] == "NO_ORDERBOOK_SNAPSHOT"
-    assert feeds["recent_trades"]["reason"] == "NO_RECENT_TRADES"
-    assert feeds["trade_flow_history"]["reason"] == "NO_TIMESTAMPED_TRADE_BATCHES"
-    assert feeds["liquidation_events"]["reason"] == "NO_EXCHANGE_LIQUIDATION_FEED"
-    assert feeds["open_interest"]["reason"] == "NO_TIMESTAMPED_OI_OBSERVATIONS"
-    assert feeds["funding_rate"]["reason"] == "NO_FUNDING_RATE_HISTORY"
-    assert feeds["candles"]["reason"] == "INCOMPLETE_OHLCV_TIMEFRAMES"
-    assert feeds["correlation_universe"]["reason"] == "NO_BENCHMARK_CANDLES"
-    assert evidence["microstructure_source"] == "UNAVAILABLE"
+    assert sources["orderbook"]["state"] == "UNAVAILABLE"
+    assert sources["trades"]["state"] == "UNAVAILABLE"
+    assert sources["liquidations"]["state"] == "UNAVAILABLE"
+    assert sources["open_interest"]["state"] == "UNAVAILABLE"
+    assert sources["funding"]["state"] == "UNAVAILABLE"
 
 
-# --- STRATEGY_FEEDS mapping ----------------------------------------------------
+# --- strateji veri kullanım raporu -------------------------------------------------
 
-def test_strategy_feeds_map_only_the_data_each_strategy_reads():
-    assert STRATEGY_FEEDS["trend_pullback"] == ("candles",)
-    assert STRATEGY_FEEDS["volatility_breakout"] == ("candles",)
-    assert STRATEGY_FEEDS["mean_reversion"] == ("candles",)
-    assert STRATEGY_FEEDS["liquidation_cascade"] == (
-        "candles", "open_interest", "funding_rate", "recent_trades", "liquidation_events",
-    )
-    assert STRATEGY_FEEDS["orderflow_momentum"] == (
-        "candles", "orderbook", "recent_trades", "trade_flow_history", "footprint", "liquidation_events",
-    )
-    assert STRATEGY_FEEDS["relative_strength"] == ("candles", "correlation_universe")
-    assert STRATEGY_FEEDS["smc"] == ("candles", "orderbook", "recent_trades", "open_interest", "funding_rate")
-
-
-def test_data_usage_marks_unused_feeds_as_not_used():
+def test_data_usage_lists_only_fields_the_strategy_reads():
     now = int(time.time() * 1000)
-    data = liquidation_data(now, [1000.0, 950.0], [now - 7_200_000, now - 60_000])
+    data = liquidation_data(now, [1000.0], [now - 60_000])
+    data["15m"] = []
+    data["4h"] = []
 
-    trend = _strategy_data_usage("trend_pullback", data)
-    assert trend["feeds"]["candles"]["used"] is True
-    assert trend["feeds"]["open_interest"]["used"] is False
-    assert trend["feeds"]["open_interest"]["status"] == "NOT_USED"
-    assert trend["feeds"]["orderbook"]["status"] == "NOT_USED"
+    report = SevenStrategyLab().analyze(data)
+    rows = {row["strategy_id"]: row for row in report["data_usage"]}
 
-    liquidation = _strategy_data_usage("liquidation_cascade", data)
-    assert liquidation["feeds"]["open_interest"]["used"] is True
-    assert liquidation["feeds"]["open_interest"]["status"] == "AVAILABLE"
-    assert liquidation["feeds"]["funding_rate"]["used"] is True
-    assert liquidation["feeds"]["orderbook"]["used"] is False
-
-    orderflow = _strategy_data_usage("orderflow_momentum", data)
-    # Footprint yalnızca orderflow için türetilir ve kullanılır.
-    assert orderflow["feeds"]["footprint"]["used"] is True
-    assert "source" in orderflow["feeds"]["footprint"]
+    # Trend yalnızca 4h/1h/current_price okur: mikroyapı girdisi hiç listelenmez.
+    assert set(rows["trend_pullback"]["generator_inputs"]) <= {"4h", "1h", "current_price"}
+    # Orderflow orderbook okur; eksikse durum açıkça raporlanır.
+    assert rows["orderflow_momentum"]["generator_inputs"]["orderbook"] == "UNAVAILABLE"
+    # Liquidation OI okur: tek snapshot INSUFFICIENT_HISTORY olarak raporlanır.
+    assert rows["liquidation_cascade"]["generator_inputs"]["open_interest"] == "INSUFFICIENT_HISTORY"
 
 
-def test_data_usage_carries_trace_id_of_the_analysis():
+def test_data_usage_rows_carry_status_filter_result_and_trace_id():
     from trace_context import new_trace_id
 
-    data = {"symbol": SYMBOL, "trace_id": new_trace_id()}
-    row = _strategy_data_usage("trend_pullback", data)
-    assert row["trace_id"] == data["trace_id"]
+    data = {"symbol": SYMBOL, "trace_id": new_trace_id(), "15m": [], "1h": [], "4h": []}
+    report = SevenStrategyLab().analyze(data)
+
+    assert len(report["data_usage"]) == 7
+    for row in report["data_usage"]:
+        assert row["trace_id"] == data["trace_id"]
+        assert isinstance(row["setup_produced"], bool)
+        assert row["common_filter_result"] in {"PASSED", "REJECTED", "NOT_REACHED"}
+        assert isinstance(row["shared_source_status"], dict)
+        assert "generator_inputs" in row and "analysis_features" in row
 
 
-# --- liquidation strategy: aligned timestamped OI pairs --------------------------
+def test_data_usage_reports_filter_rejection_and_missing_reason(monkeypatch):
+    import strategy_lab
+
+    monkeypatch.setattr(strategy_lab, "_regime", lambda data: {"label": "TREND", "trend": "BULLISH", "strength": 1.0})
+    candidate = {
+        "direction": "LONG", "entry_type": "MARKET", "entry": 100.0,
+        "stop_loss": 98.0, "tp1": 102.5, "tp2": 104.0, "tp3": 106.0,
+        "strength": 85.0, "reasons": ["test"],
+    }
+    monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(candidate))
+    monkeypatch.setattr(strategy_lab, "_risk_validate_candidate", lambda plan: {
+        "eligible": False, "reason": "TEST_STOP_COST_REJECT", "weighted_net_rr": 0.5, "risk_plan": None,
+    })
+
+    data = {"symbol": SYMBOL, "15m": [], "1h": [], "4h": []}
+    report = SevenStrategyLab().analyze(data)
+    row = next(r for r in report["data_usage"] if r["strategy_id"] == "trend_pullback")
+
+    assert row["status"] == "BLOCKED_COMMON_FILTER"
+    assert row["setup_produced"] is True
+    assert row["common_filter_result"] == "REJECTED"
+    assert row["filter_reasons"] == ["TEST_STOP_COST_REJECT"]
+    assert row["missing_reason"] is None
+
+
+def test_data_usage_reports_missing_reason_when_no_setup_produced():
+    empty = SevenStrategyLab().analyze({"symbol": SYMBOL, "15m": [], "1h": [], "4h": []})
+    empty_row = next(r for r in empty["data_usage"] if r["strategy_id"] == "trend_pullback")
+
+    assert empty_row["setup_produced"] is False
+    assert empty_row["common_filter_result"] == "NOT_REACHED"
+    assert empty_row["missing_reason"]
+
+
+# --- liquidation strategy: timestamped OI observations -----------------------------
 
 def test_liquidation_setup_requires_two_timestamped_oi_observations():
     now = int(time.time() * 1000)
-    data = liquidation_data(now, [1000.0], [])
+    data = liquidation_data(now, [1000.0], [now - 60_000])
 
     assert liquidation_generate(data) is None
 
@@ -219,27 +220,31 @@ def test_liquidation_setup_from_aligned_timestamped_oi_pairs():
     assert plan["tp1"] == pytest.approx(104.0)
     metrics = plan["liquidation_metrics"]
     assert metrics["oi_change_pct"] == pytest.approx(-5.0)
-    assert metrics["oi_history_samples"] == 2
-    assert metrics["oi_snapshot_value"] is None
+    assert metrics["event_alignment"] == "UNAVAILABLE"
     assert any("timestamped observations" in reason for reason in plan["reasons"])
 
 
-def test_liquidation_ignores_trailing_snapshot_when_computing_oi_change():
-    """Zaman damgasız snapshot tarihsel seriye karışmaz; kayma düzeltildi."""
+def test_liquidation_fails_closed_on_unstamped_trailing_snapshot():
+    """Zaman damgasız trailing snapshot hizalı seriyi bozamaz: fail-closed."""
     now = int(time.time() * 1000)
-    # Sonra eklenen zaman damgasız snapshot (940) eski kodda oi[-1] olur ve
-    # değişimi -(950->940)=-1.05%'e ezer; hizalı çiftler -5% kontraksiyonu korur.
-    data = liquidation_data(
-        now, [1000.0, 950.0], [now - 7_200_000, now - 60_000], snapshot_extra=940.0,
-    )
+    data = liquidation_data(now, [1000.0, 950.0], [now - 7_200_000, now - 60_000])
+    # Sonradan zaman damgasız eklenen snapshot: hizalama bozulur.
+    data["open_interest"] = [1000.0, 950.0, 940.0]
+    data["shared_market_evidence"] = build_shared_market_evidence(data)
 
-    plan = liquidation_generate(data)
+    # Kanıt katmanı MISSING_TIMESTAMPS verir; strateji kurulum üretemez.
+    assert data["shared_market_evidence"]["open_interest"]["state"] == "MISSING_TIMESTAMPS"
+    assert liquidation_generate(data) is None
 
-    assert plan is not None
-    metrics = plan["liquidation_metrics"]
-    assert metrics["oi_change_pct"] == pytest.approx(-5.0)
-    assert metrics["oi_history_samples"] == 2
-    assert metrics["oi_snapshot_value"] == pytest.approx(940.0)
+
+def test_liquidation_rejects_stale_shared_oi_evidence():
+    now = int(time.time() * 1000)
+    data = liquidation_data(now, [1000.0, 950.0], [now - 7_200_000, now - 60_000])
+    data["shared_market_evidence"] = {
+        "open_interest": {"state": "STALE", "count": 2, "change_pct": -5.0},
+    }
+
+    assert liquidation_generate(data) is None
 
 
 def test_liquidation_diagnostic_names_single_snapshot_limit(monkeypatch):
@@ -247,7 +252,7 @@ def test_liquidation_diagnostic_names_single_snapshot_limit(monkeypatch):
     monkeypatch.setattr(strategy_lab, "_regime", lambda data: {"label": "UNKNOWN", "trend": "NEUTRAL", "strength": 0.0})
 
     now = int(time.time() * 1000)
-    data = liquidation_data(now, [1000.0], [])
+    data = liquidation_data(now, [1000.0], [now - 60_000])
     data["15m"] = []
     data["4h"] = []
 
@@ -259,7 +264,7 @@ def test_liquidation_diagnostic_names_single_snapshot_limit(monkeypatch):
     assert liquidation["status"] == "MISSING_DATA"
     assert "INSUFFICIENT_OI_HISTORY" in liquidation["reason"]
     assert "open_interest_timestamps_ms" in liquidation["reason"]
-    assert "timestamped observations" in liquidation["reason"]
+    assert "timestamped observation(s)" in liquidation["reason"]
 
 
 def test_liquidation_setup_passes_common_filter_and_is_selected(monkeypatch):
@@ -290,37 +295,42 @@ def test_liquidation_setup_passes_common_filter_and_is_selected(monkeypatch):
     row = next(r for r in report["data_usage"] if r["strategy_id"] == "liquidation_cascade")
     assert row["setup_produced"] is True
     assert row["common_filter_result"] == "PASSED"
+    assert row["generator_inputs"]["open_interest"] == "AVAILABLE"
 
 
 # --- TUI section -----------------------------------------------------------------
 
-def _usage_row(strategy_id, strategy, feeds, **overrides):
+def _usage_row(strategy_id, strategy, **overrides):
     row = {
         "strategy_id": strategy_id,
         "strategy": strategy,
-        "feeds": feeds,
-        "microstructure_source": "MIXED_WEBSOCKET_AND_REST",
-        "trace_id": "trace-x-1",
         "status": overrides.get("status", "NO_SETUP"),
         "setup_produced": overrides.get("setup_produced", False),
         "common_filter_result": overrides.get("common_filter_result", "NOT_REACHED"),
+        "trace_id": "trace-x-1",
+        "generator_inputs": overrides.get("generator_inputs", {}),
+        "analysis_features": overrides.get("analysis_features", []),
+        "shared_source_status": overrides.get("shared_source_status", {}),
         "filter_reasons": overrides.get("filter_reasons", []),
         "missing_reason": overrides.get("missing_reason"),
     }
     return row
 
 
-def test_tui_data_usage_section_marks_unused_data():
-    feeds = {
-        "candles": {"used": True, "source": "REST", "status": "AVAILABLE", "samples": 200},
-        "orderbook": {"used": False, "status": "NOT_USED"},
-        "open_interest": {"used": True, "source": "REST_SNAPSHOT_ONLY", "status": "INSUFFICIENT_OI_HISTORY",
-                          "timestamped_samples": 0, "snapshot_only_samples": 1,
-                          "reason": "SINGLE_OI_SNAPSHOT_CANNOT_ESTABLISH_CONTRACTION"},
-    }
+def test_tui_data_usage_section_lists_inputs_and_shared_sources():
     report = {"data_usage": [_usage_row(
-        "liquidation_cascade", "Likidasyon", feeds,
-        status="MISSING_DATA", missing_reason="INSUFFICIENT_OI_HISTORY",
+        "liquidation_cascade", "Likidasyon",
+        status="MISSING_DATA",
+        missing_reason="INSUFFICIENT_OI_HISTORY - single snapshot",
+        shared_source_status={
+            "open_interest": {"state": "INSUFFICIENT_HISTORY", "source": "BYBIT_REST_SNAPSHOT"},
+            "orderbook": {"state": "UNAVAILABLE", "source": "UNAVAILABLE"},
+        },
+        generator_inputs={
+            "1h": "AVAILABLE",
+            "open_interest": "INSUFFICIENT_HISTORY",
+            "funding_rate": "AVAILABLE",
+        },
     )]}
     lines = []
     _add_data_usage_section(lines, report)
@@ -328,14 +338,13 @@ def test_tui_data_usage_section_marks_unused_data():
 
     assert "VERİ KULLANIM RAPORU" in text
     assert "Likidasyon" in text
-    assert "KULLANILMADI" in text                      # unused orderbook is explicit
-    assert "Mumlar: AVAILABLE | kaynak: REST" in text
-    assert "INSUFFICIENT_OI_HISTORY" in text
-    assert "zaman damgalı: 0" in text
+    assert "Open Interest: INSUFFICIENT_HISTORY | kaynak: BYBIT_REST_SNAPSHOT" in text
+    assert "Orderbook: UNAVAILABLE" in text
+    assert "Mumlar 1h: AVAILABLE" in text
+    assert "Funding: AVAILABLE" in text
+    assert "setup üretmedi" in text
+    assert "ortak filtre: erişilmedi" in text
     assert "eksik/koşul nedeni: INSUFFICIENT_OI_HISTORY" in text
-    assert "Mikroyapı kaynak özeti: MIXED_WEBSOCKET_AND_REST" in text
-    # Kullanılmayan veri asla kullanılmış gibi gösterilmez.
-    assert "Orderbook: AVAILABLE" not in text
 
 
 def test_tui_data_usage_section_silent_without_rows():
@@ -345,11 +354,11 @@ def test_tui_data_usage_section_silent_without_rows():
 
 
 def test_tui_data_usage_shows_filter_result_and_filter_reasons():
-    feeds = {"candles": {"used": True, "source": "REST", "status": "AVAILABLE", "samples": 200}}
     report = {"data_usage": [_usage_row(
-        "trend_pullback", "Trend", feeds,
+        "trend_pullback", "Trend",
         status="BLOCKED_COMMON_FILTER", setup_produced=True,
         common_filter_result="REJECTED", filter_reasons=["MARKET_ENTRY_TOO_FAR"],
+        generator_inputs={"1h": "AVAILABLE", "4h": "AVAILABLE", "current_price": "AVAILABLE"},
     )]}
     lines = []
     _add_data_usage_section(lines, report)
@@ -358,3 +367,10 @@ def test_tui_data_usage_shows_filter_result_and_filter_reasons():
     assert "setup üretildi" in text
     assert "ortak filtre: reddedildi" in text
     assert "filtre: MARKET_ENTRY_TOO_FAR" in text
+
+
+def test_setup_diagnostic_helper_remains_decision_neutral():
+    """_setup_diagnostic yalnızca gerekçe üretir; setup üretmez."""
+    regime = {"label": "UNKNOWN", "trend": "NEUTRAL"}
+    reason = _setup_diagnostic("liquidation_cascade", {"1h": [], "open_interest": [1000.0], "open_interest_timestamps_ms": [1]}, regime)
+    assert "INSUFFICIENT_HISTORY" in reason

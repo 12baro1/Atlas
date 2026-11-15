@@ -7,40 +7,39 @@ def generate(data):
     from strategy_lab import _atr, _value, _candle_quality, _relative_volume, _trade_flow, _current_price, _valid_plan, _entry_reference, _structure_candle_sets, liquidation_events
     """Detect a liquidation-like deleveraging impulse; OI is a proxy, not event data."""
     candles = data.get("1h") or []
-    oi_raw = data.get("open_interest") or []
-    oi_times_raw = data.get("open_interest_timestamps_ms") or []
+    oi = data.get("open_interest") or []
     atr = _atr(candles)
-    if len(candles) < 21 or atr is None:
+    if len(candles) < 21 or len(oi) < 2 or atr is None:
         return None
-    # OI gözlemleri yalnızca zaman damgasıyla hizalı çiftlerden kurulur.
-    # Sonradan eklenen zaman damgasız anlık snapshot tarihsel seriye karışmaz;
-    # böylece değer/timestamp dizin kayması değişimi bozamaz.
-    aligned = []
-    for stamp, value in zip(oi_times_raw, oi_raw):
-        try:
-            stamp = int(stamp)
-            value = float(value)
-        except (TypeError, ValueError, OverflowError):
-            continue
-        if math.isfinite(value):
-            aligned.append((stamp, value))
-    aligned.sort(key=lambda pair: pair[0])
-    # Zaman damgası olmayan trailing snapshot ayrı tutulur (tarihsel seriye girmez).
-    oi_snapshot_value = oi_raw[len(oi_times_raw)] if len(oi_raw) > len(oi_times_raw) else None
-    if len(aligned) < 2:
+    try:
+        previous_oi, current_oi = float(oi[-2]), float(oi[-1])
+    except (TypeError, ValueError, OverflowError):
         return None
-    previous_ms, previous_oi = aligned[-2]
-    current_ms, current_oi = aligned[-1]
     if previous_oi <= 0 or not math.isfinite(previous_oi) or not math.isfinite(current_oi):
         return None
+    oi_times = data.get("open_interest_timestamps_ms") or []
     now_ms = int(data.get("snapshot_timestamp_ms") or 0)
-    if not now_ms:
+    shared_evidence = data.get("shared_market_evidence") or {}
+    shared_oi = shared_evidence.get("open_interest") or {}
+    if shared_evidence and (
+        shared_oi.get("state") != "FRESH" or int(shared_oi.get("count") or 0) < 2
+    ):
         return None
-    if not (0 <= now_ms - current_ms <= 2 * 60 * 60 * 1000):
+    if len(oi_times) < 2 or not now_ms:
         return None
-    if not (0 < current_ms - previous_ms <= 3 * 60 * 60 * 1000):
+    try:
+        previous_oi_ms, current_oi_ms = int(oi_times[-2]), int(oi_times[-1])
+    except (TypeError, ValueError, OverflowError):
         return None
-    oi_change = (current_oi - previous_oi) / previous_oi
+    if not (0 <= now_ms - current_oi_ms <= 2 * 60 * 60 * 1000):
+        return None
+    if not (0 < current_oi_ms - previous_oi_ms <= 3 * 60 * 60 * 1000):
+        return None
+    oi_change = (
+        float(shared_oi["change_pct"]) / 100.0
+        if shared_evidence and shared_oi.get("change_pct") is not None
+        else (current_oi - previous_oi) / previous_oi
+    )
     last = candles[-1]
     close, opened = _value(last, "close"), _value(last, "open")
     quality = _candle_quality(last)
@@ -52,8 +51,16 @@ def generate(data):
     impulse = abs(close - opened) / atr
     direction = None
     funding_values = data.get("funding_rate") or []
+    shared_funding = shared_evidence.get("funding") or {}
     try:
-        funding = float(funding_values[-1]) if funding_values else 0.0
+        if shared_evidence:
+            funding = (
+                float(shared_funding["latest"])
+                if shared_funding.get("state") == "FRESH" and shared_funding.get("latest") is not None
+                else 0.0
+            )
+        else:
+            funding = float(funding_values[-1]) if funding_values else 0.0
     except (TypeError, ValueError, OverflowError):
         funding = 0.0
     if not math.isfinite(funding):
@@ -75,7 +82,24 @@ def generate(data):
         stop = entry + 1.5 * atr
     else:
         return None
+    event_evidence = liquidation_events(data.get("liquidation_events") or [], now_ms=now_ms)
+    event_direction = None
+    event_alignment = "UNAVAILABLE"
+    if event_evidence.get("state") == "AVAILABLE":
+        long_liquidations = float(event_evidence.get("buy_liquidation_notional") or 0.0)
+        short_liquidations = float(event_evidence.get("sell_liquidation_notional") or 0.0)
+        if short_liquidations > long_liquidations:
+            event_direction = "LONG"
+        elif long_liquidations > short_liquidations:
+            event_direction = "SHORT"
+        if event_direction:
+            event_alignment = "ALIGNED" if event_direction == direction else "OPPOSING"
+
     strength = min(92.0, 65.0 + min(abs(oi_change) * 400.0, 15.0) + min(impulse * 5.0, 10.0))
+    if event_alignment == "ALIGNED":
+        strength = min(95.0, strength + 3.0)
+    elif event_alignment == "OPPOSING":
+        strength = max(55.0, strength - 2.0)
     plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
         plan["reasons"] = [
@@ -86,12 +110,11 @@ def generate(data):
             "Liquidation-side interpretation is an OI/flow proxy, not exchange liquidation-event data",
         ]
         plan["data_quality"] = "OI_CONTRACTION_PROXY_NOT_EXCHANGE_LIQUIDATION_FEED"
-        event_evidence = liquidation_events(data.get("liquidation_events") or [], now_ms=now_ms)
         plan["liquidation_metrics"] = {"exchange_events": event_evidence,
+                                      "event_direction": event_direction,
+                                      "event_alignment": event_alignment,
                                       "event_class": "SHORT_SQUEEZE_PROXY" if direction == "SHORT" else "LONG_SQUEEZE_PROXY",
                                       "oi_change_pct": round(oi_change * 100, 3),
-                                      "oi_history_samples": len(aligned),
-                                      "oi_snapshot_value": oi_snapshot_value,
                                       "impulse_atr": round(impulse, 3),
                                       "relative_volume": round(relative_volume, 3),
                                       "taker_buy_notional_ratio": round(buy_ratio, 3),

@@ -109,15 +109,36 @@ def _is_supported_input(value: str) -> bool:
 
 
 _FEED_LABELS_TR = {
-    "candles": "Mumlar",
+    "15m": "Mumlar 15m",
+    "1h": "Mumlar 1h",
+    "4h": "Mumlar 4h",
+    "1d": "Mumlar 1d",
+    "1w": "Mumlar 1w",
+    "current_price": "Güncel fiyat",
     "orderbook": "Orderbook",
+    "orderbook_timestamp_ms": "Orderbook zamanı",
     "recent_trades": "Recent trades",
-    "trade_flow_history": "CVD",
-    "footprint": "Footprint",
-    "liquidation_events": "Likidasyon",
+    "recent_trades_timestamp_ms": "İşlem zamanı",
+    "trade_flow_history": "CVD geçmişi",
+    "liquidation_events": "Likidasyon olayları",
     "open_interest": "Open Interest",
+    "open_interest_timestamps_ms": "OI zaman damgaları",
     "funding_rate": "Funding",
-    "correlation_universe": "Korelasyon",
+    "funding_rate_timestamps_ms": "Funding zaman damgaları",
+    "correlation_universe": "Korelasyon evreni",
+    "sector_peer_universe": "Sektör evreni",
+    "smt_universe": "SMT evreni",
+    "smc_specialist_result": "SMC uzman sonucu",
+}
+
+_SOURCE_LABELS_TR = {
+    "ohlcv": "Mumlar",
+    "orderbook": "Orderbook",
+    "trades": "Recent trades",
+    "cvd": "CVD",
+    "liquidations": "Likidasyon",
+    "open_interest": "Open Interest",
+    "funding": "Funding",
 }
 
 _FILTER_RESULT_LABELS_TR = {
@@ -130,17 +151,18 @@ _FILTER_RESULT_LABELS_TR = {
 def _add_data_usage_section(lines, report):
     """Strateji başına veri kullanım bölümünü ekler (gözlemsel, salt okunur).
 
-    Rapor yalnızca gerçekten kullanılan veriyi gösterir; kullanılmayan veri
-    türleri "KULLANILMADI" olarak işaretlenir ve asla kullanılmış gibi
-    görünmez. Bu bölüm karar mantığını etkilemez.
+    Rapor yalnızca stratejinin gerçekten okuduğu girdileri ve paylaşılan
+    kaynak durumlarını gösterir; okunmayan veri türleri hiç listelenmez ve
+    asla kullanılmış gibi görünmez. Bu bölüm karar mantığını etkilemez.
     """
     rows = report.get("data_usage")
     if not isinstance(rows, list) or not rows:
         return
     lines.extend(["", "VERİ KULLANIM RAPORU"])
     summary_source = next(
-        (row.get("microstructure_source") for row in rows
-         if isinstance(row, dict) and row.get("microstructure_source")),
+        (source.get("source") for row in rows if isinstance(row, dict)
+         for source in (row.get("shared_source_status") or {}).values()
+         if isinstance(source, dict) and source.get("source")),
         None,
     )
     if summary_source:
@@ -155,28 +177,19 @@ def _add_data_usage_section(lines, report):
             "ortak filtre: bilinmiyor",
         )
         lines.append(f"▸ {name} — setup {setup_state} | {filter_text}")
-        for feed_name, feed in (row.get("feeds") or {}).items():
-            if not isinstance(feed, dict):
+        for source_name, source in (row.get("shared_source_status") or {}).items():
+            if not isinstance(source, dict):
                 continue
-            label = _FEED_LABELS_TR.get(feed_name, feed_name)
-            if not feed.get("used"):
-                lines.append(f"  {label}: KULLANILMADI")
-                continue
-            parts = [f"{feed.get('status') or 'UNKNOWN'} | kaynak: {feed.get('source') or 'UNKNOWN'}"]
-            try:
-                if feed.get("age_ms") is not None:
-                    parts.append(f"yaş: {int(feed['age_ms'])} ms")
-            except (TypeError, ValueError, OverflowError):
-                pass
-            if feed.get("samples") is not None:
-                parts.append(f"örnek: {feed['samples']}")
-            if feed.get("timestamped_samples") is not None:
-                parts.append(f"zaman damgalı: {feed['timestamped_samples']}")
-            if feed.get("snapshot_only_samples"):
-                parts.append(f"yaprak snapshot: {feed['snapshot_only_samples']}")
-            if feed.get("reason"):
-                parts.append(f"neden: {feed['reason']}")
+            label = _SOURCE_LABELS_TR.get(source_name, source_name)
+            parts = [f"{source.get('state') or 'UNKNOWN'}"]
+            if source.get("source"):
+                parts.append(f"kaynak: {source['source']}")
+            if source.get("timestamp_ms") is not None:
+                parts.append(f"zaman: {source['timestamp_ms']}")
             lines.append(f"  {label}: {' | '.join(parts)}")
+        for field, status in (row.get("generator_inputs") or {}).items():
+            label = _FEED_LABELS_TR.get(field, field)
+            lines.append(f"  {label}: {status}")
         for reason in row.get("filter_reasons") or []:
             lines.append(f"  filtre: {reason}")
         if row.get("missing_reason"):

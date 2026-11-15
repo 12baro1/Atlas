@@ -109,17 +109,15 @@ def test_strategy_report_exposes_trace_id_and_seven_data_usage_rows(engine):
         }
         assert isinstance(row["setup_produced"], bool)
         assert row["common_filter_result"] in {"PASSED", "REJECTED", "NOT_REACHED"}
-        # Kullanılmayan veri türleri kullanılmadı olarak işaretlenir.
-        for feed_name, feed in row["feeds"].items():
-            if not feed["used"]:
-                assert feed["status"] == "NOT_USED"
+        assert row["trace_id"] == result["trace_id"]
+        # Her satır jeneratör girdisi + paylaşılan kaynak durumunu taşır.
+        assert isinstance(row["generator_inputs"], dict)
+        assert isinstance(row["shared_source_status"], dict)
     by_id = {row["strategy_id"]: row for row in rows}
-    # Trend stratejisi yalnızca mum okur; mikroyapı beslemesi kullanılmadı.
-    assert by_id["trend_pullback"]["feeds"]["orderbook"]["used"] is False
-    assert by_id["trend_pullback"]["feeds"]["orderbook"]["status"] == "NOT_USED"
-    # Orderflow orderbook + recent trades + CVD + footprint okur.
-    for feed in ("orderbook", "recent_trades", "trade_flow_history", "footprint"):
-        assert by_id["orderflow_momentum"]["feeds"][feed]["used"] is True
+    # Trend yalnızca mum + güncel fiyat okur; mikroyapı girdisi hiç listelenmez.
+    assert "orderbook" not in by_id["trend_pullback"]["generator_inputs"]
+    # Orderflow orderbook okur; sentetik veride yok, açıkça raporlanır.
+    assert by_id["orderflow_momentum"]["generator_inputs"]["orderbook"] == "UNAVAILABLE"
 
 
 def test_trace_is_observability_only_and_never_changes_strategy_output():
