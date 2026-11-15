@@ -494,3 +494,17 @@ def test_close_series_fails_closed_instead_of_compressing_bad_candles():
     malformed = Candle(100.0, 99.0, 98.0, 98.5, volume=100.0)
     assert strategy_lab._series([valid, malformed]) == []
     assert strategy_lab._series([valid, valid]) == [101.0, 101.0]
+
+
+def test_extracted_strategy_packages_are_the_live_generators():
+    from strategies.trend import generate as trend_generate
+    from strategies.breakout import generate as breakout_generate
+    from strategies.mean_reversion import generate as mean_reversion_generate
+    import strategy_lab
+
+    assert strategy_lab._trend_pullback({}) is None
+    assert strategy_lab._volatility_breakout({}) is None
+    assert strategy_lab._mean_reversion({}, {"label": "UNKNOWN"}) is None
+    assert trend_generate({}) is None
+    assert breakout_generate({}) is None
+    assert mean_reversion_generate({}, {"label": "UNKNOWN"}) is None
