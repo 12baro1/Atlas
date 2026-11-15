@@ -464,3 +464,33 @@ def test_rsi_uses_wilder_smoothing_and_handles_flat_series():
     expected = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
     assert actual == expected
     assert strategy_lab._rsi([10.0] * 20, period=14) == 50.0
+
+
+
+def test_adx_uses_wilder_smoothing_and_rejects_invalid_period():
+    import strategy_lab
+
+    candles = []
+    price = 100.0
+    for index in range(80):
+        step = 1.0 if index < 30 else (0.25 if index % 3 else -0.1)
+        opened = price
+        close = price + step
+        candles.append(Candle(opened, max(opened, close) + 0.5,
+                              min(opened, close) - 0.5, close, volume=100.0))
+        price = close
+
+    result = strategy_lab._adx(candles, period=14)
+    assert result is not None
+    assert 0.0 <= result <= 100.0
+    assert strategy_lab._adx(candles, period=0) is None
+    assert strategy_lab._adx(candles[:28], period=14) is None
+
+
+def test_close_series_fails_closed_instead_of_compressing_bad_candles():
+    import strategy_lab
+
+    valid = Candle(100.0, 102.0, 99.0, 101.0, volume=100.0)
+    malformed = Candle(100.0, 99.0, 98.0, 98.5, volume=100.0)
+    assert strategy_lab._series([valid, malformed]) == []
+    assert strategy_lab._series([valid, valid]) == [101.0, 101.0]
