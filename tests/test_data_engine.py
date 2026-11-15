@@ -103,6 +103,7 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
                 "liquidation_events": [],
             }
 
+    monkeypatch.setenv("ATLAS_MICROSTRUCTURE_ARCHIVE_ENABLED", "0")
     monkeypatch.setattr(data_engine, "exchange", FakeExchange())
     monkeypatch.setattr(data_engine, "fetch_candles", lambda *_args, **_kwargs: [
         Candle(time=now - 3_600_000, open=100, high=102, low=98, close=101, volume=10)
