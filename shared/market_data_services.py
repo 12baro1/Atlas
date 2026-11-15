@@ -154,6 +154,49 @@ def _series_evidence(values, timestamps, now_ms, max_age_ms):
     return result
 
 
+def _footprint_evidence(trades):
+    levels = {}
+    for trade in trades or []:
+        if not isinstance(trade, dict):
+            continue
+        price = _number(trade.get("price"))
+        size = _number(trade.get("size", trade.get("amount")))
+        side = str(trade.get("side") or "").upper()
+        if price is None or size is None or price <= 0 or size <= 0 or side not in {"BUY", "SELL"}:
+            continue
+        key = format(price, ".12g")
+        row = levels.setdefault(key, {"buy_notional": 0.0, "sell_notional": 0.0, "trades": 0})
+        row["buy_notional" if side == "BUY" else "sell_notional"] += price * size
+        row["trades"] += 1
+    return {"state": "AVAILABLE", "levels": levels} if levels else {"state": "UNAVAILABLE"}
+
+
+def _liquidity_wall_evidence(book, top_n=20):
+    if not isinstance(book, dict):
+        return {"state": "UNAVAILABLE"}
+    result = {}
+    for side in ("bids", "asks"):
+        levels = []
+        for row in (book.get(side) or [])[:max(1, int(top_n))]:
+            try:
+                price, size = _number(row[0]), _number(row[1])
+            except (TypeError, IndexError):
+                continue
+            if price is not None and size is not None and price > 0 and size > 0:
+                levels.append({"price": price, "notional": price * size})
+        result[side] = sorted(levels, key=lambda item: item["notional"], reverse=True)
+    return {
+        "state": "AVAILABLE" if result["bids"] or result["asks"] else "UNAVAILABLE",
+        **result,
+        "disclaimer": "Displayed resting orders may be cancelled; not proof of support/resistance",
+    }
+
+
+def _cvd_evidence(trade_flow_history):
+    from shared.microstructure_services import cumulative_volume_delta
+    return cumulative_volume_delta(trade_flow_history or [])
+
+
 def build_shared_market_evidence(data):
     """Build immutable-style, strategy-neutral evidence from raw market data."""
     data = data if isinstance(data, dict) else {}
@@ -182,6 +225,9 @@ def build_shared_market_evidence(data):
     funding = _series_evidence(data.get("funding_rate") or [],
                                data.get("funding_rate_timestamps_ms") or [], now_ms, 8 * 60 * 60 * 1000)
     liquidations = _liquidation_evidence(data.get("liquidation_events") or [], now_ms)
+    footprint = _footprint_evidence(data.get("recent_trades") or [])
+    liquidity_walls = _liquidity_wall_evidence(data.get("orderbook"))
+    cvd = _cvd_evidence(data.get("trade_flow_history") or [])
 
     candle_counts = {
         timeframe: len(data.get(timeframe) or [])
@@ -206,6 +252,9 @@ def build_shared_market_evidence(data):
         },
         "orderbook": book,
         "trades": trades,
+        "cvd": cvd,
+        "footprint": footprint,
+        "liquidity_walls": liquidity_walls,
         "liquidations": liquidations,
         "open_interest": oi,
         "funding": funding,
