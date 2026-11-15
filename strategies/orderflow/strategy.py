@@ -36,6 +36,16 @@ def generate(data):
         footprint_directional_evidence, opposing_liquidity_wall, liquidation_pressure,
     )
 
+    shared_evidence = data.get("shared_market_evidence") or {}
+    shared_sources = shared_evidence.get("sources") or {}
+    book_source = shared_sources.get("orderbook") or {}
+    trade_source = shared_sources.get("trades") or {}
+    # When present, shared per-feed freshness is authoritative. Direct-call
+    # fixtures without the shared contract retain the existing timestamp checks.
+    if shared_sources and (
+        book_source.get("state") != "FRESH" or trade_source.get("state") != "FRESH"
+    ):
+        return None
     book = data.get("orderbook")
     candles = data.get("15m") or []
     atr = _atr(candles)
