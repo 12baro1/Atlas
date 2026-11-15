@@ -14,6 +14,7 @@ from risk_engine import RiskEngine
 from config import Config
 from strategy_submotors import (trend_structure, displacement, volatility_regime, breakout_acceptance, statistical_deviation, rsi_divergence)
 from smc_submotors import dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, narrative as smc_narrative
+from microstructure_submotors import cumulative_volume_delta, liquidation_events
 
 _ORDERBOOK_ENGINE = OrderBookEngine()
 
@@ -744,7 +745,9 @@ def _orderflow_momentum(data):
         plan["data_quality"] = "ABSORPTION_PROXY" if absorption else "FRESH_BOOK_AND_NOTIONAL_TRADE_FLOW"
         if absorption:
             plan["reasons"].append(f"Absorption proxy: {absorption}; passive absorption is inferred, not directly observed")
+        cvd_evidence = cumulative_volume_delta(data.get("trade_flow_history") or [])
         plan["orderflow_metrics"] = {
+            "cvd": cvd_evidence,
             "bid_notional": flow.get("bid_notional"),
             "ask_notional": flow.get("ask_notional"),
             "trade_delta": trade_delta,
@@ -829,7 +832,9 @@ def _liquidation_cascade(data):
             "Liquidation-side interpretation is an OI/flow proxy, not exchange liquidation-event data",
         ]
         plan["data_quality"] = "OI_CONTRACTION_PROXY_NOT_EXCHANGE_LIQUIDATION_FEED"
-        plan["liquidation_metrics"] = {"event_class": "SHORT_SQUEEZE_PROXY" if direction == "SHORT" else "LONG_SQUEEZE_PROXY",
+        event_evidence = liquidation_events(data.get("liquidation_events") or [], now_ms=now_ms)
+        plan["liquidation_metrics"] = {"exchange_events": event_evidence,
+                                      "event_class": "SHORT_SQUEEZE_PROXY" if direction == "SHORT" else "LONG_SQUEEZE_PROXY",
                                       "oi_change_pct": round(oi_change * 100, 3),
                                       "impulse_atr": round(impulse, 3),
                                       "relative_volume": round(relative_volume, 3),
