@@ -1,4 +1,6 @@
-"""Independent liquidation_cascade setup generator."""\n\ndef generate(data):
+"""Independent liquidation_cascade setup generator."""
+
+def generate(data):
     from strategy_lab import _atr, _value, _candle_quality, _relative_volume, _trade_flow, _current_price, _valid_plan, _entry_reference, _structure_candle_sets, liquidation_events
     """Detect a liquidation-like deleveraging impulse; OI is a proxy, not event data."""
     candles = data.get("1h") or []
@@ -78,4 +80,4 @@
                                       "relative_volume": round(relative_volume, 3),
                                       "taker_buy_notional_ratio": round(buy_ratio, 3),
                                       "funding_rate": funding}
-    return plan\n
+    return plan
