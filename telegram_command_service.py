@@ -114,15 +114,13 @@ class TelegramCommandService:
         self.logger.info("Telegram command polling started for configured group")
         while not self.stop_flag.is_set():
             try:
-                updates = self._api(
-                    "getUpdates",
-                    {
-                        "offset": self._offset,
-                        "timeout": 15,
-                        "allowed_updates": ["message"],
-                    },
-                    timeout=20,
-                ) or []
+                payload = {
+                    "timeout": 15,
+                    "allowed_updates": ["message"],
+                }
+                if self._offset is not None:
+                    payload["offset"] = self._offset
+                updates = self._api("getUpdates", payload, timeout=20) or []
                 for update in updates:
                     self._offset = int(update.get("update_id", 0)) + 1
                     if self.stop_flag.is_set():
