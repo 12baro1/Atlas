@@ -155,7 +155,7 @@ class StateEngine:
         return snapshot
 
     def get_active_setup(self, symbol, candles=None, expiry_hours=24):
-        """Restore an active setup until TP3, SL, or its bounded lifetime is reached."""
+        """Restore an active setup until TP1, SL, or its bounded lifetime is reached."""
         active = self.state.setdefault("active_setups", {}).get(str(symbol))
         if not isinstance(active, dict):
             return None
@@ -175,9 +175,12 @@ class StateEngine:
         side = str(signal.get("signal") or "").upper()
         try:
             stop = float(risk.get("stop_loss"))
-            tp3 = float(risk.get("tp3") or (active.get("dynamic_tp") or {}).get("tp3"))
         except (TypeError, ValueError, OverflowError):
-            stop = tp3 = None
+            stop = None
+        try:
+            tp1 = float(risk.get("tp1") or (active.get("dynamic_tp") or {}).get("tp1"))
+        except (TypeError, ValueError, OverflowError):
+            tp1 = None
         created_candles = []
         for candle in candles or []:
             try:
@@ -193,9 +196,10 @@ class StateEngine:
             except (AttributeError, TypeError, ValueError, OverflowError):
                 continue
             stop_hit = stop is not None and ((side == "LONG" and low <= stop) or (side == "SHORT" and high >= stop))
-            tp3_hit = tp3 is not None and ((side == "LONG" and high >= tp3) or (side == "SHORT" and low <= tp3))
-            if stop_hit or tp3_hit:
-                self.clear_active_setup(symbol, reason="stop_or_final_target_reached")
+            tp1_hit = tp1 is not None and ((side == "LONG" and high >= tp1) or (side == "SHORT" and low <= tp1))
+            if stop_hit or tp1_hit:
+                reason = "stop_reached" if stop_hit else "tp1_reached"
+                self.clear_active_setup(symbol, reason=reason)
                 return None
 
         restored = dict(active)
