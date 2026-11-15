@@ -520,3 +520,57 @@ def test_extracted_strategy_packages_are_the_live_generators():
     assert liquidation_generate({}) is None
     assert relative_strength_generate({}) is None
     assert smc_generate({}) is None
+
+
+def test_seven_strategy_selector_uses_injected_decision_engine_once(monkeypatch):
+    import strategy_lab
+
+    class RecordingDecisionEngine:
+        def __init__(self):
+            self.calls = []
+
+        def select_strategy_candidate(self, candidates):
+            self.calls.append(list(candidates))
+            return max(candidates, key=lambda item: item["estimated_net_rr"])
+
+    decision_engine = RecordingDecisionEngine()
+    plan = {
+        "direction": "LONG", "entry_type": "LIMIT", "entry": 100.0,
+        "stop_loss": 98.0, "tp1": 104.0, "tp2": 106.0, "tp3": 108.0,
+        "strength": 80.0, "reasons": ["test"],
+    }
+    monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(plan))
+    monkeypatch.setattr(strategy_lab, "_risk_validate_candidate", lambda candidate: {
+        "eligible": True, "reason": None, "weighted_net_rr": 2.5,
+        "risk_plan": {"final_geometry_reconciled": True, "risk_setup_valid": True,
+                      "weighted_net_rr": 2.5, "weighted_rr": 2.7},
+    })
+
+    lab = strategy_lab.SevenStrategyLab(decision_engine=decision_engine)
+    report = lab.analyze({"symbol": "BTC/USDT:USDT", "current_price": 1000.0})
+
+    assert len(decision_engine.calls) == 1
+    assert len(decision_engine.calls[0]) == 1
+    assert decision_engine.calls[0][0]["strategy_id"] == "trend_pullback"
+    assert report["selected"]["strategy_id"] == "trend_pullback"
+
+
+def test_decision_engine_selects_only_common_filter_passed_candidates():
+    from decision_engine import DecisionEngine
+
+    engine = DecisionEngine()
+    blocked = {
+        "strategy_id": "blocked", "status": "BLOCKED_COMMON_FILTER",
+        "estimated_net_rr": 99.0, "strength": 100.0, "regime_fit": 1.0,
+    }
+    first = {
+        "strategy_id": "trend", "status": "FILTERED_SETUP",
+        "estimated_net_rr": 2.1, "strength": 90.0, "regime_fit": 0.9,
+    }
+    second = {
+        "strategy_id": "smc", "status": "FILTERED_SETUP",
+        "estimated_net_rr": 2.4, "strength": 70.0, "regime_fit": 0.8,
+    }
+
+    assert engine.select_strategy_candidate([blocked, first, second]) is second
+    assert engine.select_strategy_candidate([blocked]) is None
