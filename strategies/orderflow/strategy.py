@@ -36,6 +36,16 @@ def generate(data):
         footprint_directional_evidence, opposing_liquidity_wall, liquidation_pressure,
     )
 
+    shared_evidence = data.get("shared_market_evidence") or {}
+    shared_sources = shared_evidence.get("sources") or {}
+    book_source = shared_sources.get("orderbook") or {}
+    trade_source = shared_sources.get("trades") or {}
+    # When present, shared per-feed freshness is authoritative. Direct-call
+    # fixtures without the shared contract retain the existing timestamp checks.
+    if shared_sources and (
+        book_source.get("state") != "FRESH" or trade_source.get("state") != "FRESH"
+    ):
+        return None
     book = data.get("orderbook")
     candles = data.get("15m") or []
     atr = _atr(candles)
@@ -72,10 +82,18 @@ def generate(data):
     trades = data.get("recent_trades") or []
     liquidation_events = data.get("liquidation_events") or []
     absorption = _absorption_proxy(flow, last, atr)
-    cvd_evidence = cumulative_volume_delta(data.get("trade_flow_history") or [])
+    shared_analytics = data.get("shared_market_evidence") or {}
+    if shared_analytics:
+        shared_cvd = shared_analytics.get("cvd") or {}
+        cvd_evidence = (
+            shared_cvd if shared_cvd.get("state") == "FRESH"
+            else {"state": "UNAVAILABLE", "reason": "SHARED_CVD_NOT_FRESH"}
+        )
+    else:
+        cvd_evidence = cumulative_volume_delta(data.get("trade_flow_history") or [])
     evidence = build_orderflow_evidence(trades, book, candles, liquidation_events)
-    footprint = evidence.get("footprint") or {}
-    cvd_direction = cvd_evidence.get("direction") if cvd_evidence.get("state") == "AVAILABLE" else None
+    footprint = shared_analytics.get("footprint") or evidence.get("footprint") or {}
+    cvd_direction = cvd_evidence.get("direction") if cvd_evidence.get("state") in {"AVAILABLE", "FRESH"} else None
 
     # Footprint must confirm the aggressive flow behind the setup. For an
     # absorption reversal, it confirms the absorbed aggressor rather than the
@@ -160,7 +178,7 @@ def generate(data):
             "cvd": cvd_evidence,
             "footprint": footprint,
             "footprint_confirmation": footprint_confirmation,
-            "liquidity_walls": evidence.get("liquidity_walls"),
+            "liquidity_walls": shared_analytics.get("liquidity_walls") or evidence.get("liquidity_walls"),
             "opposing_wall_risk": wall,
             "recent_trade_cvd": evidence.get("cvd"),
             "exchange_liquidations": evidence.get("liquidations"),

@@ -574,3 +574,51 @@ def test_decision_engine_selects_only_common_filter_passed_candidates():
 
     assert engine.select_strategy_candidate([blocked, first, second]) is second
     assert engine.select_strategy_candidate([blocked]) is None
+
+
+def test_each_strategy_reports_its_own_market_input_availability():
+    report = SevenStrategyLab().analyze({
+        "symbol": "BTC/USDT:USDT",
+        "15m": [Candle(100, 101, 99, 100) for _ in range(25)],
+        "1h": [Candle(100, 101, 99, 100) for _ in range(30)],
+        "4h": [Candle(100, 101, 99, 100) for _ in range(60)],
+        "open_interest": [1000.0],
+        "open_interest_timestamps_ms": [1_700_000_000_000],
+        "funding_rate": [0.0001],
+        "funding_rate_timestamps_ms": [1_700_000_000_000],
+        "snapshot_timestamp_ms": 1_700_000_000_000,
+    })
+    by_id = {item["strategy_id"]: item for item in report["strategies"]}
+
+    assert by_id["trend_pullback"]["data_usage"]["generator_inputs"]["4h"] == "AVAILABLE"
+    assert by_id["orderflow_momentum"]["data_usage"]["generator_inputs"]["orderbook"] == "UNAVAILABLE"
+    assert by_id["liquidation_cascade"]["data_usage"]["generator_inputs"]["open_interest_timestamps_ms"] == "INSUFFICIENT_HISTORY"
+    assert by_id["relative_strength"]["data_usage"]["generator_inputs"]["correlation_universe"] == "UNAVAILABLE"
+    assert all("shared_source_status" in item["data_usage"] for item in report["strategies"])
+    assert any(
+        "Executed footprint" in feature
+        for feature in by_id["orderflow_momentum"]["data_usage"]["analysis_features"]
+    )
+    assert any(
+        "sector-peer returns" in feature
+        for feature in by_id["relative_strength"]["data_usage"]["analysis_features"]
+    )
+
+
+def test_liquidation_strategy_rejects_stale_shared_oi_evidence(monkeypatch):
+    import strategy_lab
+    from strategies.liquidation.strategy import generate
+
+    monkeypatch.setattr(strategy_lab, "_atr", lambda _candles: 1.0)
+    now = 1_700_000_000_000
+    data = {
+        "1h": [Candle(100, 102, 98, 101) for _ in range(21)],
+        "open_interest": [1000.0, 970.0],
+        "open_interest_timestamps_ms": [now - 3_600_000, now - 1_800_000],
+        "snapshot_timestamp_ms": now,
+        "shared_market_evidence": {
+            "open_interest": {"state": "STALE", "count": 2, "change_pct": -3.0},
+        },
+    }
+
+    assert generate(data) is None

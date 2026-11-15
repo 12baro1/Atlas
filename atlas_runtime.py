@@ -422,6 +422,12 @@ class AtlasRuntime:
                 except Exception as exc:
                     self._log(f"WARN SMT comparison universe unavailable: {exc}")
 
+                # Runtime adds closed-candle, BTC/ETH correlation and SMT data
+                # after DataEngine's initial snapshot; rebuild the shared
+                # evidence only after the complete analysis input is assembled.
+                from shared.market_data_services import build_shared_market_evidence
+                data["shared_market_evidence"] = build_shared_market_evidence(data)
+
                 with self._journal_lock:
                     result = self.engine.analyze(data)
                     # AtlasEngine already ran the seven generators, common filter,
