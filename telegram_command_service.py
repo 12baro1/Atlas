@@ -152,7 +152,7 @@ def _format_telegram_card(card, elapsed_ms=0):
         reason = str(card.get("reason") or "Ortak karar mekanizması işlem planı üretmedi.")
         return f"ATLAS | {symbol}\nŞu an geçerli işlem planı yok.\n{reason[:180]}"
 
-    strategy = card.get("strategy") or card.get("strategy_id") or card.get("setup_thesis") or "—"
+    strategy = card.get("strategy") or card.get("strategy_id") or "SMC"
     targets = card.get("tp_levels") or []
     rr = card.get("net_rr")
     if rr is None:
@@ -377,9 +377,15 @@ class TelegramCommandService:
                 if rr is None:
                     rr = card.get("rr")
                 try:
-                    score = float(card.get("setup_quality") or 0) * 0.55 + float(card.get("confidence") or 0) * 0.25 + min(float(rr or 0), 5.0) * 4
+                    rr_value = float(rr)
+                    if rr_value <= 0:
+                        continue
+                    score = float(card.get("setup_quality") or 0) * 0.55 + float(card.get("confidence") or 0) * 0.25 + min(rr_value, 5.0) * 4
                 except (TypeError, ValueError, OverflowError):
                     continue
+                if not card.get("strategy") and not card.get("strategy_id"):
+                    analysis = raw.get("analysis") or {}
+                    card["strategy"] = analysis.get("strategy") or "SMC"
                 candidates.append((score, card))
             candidates.sort(key=lambda item: item[0], reverse=True)
             if not candidates:
@@ -403,6 +409,9 @@ class TelegramCommandService:
             if isinstance(raw.get("strategy_lab"), dict)
             else build_signal_card(raw)
         )
+        if not card.get("strategy") and not card.get("strategy_id"):
+            analysis = raw.get("analysis") or {}
+            card["strategy"] = analysis.get("strategy") or "SMC"
         return _format_telegram_card(card, outcome.get("elapsed_ms", 0))
 
 
