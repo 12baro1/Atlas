@@ -785,11 +785,34 @@ class AtlasEngine:
         if entry is None or stop_loss is None or side not in ("LONG", "SHORT"):
             return None
 
+        analysis = result_payload.get("analysis") or {}
+        setup_quality = analysis.get("setup_quality") or {}
+        setup_fingerprint = (
+            setup_quality.get("setup_fingerprint")
+            or (analysis.get("setup") or {}).get("fingerprint")
+            or None
+        )
+        target_prices = {
+            "tp1": risk.get("tp1") or (result_payload.get("dynamic_tp") or {}).get("tp1"),
+            "tp2": risk.get("tp2") or (result_payload.get("dynamic_tp") or {}).get("tp2"),
+            "tp3": risk.get("tp3") or (result_payload.get("dynamic_tp") or {}).get("tp3"),
+        }
+
+        def same_setup(record):
+            if record.get("side") != side:
+                return False
+            if any(record.get(key) != value for key, value in {
+                "entry": entry, "stop_loss": stop_loss, **target_prices
+            }.items()):
+                return False
+            recorded_analysis = record.get("analysis") or {}
+            recorded_quality = recorded_analysis.get("setup_quality") or {}
+            return recorded_quality.get("setup_fingerprint") == setup_fingerprint
+
         for existing in self.trade_journal.open_trades(symbol=symbol):
-            if existing.get("side") == side and existing.get("entry") == entry:
+            if same_setup(existing):
                 return existing
 
-        analysis = result_payload.get("analysis") or {}
         trade = {
             "symbol": symbol,
             "side": side,
@@ -812,19 +835,18 @@ class AtlasEngine:
         # Teorik sinyal sonucu (SIGNAL OUTCOME) kaydı: TP/SL çözümlenmesi için.
         # Aynı sembol+yönde açık bir kayıt varsa tekrar açılmaz.
         opened_at = result_payload.get("decision", {}).get("executed_at") or int(time.time() * 1000)
-        analysis = result_payload.get("analysis") or {}
-        setup_quality = analysis.get("setup_quality") or {}
-        setup_fingerprint = (
-            setup_quality.get("setup_fingerprint")
-            or (analysis.get("setup") or {}).get("fingerprint")
-            or None
-        )
         setup_features = list(setup_quality.get("features") or [])
         signal_id = None
         existing = [
             o
             for o in self.trade_journal.open_signal_outcomes(symbol=symbol)
-            if o.get("direction") == side
+            if (
+                o.get("direction") == side
+                and o.get("entry") == entry
+                and o.get("stop_loss") == stop_loss
+                and all(o.get(key) == value for key, value in target_prices.items())
+                and o.get("setup_fingerprint") == setup_fingerprint
+            )
         ]
         if existing:
             signal_id = existing[0].get("signal_id")
@@ -851,6 +873,8 @@ class AtlasEngine:
                         "setup_type": (analysis.get("setup") or {}).get("type")
                         or setup_quality.get("setup")
                         or None,
+                        "strategy_id": ((result_payload.get("strategy_lab") or {}).get("selected") or {}).get("strategy_id"),
+                        "strategy": ((result_payload.get("strategy_lab") or {}).get("selected") or {}).get("strategy"),
                         "setup_features": setup_features,
                         "learning": setup_quality.get("learning") or {},
                         "setup_quality": setup_quality,
