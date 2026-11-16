@@ -1,9 +1,9 @@
 """Public MEXC USDT-perpetual market-data adapter.
 
 This intentionally implements only the read-only subset consumed by Atlas.
-It never signs requests or submits orders. MEXC reports contract volume in
-contracts; the adapter preserves that exchange-native quantity and normalizes
-symbols/timestamps into Atlas' existing CCXT-like interface.
+It never signs requests or submits orders. MEXC reports many derivative quantities in contracts; the adapter converts
+those quantities to base-asset units using each contract's contractSize and
+normalizes symbols/timestamps into Atlas' existing market-data interface.
 """
 from __future__ import annotations
 
