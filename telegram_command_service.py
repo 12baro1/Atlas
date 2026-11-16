@@ -244,7 +244,7 @@ def format_daily_signal_report(outcomes, now=None):
         f"Kayıp: {_format_rr(negative)}",
         f"Net: {_format_rr(net)}",
         divider,
-        "TP1 alınması işlemi kapatmaz; kalan hedefler takip edilir.",
+        "TP1 kısmi hedef olarak kaydedilir; işlem kapanmaz ve kalan hedefler takip edilir.",
         "Giriş seviyesinin mumda görülmesi, borsada emir/fill gerçekleştiği anlamına gelmez.",
     ])
     return "\n".join(lines)
@@ -293,6 +293,7 @@ def _format_telegram_card(card, elapsed_ms=0):
 
     direction_label = "LONG" if direction == "LONG" else "SHORT"
     lines = [
+        f"ATLAS  |  {card.get('symbol') or symbol}",
         f"{'🟢' if direction == 'LONG' else '🔴'} {symbol} — {direction_label}",
         divider,
         "İŞLEM PLANI",
@@ -334,7 +335,8 @@ def _format_telegram_card(card, elapsed_ms=0):
         lines.append("Fiyat belirlenen LIMIT seviyesine gelmeden giriş varsayılmaz.")
     else:
         lines.append("DURUM: MARKET planı hazır.")
-        lines.append("Bu mesaj borsa emri veya gerçekleşmiş fill teyidi değildir.")
+        lines.append("Borsa emri veya gerçekleşmiş fill teyidi değildir.")
+        lines.append("Bu mesaj yalnızca analiz planıdır; borsada emir gönderilmez.")
     lines.append("Atlas otomatik emir göndermez.")
     lines.append(divider)
     return "\n".join(lines)
