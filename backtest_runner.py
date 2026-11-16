@@ -1208,6 +1208,11 @@ class BacktestRunner:
                 for key in ("entry", "weekly", "daily", "h4", "entry_source")
             } if isinstance(analysis.get("mtf"), dict) else {},
             "exit_reason": outcome.get("exit_reason", "UNKNOWN"),
+            "tp_behavior": __import__("segmentation_report").classify_tp_behavior({
+                "result": outcome.get("result"),
+                "_levels": outcome.get("levels") or [],
+                "exit_reason": outcome.get("exit_reason", "UNKNOWN"),
+            }),
             "exit_index": exit_index,
             "exit_time": exit_time,
             "result": outcome.get("result"),
