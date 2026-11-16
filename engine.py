@@ -813,7 +813,7 @@ class AtlasEngine:
             if not same_setup(existing):
                 continue
             linked_signal = self.trade_journal.find_signal_outcome(existing.get("signal_id"))
-            if linked_signal is None or linked_signal.get("status") == "PENDING":
+            if linked_signal is not None and linked_signal.get("status") == "PENDING":
                 return existing
 
         trade = {
