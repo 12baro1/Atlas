@@ -142,9 +142,33 @@ class AtlasRuntime:
                 return self._latest_analysis_by_symbol.get(latest_symbol)
             return None
 
+    def _prune_latest_analyses(self, now_ms=None):
+        """Remove stale cache entries and enforce a deterministic symbol cap."""
+        now_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+        max_age_ms = max(0, int(float(getattr(Config, "ANALYSIS_CACHE_MAX_AGE_SECONDS", 86400)) * 1000))
+        max_symbols = max(1, int(getattr(Config, "ANALYSIS_CACHE_MAX_SYMBOLS", 1100)))
+        with self._lock:
+            stale = [
+                symbol for symbol, analyzed_at in self._latest_analysis_at.items()
+                if not analyzed_at or now_ms - int(analyzed_at) > max_age_ms
+            ]
+            for symbol in stale:
+                self._latest_analysis_at.pop(symbol, None)
+                self._latest_analysis_by_symbol.pop(symbol, None)
+
+            if len(self._latest_analysis_by_symbol) > max_symbols:
+                oldest_first = sorted(
+                    self._latest_analysis_at,
+                    key=lambda symbol: int(self._latest_analysis_at.get(symbol) or 0),
+                )
+                for symbol in oldest_first[:len(self._latest_analysis_by_symbol) - max_symbols]:
+                    self._latest_analysis_at.pop(symbol, None)
+                    self._latest_analysis_by_symbol.pop(symbol, None)
+
     def latest_analyses(self, max_age_seconds=None):
         """Return a snapshot of cached analyses, optionally excluding stale entries."""
         now_ms = int(time.time() * 1000)
+        self._prune_latest_analyses(now_ms)
         max_age_ms = None if max_age_seconds is None else max(0, int(float(max_age_seconds) * 1000))
         with self._lock:
             items = []
@@ -483,6 +507,7 @@ class AtlasRuntime:
                     with self._lock:
                         self._latest_analysis_by_symbol[symbol] = result
                         self._latest_analysis_at[symbol] = int(time.time() * 1000)
+                    self._prune_latest_analyses()
 
                     if Config.SIGNAL_TRACKING_ENABLED:
                         candles_15m = data.get("15m") or data.get("15M") or []
