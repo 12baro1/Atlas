@@ -1,14 +1,13 @@
-"""Optional Bybit V5 public WebSocket collector for linear perpetuals.
+"""MEXC Futures public WebSocket collector for USDT perpetuals.
 
-Uses websocket-client when installed. REST remains a fallback. The collector
-records only exchange messages actually received; no synthetic history.
-
-Kaynak ayrımı bağlantı durumundan değil, gerçekten kullanılan veriden gelir:
-her veri türünün (orderbook, trades, liquidation) kaynağı ayrı etiketlenir ve
-sadece taze/geçerli veriler "WEBSOCKET" olarak işaretlenir.
+The collector only marks feeds available after valid exchange messages arrive.
+MEXC's documented public futures channels provide depth, deals and ticker;
+the public contract WebSocket does not document a liquidation-event channel,
+so liquidation_events deliberately remain unavailable.
 """
 from __future__ import annotations
 
+import gzip
 import json
 import math
 import os
@@ -16,14 +15,11 @@ import threading
 import time
 from collections import deque
 
-# Standalone use: bounded wait for the first exchange messages after connect.
-# Never infinite; configurable via ATLAS_WS_FIRST_SNAPSHOT_TIMEOUT_MS.
 DEFAULT_FIRST_SNAPSHOT_WAIT_MS = 2500.0
 MAX_FIRST_SNAPSHOT_WAIT_MS = 15000.0
 
 
 def configured_first_snapshot_wait_ms():
-    """Return the configured bounded wait for the first valid snapshot (ms)."""
     raw = os.getenv("ATLAS_WS_FIRST_SNAPSHOT_TIMEOUT_MS", str(DEFAULT_FIRST_SNAPSHOT_WAIT_MS))
     try:
         value = float(raw)
@@ -34,8 +30,8 @@ def configured_first_snapshot_wait_ms():
     return min(value, MAX_FIRST_SNAPSHOT_WAIT_MS)
 
 
-class BybitPublicStream:
-    URL = "wss://stream.bybit.com/v5/public/linear"
+class MexcPublicStream:
+    URL = "wss://contract.mexc.com/edge"
     _instances = {}
     _instances_lock = threading.RLock()
 
@@ -51,44 +47,58 @@ class BybitPublicStream:
 
     def __init__(self, symbol, max_events=20000):
         self.symbol = str(symbol)
-        self.instrument = self.symbol.replace("/", "").replace(":USDT", "").replace(":", "")
+        self.instrument = self.symbol.split(":")[0].replace("/", "_").upper()
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread = None
         self._book = {"bids": {}, "asks": {}}
         self._book_timestamp_ms = None
         self._trades = deque(maxlen=max_events)
-        self._liquidations = deque(maxlen=5000)
         self._connected = False
         self._last_message_ms = None
+        self._ticker = {}
 
     def start(self):
         if self._thread and self._thread.is_alive():
             return True
         try:
-            import websocket  # websocket-client; optional for mobile/minimal installs
+            import websocket
         except ImportError:
             return False
         self._stop.clear()
+
         def worker():
             while not self._stop.is_set():
                 ws = None
                 try:
                     ws = websocket.create_connection(self.URL, timeout=10, enable_multithread=True)
-                    topics = [f"orderbook.50.{self.instrument}", f"publicTrade.{self.instrument}", f"allLiquidation.{self.instrument}"]
-                    ws.send(json.dumps({"op": "subscribe", "args": topics}))
+                    for method, param in (
+                        ("sub.depth.full", {"symbol": self.instrument, "limit": 20}),
+                        ("sub.deal", {"symbol": self.instrument}),
+                        ("sub.ticker", {"symbol": self.instrument}),
+                    ):
+                        ws.send(json.dumps({"method": method, "param": param, "gzip": False}))
                     with self._lock:
                         self._connected = True
                     while not self._stop.is_set():
                         try:
                             raw = ws.recv()
                         except Exception:
-                            break
+                            try:
+                                ws.send(json.dumps({"method": "ping"}))
+                            except Exception:
+                                break
+                            continue
                         if not raw:
                             continue
                         try:
+                            if isinstance(raw, bytes):
+                                try:
+                                    raw = gzip.decompress(raw).decode("utf-8")
+                                except (OSError, UnicodeDecodeError):
+                                    raw = raw.decode("utf-8")
                             self._consume(json.loads(raw))
-                        except (TypeError, ValueError):
+                        except (TypeError, ValueError, UnicodeDecodeError):
                             continue
                 except Exception:
                     pass
@@ -101,7 +111,10 @@ class BybitPublicStream:
                     except Exception:
                         pass
                 self._stop.wait(2.0)
-        self._thread = threading.Thread(target=worker, name=f"atlas-ws-{self.instrument}", daemon=True)
+
+        self._thread = threading.Thread(
+            target=worker, name=f"atlas-mexc-ws-{self.instrument}", daemon=True
+        )
         self._thread.start()
         return True
 
@@ -112,85 +125,72 @@ class BybitPublicStream:
             thread.join(timeout=2.0)
 
     @staticmethod
-    def _levels(rows):
+    def _book_levels(rows, quantity_index=2):
         output = {}
         for row in rows or []:
             try:
-                price, size = float(row[0]), float(row[1])
-                if price > 0 and size > 0:
-                    output[price] = size
-                elif price > 0 and size == 0:
-                    output.pop(price, None)
+                price = float(row[0])
+                quantity = float(row[quantity_index] if len(row) > quantity_index else row[1])
+                if price > 0 and quantity > 0:
+                    output[price] = quantity
             except (TypeError, ValueError, IndexError, OverflowError):
                 continue
         return output
 
     def _consume(self, message):
-        topic = str(message.get("topic") or "")
-        data = message.get("data")
-        if not topic or data is None:
+        channel = str(message.get("channel") or "")
+        if not channel or channel.startswith(("rs.", "pong")):
             return
+        data = message.get("data")
+        if data is None:
+            return
+        stamp = int(message.get("ts") or time.time() * 1000)
         with self._lock:
-            self._last_message_ms = int(time.time() * 1000)
-            if topic.startswith("orderbook.") and isinstance(data, dict):
-                kind = str(message.get("type") or "").lower()
-                if kind == "snapshot":
-                    self._book = {"bids": self._levels(data.get("b")), "asks": self._levels(data.get("a"))}
-                else:
-                    self._book.setdefault("bids", {}).update(self._levels(data.get("b")))
-                    self._book.setdefault("asks", {}).update(self._levels(data.get("a")))
-                    # Explicit zero-size updates delete levels.
-                    for key, rows in (("bids", data.get("b")), ("asks", data.get("a"))):
-                        for row in rows or []:
-                            try:
-                                if float(row[1]) == 0:
-                                    self._book[key].pop(float(row[0]), None)
-                            except (TypeError, ValueError, IndexError):
-                                pass
-                self._book_timestamp_ms = int(data.get("ts") or message.get("ts") or self._last_message_ms)
-            elif topic.startswith("publicTrade."):
-                for row in data if isinstance(data, list) else []:
+            if channel in {"push.depth", "push.depth.full"} and isinstance(data, dict):
+                # sub.depth.full supplies complete depth snapshots. Replace
+                # both sides atomically rather than treating them as deltas.
+                self._book = {
+                    "bids": self._book_levels(data.get("bids")),
+                    "asks": self._book_levels(data.get("asks")),
+                }
+                self._book_timestamp_ms = stamp
+                self._last_message_ms = stamp
+            elif channel == "push.deal":
+                rows = data if isinstance(data, list) else [data]
+                for row in rows:
                     try:
-                        size = float(row["v"])
-                        self._trades.append({"timestamp_ms": int(row.get("T") or message.get("ts")),
-                                             "price": float(row["p"]), "size": size, "amount": size,
-                                             "side": str(row["S"]).upper(), "trade_id": row.get("i")})
+                        trade_stamp = int(row.get("t") or stamp)
+                        side_code = int(row.get("T") or 0)
+                        if side_code not in (1, 2):
+                            continue
+                        self._trades.append({
+                            "timestamp_ms": trade_stamp,
+                            "price": float(row["p"]),
+                            "size": float(row["v"]),
+                            "amount": float(row["v"]),
+                            "side": "BUY" if side_code == 1 else "SELL",
+                            "trade_id": str(trade_stamp),
+                        })
+                        self._last_message_ms = trade_stamp
                     except (KeyError, TypeError, ValueError, OverflowError):
                         continue
-            elif topic.startswith("allLiquidation."):
-                for row in data if isinstance(data, list) else [data]:
-                    try:
-                        self._liquidations.append({"timestamp_ms": int(row.get("T") or message.get("ts")),
-                                                   "price": float(row["p"]), "size": float(row["v"]),
-                                                   "notional": float(row["p"]) * float(row["v"]),
-                                                   "side": str(row["S"]).upper()})
-                    except (KeyError, TypeError, ValueError, OverflowError):
-                        continue
-
-    def _await_first_message(self, timeout_seconds):
-        """Bounded wait for the first exchange message. Returns as soon as one
-        message arrives or the deadline passes; never blocks forever."""
-        timeout_seconds = max(0.0, float(timeout_seconds or 0.0))
-        if timeout_seconds <= 0:
-            return self._has_any_message()
-        deadline = time.monotonic() + timeout_seconds
-        while time.monotonic() < deadline:
-            if self._has_any_message():
-                return True
-            remaining = deadline - time.monotonic()
-            time.sleep(min(0.02, max(0.0, remaining)))
-        return self._has_any_message()
+            elif channel == "push.ticker" and isinstance(data, dict):
+                self._ticker = dict(data)
+                self._last_message_ms = stamp
 
     def _has_any_message(self):
         with self._lock:
             return self._last_message_ms is not None
 
-    def snapshot(self, now_ms=None, wait_ms=None):
-        """Return a fresh per-feed snapshot.
+    def _await_first_message(self, timeout_seconds):
+        deadline = time.monotonic() + max(0.0, float(timeout_seconds or 0.0))
+        while time.monotonic() < deadline:
+            if self._has_any_message():
+                return True
+            time.sleep(min(0.02, max(0.0, deadline - time.monotonic())))
+        return self._has_any_message()
 
-        wait_ms: bounded first-snapshot wait. The connection alone never marks
-        data as WebSocket-sourced; only actually received, fresh data does.
-        """
+    def snapshot(self, now_ms=None, wait_ms=None):
         now = int(now_ms or time.time() * 1000)
         if wait_ms is None:
             wait_ms = configured_first_snapshot_wait_ms()
@@ -198,28 +198,35 @@ class BybitPublicStream:
             self._await_first_message(float(wait_ms) / 1000.0)
             now = int(now_ms) if now_ms is not None else int(time.time() * 1000)
         with self._lock:
-            bids = sorted(self._book.get("bids", {}).items(), reverse=True)[:50]
-            asks = sorted(self._book.get("asks", {}).items())[:50]
+            bids = sorted(self._book["bids"].items(), reverse=True)[:50]
+            asks = sorted(self._book["asks"].items())[:50]
             trades = list(self._trades)
-            liquidations = list(self._liquidations)
-            book_ts, last_msg, connected = self._book_timestamp_ms, self._last_message_ms, self._connected
+            book_ts = self._book_timestamp_ms
+            last_msg = self._last_message_ms
+            connected = self._connected
         book_age = now - int(book_ts) if book_ts else None
         fresh_book = bool(bids and asks and book_age is not None and 0 <= book_age <= 15000)
-        fresh_trades = [x for x in trades if 0 <= now - x["timestamp_ms"] <= 30000]
-        fresh_liquidations = [x for x in liquidations if 0 <= now - x["timestamp_ms"] <= 900000]
-        return {"source": "BYBIT_V5_PUBLIC_WEBSOCKET", "connected": connected,
-                "last_message_timestamp_ms": last_msg,
-                "orderbook": {"bids": bids, "asks": asks, "timestamp": book_ts} if fresh_book else None,
-                "orderbook_timestamp_ms": book_ts if fresh_book else None,
-                # Kaynak etiketi yalnızca gerçekten kullanılan taze veri için.
-                "orderbook_source": "WEBSOCKET" if fresh_book else "UNAVAILABLE",
-                "recent_trades": fresh_trades,
-                "recent_trades_timestamp_ms": max((x["timestamp_ms"] for x in fresh_trades), default=None),
-                "recent_trades_source": "WEBSOCKET" if fresh_trades else "UNAVAILABLE",
-                "trade_flow_history": self._minute_batches(trades, now),
-                "trade_flow_history_source": "WEBSOCKET" if trades else "UNAVAILABLE",
-                "liquidation_events": fresh_liquidations,
-                "liquidation_events_source": "WEBSOCKET" if fresh_liquidations else "UNAVAILABLE"}
+        fresh_trades = [row for row in trades if 0 <= now - row["timestamp_ms"] <= 30000]
+        return {
+            "source": "MEXC_FUTURES_PUBLIC_WEBSOCKET",
+            "connected": connected,
+            "last_message_timestamp_ms": last_msg,
+            "orderbook": {
+                "bids": bids, "asks": asks, "timestamp": book_ts,
+            } if fresh_book else None,
+            "orderbook_timestamp_ms": book_ts if fresh_book else None,
+            "orderbook_source": "WEBSOCKET" if fresh_book else "UNAVAILABLE",
+            "recent_trades": fresh_trades,
+            "recent_trades_timestamp_ms": max(
+                (row["timestamp_ms"] for row in fresh_trades), default=None
+            ),
+            "recent_trades_source": "WEBSOCKET" if fresh_trades else "UNAVAILABLE",
+            "trade_flow_history": self._minute_batches(trades, now),
+            "trade_flow_history_source": "WEBSOCKET" if trades else "UNAVAILABLE",
+            # No public MEXC futures liquidation-event channel is documented.
+            "liquidation_events": [],
+            "liquidation_events_source": "UNAVAILABLE",
+        }
 
     @staticmethod
     def _minute_batches(trades, now_ms):
@@ -230,7 +237,9 @@ class BybitPublicStream:
             if stamp < cutoff:
                 continue
             bucket = stamp // 60000 * 60000
-            row = buckets.setdefault(bucket, {"timestamp_ms": bucket, "buy_notional": 0.0, "sell_notional": 0.0})
+            row = buckets.setdefault(
+                bucket, {"timestamp_ms": bucket, "buy_notional": 0.0, "sell_notional": 0.0}
+            )
             key = "buy_notional" if trade["side"] == "BUY" else "sell_notional"
             row[key] += trade["price"] * trade["size"]
         return [buckets[key] for key in sorted(buckets)]
