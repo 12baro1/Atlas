@@ -288,12 +288,13 @@ class TelegramCommandService:
         sender = message.get("from") or {}
         if str(chat.get("id", "")) != self.chat_id or sender.get("is_bot"):
             return
-        command = normalize_command(message.get("text") or "")
-        if not command or not is_recognized_command(command):
+        raw_command = str(message.get("text") or "").strip()
+        command = normalize_command(raw_command)
+        if not command or not is_recognized_command(raw_command):
             return
         self.logger.info("Telegram command received: %s", command[:80])
         try:
-            result = self.execute_command(command)
+            result = self.execute_command(raw_command)
         except Exception:
             self.logger.error("Telegram command failed: %s", command[:80])
             result = "Komut işlenirken hata oluştu. VPS günlüklerini kontrol et."
@@ -409,7 +410,7 @@ class TelegramCommandService:
                 if not card.get("strategy") and not card.get("strategy_id"):
                     analysis = raw.get("analysis") or {}
                     card["strategy"] = analysis.get("strategy") or "SMC"
-                candidates.append((score, card))
+                candidates.append((score, card, raw))
             candidates.sort(key=lambda item: item[0], reverse=True)
             if not candidates:
                 if cached_best_request:
@@ -417,13 +418,10 @@ class TelegramCommandService:
                 return f"ATLAS | TARAMA\\nTaranan piyasa: {len(symbols)}\\nGeçerli MARKET/LIMIT setup bulunamadı."
             shown = candidates[:max(1, min(int(result_limit), 20))]
             if cached_best_request:
-                for _score, selected_card in shown:
-                    selected_symbol = selected_card.get("symbol")
-                    selected_item = next((item for item in cached_items if item.get("symbol") == selected_symbol), None)
-                    if selected_item:
-                        self.runtime.track_requested_result(selected_item.get("result"))
+                for _score, _selected_card, selected_raw in shown:
+                    self.runtime.track_requested_result(selected_raw)
             lines = [f"ATLAS | EN İYİ {len(shown)} SETUP", f"Taranan piyasa: {len(symbols)}"]
-            for rank, (_score, card) in enumerate(shown, start=1):
+            for rank, (_score, card, _raw) in enumerate(shown, start=1):
                 lines.extend(["", f"#{rank}", _format_telegram_card(card)])
             return "\n".join(lines)
 
