@@ -1033,7 +1033,7 @@ def test_daily_report_shows_tp1_as_hit_while_following_later_targets():
 
     assert "TP1 alındı, TP2/TP3 takipte: 1" in report
     assert "TP1 ALINDI  |  TP2/TP3 TAKİPTE" in report
-    assert "Net:  +0.00R" in report  # Açık sinyal kapanan net toplama eklenmez.
+    assert "Net: +0.00R" in report  # Açık sinyal kapanan net toplama eklenmez.
     assert "TP1 kısmi hedef olarak kaydedilir" in report
 
 
@@ -1053,9 +1053,9 @@ def test_telegram_signal_card_uses_clear_sectioned_layout():
     message = _format_telegram_card(card)
 
     assert "ATLAS  |  BTC/USDT:USDT" in message
-    assert "STRATEJİ   SMC" in message
-    assert "GİRİŞ      65000.0" in message
-    assert "TP1        66000.0" in message
-    assert "TP3        68000.0" in message
-    assert "NET RR     +1.80R" in message
+    assert "Strateji: SMC" in message
+    assert "Giriş: 65000.0" in message
+    assert "TP1: 66000.0" in message
+    assert "TP3: 68000.0" in message
+    assert "Net RR: +1.80R" in message
     assert "LIMIT giriş seviyesi bekleniyor" in message
