@@ -97,26 +97,72 @@ def _risk_validate_candidate(candidate):
         return {"eligible": False, "reason": f"risk validation error: {type(exc).__name__}: {exc}", "weighted_net_rr": None, "risk_plan": None}
 
 
-def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_type="MARKET", entry_reference="LAST_CLOSED_15M_FALLBACK", structure_candles=None):
+def _raw_candidate(direction, entry, stop, atr, source, strength, entry_type="MARKET", entry_reference="LAST_CLOSED_15M_FALLBACK"):
+    """Create a strategy-native raw setup without applying shared geometry gates.
+
+    Strategy packages own pattern detection and preferred entry/initial invalidation.
+    Confirmed structural stop/targets are finalized later by the one common filter.
+    """
+    try:
+        values = [float(entry), float(stop), float(atr), float(strength)]
+    except (TypeError, ValueError, OverflowError):
+        return None
+    entry_value, initial_stop, atr_value, strength_value = values
     if direction not in {"LONG", "SHORT"} or not all(
-        isinstance(value, (int, float)) and math.isfinite(value) and value > 0
-        for value in (entry, stop, atr)
+        math.isfinite(value) and value > 0 for value in (entry_value, initial_stop, atr_value)
+    ) or not math.isfinite(strength_value):
+        return None
+    if (direction == "LONG" and initial_stop >= entry_value) or (
+        direction == "SHORT" and initial_stop <= entry_value
     ):
         return None
-    # The strategy-provided stop is only a directional sanity check. Its
-    # numeric level is never used; the shared structure engine replaces it.
-    if (direction == "LONG" and stop >= entry) or (direction == "SHORT" and stop <= entry):
-        return None
+    return {
+        "status": "RAW_SETUP",
+        "strategy_id": source,
+        "strategy": STRATEGY_NAMES[source],
+        "direction": direction,
+        "entry_type": str(entry_type or "MARKET").upper(),
+        "entry_reference": entry_reference,
+        "entry": round(entry_value, 10),
+        "initial_stop_loss": round(initial_stop, 10),
+        "atr": round(atr_value, 10),
+        "strength": round(strength_value, 2),
+        "experimental": source != "smc",
+        "reasons": [],
+        "partial_exit_weights": _configured_partial_tp_weights(),
+    }
 
-    # Detect pivots independently per timeframe. Never concatenate candle
-    # intervals: cross-timeframe concatenation would create false pivots.
-    candle_sets = structure_candles or [candles]
+
+def _finalize_candidate_geometry(candidate, candle_sets):
+    """Apply shared swing invalidation and real-liquidity targets after generation.
+
+    Returns a rejection reason, or None after mutating the candidate with its
+    final stop and three confirmed opposing swing targets.
+    """
+    if not isinstance(candidate, dict):
+        return "INVALID_RAW_CANDIDATE"
+    direction = str(candidate.get("direction") or "").upper()
+    try:
+        entry = float(candidate.get("entry"))
+        initial_stop = float(candidate.get("initial_stop_loss", candidate.get("stop_loss")))
+        atr = float(candidate.get("atr"))
+    except (TypeError, ValueError, OverflowError):
+        return "INVALID_RAW_GEOMETRY_INPUT"
+    if direction not in {"LONG", "SHORT"} or not all(
+        math.isfinite(value) and value > 0 for value in (entry, initial_stop, atr)
+    ):
+        return "INVALID_RAW_GEOMETRY_INPUT"
+    if (direction == "LONG" and initial_stop >= entry) or (
+        direction == "SHORT" and initial_stop <= entry
+    ):
+        return "INVALID_INITIAL_STOP_DIRECTION"
+
+    # Detect pivots independently per timeframe; never concatenate intervals.
     swing_highs, swing_lows = [], []
-    for candle_set in candle_sets:
+    for candle_set in candle_sets or []:
         sample = list(candle_set or [])[-120:]
-        # Invalid OHLC data must never manufacture a structural stop or target.
         if any(not _valid_ohlc(item) for item in sample):
-            return None
+            return "INVALID_OHLC_IN_STRUCTURE_DATA"
         for index in range(2, len(sample) - 2):
             high = _value(sample[index], "high")
             low = _value(sample[index], "low")
@@ -133,23 +179,21 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
                 if low < min(left_lows + right_lows):
                     swing_lows.append(low)
 
-    # Stop invalidation comes from the nearest confirmed opposing swing;
-    # ATR contributes only a small buffer around that structural level.
     buffer = atr * 0.05
     if direction == "LONG":
         invalidation = [value for value in swing_lows if value < entry]
         if not invalidation:
-            return None
+            return "NO_CONFIRMED_STOP_INVALIDATION"
         structural_stop = max(invalidation) - buffer
     else:
         invalidation = [value for value in swing_highs if value > entry]
         if not invalidation:
-            return None
+            return "NO_CONFIRMED_STOP_INVALIDATION"
         structural_stop = min(invalidation) + buffer
 
     risk_distance = entry - structural_stop if direction == "LONG" else structural_stop - entry
-    if risk_distance <= 0:
-        return None
+    if not math.isfinite(risk_distance) or risk_distance <= 0:
+        return "INVALID_STRUCTURAL_STOP_DISTANCE"
 
     if direction == "LONG":
         structural_targets = sorted(set(
@@ -162,27 +206,39 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
             if value < entry and (entry - value) / risk_distance >= 1.25
         ), reverse=True)
 
-    # Never fabricate 2R/3R/4R targets. Without three actual opposing
-    # swing-liquidity levels this strategy has no executable geometry.
     if len(structural_targets) < 3:
-        return None
+        return f"INSUFFICIENT_OPPOSING_SWING_TARGETS:{len(structural_targets)}/3"
     targets = structural_targets[:3]
     rr_values = [abs(value - entry) / risk_distance for value in targets]
-    plan = {
-        "status": "CANDIDATE", "strategy_id": source, "strategy": STRATEGY_NAMES[source],
-        "direction": direction, "entry_type": str(entry_type or "MARKET").upper(),
-        "entry_reference": entry_reference, "entry": round(entry, 10), "atr": round(atr, 10),
-        "stop_loss": round(structural_stop, 10), "tp1": round(targets[0], 10),
-        "tp2": round(targets[1], 10), "tp3": round(targets[2], 10),
-        "rr_tp1": round(rr_values[0], 4), "rr_tp2": round(rr_values[1], 4),
-        "rr_tp3": round(rr_values[2], 4), "strength": round(float(strength), 2),
+    candidate.update({
+        "stop_loss": round(structural_stop, 10),
+        "tp1": round(targets[0], 10),
+        "tp2": round(targets[1], 10),
+        "tp3": round(targets[2], 10),
+        "rr_tp1": round(rr_values[0], 4),
+        "rr_tp2": round(rr_values[1], 4),
+        "rr_tp3": round(rr_values[2], 4),
         "stop_model": "CONFIRMED_SWING_INVALIDATION_ATR_BUFFER",
         "target_model": "CONFIRMED_OPPOSING_SWING_LIQUIDITY",
-        "experimental": source != "smc", "reasons": [],
-    }
-    # Shared risk, fees, minimum-RR and execution gates run after generation.
-    plan["partial_exit_weights"] = _configured_partial_tp_weights()
-    return plan
+        "geometry_finalized_by": "COMMON_FILTER",
+    })
+    candidate.pop("initial_stop_loss", None)
+    return None
+
+
+def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_type="MARKET", entry_reference="LAST_CLOSED_15M_FALLBACK", structure_candles=None):
+    """Compatibility helper for research/tests; live generators use raw candidates."""
+    candidate = _raw_candidate(
+        direction, entry, stop, atr, source, strength,
+        entry_type=entry_type, entry_reference=entry_reference,
+    )
+    if candidate is None:
+        return None
+    reason = _finalize_candidate_geometry(
+        candidate, structure_candles or [candles],
+    )
+    return None if reason else candidate
+
 
 @cached_analysis
 def _current_price(data):
@@ -722,6 +778,21 @@ class SevenStrategyLab:
 
         eligible = []
         for candidate in generated:
+            # Non-SMC strategies publish their raw pattern setup first. Shared
+            # structural stop/TP geometry is applied here, never inside a strategy.
+            if candidate.get("strategy_id") != "smc" and not all(
+                candidate.get(key) is not None for key in ("stop_loss", "tp1", "tp2", "tp3")
+            ):
+                geometry_reason = _finalize_candidate_geometry(
+                    candidate, _structure_candle_sets(data),
+                )
+                if geometry_reason:
+                    candidate["status"] = "BLOCKED_COMMON_FILTER"
+                    candidate["rejection_stage"] = "COMMON_FILTER"
+                    candidate["rejection_reasons"] = [geometry_reason]
+                    _record_common_filter(candidate, "REJECTED", geometry_reason)
+                    continue
+
             direction = str(candidate.get("direction") or "").upper()
             try:
                 entry = float(candidate.get("entry"))
