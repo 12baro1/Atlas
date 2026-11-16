@@ -19,6 +19,9 @@ from strategies.smc.submotors import dealing_range, liquidity_draw, poi_freshnes
 from shared.microstructure_services import cumulative_volume_delta, liquidation_events, beta_stability, relative_volume
 from strategies.orderflow.analytics import build_footprint, liquidity_walls, build_orderflow_evidence
 from shared.analysis_context import analysis_scope, cached_analysis
+from shared.specialist_evidence import (
+    STRATEGY_SPECIALIST_MOTORS, evidence_for_strategy, attach_strategy_evidence,
+)
 from shared.analysis_services import (
     _value, _valid_ohlc, _series, _ema, _atr, _adx, _candle_quality,
     _relative_volume, _directional_movement, _efficiency_ratio, _rsi,
@@ -397,6 +400,16 @@ def _common_filter_result(status):
     return "NOT_REACHED"
 
 
+def _strategy_specialist_evidence(data, strategy_id):
+    """Read the strategy's assigned shared specialist outputs, never peer strategy decisions."""
+    return evidence_for_strategy(data, strategy_id)
+
+
+def _attach_strategy_specialist_evidence(candidate, records):
+    """Record the specialist evidence actually made available to this setup."""
+    return attach_strategy_evidence(candidate, records)
+
+
 def _setup_diagnostic(strategy_id, data, regime):
     """Explain why a native generator returned no setup without changing its rules."""
     def candles(tf):
@@ -626,11 +639,24 @@ def _strategy_data_usage(strategy_id, data, smc_result=None):
             "open_interest", "funding",
         }
     }
+    specialist_inputs = {}
+    for motor in STRATEGY_SPECIALIST_MOTORS.get(strategy_id, ()):
+        records = [
+            item for item in (data.get("specialist_evidence") or [])
+            if isinstance(item, dict) and item.get("motor") == motor
+            and item.get("status") == "COMPLETED"
+        ]
+        specialist_inputs[motor] = {
+            "state": "AVAILABLE" if records else "NOT_INVOKED_OR_UNAVAILABLE",
+            "calls": len(records),
+            "event_id_count": sum(len(item.get("event_ids") or []) for item in records),
+        }
     return {
         "generator_inputs": inputs,
         "analysis_features": list(_STRATEGY_ANALYSIS_FEATURES.get(strategy_id, ())),
         "shared_source_status": relevant_sources,
-        "note": "Availability/provenance diagnostics; strategies retain independent setup rules.",
+        "specialist_motor_inputs": specialist_inputs,
+        "note": "Specialist outputs are read-only shared evidence; strategy rules and decisions remain independent.",
     }
 
 
