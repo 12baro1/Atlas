@@ -2,8 +2,8 @@
 
 
 def generate(data):
-    specialist_evidence = _strategy_specialist_evidence(data, "volatility_breakout")
     from strategy_lab import _series, _atr, _bollinger, volatility_regime, breakout_acceptance, _value, _candle_quality, _relative_volume, _current_price, _raw_candidate, _entry_reference, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
+    specialist_evidence = _strategy_specialist_evidence(data, "volatility_breakout")
     candles = data.get("1h") or []
     closes = _series(candles)
     atr = _atr(candles)
