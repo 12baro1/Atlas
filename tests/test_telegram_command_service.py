@@ -15,8 +15,9 @@ def test_normalize_plain_and_addressed_commands():
 
 def test_recognizes_terminal_commands():
     for command in (
-        "BTC",
-        "ETH",
+        "/BTC",
+        "/ETH",
+        "/BTC@Oakmontincbot",
         "en iyi 5 işlem",
         "50 analiz et",
         "tüm piyasayı tara",
@@ -31,6 +32,9 @@ def test_recognizes_terminal_commands():
 def test_ignores_unrecognized_group_chat():
     assert not is_recognized_command("Günaydın herkes")
     assert not is_recognized_command("fiyat kaç olur?")
+    assert not is_recognized_command("BTC")
+    assert not is_recognized_command("ETH")
+    assert not is_recognized_command("btc analiz eder misin")
 
 
 def test_split_message_respects_telegram_limit():
