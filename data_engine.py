@@ -172,7 +172,7 @@ def get_market_data(symbol, force_refresh=False):
         ]
         data["recent_trades_timestamp_ms"] = max(valid_trade_times) if valid_trade_times else None
         if data["recent_trades"]:
-            data["data_provenance"]["recent_trades"] = "BYBIT_REST"
+            data["data_provenance"]["recent_trades"] = "MEXC_REST"
     except Exception:
         data["recent_trades"] = None
     trades_age_ms = None
@@ -185,26 +185,26 @@ def get_market_data(symbol, force_refresh=False):
     if stream_snapshot.get("orderbook") is not None:
         data["orderbook"] = stream_snapshot["orderbook"]
         data["orderbook_timestamp_ms"] = stream_snapshot.get("orderbook_timestamp_ms")
-        data["data_provenance"]["orderbook"] = "BYBIT_V5_PUBLIC_WEBSOCKET"
+        data["data_provenance"]["orderbook"] = "MEXC_FUTURES_PUBLIC_WEBSOCKET"
     if stream_snapshot.get("recent_trades"):
         data["recent_trades"] = stream_snapshot["recent_trades"]
         data["recent_trades_timestamp_ms"] = stream_snapshot.get("recent_trades_timestamp_ms")
-        data["data_provenance"]["recent_trades"] = "BYBIT_V5_PUBLIC_WEBSOCKET"
+        data["data_provenance"]["recent_trades"] = "MEXC_V5_PUBLIC_WEBSOCKET"
     data["trade_flow_history"] = stream_snapshot.get("trade_flow_history") or []
     if data["trade_flow_history"]:
-        data["data_provenance"]["trade_flow_history"] = "BYBIT_V5_PUBLIC_WEBSOCKET"
+        data["data_provenance"]["trade_flow_history"] = "MEXC_V5_PUBLIC_WEBSOCKET"
     data["liquidation_events"] = stream_snapshot.get("liquidation_events") or []
     if data["liquidation_events"]:
-        data["data_provenance"]["liquidations"] = "BYBIT_V5_PUBLIC_WEBSOCKET"
+        data["data_provenance"]["liquidations"] = "MEXC_V5_PUBLIC_WEBSOCKET"
     # Keep the legacy aggregate field, but never use socket connection state
     # as proof that every feed is live. Per-feed provenance is authoritative.
     active_sources = {
         value for value in data["data_provenance"].values()
-        if value not in {"UNAVAILABLE", "BYBIT_REST"}
+        if value not in {"UNAVAILABLE", "MEXC_REST"}
     }
     data["microstructure_source"] = (
         "MIXED" if active_sources and any(
-            value == "BYBIT_REST" for value in data["data_provenance"].values()
+            value == "MEXC_REST" for value in data["data_provenance"].values()
         ) else "WEBSOCKET" if active_sources else "REST_FALLBACK"
     )
 
@@ -295,7 +295,7 @@ def get_market_data(symbol, force_refresh=False):
             data["funding_rate"] = [float(item["fundingRate"]) for item in valid_funding]
             data["funding_rate_timestamps_ms"] = [int(item["timestamp"]) for item in valid_funding]
             if data["funding_rate"]:
-                data["data_provenance"]["funding_rate"] = "BYBIT_REST_HISTORY"
+                data["data_provenance"]["funding_rate"] = "MEXC_REST_HISTORY"
         except Exception:
             data["funding_rate"] = []
             data["funding_rate_timestamps_ms"] = []
@@ -311,7 +311,7 @@ def get_market_data(symbol, force_refresh=False):
                     data["funding_rate_timestamps_ms"] = [
                         int(funding_time) if funding_time is not None else int(exchange.milliseconds())
                     ]
-                    data["data_provenance"]["funding_rate"] = "BYBIT_REST_SNAPSHOT"
+                    data["data_provenance"]["funding_rate"] = "MEXC_REST_SNAPSHOT"
             except Exception:
                 pass
     record_stage(
@@ -400,9 +400,9 @@ def get_market_data(symbol, force_refresh=False):
     # their exchange timestamps are never incorrectly classified as future.
     data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
     feed_sources = set(data["data_provenance"].values()) - {"UNAVAILABLE"}
-    if "BYBIT_V5_PUBLIC_WEBSOCKET" in feed_sources:
+    if "MEXC_V5_PUBLIC_WEBSOCKET" in feed_sources:
         data["microstructure_source"] = (
-            "MIXED" if any(source.startswith("BYBIT_REST") for source in feed_sources)
+            "MIXED" if any(source.startswith("MEXC_REST") for source in feed_sources)
             else "WEBSOCKET"
         )
     else:
@@ -412,7 +412,7 @@ def get_market_data(symbol, force_refresh=False):
         "DATA_SOURCE",
         source="MEXC_FUTURES_PUBLIC_MARKET_DATA",
         timestamp_ms=data["snapshot_timestamp_ms"],
-        freshness=("FRESH" if data.get("current_price_source") == "BYBIT_TICKER" else "UNKNOWN"),
+        freshness=("FRESH" if data.get("current_price_source") == "MEXC_TICKER" else "UNKNOWN"),
         availability=("AVAILABLE" if bool(data.get("15m")) else "UNAVAILABLE"),
         reason=None if bool(data.get("15m")) else "NO_OHLCV_CANDLES",
         detail={
