@@ -30,7 +30,7 @@ class InstitutionalAnalysisEngine:
         anchor_index = self._anchor_index(data, candles)
         anchored_vwap_value = self._vwap(candles[anchor_index:]) if anchor_index < len(candles) else vwap_value
 
-        # Prefer actual Bybit taker-side trades when available. Candle-color
+        # Prefer actual MEXC taker-side trades when available. Candle-color
         # volume remains an explicitly labelled proxy, never a claimed CVD feed.
         trade_flow = self._trade_flow(data.get("recent_trades"), now_ms=data.get("analysis_timestamp_ms"))
         if trade_flow:
@@ -263,7 +263,7 @@ class InstitutionalAnalysisEngine:
             return None
         net = buy_volume - sell_volume
         imbalance = net / total
-        event_id = f"cvd:bybit_trades:{newest_timestamp}" if newest_timestamp is not None else None
+        event_id = f"cvd:mexc_trades:{newest_timestamp}" if newest_timestamp is not None else None
         cvd = {
             "event_id": event_id,
             "value": round(net, 8),
@@ -271,7 +271,7 @@ class InstitutionalAnalysisEngine:
             "delta_pct": round(imbalance * 100, 2),
             "direction": "LONG" if net > 0 else "SHORT" if net < 0 else "NONE",
             "slope": round(net, 8),
-            "source": "bybit_recent_trades",
+            "source": "mexc_recent_trades",
             "is_proxy": False,
             "trade_count": used,
             "timestamp_validated": now_ms is not None,
@@ -283,7 +283,7 @@ class InstitutionalAnalysisEngine:
             "net": round(net, 8),
             "imbalance": round(imbalance, 4),
             "direction": cvd["direction"],
-            "source": "bybit_recent_trades",
+            "source": "mexc_recent_trades",
             "is_proxy": False,
             "trade_count": used,
             "timestamp_validated": now_ms is not None,
@@ -506,7 +506,7 @@ class InstitutionalAnalysisEngine:
             return {"active": False, "value": None, "bias": "NONE", "confidence": 0}
 
         value = values[-1]
-        # Bybit funding is a decimal rate (0.0001 = 0.01%), not a percent
+        # MEXC funding is a decimal rate (0.0001 = 0.01%), not a percent
         # number. The previous 0.01 threshold ignored ordinary extreme funding.
         threshold = 0.0001
         if value >= threshold:
