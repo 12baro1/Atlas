@@ -188,6 +188,10 @@ def get_market_data(symbol, force_refresh=False):
         data["orderbook"] = stream_snapshot["orderbook"]
         data["orderbook_timestamp_ms"] = stream_snapshot.get("orderbook_timestamp_ms")
         data["data_provenance"]["orderbook"] = "GATEIO_FUTURES_PUBLIC_WEBSOCKET"
+        book_age_ms = (
+            max(0, data["snapshot_timestamp_ms"] - int(data["orderbook_timestamp_ms"]))
+            if data["orderbook_timestamp_ms"] is not None else None
+        )
     if stream_snapshot.get("recent_trades"):
         data["recent_trades"] = stream_snapshot["recent_trades"]
         data["recent_trades_timestamp_ms"] = stream_snapshot.get("recent_trades_timestamp_ms")
