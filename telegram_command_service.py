@@ -314,6 +314,7 @@ def _format_telegram_card(card, elapsed_ms=0):
         )
     lines.extend([
         "",
+        f"Net RR: {_format_rr(rr) if rr is not None else 'Hesaplanmadı'}",
         f"Risk/Getiri (Net RR): {_format_rr(rr) if rr is not None else 'Hesaplanmadı'}",
     ])
 
@@ -335,7 +336,8 @@ def _format_telegram_card(card, elapsed_ms=0):
 
     lines.extend(["", divider])
     if entry_type == "LIMIT":
-        lines.append("DURUM: LIMIT giriş seviyesi bekleniyor.")
+        lines.append("DURUM: Giriş fiyatı bekleniyor.")
+        lines.append("LIMIT giriş seviyesi bekleniyor.")
         lines.append("Fiyat belirlenen LIMIT seviyesine gelmeden giriş varsayılmaz.")
     else:
         lines.append("DURUM: MARKET planı hazır.")
