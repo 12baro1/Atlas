@@ -5,6 +5,7 @@ import json
 import math
 import threading
 import time
+from decimal import Decimal
 from collections import deque
 
 
@@ -70,7 +71,8 @@ class GatePublicStream:
             while not self._stop.is_set():
                 ws = None
                 try:
-                    ws = websocket.create_connection(GATE_WS_URL, timeout=10, enable_multithread=True)
+                    ws = websocket.create_connection(GATE_WS_URL, timeout=10, enable_multithread=True,
+                                                       header=["X-Gate-Size-Decimal: 1"])
                     subscriptions = [
                         ("futures.trades", [self.contract]),
                         ("futures.tickers", [self.contract]),
@@ -202,11 +204,13 @@ class GatePublicStream:
                         continue
                     if not 0 <= now - raw["timestamp_ms"] <= 120000:
                         continue
-                    size = raw["raw_size"] * self._contract_size
+                    size = float(Decimal(str(raw["raw_size"])) * Decimal(str(self._contract_size)))
                     liquidations.append({
                         "event_id": raw["event_id"], "exchange": "GATEIO_FUTURES",
                         "symbol": self.base, "product_id": raw["contract"],
                         "event_type": "liquidation", "side": "SELL" if size < 0 else "BUY",
+                        "order_side": "SELL" if size < 0 else "BUY",
+                        "side_semantics": "GATE_LIQUIDATION_ORDER_SIDE",
                         "timestamp_ms": raw["timestamp_ms"], "price": raw["price"],
                         "quantity": abs(size), "notional": raw["price"] * abs(size),
                         "source": "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS",
