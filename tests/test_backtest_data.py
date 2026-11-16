@@ -227,33 +227,21 @@ def test_fetch_history_clears_transient_error_after_success(monkeypatch):
 
 
 
-def test_fetch_history_uses_binance_fallback_after_mexc_geoblock(monkeypatch):
-    calls = {"mexc": 0, "fallback": 0}
+def test_fetch_history_never_switches_away_from_gateio(monkeypatch):
+    calls = {"gateio": 0}
 
     def blocked(*args, **kwargs):
-        calls["mexc"] += 1
+        calls["gateio"] += 1
         raise RuntimeError("403 Forbidden CloudFront distribution is configured to block")
 
-    class FakeFallback:
-        def fetch_ohlcv(self, *args, **kwargs):
-            calls["fallback"] += 1
-            if calls["fallback"] == 1:
-                return [[60_000, 1.0, 2.0, 0.5, 1.5, 10.0]]
-            return []
-
     monkeypatch.setattr(backtest.exchange, "fetch_ohlcv", blocked)
-    monkeypatch.setattr(backtest, "_create_history_fallback_exchange", FakeFallback)
     monkeypatch.setattr(backtest.time, "sleep", lambda *_: None)
-    monkeypatch.setattr(backtest, "_history_fallback_exchange", None)
-    monkeypatch.setattr(backtest, "_history_provider_name", "MEXC")
 
-    candles = backtest._fetch_history("BTC/USDT:USDT", "1m", since_ms=0)
+    with pytest.raises(RuntimeError, match="4 deneme başarısız"):
+        backtest._fetch_history("BTC/USDT:USDT", "1m", since_ms=0)
 
-    assert len(candles) == 1
-    assert calls["mexc"] == 1
-    # The fallback provider is paged until it returns an empty page.
-    assert calls["fallback"] == 2
-    assert "Binance USD-M Futures" in backtest._history_provider_name
+    assert calls["gateio"] == 4
+    assert backtest._history_provider_name == "Gate.io"
 
 
 def test_fetch_history_does_not_switch_provider_for_transient_errors(monkeypatch):
