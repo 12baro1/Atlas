@@ -86,8 +86,8 @@ def generate(data):
     event_direction = None
     event_alignment = "UNAVAILABLE"
     if event_evidence.get("state") == "AVAILABLE":
-        long_liquidations = float(event_evidence.get("buy_liquidation_notional") or 0.0)
-        short_liquidations = float(event_evidence.get("sell_liquidation_notional") or 0.0)
+        long_liquidations = float(event_evidence.get("long_liquidation_notional") or 0.0)
+        short_liquidations = float(event_evidence.get("short_liquidation_notional") or 0.0)
         if short_liquidations > long_liquidations:
             event_direction = "LONG"
         elif long_liquidations > short_liquidations:
