@@ -110,7 +110,7 @@ class GateFuturesExchange:
             out = []
             for row in rows or []:
                 try:
-                    price, size = float(row["p"]), abs(float(row["s"]))
+                    price, size = float(row["p"]), abs(float(row["s"])) * self.contract_size(symbol)
                     if price > 0 and size > 0:
                         out.append([price, size])
                 except (KeyError, TypeError, ValueError, OverflowError):
@@ -164,7 +164,7 @@ class GateFuturesExchange:
                     "high": row.get("high_24h"), "low": row.get("low_24h"),
                     "bid": row.get("highest_bid"), "ask": row.get("lowest_ask"),
                     "last": row.get("last"), "close": row.get("last"),
-                    "baseVolume": row.get("volume_24h"), "quoteVolume": row.get("volume_24h_quote"),
+                    "baseVolume": (float(row.get("volume_24h") or 0) * self.contract_size(symbol)), "quoteVolume": row.get("volume_24h_quote"),
                     "info": dict(row)}
         return out
 
