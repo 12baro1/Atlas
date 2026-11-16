@@ -541,7 +541,11 @@ class TelegramCommandService:
             )
         if scan_request is not None:
             scan_limit, result_limit = scan_request
-            cached_items = self.runtime.latest_analyses(max_age_seconds=1800) if cached_best_request else []
+            # The in-memory pool is already bounded by ANALYSIS_CACHE_MAX_AGE_SECONDS
+            # (24h by default). Do not impose a second 30-minute cutoff here:
+            # a 100-market cycle can take longer and would otherwise lose its
+            # earliest results before /eniyi5 reads the completed pool.
+            cached_items = self.runtime.latest_analyses() if cached_best_request else []
             symbols = [item.get("symbol") for item in cached_items] if cached_best_request else _best_symbols(limit=scan_limit)
             candidates = []
             for symbol in symbols:

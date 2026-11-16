@@ -49,6 +49,11 @@ def _parse_scan_command(value: str):
     if match:
         count = _normalize_scan_limit(match.group(1), default=1, maximum=20)
         return _configured_scan_limit(default=DEFAULT_RANK_SCAN_LIMIT), count
+    # Short Telegram/terminal aliases: "20 tara", "30 tara".
+    match = re.fullmatch(r"(\d+)\s+tara", normalized)
+    if match:
+        count = _normalize_scan_limit(match.group(1), default=DEFAULT_SCAN_LIMIT, maximum=MAX_SCAN_LIMIT)
+        return count, 5
     match = re.fullmatch(r"(\d+)\s+(?:tane\s+)?(?:(?:coin|piyasa|sembol)\s+)?(?:analiz et|tara)", normalized)
     if match:
         count = _normalize_scan_limit(match.group(1), default=DEFAULT_SCAN_LIMIT, maximum=MAX_SCAN_LIMIT)
