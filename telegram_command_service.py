@@ -76,6 +76,10 @@ def _outcome_strategy(item):
         or payload.get("setup_type")
     )
     if not strategy:
+        analysis = payload.get("analysis")
+        if isinstance(analysis, dict):
+            strategy = analysis.get("strategy") or analysis.get("strategy_id") or analysis.get("setup_type")
+    if not strategy:
         selected = payload.get("selected_strategy")
         if isinstance(selected, dict):
             strategy = selected.get("strategy") or selected.get("strategy_id")
@@ -113,7 +117,7 @@ def _format_outcome_item(item, state):
     lines = [
         f"{symbol}  |  {direction}",
         f"Strateji: {_outcome_strategy(item)}",
-        f"Durum: {state}",
+        f"Durum: {state or status}",
     ]
     if item.get("signal_id"):
         lines.append(f"Sinyal ID: {item['signal_id']}")
