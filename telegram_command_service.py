@@ -145,9 +145,11 @@ def format_daily_signal_report(outcomes, now=None):
         "ATLAS  |  GÜNLÜK RAPOR",
         f"{today:%d.%m.%Y}",
         divider,
-        f"SETUP: {len(daily)}  |  GİRİŞİ GÖRÜLEN: {reached_count}",
-        f"LIMIT BEKLİYOR: {len(waiting)}  |  GİRİŞ OLMADI: {len(no_entry)}",
+        f"Verilen setup: {len(daily)}",
+        f"Giriş seviyesi mumda görüldü: {reached_count}",
         f"MARKET referansı (fill teyitsiz): {market_reference_count}",
+        f"Giriş bekliyor: {len(waiting)}",
+        f"Giriş olmadı (süresi doldu): {len(no_entry)}",
         f"TP1 alındı, TP2/TP3 takipte: {tp1_tracking}",
     ]
     for heading, items, state in (
@@ -166,7 +168,7 @@ def format_daily_signal_report(outcomes, now=None):
         "GÜNLÜK NET  |  YALNIZCA KAPANAN SİNYALLER",
         f"Artı: {_format_rr(positive)}",
         f"Eksi: {_format_rr(negative)}",
-        f"Net:  {_format_rr(net)}",
+        f"Net: {_format_rr(net)}",
         divider,
         "Not: TP1 kısmi hedef olarak kaydedilir; TP2/TP3 takibi sürer.",
         "Giriş seviyesi görülmesi borsa emri/fill gerçekleştiğini kanıtlamaz.",
@@ -206,19 +208,18 @@ def _format_telegram_card(card, elapsed_ms=0):
         divider,
         f"ATLAS  |  {symbol}",
         divider,
-        f"STRATEJİ   {strategy}",
-        f"YÖN        {direction}",
-        f"EMİR       {entry_type}",
+        f"Strateji: {strategy}",
+        f"Yön: {direction} | Emir: {entry_type}",
         "",
-        f"GİRİŞ      {card.get('entry')}",
-        f"STOP       {card.get('stop_loss')}",
+        f"Giriş: {card.get('entry')}",
+        f"SL: {card.get('stop_loss')}",
         "",
         "HEDEFLER",
     ]
-    lines.extend(f"TP{index}        {target}" for index, target in enumerate(targets, start=1))
+    lines.extend(f"TP{index}: {target}" for index, target in enumerate(targets, start=1))
     lines.extend([
         "",
-        f"NET RR     {_format_rr(rr) if rr is not None else 'Hesaplanmadı'}",
+        f"Net RR: {_format_rr(rr) if rr is not None else 'Hesaplanmadı'}",
         divider,
     ])
     if entry_type == "LIMIT":
