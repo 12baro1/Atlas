@@ -51,6 +51,7 @@ def test_latest_analyses_also_prunes_expired_entries(monkeypatch):
     monkeypatch.setattr(Config, "ANALYSIS_CACHE_MAX_SYMBOLS", 10)
     runtime = _runtime_with_cache({"STALE/USDT": 1_000, "FRESH/USDT": 95_000})
 
+    monkeypatch.setattr("atlas_runtime.time.time", lambda: 100.0)
     results = runtime.latest_analyses(max_age_seconds=120)
 
     assert [item["symbol"] for item in results] == ["FRESH/USDT"]
