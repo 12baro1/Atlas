@@ -105,6 +105,43 @@ def test_telegram_card_is_compact_and_keeps_trade_levels():
     assert "motor" not in text.lower()
 
 
+def test_recognizes_slash_command_menu_entries():
+    for command in (
+        "/yardim", "/mevcut", "/eniyi5", "/tara", "/likidite",
+        "/performans", "/ogrenme", "/btc", "/eth", "/sol",
+    ):
+        assert is_recognized_command(command), command
+
+
+def test_registers_command_menu_only_for_configured_group(monkeypatch):
+    service = TelegramCommandService(object(), "token", "-100123")
+    calls = []
+    monkeypatch.setattr(
+        service, "_api",
+        lambda method, payload, timeout=25: calls.append((method, payload, timeout)),
+    )
+
+    service._register_command_menu()
+
+    assert len(calls) == 1
+    method, payload, timeout = calls[0]
+    assert method == "setMyCommands"
+    assert payload["scope"] == {"type": "chat", "chat_id": -100123}
+    assert {item["command"] for item in payload["commands"]} >= {
+        "yardim", "mevcut", "eniyi5", "tara", "likidite",
+        "performans", "ogrenme", "btc", "eth", "sol",
+    }
+
+
+def test_command_menu_registration_failure_does_not_raise(monkeypatch):
+    service = TelegramCommandService(object(), "token", "-100123")
+    monkeypatch.setattr(
+        service, "_api",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Telegram unavailable")),
+    )
+    service._register_command_menu()
+
+
 def test_recognizes_mevcut_command():
     assert is_recognized_command("/mevcut@Oakmontincbot")
 
