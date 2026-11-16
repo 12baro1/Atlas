@@ -622,3 +622,72 @@ def test_liquidation_strategy_rejects_stale_shared_oi_evidence(monkeypatch):
     }
 
     assert generate(data) is None
+
+
+def test_raw_strategy_setup_reaches_common_filter_before_geometry():
+    import strategy_lab
+
+    raw = strategy_lab._raw_candidate(
+        "LONG", 100.0, 98.0, 1.0, "trend_pullback", 75.0,
+    )
+    assert raw is not None
+    assert raw["status"] == "RAW_SETUP"
+    assert "stop_loss" not in raw
+    assert not any(key in raw for key in ("tp1", "tp2", "tp3"))
+
+    from strategy_lab import _finalize_candidate_geometry
+    reason = _finalize_candidate_geometry(dict(raw), [])
+    assert reason == "NO_CONFIRMED_STOP_INVALIDATION"
+
+
+def test_strategy_native_setup_is_counted_before_common_geometry_rejection(monkeypatch):
+    import strategy_lab
+
+    raw = strategy_lab._raw_candidate(
+        "LONG", 100.0, 98.0, 1.0, "trend_pullback", 75.0,
+    )
+    monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(raw))
+    monkeypatch.setattr(strategy_lab, "_regime", lambda data: {
+        "label": "TREND", "trend": "BULLISH", "strength": 1.0,
+    })
+    report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT"})
+
+    trend = next(item for item in report["strategies"] if item["strategy_id"] == "trend_pullback")
+    assert report["candidate_count"] == 1
+    assert report["validated_candidate_count"] == 0
+    assert trend["status"] == "BLOCKED_COMMON_FILTER"
+    assert trend["rejection_stage"] == "COMMON_FILTER"
+    assert trend["rejection_reasons"] == ["NO_CONFIRMED_STOP_INVALIDATION"]
+    usage = next(item for item in report["data_usage"] if item["strategy_id"] == "trend_pullback")
+    assert usage["setup_produced"] is True
+    assert usage["common_filter_result"] == "REJECTED"
+
+
+def test_common_filter_finalizes_raw_strategy_geometry_and_selects_complete_plan(monkeypatch):
+    import strategy_lab
+
+    highs = [101, 102, 103, 105, 103, 102, 104, 105, 108, 106, 105, 107, 108, 111, 109, 108, 107]
+    lows = [99, 98, 99, 99, 97, 99, 99, 98, 99, 99, 98, 99, 99, 98, 99, 99, 98]
+    candles = [Candle(100, high, low, 100) for high, low in zip(highs, lows)]
+    raw = strategy_lab._raw_candidate(
+        "LONG", 100.0, 98.0, 1.0, "trend_pullback", 75.0,
+    )
+    monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(raw))
+    monkeypatch.setattr(strategy_lab, "_regime", lambda data: {
+        "label": "TREND", "trend": "BULLISH", "strength": 1.0,
+    })
+    monkeypatch.setattr(strategy_lab, "_risk_validate_candidate", lambda plan: {
+        "eligible": True, "reason": None, "weighted_net_rr": 2.5,
+        "risk_plan": {"final_geometry_reconciled": True, "risk_setup_valid": True,
+                      "weighted_net_rr": 2.5, "weighted_rr": 2.7},
+    })
+
+    report = SevenStrategyLab().analyze({
+        "symbol": "BTC/USDT:USDT", "current_price": 100.0, "15m": candles,
+    })
+    selected = report["selected"]
+    assert selected["strategy_id"] == "trend_pullback"
+    assert selected["geometry_finalized_by"] == "COMMON_FILTER"
+    assert selected["stop_loss"] < selected["entry"] < selected["tp1"] < selected["tp2"] < selected["tp3"]
+    assert "initial_stop_loss" not in selected
+
