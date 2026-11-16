@@ -28,8 +28,8 @@ def test_shared_evidence_tracks_each_source_independently():
         "data_provenance": {
             "orderbook": "MEXC_FUTURES_PUBLIC_WEBSOCKET",
             "recent_trades": "MEXC_REST",
-            "liquidations": "MEXC_FUTURES_PUBLIC_WEBSOCKET",
-            "open_interest": "MEXC_REST_HISTORY",
+            "liquidations": "TEST_FIXTURE",
+            "open_interest": "MEXC_REST_OBSERVED_SNAPSHOTS",
             "funding_rate": "MEXC_REST_SNAPSHOT",
         },
         "correlation_universe": {"BTC": [1, 2]},
