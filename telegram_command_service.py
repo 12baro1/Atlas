@@ -83,6 +83,13 @@ class TelegramCommandService:
             return False
         if self._thread and self._thread.is_alive():
             return True
+        # getUpdates returns HTTP 409 while a webhook is configured. Remove any
+        # stale webhook and discard its queued updates so old commands cannot run.
+        try:
+            self._api("deleteWebhook", {"drop_pending_updates": True}, timeout=10)
+        except Exception as exc:
+            self.logger.error("Telegram polling could not initialize (%s)", type(exc).__name__)
+            return False
         self.stop_flag.clear()
         self._thread = threading.Thread(
             target=self._poll_loop,
