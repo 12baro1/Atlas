@@ -168,14 +168,20 @@ class GatePublicStream:
                         stamp = int(row.get("create_time_ms") or row.get("create_time") or now_ms)
                         if stamp < 10_000_000_000:
                             stamp *= 1000
-                        size = float(row["size"])
+                        raw_size = float(row["size"])
                         price = float(row["price"])
-                        if price <= 0 or size == 0:
+                        if price <= 0 or raw_size == 0:
+                            continue
+                        # Gate futures trade size is in contracts; normalize to
+                        # base-asset quantity exactly once, like REST trades.
+                        size = float(Decimal(str(abs(raw_size))) * Decimal(str(self._contract_size)))
+                        if not math.isfinite(size) or size <= 0:
                             continue
                         self._trades.append({
-                            "timestamp_ms": stamp, "price": price, "size": abs(size),
-                            "amount": abs(size), "side": "BUY" if size > 0 else "SELL",
-                            "trade_id": str(row.get("id") or f"{stamp}:{price}:{size}"),
+                            "timestamp_ms": stamp, "price": price, "size": size,
+                            "amount": size, "raw_contract_size": abs(raw_size),
+                            "side": "BUY" if raw_size > 0 else "SELL",
+                            "trade_id": str(row.get("id") or f"{stamp}:{price}:{raw_size}"),
                         })
                     except (KeyError, TypeError, ValueError, OverflowError):
                         continue
