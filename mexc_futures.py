@@ -202,18 +202,17 @@ class MexcFuturesExchange:
                 continue
         return sorted(output, key=lambda item: item["timestamp"])[-int(limit or 100):]
 
-    def fetch_ticker(self, symbol, params=None):
-        data = self._get("/api/v1/contract/ticker",
-                         {"symbol": self.market_id(symbol)})
-        if isinstance(data, list):
-            data = next((row for row in data if row.get("symbol") == self.market_id(symbol)), {})
+    def _normalize_ticker(self, symbol, data):
         data = data or {}
+        contract_size = self.contract_size(symbol)
         ticker = {
             "symbol": symbol, "timestamp": int(data.get("timestamp") or self.milliseconds()),
             "datetime": None, "high": data.get("high24Price"),
             "low": data.get("lower24Price"), "bid": data.get("bid1"),
             "ask": data.get("ask1"), "last": data.get("lastPrice"),
-            "close": data.get("lastPrice"), "baseVolume": data.get("volume24"),
+            "close": data.get("lastPrice"),
+            "baseVolume": (float(data["volume24"]) * contract_size
+                           if data.get("volume24") is not None else None),
             "quoteVolume": data.get("amount24"), "info": dict(data),
         }
         with self._lock:
@@ -223,9 +222,38 @@ class MexcFuturesExchange:
                 stamp = ticker["timestamp"]
                 history = self._oi_history[symbol]
                 if not history or history[-1]["timestamp"] != stamp:
-                    history.append({"timestamp": stamp, "openInterestAmount": float(oi) * self.contract_size(symbol)})
+                    history.append({
+                        "timestamp": stamp,
+                        "openInterestAmount": float(oi) * contract_size,
+                    })
                     del history[:-200]
         return ticker
+
+    def fetch_tickers(self, symbols=None, params=None):
+        rows = self._get("/api/v1/contract/ticker") or []
+        if isinstance(rows, dict):
+            rows = [rows]
+        requested = set(symbols or self.symbols or [])
+        output = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            symbol = self.unified_symbol({
+                "baseCoin": row.get("symbol", "").split("_")[0],
+                "quoteCoin": row.get("symbol", "").split("_")[-1],
+                "settleCoin": row.get("symbol", "").split("_")[-1],
+            })
+            if requested and symbol not in requested:
+                continue
+            output[symbol] = self._normalize_ticker(symbol, row)
+        return output
+
+    def fetch_ticker(self, symbol, params=None):
+        data = self._get("/api/v1/contract/ticker",
+                         {"symbol": self.market_id(symbol)})
+        if isinstance(data, list):
+            data = next((row for row in data if row.get("symbol") == self.market_id(symbol)), {})
+        return self._normalize_ticker(symbol, data or {})
 
     def fetch_open_interest(self, symbol, params=None):
         self.fetch_ticker(symbol)
