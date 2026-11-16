@@ -120,7 +120,7 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
     data = data_engine.get_market_data("BTC/USDT:USDT", force_refresh=True)
 
     assert data["data_provenance"]["orderbook"] == "GATEIO_REST"
-    assert data["data_provenance"]["recent_trades"] == "MEXC_REST"
+    assert data["data_provenance"]["recent_trades"] == "GATEIO_REST"
     assert data["data_provenance"]["open_interest"] == "GATEIO_REST_SNAPSHOT"
     assert data["open_interest_timestamps_ms"] == [now - 2_000]
     assert data["funding_rate_timestamps_ms"] == [now - 3_000]
