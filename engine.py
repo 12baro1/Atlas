@@ -668,10 +668,9 @@ class AtlasEngine:
 
         if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)):
             self.state_engine.update_analysis_state(symbol, data, result_payload)
-            if decision_state.get("action") in ("EXECUTE", "EXECUTE_WITH_CAUTION"):
-                # Aktif işlem yanlışlıkla silinmez veya değiştirilmez: yalnızca
-                # aktif setup yokken yeni EXECUTE sonucu aktif setup olur.
-                # Varsa yeni analiz sonucu ayrı olarak analysis cache'te kalır.
+            if track_signal and decision_state.get("action") in ("EXECUTE", "EXECUTE_WITH_CAUTION"):
+                # Only explicitly requested Telegram analyses may become active setups.
+                # Background scans remain analysis/cache-only.
                 if active_setup is None:
                     self.state_engine.store_active_setup(symbol, result_payload, data=data)
                 else:
@@ -680,9 +679,13 @@ class AtlasEngine:
                         symbol, decision_state.get("action"),
                     )
             self.state_engine.sync_open_positions(self.position.open_positions())
-        if execution_state["signal"].get("signal") in ["LONG", "SHORT"] and decision_state.get("action") in ["EXECUTE", "EXECUTE_WITH_CAUTION"]:
+        if (
+            track_signal
+            and execution_state["signal"].get("signal") in ["LONG", "SHORT"]
+            and decision_state.get("action") in ["EXECUTE", "EXECUTE_WITH_CAUTION"]
+        ):
             self.cooldown.register_signal(symbol, execution_state["signal"].get("signal"))
-            if track_signal and getattr(Config, "SIGNAL_TRACKING_ENABLED", True) and self.trade_journal is not None:
+            if getattr(Config, "SIGNAL_TRACKING_ENABLED", True) and self.trade_journal is not None:
                 self._register_tracked_signal(symbol, result_payload)
 
         self._notify_if_elite(
