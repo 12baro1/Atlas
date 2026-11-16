@@ -414,8 +414,8 @@ class TelegramCommandService:
             candidates.sort(key=lambda item: item[0], reverse=True)
             if not candidates:
                 if cached_best_request:
-                    return "ATLAS | EN İYİ 5 SETUP\\nArka plan tarama havuzunda henüz güncel ve geçerli setup yok. İlk tarama döngüsünün tamamlanmasını bekle."
-                return f"ATLAS | TARAMA\\nTaranan piyasa: {len(symbols)}\\nGeçerli MARKET/LIMIT setup bulunamadı."
+                    return "ATLAS | EN İYİ 5 SETUP\nArka plan tarama havuzunda henüz güncel ve geçerli setup yok. İlk tarama döngüsünün tamamlanmasını bekle."
+                return f"ATLAS | TARAMA\nTaranan piyasa: {len(symbols)}\\nGeçerli MARKET/LIMIT setup bulunamadı."
             shown = candidates[:max(1, min(int(result_limit), 20))]
             if cached_best_request:
                 for _score, _selected_card, selected_raw in shown:
