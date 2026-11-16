@@ -291,7 +291,7 @@ class AtlasTUIApp(App):
             yield Static(
                 Panel(
                     Text("ATLAS  /  LIVE MARKET & STRATEGY TERMINAL", style="bold bright_cyan"),
-                    subtitle="BYBIT PUBLIC DATA  •  7 STRATEGIES  •  ONE DECISION",
+                    subtitle="GATE.IO PUBLIC DATA  •  7 STRATEGIES  •  ONE DECISION",
                     border_style="bright_cyan",
                     box=box.DOUBLE,
                     padding=(0, 1),
@@ -306,7 +306,7 @@ class AtlasTUIApp(App):
                 yield Static(self._pipeline_renderable("READY"), id="pipeline")
                 yield RichLog(id="output", wrap=True, markup=False, auto_scroll=True, max_lines=3000)
                 yield RichLog(id="events", wrap=True, markup=False, auto_scroll=True, max_lines=120)
-            yield Static("● CONNECTING TO BYBIT PUBLIC MARKET DATA", id="status")
+            yield Static("● CONNECTING TO GATE.IO PUBLIC MARKET DATA", id="status")
             yield Input(placeholder="Coin / command  •  Enter to analyze", id="command")
         yield Footer()
 
