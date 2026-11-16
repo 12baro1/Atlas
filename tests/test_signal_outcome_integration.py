@@ -958,3 +958,46 @@ def test_manual_actual_costs_can_turn_gross_win_into_net_loss(tmp_path):
     learning_record = journal.learning_records(source="manual")[0]
     assert learning_record["result"] == "LOSS"
     assert learning_record["win"] is False
+
+
+
+def test_limit_signal_is_not_tracked_until_entry_price_is_reached(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "entry.sqlite")
+    opened = 1_700_000_000_000
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT", direction="LONG",
+        entry=100.0, stop_loss=99.0, tp1=101.0,
+        opened_at=opened,
+        payload={"execution_costs": {"entry_type": "LIMIT"}},
+    )
+
+    untouched = _precise_candle(1, high=100.8, low=100.2, close=100.5)
+    assert journal.resolve_signal_outcome(outcome, [untouched]) is None
+    assert outcome["status"] == "PENDING"
+    assert outcome["entry_reached"] is False
+
+    # This candle crosses both entry and SL. The first entry-touch candle is
+    # deliberately not allowed to prove an intrabar stop-out.
+    entry_touch = _precise_candle(2, high=100.2, low=98.5, close=99.0)
+    assert journal.resolve_signal_outcome(outcome, [untouched, entry_touch]) is None
+    assert outcome["entry_reached"] is True
+    assert outcome["entry_reached_at"] == entry_touch.time
+    assert outcome["status"] == "PENDING"
+
+    later_stop = _precise_candle(3, high=99.5, low=98.5, close=99.0)
+    resolved = journal.resolve_signal_outcome(outcome, [untouched, entry_touch, later_stop])
+    assert resolved["status"] == "SL"
+    assert resolved["hit_sl"] is True
+
+
+def test_market_signal_is_marked_as_reference_not_exchange_fill(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "market.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="ETH/USDT:USDT", direction="SHORT",
+        entry=100.0, stop_loss=101.0, tp1=99.0,
+        opened_at=1_700_000_000_000,
+        payload={"execution_costs": {"entry_type": "MARKET"}},
+    )
+    assert outcome["entry_reached"] is True
+    assert outcome["entry_tracking_source"] == "market_reference"
+    assert "fill" not in outcome["entry_tracking_source"]
