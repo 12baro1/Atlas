@@ -380,7 +380,9 @@ class TelegramCommandService:
                     rr_value = float(rr)
                     if rr_value <= 0:
                         continue
-                    score = float(card.get("setup_quality") or 0) * 0.55 + float(card.get("confidence") or 0) * 0.25 + min(rr_value, 5.0) * 4
+                    quality = float(card.get("setup_quality") or 0)
+                    confidence = float(card.get("confidence") or 0)
+                    score = quality * 0.55 + confidence * 0.25 + min(rr_value, 5.0) * 4
                 except (TypeError, ValueError, OverflowError):
                     continue
                 if not card.get("strategy") and not card.get("strategy_id"):
