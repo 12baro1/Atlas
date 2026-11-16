@@ -214,9 +214,11 @@ class GatePublicStream:
                     liquidations.append({
                         "event_id": raw["event_id"], "exchange": "GATEIO_FUTURES",
                         "symbol": self.base, "product_id": raw["contract"],
-                        "event_type": "liquidation", "side": "SELL" if size < 0 else "BUY",
+                        "event_type": "liquidation",
+                        "side": "SELL" if size < 0 else "BUY",
                         "order_side": "SELL" if size < 0 else "BUY",
-                        "side_semantics": "GATE_LIQUIDATION_ORDER_SIDE",
+                        "position_side": "LONG" if size < 0 else "SHORT",
+                        "side_semantics": "GATE_ORDER_SIDE_AND_LIQUIDATED_POSITION",
                         "timestamp_ms": raw["timestamp_ms"], "price": raw["price"],
                         "quantity": abs(size), "notional": raw["price"] * abs(size),
                         "source": "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS",
