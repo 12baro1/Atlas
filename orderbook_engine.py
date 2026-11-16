@@ -1,4 +1,4 @@
-"""Bybit public order-book analysis for Atlas entry validation.
+"""MEXC public futures order-book analysis for Atlas entry validation.
 
 Displayed liquidity is a snapshot, not proof of executed buying/selling.
 """
@@ -73,7 +73,7 @@ class OrderBookEngine:
         side = str(direction or "NONE").upper()
         flow = self._analyze_trade_flow(trades, now_ms=now_ms, direction=side)
         empty = {
-            "active": False, "source": "bybit_orderbook", "direction": side,
+            "active": False, "source": "mexc_orderbook", "direction": side,
             "imbalance": 0.0, "bid_notional": 0.0, "ask_notional": 0.0,
             "spread_pct": None, "best_bid": None, "best_ask": None,
             "supportive": flow["trade_flow_supportive"],
@@ -158,7 +158,7 @@ class OrderBookEngine:
                 except (TypeError, ValueError, OverflowError):
                     event_id = None
             result = {
-                "active": True, "source": "bybit_orderbook", "direction": side,
+                "active": True, "source": "mexc_orderbook", "direction": side,
                 "event_id": event_id,
                 "imbalance": round(imbalance, 4),
                 "bid_notional": round(bid_notional, 2),
