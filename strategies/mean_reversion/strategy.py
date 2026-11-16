@@ -2,7 +2,8 @@
 
 
 def generate(data, regime):
-    from strategy_lab import _series, _atr, _bollinger, _rsi, statistical_deviation, rsi_divergence, _value, _candle_quality, _current_price, _vwap, _raw_candidate, _entry_reference
+    from strategy_lab import _series, _atr, _bollinger, _rsi, statistical_deviation, rsi_divergence, _value, _candle_quality, _current_price, _vwap, _raw_candidate, _entry_reference, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
+    specialist_evidence = _strategy_specialist_evidence(data, "mean_reversion")
     candles = data.get("15m") or []
     closes = _series(candles)
     atr = _atr(candles)
@@ -63,5 +64,7 @@ def generate(data, regime):
                                           "vwap_distance_atr": round(vwap_distance_atr, 3),
                                           "rejection_wick_ratio": round(rejection_wick, 3),
                                           "statistical_deviation": deviation_evidence, "rsi_divergence": divergence_evidence}
+    if plan:
+        _attach_strategy_specialist_evidence(plan, specialist_evidence)
     return plan
 

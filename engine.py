@@ -489,7 +489,11 @@ class AtlasEngine:
             reason=None if invoked_motors else "NO_SPECIALIST_MOTOR_INVOKED",
             detail={"invoked_motors": invoked_motors, "call_total": sum(self.main_engine.motor_call_counts.values())},
         )
-        strategy_report = self.strategy_lab.analyze(data, smc_result=smc_raw)
+        # Publish the already-executed specialist outputs to every independent
+        # strategy as read-only evidence. SMC's own submotors remain in SMC.
+        strategy_data = dict(data)
+        strategy_data["specialist_evidence"] = self.main_engine.strategy_evidence_snapshot()
+        strategy_report = self.strategy_lab.analyze(strategy_data, smc_result=smc_raw)
         selected = strategy_report.get("selected")
         if isinstance(selected, dict):
             selected_risk = dict(selected.get("risk_plan") or {})

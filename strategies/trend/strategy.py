@@ -2,7 +2,8 @@
 
 
 def generate(data):
-    from strategy_lab import _series, _atr, _ema, _adx, _directional_movement, _value, _candle_quality, _efficiency_ratio, _current_price, trend_structure, displacement, _raw_candidate, _entry_reference
+    from strategy_lab import _series, _atr, _ema, _adx, _directional_movement, _value, _candle_quality, _efficiency_ratio, _current_price, trend_structure, displacement, _raw_candidate, _entry_reference, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
+    specialist_evidence = _strategy_specialist_evidence(data, "trend_pullback")
     h4, h1 = data.get("4h") or [], data.get("1h") or []
     c4, c1 = _series(h4), _series(h1)
     atr = _atr(h1)
@@ -69,5 +70,7 @@ def generate(data):
                                  "efficiency_ratio": round(efficiency, 3), "pullback_distance_atr": round(pullback_distance, 3),
                                  "structure": structure_evidence, "displacement": impulse_evidence}
         plan["reasons"].append(f"Structure motor={structure_evidence['state']} (quality={structure_evidence['quality']:.2f}); displacement={impulse_evidence.get('state')}")
+    if plan:
+        _attach_strategy_specialist_evidence(plan, specialist_evidence)
     return plan
 

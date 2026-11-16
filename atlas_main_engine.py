@@ -124,6 +124,11 @@ class AtlasMainEngine:
         """Return actual motor outputs in execution order for the setup authority."""
         return list(self.evidence_pool)
 
+    def strategy_evidence_snapshot(self):
+        """Return completed analysis-only specialist outputs for independent strategies."""
+        from shared.specialist_evidence import build_strategy_evidence
+        return build_strategy_evidence(self.evidence_pool)
+
     def motor_diagnostics(self):
         expected = sorted(self.motors)
         invoked = sorted(name for name, count in self.motor_call_counts.items() if count)
