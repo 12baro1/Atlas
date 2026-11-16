@@ -873,8 +873,8 @@ class AtlasEngine:
                         "setup_type": (analysis.get("setup") or {}).get("type")
                         or setup_quality.get("setup")
                         or None,
-                        "strategy_id": ((result_payload.get("strategy_lab") or {}).get("selected") or {}).get("strategy_id"),
-                        "strategy": ((result_payload.get("strategy_lab") or {}).get("selected") or {}).get("strategy"),
+                        "strategy_id": ((result_payload.get("strategy_lab") or {}).get("selected") or {}).get("strategy_id") or "smc",
+                        "strategy": ((result_payload.get("strategy_lab") or {}).get("selected") or {}).get("strategy") or "SMC",
                         "setup_features": setup_features,
                         "learning": setup_quality.get("learning") or {},
                         "setup_quality": setup_quality,
