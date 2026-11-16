@@ -1,7 +1,7 @@
 """Headless long-running Atlas market-analysis service.
 
 This service runs the same seven-strategy AtlasRuntime used by the terminal UI.
-It only reads public Bybit market data and never submits exchange orders.
+It only reads public MEXC market data and never submits exchange orders.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def configured_max_symbols(raw_value: str | None) -> int:
 
 
 def select_live_symbols(markets, max_symbols: int = DEFAULT_MAX_SYMBOLS):
-    """Select active Bybit USDT perpetual swaps for the headless scanner."""
+    """Select active MEXC USDT perpetual swaps for the headless scanner."""
     from universe_engine import select_symbols
 
     return select_symbols(
