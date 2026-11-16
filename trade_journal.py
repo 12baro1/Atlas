@@ -117,6 +117,14 @@ class TradeJournal:
         self._enforce_retention()
         return snapshot
 
+    @staticmethod
+    def _analysis_segment_value(analysis, section, key, default=None):
+        if not isinstance(analysis, dict):
+            return default
+        source = analysis.get("analysis") if isinstance(analysis.get("analysis"), dict) else analysis
+        payload = source.get(section) if isinstance(source, dict) else None
+        return payload.get(key, default) if isinstance(payload, dict) else default
+
     def register_trade(self, trade, analysis=None, symbol=None, timestamp=None, metadata=None):
         """Açılan işlemi trade journal'a yazar."""
         now = int(timestamp or time.time() * 1000)
@@ -132,6 +140,11 @@ class TradeJournal:
             "entry": trade.get("entry"),
             "stop_loss": trade.get("stop_loss"),
             "take_profit": trade.get("tp3") or trade.get("take_profit"),
+            "entry_type": trade.get("entry_type") or self._analysis_segment_value(analysis, "entry", "entry_type", "UNKNOWN"),
+            "poi_source": trade.get("poi_source") or self._analysis_segment_value(analysis, "entry", "poi_source", "UNKNOWN"),
+            "regime": trade.get("regime") or self._analysis_segment_value(analysis, "market_regime", "regime", "UNKNOWN"),
+            "volatility_ratio": trade.get("volatility_ratio") if trade.get("volatility_ratio") is not None else self._analysis_segment_value(analysis, "market_regime", "volatility_ratio", None),
+            "market_phase": trade.get("market_phase") or self._analysis_segment_value(analysis, "market_phase", "phase", "UNKNOWN"),
             "tp1": trade.get("tp1"),
             "tp2": trade.get("tp2"),
             "tp3": trade.get("tp3"),
