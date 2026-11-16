@@ -419,6 +419,10 @@ class Config:
     # Backtest
     INITIAL_BALANCE = 10000
 
+    # Background analysis cache: one result per symbol, with bounded age and size.
+    ANALYSIS_CACHE_MAX_AGE_SECONDS = int(os.getenv("ATLAS_ANALYSIS_CACHE_MAX_AGE_SECONDS", "86400"))
+    ANALYSIS_CACHE_MAX_SYMBOLS = int(os.getenv("ATLAS_ANALYSIS_CACHE_MAX_SYMBOLS", "1100"))
+
     # Canlı sinyal sonuç takibi (trade journal)
     SIGNAL_TRACKING_ENABLED = os.getenv("ATLAS_SIGNAL_TRACKING_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
     TRADE_JOURNAL_DB_FILE = os.getenv("ATLAS_TRADE_JOURNAL_DB_FILE", "atlas_journal.db")
