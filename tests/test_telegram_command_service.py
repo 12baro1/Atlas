@@ -3,6 +3,8 @@ from telegram_command_service import (
     is_recognized_command,
     normalize_command,
     split_message,
+    format_daily_signal_report,
+    _format_telegram_card,
 )
 
 
@@ -42,3 +44,56 @@ def test_service_requires_explicit_group_target():
     assert service.enabled
     service_without_chat = TelegramCommandService(object(), "token", "")
     assert not service_without_chat.enabled
+
+
+
+def test_mevcut_daily_report_uses_turkey_local_day_and_net_r():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("Europe/Istanbul")
+    now = datetime(2026, 11, 16, 1, 0, tzinfo=tz)
+    stamp = int(datetime(2026, 11, 16, 0, 10, tzinfo=tz).timestamp() * 1000)
+    previous_day = int(datetime(2026, 11, 15, 23, 50, tzinfo=tz).timestamp() * 1000)
+    rows = [
+        {"signal_id": "A1", "symbol": "BTC/USDT", "direction": "LONG", "opened_at": stamp,
+         "status": "PENDING", "entry_reached": True, "realized_r": 0.0},
+        {"signal_id": "A2", "symbol": "ETH/USDT", "direction": "SHORT", "opened_at": stamp,
+         "status": "TP1", "entry_reached": True, "realized_r": 0.5},
+        {"signal_id": "A3", "symbol": "SOL/USDT", "direction": "LONG", "opened_at": stamp,
+         "status": "SL", "entry_reached": True, "realized_r": -1.0},
+        {"signal_id": "A4", "symbol": "XRP/USDT", "direction": "SHORT", "opened_at": stamp,
+         "status": "EXPIRED", "entry_reached": False, "realized_r": 0.0},
+        {"signal_id": "OLD", "symbol": "OLD/USDT", "direction": "LONG", "opened_at": previous_day,
+         "status": "TP3", "entry_reached": True, "realized_r": 2.0},
+    ]
+
+    report = format_daily_signal_report(rows, now=now)
+    assert "Verilen setup: 4" in report
+    assert "Giriş seviyesi görüldü: 3" in report
+    assert "Giriş olmadı (süresi doldu): 1" in report
+    assert "Net: -0.50R" in report
+    assert "OLD/USDT" not in report
+    assert "A4" in report
+
+
+def test_telegram_card_is_compact_and_keeps_trade_levels():
+    card = {
+        "symbol": "BTC/USDT:USDT", "direction": "LONG",
+        "decision_action": "EXECUTE", "entry_type": "LIMIT",
+        "entry": 100.0, "stop_loss": 99.0,
+        "tp_levels": [101.0, 102.0, 103.0],
+        "net_rr": 1.25, "strategy": "SMC",
+    }
+    text = _format_telegram_card(card)
+    assert "Strateji: SMC" in text
+    assert "Yön: LONG | Emir: LIMIT" in text
+    assert "Giriş: 100.0" in text
+    assert "SL: 99.0" in text
+    assert "TP3: 103.0" in text
+    assert "Net RR: +1.25R" in text
+    assert "motor" not in text.lower()
+
+
+def test_recognizes_mevcut_command():
+    assert is_recognized_command("/mevcut@Oakmontincbot")
