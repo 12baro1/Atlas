@@ -1156,6 +1156,21 @@ class BacktestRunner:
                 if isinstance(analysis.get("market_regime"), dict)
                 else analysis.get("market_regime") or "UNKNOWN"
             ),
+            "regime": (
+                (analysis.get("market_regime") or {}).get("regime")
+                if isinstance(analysis.get("market_regime"), dict)
+                else analysis.get("market_regime") or "UNKNOWN"
+            ),
+            "volatility_ratio": _num((analysis.get("market_regime") or {}).get("volatility_ratio"))
+                if isinstance(analysis.get("market_regime"), dict) else None,
+            "volatility_regime": (
+                "HIGH" if _num((analysis.get("market_regime") or {}).get("volatility_ratio")) is not None
+                and _num((analysis.get("market_regime") or {}).get("volatility_ratio")) >= 1.65
+                else "LOW" if _num((analysis.get("market_regime") or {}).get("volatility_ratio")) is not None
+                and _num((analysis.get("market_regime") or {}).get("volatility_ratio")) <= 0.72
+                else "NORMAL" if _num((analysis.get("market_regime") or {}).get("volatility_ratio")) is not None
+                else "UNKNOWN"
+            ),
             "volatility": (
                 "HIGH" if _num((analysis.get("market_regime") or {}).get("volatility_ratio")) is not None
                 and _num((analysis.get("market_regime") or {}).get("volatility_ratio")) >= 1.65
@@ -1167,6 +1182,13 @@ class BacktestRunner:
             "poi_type": (
                 (analysis.get("entry") or {}).get("poi_type")
                 or (analysis.get("entry") or {}).get("poi_source")
+                or (analysis.get("entry") or {}).get("source")
+                or analysis.get("entry_source")
+                or "UNKNOWN"
+            ) if isinstance(analysis.get("entry") or {}, dict) else "UNKNOWN",
+            "poi_source": (
+                (analysis.get("entry") or {}).get("poi_source")
+                or (analysis.get("entry") or {}).get("poi_type")
                 or (analysis.get("entry") or {}).get("source")
                 or analysis.get("entry_source")
                 or "UNKNOWN"
@@ -1186,6 +1208,11 @@ class BacktestRunner:
                 for key in ("entry", "weekly", "daily", "h4", "entry_source")
             } if isinstance(analysis.get("mtf"), dict) else {},
             "exit_reason": outcome.get("exit_reason", "UNKNOWN"),
+            "tp_behavior": __import__("segmentation_report").classify_tp_behavior({
+                "result": outcome.get("result"),
+                "_levels": outcome.get("levels") or [],
+                "exit_reason": outcome.get("exit_reason", "UNKNOWN"),
+            }),
             "exit_index": exit_index,
             "exit_time": exit_time,
             "result": outcome.get("result"),
@@ -1320,33 +1347,9 @@ class BacktestRunner:
             for key, trades in sorted(groups.items())
         }
     def segment_breakdown(self):
-        """Net performance by execution type, regime, volatility, POI and TP path."""
-        dimensions = {
-            "entry_type": lambda trade: trade.get("entry_type"),
-            "market_phase": lambda trade: trade.get("market_phase"),
-            "market_regime": lambda trade: trade.get("market_regime"),
-            "volatility": lambda trade: trade.get("volatility"),
-            "poi_type": lambda trade: trade.get("poi_type"),
-            "tp_behavior": lambda trade: (
-                "TP3" if 3 in (trade.get("_levels") or [])
-                else "TP2" if 2 in (trade.get("_levels") or [])
-                else "TP1_THEN_STOP" if 1 in (trade.get("_levels") or []) and "STOP" in str(trade.get("exit_reason", "")).upper()
-                else "TP1_THEN_EXIT" if 1 in (trade.get("_levels") or [])
-                else "STOP_BEFORE_TP1" if "STOP" in str(trade.get("exit_reason", "")).upper()
-                else str(trade.get("exit_reason") or "UNKNOWN").upper()
-            ),
-        }
-        output = {}
-        for dimension, getter in dimensions.items():
-            groups = {}
-            for trade in self.history:
-                key = str(getter(trade) or "UNKNOWN").upper()
-                groups.setdefault(key, []).append(trade)
-            output[dimension] = {
-                key: self._trade_metrics(items)
-                for key, items in sorted(groups.items())
-            }
-        return output
+        """Realized performance segments using the shared report dimensions."""
+        from segmentation_report import segment_breakdown
+        return segment_breakdown(self.history)
 
     def _microstructure_quality(self):
         samples = self.microstructure_samples
