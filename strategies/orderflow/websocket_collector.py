@@ -133,8 +133,7 @@ class MexcPublicStream:
         if thread and thread.is_alive():
             thread.join(timeout=2.0)
 
-    @staticmethod
-    def _book_levels(rows, quantity_index=2):
+    def _book_levels(self, rows, quantity_index=2):
         output = {}
         for row in rows or []:
             try:
