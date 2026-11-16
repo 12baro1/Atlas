@@ -1,7 +1,7 @@
 """End-to-end analysis trace context.
 
 Her piyasa analizi için tek ve kararlı bir "trace_id" üretir. Bu kimlik veri
-kaynağından (Bybit REST/WebSocket), DataEngine normalizasyonuna, ortak piyasa
+kaynağından (Gate.io REST/WebSocket), DataEngine normalizasyonuna, ortak piyasa
 kanıtlarına, uzman motorlara, yedi bağımsız stratejinin setup üretimine, ortak
 filtreye ve nihai karar + TUI çıktısına kadar taşınır.
 
