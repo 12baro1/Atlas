@@ -1227,6 +1227,19 @@ class TradeJournal:
             if low is None or high is None:
                 continue
 
+            # A LIMIT setup is not an open theoretical position until its
+            # entry price is actually traded. Do not count TP/SL on the
+            # candle that first reaches entry: OHLC cannot prove intrabar order.
+            if not outcome.get("entry_reached"):
+                entry_touched = (
+                    low <= entry if side == "LONG" else high >= entry
+                )
+                if entry_touched:
+                    outcome["entry_reached"] = True
+                    outcome["entry_reached_at"] = int(getattr(candle, "time", 0) or 0)
+                    outcome["entry_tracking_source"] = "closed_ohlc"
+                continue
+
             # MFE / MAE takibi
             if side == "LONG":
                 if high is not None:
@@ -2276,6 +2289,10 @@ class TradeJournal:
         tp2 = self._norm_price(tp2)
         tp3 = self._norm_price(tp3)
 
+        payload = copy.deepcopy(payload or {})
+        execution_costs = payload.get("execution_costs") if isinstance(payload, dict) else {}
+        market_reference = str((execution_costs or {}).get("entry_type") or "").upper() == "MARKET"
+
         outcome = {
             "signal_id": signal_id,
             "symbol": symbol,
@@ -2284,6 +2301,11 @@ class TradeJournal:
             "status": "PENDING",
             "opened_at": opened_at,
             "resolved_at": None,
+            # MARKET is a theoretical signal reference, not a confirmed exchange fill.
+            # LIMIT remains pending until a closed candle trades through its entry.
+            "entry_reached": market_reference,
+            "entry_reached_at": opened_at if market_reference else None,
+            "entry_tracking_source": "market_reference" if market_reference else None,
             "entry": self._norm_price(entry),
             "stop_loss": self._norm_price(stop_loss),
             "tp1": tp1,
@@ -2305,7 +2327,7 @@ class TradeJournal:
             "hit_sl": False,
             "final_result": None,
             "tps_hit": [],
-            "payload": copy.deepcopy(payload or {}),
+            "payload": payload,
         }
         self._signal_outcomes.append(outcome)
         self._persist_signal_outcome(outcome)
