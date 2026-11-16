@@ -19,7 +19,7 @@ class FakeGate(GateFuturesExchange):
         if path == "/futures/usdt/tickers":
             return [{"contract":"BTC_USDT","last":"101","high_24h":"105","low_24h":"95"}]
         if path == "/futures/usdt/contract_stats":
-            return [{"time":1700000000,"open_interest":"1234"}]
+            return [{"time":1700000000,"open_interest":"1234","open_interest_usd":123400.0}]
         if path == "/futures/usdt/funding_rate":
             return [{"t":1700000000,"r":"0.0001"}]
         raise AssertionError(path)
@@ -51,3 +51,21 @@ def test_gate_ticker_open_interest_and_funding():
     assert ex.fetch_ticker("BTC/USDT:USDT")["last"] == "101"
     assert ex.fetch_open_interest("BTC/USDT:USDT")["openInterestAmount"] == 0.1234
     assert ex.fetch_funding_rate_history("BTC/USDT:USDT")[0]["fundingRate"] == 0.0001
+
+
+def test_gate_open_interest_history_exposes_timestamped_amount_and_usd_value():
+    ex = FakeGate()
+    ex.load_markets()
+    rows = ex.fetch_open_interest_history("BTC/USDT:USDT", timeframe="1h", limit=10)
+    assert rows[0]["timestamp"] == 1700000000000
+    assert rows[0]["openInterestAmount"] == 0.1234
+    assert rows[0]["openInterestValue"] == 123400.0
+
+
+def test_gate_open_interest_snapshot_uses_exchange_timestamp_and_usd_value():
+    ex = FakeGate()
+    ex.load_markets()
+    snapshot = ex.fetch_open_interest("BTC/USDT:USDT")
+    assert snapshot["timestamp"] == 1700000000000
+    assert snapshot["openInterestAmount"] == 0.1234
+    assert snapshot["openInterestValue"] == 123400.0
