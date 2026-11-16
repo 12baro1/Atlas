@@ -34,7 +34,7 @@ def test_load_historical_excludes_unclosed_candles(monkeypatch, timeframe):
     assert [c.time for c in data[timeframe]] == [now_ms - duration]
 
 
-def test_market_listing_time_reads_mexc_launch_timestamp(monkeypatch):
+def test_market_listing_time_reads_gateio_launch_timestamp(monkeypatch):
     class FakeExchange:
         def load_markets(self):
             return {
