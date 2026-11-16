@@ -269,3 +269,23 @@ def test_historical_smt_universe_uses_primary_series_and_loads_comparisons(monke
     assert result["smt_universe"]["ETH/USDT:USDT"]["15m"] == []
     assert len(calls) == 4
     assert all(call[0] == "ETH/USDT:USDT" for call in calls)
+
+
+def test_legacy_non_gate_cache_is_rejected(tmp_path, monkeypatch):
+    cache_file = tmp_path / "legacy.json"
+    cache_file.write_text('{"rows": [[60000, 1, 2, 0.5, 1.5, 10]]}', encoding="utf-8")
+    monkeypatch.setattr(backtest, "_cache_path", lambda *_args: str(cache_file))
+
+    assert backtest._load_cached_candles("BTC/USDT:USDT", "15m", 0, 10**12) is None
+
+
+def test_gate_cache_round_trip_includes_provider(tmp_path, monkeypatch):
+    cache_file = tmp_path / "gate.json"
+    monkeypatch.setattr(backtest, "_cache_path", lambda *_args: str(cache_file))
+    candle = _candle(60_000)
+
+    backtest._save_cached_candles("BTC/USDT:USDT", "15m", [candle])
+    loaded = backtest._load_cached_candles("BTC/USDT:USDT", "15m", 0, 10**12)
+
+    assert loaded and loaded[0].time == candle.time
+    assert '"provider": "GATEIO"' in cache_file.read_text(encoding="utf-8")
