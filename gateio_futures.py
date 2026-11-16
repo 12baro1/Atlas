@@ -2,10 +2,20 @@
 from __future__ import annotations
 
 import time
+from decimal import Decimal, InvalidOperation
 import requests
 
 
 BASE_URL = "https://api.gateio.ws/api/v4"
+
+
+def _scaled_contract_amount(value, multiplier):
+    """Scale Gate contract counts without binary-float multiplication drift."""
+    try:
+        amount = Decimal(str(value)) * Decimal(str(multiplier))
+    except (InvalidOperation, TypeError, ValueError):
+        return 0.0
+    return float(amount) if amount.is_finite() else 0.0
 _INTERVALS = {"1m":"1m", "5m":"5m", "15m":"15m", "30m":"30m",
               "1h":"1h", "4h":"4h", "1d":"1d", "1w":"7d"}
 
@@ -102,7 +112,7 @@ class GateFuturesExchange:
         for row in rows:
             try:
                 result.append([int(row["t"]) * 1000, float(row["o"]), float(row["h"]),
-                               float(row["l"]), float(row["c"]), abs(float(row["v"])) * self.contract_size(symbol)])
+                               float(row["l"]), float(row["c"]), _scaled_contract_amount(abs(float(row["v"])), self.contract_size(symbol))])
             except (KeyError, TypeError, ValueError, OverflowError):
                 continue
         return sorted(result, key=lambda x: x[0])[-count:]
@@ -116,7 +126,7 @@ class GateFuturesExchange:
             out = []
             for row in rows or []:
                 try:
-                    price, size = float(row["p"]), abs(float(row["s"])) * self.contract_size(symbol)
+                    price, size = float(row["p"]), _scaled_contract_amount(abs(float(row["s"])), self.contract_size(symbol))
                     if price > 0 and size > 0:
                         out.append([price, size])
                 except (KeyError, TypeError, ValueError, OverflowError):
@@ -135,7 +145,7 @@ class GateFuturesExchange:
                 stamp = int(row["create_time_ms"])
                 if since is not None and stamp < int(since):
                     continue
-                size = abs(float(row["size"])) * self.contract_size(symbol)
+                size = _scaled_contract_amount(abs(float(row["size"])), self.contract_size(symbol))
                 side = "buy" if float(row["size"]) > 0 else "sell"
                 price = float(row["price"])
                 out.append({"id": str(row.get("id", "")), "timestamp": stamp, "datetime": None,
@@ -155,7 +165,7 @@ class GateFuturesExchange:
                 "high": row.get("high_24h"), "low": row.get("low_24h"),
                 "bid": row.get("highest_bid"), "ask": row.get("lowest_ask"),
                 "last": row.get("last"), "close": row.get("last"),
-                "baseVolume": (float(row.get("volume_24h") or 0) * self.contract_size(symbol)), "quoteVolume": row.get("volume_24h_quote"),
+                "baseVolume": _scaled_contract_amount(row.get("volume_24h") or 0, self.contract_size(symbol)), "quoteVolume": row.get("volume_24h_quote"),
                 "info": dict(row)}
 
     def fetch_tickers(self, symbols=None, params=None):
@@ -180,7 +190,7 @@ class GateFuturesExchange:
         }) or []
         row = rows[-1] if rows else {}
         value = row.get("open_interest")
-        return {"symbol": symbol, "openInterestAmount": float(value) * self.contract_size(symbol) if value is not None else None,
+        return {"symbol": symbol, "openInterestAmount": _scaled_contract_amount(value, self.contract_size(symbol)) if value is not None else None,
                 "openInterestValue": None, "timestamp": int(row.get("time") or self.milliseconds()),
                 "info": dict(row)}
 
@@ -197,7 +207,7 @@ class GateFuturesExchange:
                     stamp *= 1000
                 if since is not None and stamp < int(since):
                     continue
-                out.append({"timestamp": stamp, "openInterestAmount": float(row["open_interest"]) * self.contract_size(symbol)})
+                out.append({"timestamp": stamp, "openInterestAmount": _scaled_contract_amount(row["open_interest"], self.contract_size(symbol))})
             except (KeyError, TypeError, ValueError, OverflowError):
                 continue
         return out
