@@ -16,7 +16,7 @@ executed-trade footprint, and displayed L2 liquidity-wall summaries once per sna
 | Timestamped trade-flow batches | MEXC Futures public-deal WebSocket collector | Orderflow CVD |
 | Liquidation events | Unavailable: MEXC has no documented public liquidation-event channel | Orderflow; liquidation-cascade event corroboration |
 | Open interest | MEXC ticker OI snapshots observed over runtime (no historical OI endpoint) | Liquidation Cascade |
-| Funding rate | MEXC ticker OI snapshots observed over runtime (no historical OI endpoint) | Liquidation Cascade |
+| Funding rate | MEXC public funding-rate history and current funding-rate endpoint | Liquidation Cascade |
 | BTC/ETH comparison candles | MEXC Futures REST | Relative Strength, SMT/correlation consumers |
 | Configured sector peers | MEXC Futures REST | Relative Strength |
 
