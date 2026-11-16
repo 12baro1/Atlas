@@ -54,7 +54,7 @@ def _format_rr(value):
     return f"{number:+.2f}R"
 
 
-def _format_price(value):
+def _format_price(value, *, grouping=True):
     """Format prices without hiding small-coin precision."""
     if value is None:
         return "—"
@@ -64,7 +64,8 @@ def _format_price(value):
         return str(value)
     if not math.isfinite(number):
         return "—"
-    rendered = f"{number:,.8f}".rstrip("0").rstrip(".")
+    rendered = f"{number:,.8f}" if grouping else f"{number:.8f}"
+    rendered = rendered.rstrip("0").rstrip(".")
     # Keep one decimal for whole-number prices for compatibility and clarity.
     if "." not in rendered:
         rendered += ".0"
@@ -302,13 +303,13 @@ def _format_telegram_card(card, elapsed_ms=0):
         "İŞLEM PLANI",
         f"Strateji: {strategy}",
         f"Emir tipi: {entry_type}",
-        f"Giriş: {_format_price(card.get('entry'))}",
-        f"Stop Loss: {_format_price(card.get('stop_loss'))}",
+        f"Giriş: {_format_price(card.get('entry'), grouping=False)}",
+        f"Stop Loss: {_format_price(card.get('stop_loss'), grouping=False)}",
     ]
     if targets:
         lines.extend(["", "HEDEFLER"])
         lines.extend(
-            f"TP{index}: {_format_price(target)}"
+            f"TP{index}: {_format_price(target, grouping=False)}"
             for index, target in enumerate(targets[:3], start=1)
         )
     lines.extend([
@@ -334,7 +335,7 @@ def _format_telegram_card(card, elapsed_ms=0):
 
     lines.extend(["", divider])
     if entry_type == "LIMIT":
-        lines.append("DURUM: Giriş fiyatı bekleniyor.")
+        lines.append("DURUM: LIMIT giriş seviyesi bekleniyor.")
         lines.append("Fiyat belirlenen LIMIT seviyesine gelmeden giriş varsayılmaz.")
     else:
         lines.append("DURUM: MARKET planı hazır.")
