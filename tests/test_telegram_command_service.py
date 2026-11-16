@@ -64,13 +64,17 @@ def test_mevcut_daily_report_uses_turkey_local_day_and_net_r():
          "status": "SL", "entry_reached": True, "realized_r": -1.0},
         {"signal_id": "A4", "symbol": "XRP/USDT", "direction": "SHORT", "opened_at": stamp,
          "status": "EXPIRED", "entry_reached": False, "realized_r": 0.0},
+        {"signal_id": "A5", "symbol": "ADA/USDT", "direction": "LONG", "opened_at": stamp,
+         "status": "PENDING", "entry_reached": True, "entry_tracking_source": "market_reference",
+         "realized_r": 0.0},
         {"signal_id": "OLD", "symbol": "OLD/USDT", "direction": "LONG", "opened_at": previous_day,
          "status": "TP3", "entry_reached": True, "realized_r": 2.0},
     ]
 
     report = format_daily_signal_report(rows, now=now)
-    assert "Verilen setup: 4" in report
-    assert "Giriş seviyesi görüldü: 3" in report
+    assert "Verilen setup: 5" in report
+    assert "Giriş seviyesi mumda görüldü: 3" in report
+    assert "MARKET referansı (fill teyitsiz): 1" in report
     assert "Giriş olmadı (süresi doldu): 1" in report
     assert "Net: -0.50R" in report
     assert "OLD/USDT" not in report
