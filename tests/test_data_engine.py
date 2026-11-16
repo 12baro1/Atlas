@@ -109,12 +109,12 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
         Candle(time=now - 3_600_000, open=100, high=102, low=98, close=101, volume=10)
     ])
     monkeypatch.setattr(data_engine, "configured_sector_peers", lambda _symbol: [])
-    monkeypatch.setattr(BybitPublicStream, "for_symbol", classmethod(lambda cls, _symbol: FakeStream()))
+    monkeypatch.setattr(MexcPublicStream, "for_symbol", classmethod(lambda cls, _symbol: FakeStream()))
 
     data = data_engine.get_market_data("BTC/USDT:USDT", force_refresh=True)
 
     assert data["data_provenance"]["orderbook"] == "MEXC_REST"
-    assert data["data_provenance"]["recent_trades"] == "BYBIT_REST"
+    assert data["data_provenance"]["recent_trades"] == "MEXC_REST"
     assert data["data_provenance"]["open_interest"] == "MEXC_REST_SNAPSHOT"
     assert data["open_interest_timestamps_ms"] == [now - 2_000]
     assert data["funding_rate_timestamps_ms"] == [now - 3_000]
