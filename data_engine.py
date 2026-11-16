@@ -124,6 +124,7 @@ def get_market_data(symbol, force_refresh=False):
     try:
         from strategies.orderflow.websocket_collector import MexcPublicStream
         stream = MexcPublicStream.for_symbol(symbol)
+        stream.set_contract_size(exchange.contract_size(symbol))
         stream.start()
         # İlk geçerli snapshot için sınırlı bekleme: ilk mesajlar gelmeden
         # snapshot almak orderbook/trade verisini boş bırakırdı. Sonsuz
@@ -257,7 +258,7 @@ def get_market_data(symbol, force_refresh=False):
                 int(item["timestamp"]) for item in valid_oi if item.get("timestamp") is not None
             ]
             if data["open_interest"]:
-                data["data_provenance"]["open_interest"] = "MEXC_REST_HISTORY"
+                data["data_provenance"]["open_interest"] = "MEXC_REST_OBSERVED_SNAPSHOTS"
         except Exception:
             data["open_interest"] = []
             data["open_interest_timestamps_ms"] = []
