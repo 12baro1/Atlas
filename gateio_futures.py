@@ -96,7 +96,7 @@ class GateFuturesExchange:
         for row in rows:
             try:
                 result.append([int(row["t"]) * 1000, float(row["o"]), float(row["h"]),
-                               float(row["l"]), float(row["c"]), abs(float(row["v"]) * self.contract_size(symbol)])
+                               float(row["l"]), float(row["c"]), abs(float(row["v"])) * self.contract_size(symbol)])
             except (KeyError, TypeError, ValueError, OverflowError):
                 continue
         return sorted(result, key=lambda x: x[0])[-count:]
