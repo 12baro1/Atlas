@@ -121,6 +121,7 @@ def get_market_data(symbol, force_refresh=False):
     # Start one shared public stream per symbol; REST remains the fallback.
     from config import Config
     stream_snapshot = {}
+    stream = None
     try:
         from strategies.orderflow.gateio_public_stream import GatePublicStream
         stream = GatePublicStream.for_symbol(symbol)
@@ -262,6 +263,24 @@ def get_market_data(symbol, force_refresh=False):
         except Exception:
             data["open_interest"] = []
             data["open_interest_timestamps_ms"] = []
+    # Merge observed WS contract_stats with REST history by exchange timestamp.
+    ws_oi = stream_snapshot.get("open_interest") or []
+    if ws_oi:
+        by_timestamp = {}
+        for index, value in enumerate(data["open_interest"]):
+            if index < len(data["open_interest_timestamps_ms"]):
+                by_timestamp[int(data["open_interest_timestamps_ms"][index])] = {"openInterestValue": value}
+        for item in ws_oi:
+            if isinstance(item, dict) and item.get("timestamp") is not None:
+                value = item.get("openInterestValue", item.get("openInterestAmount"))
+                if value is not None:
+                    by_timestamp[int(item["timestamp"])] = {"openInterestValue": float(value)}
+        ordered = sorted(by_timestamp.items())
+        data["open_interest"] = [float(item["openInterestValue"]) for _, item in ordered]
+        data["open_interest_timestamps_ms"] = [stamp for stamp, _ in ordered]
+        if data["open_interest"]:
+            data["data_provenance"]["open_interest"] = "GATEIO_FUTURES_PUBLIC_WEBSOCKET_AND_REST"
+
     if not data["open_interest"]:
         fetch_oi_snapshot = getattr(exchange, "fetch_open_interest", None)
         if callable(fetch_oi_snapshot):
