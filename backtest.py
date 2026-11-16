@@ -116,7 +116,7 @@ def _market_listing_time_ms(symbol):
         markets = exchange.load_markets()
     except Exception as exc:
         raise RuntimeError(
-            f"{symbol}: MEXC market metadata yüklenemedi: "
+            f"{symbol}: Gate.io market metadata yüklenemedi: "
             f"{type(exc).__name__}: {exc}"
         ) from exc
 
