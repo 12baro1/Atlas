@@ -2,8 +2,8 @@
 
 
 def generate(data, regime):
-    specialist_evidence = _strategy_specialist_evidence(data, "mean_reversion")
     from strategy_lab import _series, _atr, _bollinger, _rsi, statistical_deviation, rsi_divergence, _value, _candle_quality, _current_price, _vwap, _raw_candidate, _entry_reference, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
+    specialist_evidence = _strategy_specialist_evidence(data, "mean_reversion")
     candles = data.get("15m") or []
     closes = _series(candles)
     atr = _atr(candles)
