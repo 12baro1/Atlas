@@ -124,8 +124,15 @@ class MexcFuturesExchange:
             self.load_markets()
         return self.markets[symbol]
 
+    def contract_size(self, symbol):
+        market = self.markets.get(symbol) if self.markets else None
+        if market is None:
+            market = self.market(symbol)
+        return float((market or {}).get("contractSize") or 1.0)
+
     def fetch_ohlcv(self, symbol, timeframe="1m", since=None, limit=None, params=None):
         interval, seconds = _INTERVALS[timeframe]
+        contract_size = self.contract_size(symbol)
         now = self.milliseconds()
         count = min(max(int(limit or 500), 1), 2000)
         end_s = now // 1000
@@ -144,13 +151,14 @@ class MexcFuturesExchange:
                     int(stamp) * 1000,
                     float(data["open"][i]), float(data["high"][i]),
                     float(data["low"][i]), float(data["close"][i]),
-                    float(data.get("vol", [0] * len(times))[i]),
+                    float(data.get("vol", [0] * len(times))[i]) * contract_size,
                 ])
             except (KeyError, IndexError, TypeError, ValueError, OverflowError):
                 continue
         return sorted(rows, key=lambda row: row[0])[-count:]
 
     def fetch_order_book(self, symbol, limit=50, params=None):
+        contract_size = self.contract_size(symbol)
         data = self._get(f"/api/v1/contract/depth/{self.market_id(symbol)}",
                          {"limit": min(max(int(limit or 50), 1), 50)}) or {}
         def levels(rows):
@@ -159,7 +167,7 @@ class MexcFuturesExchange:
                 try:
                     price, amount = float(row[0]), float(row[1])
                     if price > 0 and amount > 0:
-                        output.append([price, amount])
+                        output.append([price, amount * contract_size])
                 except (IndexError, TypeError, ValueError, OverflowError):
                     continue
             return output
@@ -171,6 +179,7 @@ class MexcFuturesExchange:
         }
 
     def fetch_trades(self, symbol, since=None, limit=100, params=None):
+        contract_size = self.contract_size(symbol)
         rows = self._get(
             f"/api/v1/contract/deals/{self.market_id(symbol)}",
             {"limit": min(max(int(limit or 100), 1), 100)},
@@ -186,7 +195,7 @@ class MexcFuturesExchange:
                     "id": str(row.get("t", "")), "timestamp": stamp,
                     "datetime": None, "symbol": symbol, "type": None,
                     "side": side, "price": float(row["p"]),
-                    "amount": float(row["v"]), "cost": None,
+                    "amount": float(row["v"]) * contract_size, "cost": None,
                     "info": dict(row),
                 })
             except (KeyError, TypeError, ValueError, OverflowError):
@@ -214,7 +223,7 @@ class MexcFuturesExchange:
                 stamp = ticker["timestamp"]
                 history = self._oi_history[symbol]
                 if not history or history[-1]["timestamp"] != stamp:
-                    history.append({"timestamp": stamp, "openInterestAmount": float(oi)})
+                    history.append({"timestamp": stamp, "openInterestAmount": float(oi) * self.contract_size(symbol)})
                     del history[:-200]
         return ticker
 
@@ -226,7 +235,7 @@ class MexcFuturesExchange:
         if value is None:
             return {}
         return {
-            "symbol": symbol, "openInterestAmount": float(value),
+            "symbol": symbol, "openInterestAmount": float(value) * self.contract_size(symbol),
             "openInterestValue": None,
             "timestamp": int(data.get("timestamp") or self.milliseconds()),
             "info": data,
