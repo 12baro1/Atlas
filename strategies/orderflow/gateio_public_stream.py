@@ -213,12 +213,10 @@ class GatePublicStream:
                         stamp = int(row.get("time") or 0)
                         if stamp < 10_000_000_000:
                             stamp *= 1000
-                        raw_value = row.get("open_interest_usd")
-                        if raw_value is None:
-                            raw_value = row.get("open_interest")
-                        value = float(raw_value)
+                        raw_value = row.get("open_interest")
+                        value = float(raw_value) * self._contract_size
                         if stamp > 0 and math.isfinite(value) and value > 0:
-                            self._open_interest.append({"timestamp": stamp, "openInterestValue": value})
+                            self._open_interest.append({"timestamp": stamp, "openInterestAmount": value})
                     except (TypeError, ValueError, OverflowError):
                         continue
             elif channel == "futures.tickers" and rows:
