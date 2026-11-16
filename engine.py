@@ -240,9 +240,12 @@ class AtlasEngine:
         # Trace kimliği burada yalnızca eksikse üretilir; data_engine ile
         # başlatılan aynı analiz aynı kimliği taşır.
         ensure_trace(data)
-        return self.main_engine.analyze(data, pipeline=self._analyze_with_motors)
+        return self.main_engine.analyze(
+            data,
+            pipeline=lambda payload: self._analyze_with_motors(payload, track_signal=track_signal),
+        )
 
-    def _analyze_with_motors(self, data):
+    def _analyze_with_motors(self, data, track_signal=True):
         """Execute registered specialist motors and assemble their evidence."""
         self._validate_market_data(data)
 
