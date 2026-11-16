@@ -105,3 +105,8 @@ def test_telegram_card_is_compact_and_keeps_trade_levels():
 
 def test_recognizes_mevcut_command():
     assert is_recognized_command("/mevcut@Oakmontincbot")
+
+
+def test_recognizes_cached_best_five_command():
+    assert is_recognized_command("/eniyi5")
+    assert is_recognized_command("/eniyi5@Oakmontincbot")
