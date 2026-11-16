@@ -132,8 +132,11 @@ class GateFuturesExchange:
                 except (KeyError, TypeError, ValueError, OverflowError):
                     continue
             return out
+        stamp = int(data.get("t") or self.milliseconds())
+        if stamp < 10_000_000_000:
+            stamp *= 1000
         return {"symbol": symbol, "bids": levels(data.get("bids")), "asks": levels(data.get("asks")),
-                "timestamp": int(data.get("t") or self.milliseconds()), "nonce": data.get("id"), "datetime": None}
+                "timestamp": stamp, "nonce": data.get("id"), "datetime": None}
 
     def fetch_trades(self, symbol, since=None, limit=100, params=None):
         rows = self._get("/futures/usdt/trades", {
