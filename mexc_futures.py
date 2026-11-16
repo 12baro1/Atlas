@@ -230,6 +230,8 @@ class MexcFuturesExchange:
         return ticker
 
     def fetch_tickers(self, symbols=None, params=None):
+        if not self.markets:
+            self.load_markets()
         rows = self._get("/api/v1/contract/ticker") or []
         if isinstance(rows, dict):
             rows = [rows]
@@ -243,7 +245,7 @@ class MexcFuturesExchange:
                 "quoteCoin": row.get("symbol", "").split("_")[-1],
                 "settleCoin": row.get("symbol", "").split("_")[-1],
             })
-            if requested and symbol not in requested:
+            if symbol not in self.markets or (requested and symbol not in requested):
                 continue
             output[symbol] = self._normalize_ticker(symbol, row)
         return output
