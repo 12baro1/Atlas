@@ -305,7 +305,7 @@ class GatePublicStream:
                         "side": "SELL" if size < 0 else "BUY",
                         "order_side": "SELL" if size < 0 else "BUY",
                         "position_side": "LONG" if size < 0 else "SHORT",
-                        "side_semantics": "GATE_ORDER_SIDE_AND_LIQUIDATED_POSITION",
+                        "side_semantics": "GATE_LIQUIDATION_ORDER_SIDE",
                         "timestamp_ms": raw["timestamp_ms"], "price": raw["price"],
                         "quantity": abs(size), "notional": raw["price"] * abs(size),
                         "source": "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS",
