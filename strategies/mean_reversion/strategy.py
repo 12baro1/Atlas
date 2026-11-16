@@ -2,7 +2,7 @@
 
 
 def generate(data, regime):
-    from strategy_lab import _series, _atr, _bollinger, _rsi, statistical_deviation, rsi_divergence, _value, _candle_quality, _current_price, _vwap, _valid_plan, _entry_reference, _structure_candle_sets
+    from strategy_lab import _series, _atr, _bollinger, _rsi, statistical_deviation, rsi_divergence, _value, _candle_quality, _current_price, _vwap, _raw_candidate, _entry_reference
     candles = data.get("15m") or []
     closes = _series(candles)
     atr = _atr(candles)
@@ -50,7 +50,7 @@ def generate(data, regime):
             return None
     extremity = max(0.0, 42.0 - rsi) if direction == "LONG" else max(0.0, rsi - 58.0)
     strength = min(88.0, 65.0 + min(extremity * 0.5, 12.0) + min(abs(close - prev_close) / atr * 4.0, 8.0))
-    plan = _valid_plan(direction, entry, stop, atr, candles, "mean_reversion", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
+    plan = _raw_candidate(direction, entry, stop, atr, "mean_reversion", strength, entry_reference=_entry_reference(data))
     if plan:
         rejection_wick = quality["lower_wick_ratio"] if direction == "LONG" else quality["upper_wick_ratio"]
         plan["reasons"] = [
