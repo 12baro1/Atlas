@@ -27,9 +27,10 @@ def _absorption_proxy(flow, candle, atr):
 
 
 def generate(data):
+    specialist_evidence = _strategy_specialist_evidence(data, "orderflow_momentum")
     from strategy_lab import (
         _atr, _ORDERBOOK_ENGINE, _value, _candle_quality, _current_price,
-        _raw_candidate, _entry_reference, displacement,
+        _raw_candidate, _entry_reference, displacement, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
         cumulative_volume_delta, build_orderflow_evidence,
     )
     from strategies.orderflow.analytics import (
@@ -193,4 +194,6 @@ def generate(data):
             "absorption_proxy": absorption,
             "displacement": displacement(candles, atr),
         }
+    if plan:
+        _attach_strategy_specialist_evidence(plan, specialist_evidence)
     return plan
