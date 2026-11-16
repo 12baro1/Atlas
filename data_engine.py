@@ -34,7 +34,7 @@ _cache = {}
 def _fetch(symbol, timeframe, limit):
     """Fetch validated, fully closed candles only.
 
-    MEXC/CCXT commonly includes the currently forming candle as the final
+    MEXC commonly includes the currently forming candle as the final
     OHLCV row. Returning it to SMC/MTF engines creates moving structure and
     inconsistent signals. Invalid, duplicate, or out-of-order rows are
     discarded; the last candle is retained only after its timeframe closes.
