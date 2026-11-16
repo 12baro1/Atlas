@@ -845,7 +845,10 @@ def test_signal_outcome_uses_per_fill_costs_for_tp_then_trailing_stop(tmp_path):
     )
     candles = [
         _precise_candle(1, high=101.2, low=100.1, close=101.1),
+        # Entry is first touched here; this candle must not also count TP/SL.
         _precise_candle(2, high=100.5, low=99.9, close=100.0),
+        # Only the following closed candle can resolve the entered position.
+        _precise_candle(3, high=101.2, low=100.0, close=100.2),
     ]
     resolved = journal.resolve_signal_outcome(outcome, candles)
     expected_cost = 100.0 * 0.0002 + 101.0 * 0.5 * 0.0002 + 100.0 * 0.5 * (
