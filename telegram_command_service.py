@@ -18,6 +18,19 @@ TELEGRAM_API = "https://api.telegram.org"
 MAX_MESSAGE_LENGTH = 3900
 MAX_COMMAND_AGE_SECONDS = 120
 
+TELEGRAM_COMMANDS = [
+    {"command": "yardim", "description": "Atlas komutlarını göster"},
+    {"command": "mevcut", "description": "Bugünün setup ve işlem takibi"},
+    {"command": "eniyi5", "description": "Havuzdaki en iyi 5 setup"},
+    {"command": "tara", "description": "50 piyasayı tara"},
+    {"command": "likidite", "description": "Seçili coin likidite haritası"},
+    {"command": "performans", "description": "Geçmiş performans raporu"},
+    {"command": "ogrenme", "description": "Öğrenme verisini göster"},
+    {"command": "btc", "description": "BTC 7 strateji analizi"},
+    {"command": "eth", "description": "ETH 7 strateji analizi"},
+    {"command": "sol", "description": "SOL 7 strateji analizi"},
+]
+
 
 def normalize_command(value: str) -> str:
     """Normalize plain text and /commands addressed to this bot."""
@@ -196,7 +209,7 @@ def is_recognized_command(command: str) -> bool:
 
     raw = str(command or "").strip()
     normalized = normalize_command(raw).lower()
-    if normalized in {"yardım", "yardim", "help", "?", "mevcut"}:
+    if normalized in {"yardım", "yardim", "help", "?", "mevcut", "tara"}:
         return True
     return (
         _is_report_command(normalized)
@@ -233,6 +246,7 @@ class TelegramCommandService:
         if self._thread and self._thread.is_alive():
             return True
         self.stop_flag.clear()
+        self._register_command_menu()
         self._thread = threading.Thread(
             target=self._poll_loop,
             name="atlas-telegram-commands",
@@ -240,6 +254,25 @@ class TelegramCommandService:
         )
         self._thread.start()
         return True
+
+    def _register_command_menu(self) -> None:
+        """Publish slash commands only in the configured Telegram group."""
+        try:
+            self._api(
+                "setMyCommands",
+                {
+                    "commands": TELEGRAM_COMMANDS,
+                    "scope": {"type": "chat", "chat_id": int(self.chat_id)},
+                },
+                timeout=10,
+            )
+            self.logger.info("Telegram command menu registered for configured group")
+        except Exception as exc:
+            # A menu-registration failure must not disable command polling.
+            self.logger.warning(
+                "Telegram command menu registration failed (%s)",
+                type(exc).__name__,
+            )
 
     def stop(self, timeout: float = 25.0) -> None:
         self.stop_flag.set()
@@ -335,6 +368,9 @@ class TelegramCommandService:
 
         normalized = normalize_command(command)
         lowered = normalized.lower()
+        if lowered == "tara":
+            normalized = "50 analiz et"
+            lowered = normalized.lower()
         if lowered in {"yardım", "yardim", "help", "?"}:
             return (
                 "ATLAS KOMUTLARI\n"
