@@ -233,7 +233,7 @@ class GatePublicStream:
             "trade_flow_history": [buckets[k] for k in sorted(buckets)],
             "trade_flow_history_source": "WEBSOCKET" if buckets else "UNAVAILABLE",
             "liquidation_events": liquidations,
-            "liquidation_events_source": "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS" if connected else "UNAVAILABLE",
+            "liquidation_events_source": "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS" if liquidations else "UNAVAILABLE",
             "liquidation_events_timestamp_ms": max((x["timestamp_ms"] for x in liquidations), default=None),
             "liquidation_events_connected": connected,
             "liquidation_events_last_error": last_error,
