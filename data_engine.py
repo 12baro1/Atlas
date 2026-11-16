@@ -157,6 +157,16 @@ def get_market_data(symbol, force_refresh=False):
         book_timestamp = data["orderbook"].get("timestamp") if isinstance(data["orderbook"], dict) else None
         data["orderbook_timestamp_ms"] = int(book_timestamp) if book_timestamp is not None else int(exchange.milliseconds())
         data["data_provenance"]["orderbook"] = "GATEIO_REST"
+        # Seed the local L2 book from the REST nonce, then replay buffered
+        # WebSocket deltas. Never label an unsynchronized book as WS data.
+        if stream is not None:
+            try:
+                if stream.set_orderbook_snapshot(data["orderbook"]):
+                    synchronized = stream.snapshot(int(exchange.milliseconds()))
+                    if synchronized.get("orderbook") is not None:
+                        stream_snapshot.update(synchronized)
+            except Exception:
+                pass
     except Exception:
         data["orderbook"] = None
     book_age_ms = None
