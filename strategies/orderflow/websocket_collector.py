@@ -57,6 +57,15 @@ class MexcPublicStream:
         self._connected = False
         self._last_message_ms = None
         self._ticker = {}
+        self._contract_size = 1.0
+
+    def set_contract_size(self, value):
+        try:
+            size = float(value)
+            if math.isfinite(size) and size > 0:
+                self._contract_size = size
+        except (TypeError, ValueError, OverflowError):
+            pass
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -130,7 +139,7 @@ class MexcPublicStream:
         for row in rows or []:
             try:
                 price = float(row[0])
-                quantity = float(row[quantity_index] if len(row) > quantity_index else row[1])
+                quantity = float(row[quantity_index] if len(row) > quantity_index else row[1]) * self._contract_size
                 if price > 0 and quantity > 0:
                     output[price] = quantity
             except (TypeError, ValueError, IndexError, OverflowError):
@@ -166,8 +175,8 @@ class MexcPublicStream:
                         self._trades.append({
                             "timestamp_ms": trade_stamp,
                             "price": float(row["p"]),
-                            "size": float(row["v"]),
-                            "amount": float(row["v"]),
+                            "size": float(row["v"]) * self._contract_size,
+                            "amount": float(row["v"]) * self._contract_size,
                             "side": "BUY" if side_code == 1 else "SELL",
                             "trade_id": str(trade_stamp),
                         })
