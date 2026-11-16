@@ -6,6 +6,7 @@ def _absorption_proxy(flow, candle, atr):
     This is a snapshot proxy, not proof of hidden liquidity or queue replenishment.
     """
     from strategy_lab import _value
+    specialist_evidence = _strategy_specialist_evidence(data, "orderflow_momentum")
     if not isinstance(flow, dict) or not atr or atr <= 0:
         return None
     try:
@@ -27,7 +28,6 @@ def _absorption_proxy(flow, candle, atr):
 
 
 def generate(data):
-    specialist_evidence = _strategy_specialist_evidence(data, "orderflow_momentum")
     from strategy_lab import (
         _atr, _ORDERBOOK_ENGINE, _value, _candle_quality, _current_price,
         _raw_candidate, _entry_reference, displacement, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
@@ -59,7 +59,16 @@ def generate(data):
         return None
 
     # Depth-normalized order-book imbalance and actual recent taker flow.
-    flow = _ORDERBOOK_ENGINE.analyze(
+    # Reuse the main specialist's already-computed order-book analysis for
+    # this exact snapshot. Fall back only for direct generator use in tests.
+    specialist_orderbook = next(
+        (
+            item.get("output") for item in specialist_evidence
+            if item.get("motor") == "orderbook" and isinstance(item.get("output"), dict)
+        ),
+        None,
+    )
+    flow = specialist_orderbook or _ORDERBOOK_ENGINE.analyze(
         book, direction="NONE", now_ms=now_ms, trades=data.get("recent_trades"),
     )
     if not flow.get("active") or not flow.get("trade_flow_active"):
