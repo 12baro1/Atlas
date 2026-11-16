@@ -2,7 +2,7 @@
 
 
 def generate(data):
-    from strategy_lab import _series, _atr, _ema, _adx, _directional_movement, _value, _candle_quality, _efficiency_ratio, _current_price, trend_structure, displacement, _valid_plan, _entry_reference, _structure_candle_sets
+    from strategy_lab import _series, _atr, _ema, _adx, _directional_movement, _value, _candle_quality, _efficiency_ratio, _current_price, trend_structure, displacement, _raw_candidate, _entry_reference
     h4, h1 = data.get("4h") or [], data.get("1h") or []
     c4, c1 = _series(h4), _series(h1)
     atr = _atr(h1)
@@ -57,7 +57,7 @@ def generate(data):
                    + min(efficiency * 10.0, 7.0)
                    + min(abs(directional["plus_di"] - directional["minus_di"]) * 0.15, 6.0)
                    + max(0.0, 7.0 - pullback_distance * 5.0))
-    plan = _valid_plan(direction, entry, stop, atr, h1, "trend_pullback", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
+    plan = _raw_candidate(direction, entry, stop, atr, "trend_pullback", strength, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = [
             f"4H EMA20/EMA50 trend alignment; EMA20 slope={trend_slope:.2f} ATR",
