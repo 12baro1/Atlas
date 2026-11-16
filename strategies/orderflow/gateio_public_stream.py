@@ -37,11 +37,15 @@ class GatePublicStream:
         self._last_message_ms = None
         self._last_error = None
         self._ticker = {}
+        self._contract_size = 1.0
 
     def set_contract_size(self, value):
-        # Gate USDT futures public size is expressed in contracts. Keep the
-        # exchange-native amount and use Gate contract metadata downstream.
-        return None
+        try:
+            size = float(value)
+            if math.isfinite(size) and size > 0:
+                self._contract_size = size
+        except (TypeError, ValueError, OverflowError):
+            return None
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -123,7 +127,7 @@ class GatePublicStream:
                     try:
                         contract = str(row.get("contract") or "").upper()
                         price = float(row["price"])
-                        size = float(row["size"])
+                        size = float(row["size"]) * self._contract_size
                         stamp = int(row.get("time") or now_ms)
                         if stamp < 10_000_000_000:
                             stamp *= 1000
