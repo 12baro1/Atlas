@@ -5,10 +5,10 @@ from core.candle import Candle
 from sector_universe import configured_sector_peers
 from trace_context import ensure_trace, record_stage
 
-from mexc_futures import MexcFuturesExchange
+from gateio_futures import GateFuturesExchange
 
 # Public-only MEXC USDT perpetual market-data adapter; no trading credentials.
-exchange = MexcFuturesExchange()
+exchange = GateFuturesExchange()
 
 TIMEFRAMES = {
     "1w": 300,
@@ -122,8 +122,8 @@ def get_market_data(symbol, force_refresh=False):
     from config import Config
     stream_snapshot = {}
     try:
-        from strategies.orderflow.websocket_collector import MexcPublicStream
-        stream = MexcPublicStream.for_symbol(symbol)
+        from strategies.orderflow.gateio_public_stream import GatePublicStream
+        stream = GatePublicStream.for_symbol(symbol)
         stream.set_contract_size(exchange.contract_size(symbol))
         stream.start()
         # İlk geçerli snapshot için sınırlı bekleme: ilk mesajlar gelmeden
@@ -138,7 +138,7 @@ def get_market_data(symbol, force_refresh=False):
     record_stage(
         data,
         "DATA_COLLECTION",
-        source="MEXC_FUTURES_PUBLIC_WEBSOCKET",
+        source="GATEIO_FUTURES_PUBLIC_WEBSOCKET",
         timestamp_ms=int(exchange.milliseconds()),
         availability="AVAILABLE" if stream_snapshot.get("last_message_timestamp_ms") else "UNAVAILABLE",
         freshness="FRESH" if stream_snapshot.get("last_message_timestamp_ms") else "NO_MESSAGE",
@@ -155,7 +155,7 @@ def get_market_data(symbol, force_refresh=False):
         data["orderbook"] = exchange.fetch_order_book(symbol, limit=50)
         book_timestamp = data["orderbook"].get("timestamp") if isinstance(data["orderbook"], dict) else None
         data["orderbook_timestamp_ms"] = int(book_timestamp) if book_timestamp is not None else int(exchange.milliseconds())
-        data["data_provenance"]["orderbook"] = "MEXC_REST"
+        data["data_provenance"]["orderbook"] = "GATEIO_REST"
     except Exception:
         data["orderbook"] = None
     book_age_ms = None
@@ -354,7 +354,7 @@ def get_market_data(symbol, force_refresh=False):
     record_stage(
         data,
         "DATA_NORMALIZATION",
-        source="MEXC_PUBLIC_REST",
+        source="GATEIO_PUBLIC_REST",
         timestamp_ms=int(exchange.milliseconds()),
         freshness=("FRESH" if last_15m_age_ms is not None and last_15m_age_ms <= 30 * 60 * 1000
                    else "STALE" if last_15m_age_ms is not None else "UNKNOWN"),
@@ -387,7 +387,7 @@ def get_market_data(symbol, force_refresh=False):
         if math.isfinite(ticker_price) and ticker_price > 0 and fresh:
             data["current_price"] = ticker_price
             data["current_price_timestamp_ms"] = int(ticker_time) if ticker_time is not None else now_ms
-            data["current_price_source"] = "MEXC_TICKER"
+            data["current_price_source"] = "GATEIO_TICKER"
     except (AttributeError, TypeError, ValueError, OverflowError):
         pass
     except Exception:
@@ -411,7 +411,7 @@ def get_market_data(symbol, force_refresh=False):
     record_stage(
         data,
         "DATA_SOURCE",
-        source="MEXC_FUTURES_PUBLIC_MARKET_DATA",
+        source="GATEIO_FUTURES_PUBLIC_MARKET_DATA",
         timestamp_ms=data["snapshot_timestamp_ms"],
         freshness=("FRESH" if data.get("current_price_source") == "MEXC_TICKER" else "UNKNOWN"),
         availability=("AVAILABLE" if bool(data.get("15m")) else "UNAVAILABLE"),
