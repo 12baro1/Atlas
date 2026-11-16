@@ -42,3 +42,30 @@ def test_service_requires_explicit_group_target():
     assert service.enabled
     service_without_chat = TelegramCommandService(object(), "token", "")
     assert not service_without_chat.enabled
+
+
+
+def test_start_clears_stale_webhook_before_polling(monkeypatch):
+    service = TelegramCommandService(object(), "token", "-100123")
+    calls = []
+
+    class FakeThread:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def start(self):
+            calls.append(("thread_started", self.kwargs["name"]))
+
+        def is_alive(self):
+            return False
+
+    def fake_api(method, payload, timeout=25):
+        calls.append((method, payload, timeout))
+        return True
+
+    monkeypatch.setattr(service, "_api", fake_api)
+    monkeypatch.setattr("telegram_command_service.threading.Thread", FakeThread)
+
+    assert service.start() is True
+    assert calls[0] == ("deleteWebhook", {"drop_pending_updates": True}, 10)
+    assert calls[1] == ("thread_started", "atlas-telegram-commands")
