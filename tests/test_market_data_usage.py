@@ -374,3 +374,16 @@ def test_setup_diagnostic_helper_remains_decision_neutral():
     regime = {"label": "UNKNOWN", "trend": "NEUTRAL"}
     reason = _setup_diagnostic("liquidation_cascade", {"1h": [], "open_interest": [1000.0], "open_interest_timestamps_ms": [1]}, regime)
     assert "INSUFFICIENT_HISTORY" in reason
+
+
+
+def test_gate_liquidation_order_side_maps_to_liquidated_position():
+    from shared.market_data_services import _liquidation_evidence
+    now = int(time.time() * 1000)
+    evidence = _liquidation_evidence([
+        {"timestamp_ms": now, "notional": 200.0, "order_side": "BUY"},
+        {"timestamp_ms": now, "notional": 50.0, "order_side": "SELL"},
+    ], now)
+    assert evidence["state"] == "AVAILABLE"
+    assert evidence["short_liquidation_notional"] == 200.0
+    assert evidence["long_liquidation_notional"] == 50.0

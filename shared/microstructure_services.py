@@ -41,31 +41,52 @@ def cumulative_volume_delta(trade_batches):
 
 @cached_analysis
 def liquidation_events(events, now_ms=None, max_age_ms=900000):
-    """Validate actual exchange liquidation events separately from OI proxies."""
-    rows=list(events or [])
+    """Validate actual events and normalize Gate order side to liquidated position."""
+    rows = list(events or [])
     if not rows:
-        return {"state":"UNAVAILABLE","reason":"NO_EXCHANGE_LIQUIDATION_FEED"}
-    accepted=[]
+        return {"state": "UNAVAILABLE", "reason": "NO_EXCHANGE_LIQUIDATION_FEED"}
+    accepted = []
     for event in rows:
-        if not isinstance(event,dict): return {"state":"INVALID_DATA"}
-        timestamp=event.get("timestamp_ms")
-        size=_finite(event.get("notional"))
-        side=str(event.get("side") or "").upper()
-        try: timestamp=int(timestamp)
-        except (TypeError,ValueError,OverflowError): return {"state":"INVALID_DATA"}
-        if size is None or size<=0 or side not in ("BUY","SELL"):
-            return {"state":"INVALID_DATA"}
+        if not isinstance(event, dict):
+            return {"state": "INVALID_DATA"}
+        timestamp = event.get("timestamp_ms")
+        notional = _finite(event.get("notional"))
+        position_side = str(event.get("position_side") or "").upper()
+        order_side = str(event.get("order_side") or "").upper()
+        if position_side not in ("LONG", "SHORT"):
+            if order_side in ("BUY", "SELL"):
+                position_side = "SHORT" if order_side == "BUY" else "LONG"
+            else:
+                legacy_side = str(event.get("side") or "").upper()
+                position_side = {"BUY": "LONG", "SELL": "SHORT"}.get(legacy_side)
+        try:
+            timestamp = int(timestamp)
+        except (TypeError, ValueError, OverflowError):
+            return {"state": "INVALID_DATA"}
+        if notional is None or notional <= 0 or position_side not in ("LONG", "SHORT"):
+            return {"state": "INVALID_DATA"}
         if now_ms is not None:
-            try: age=int(now_ms)-timestamp
-            except (TypeError,ValueError,OverflowError): return {"state":"INVALID_DATA"}
-            if age<0 or age>max_age_ms: continue
-        accepted.append({"timestamp_ms":timestamp,"notional":size,"side":side})
+            age = int(now_ms) - timestamp
+            if age < 0 or age > max_age_ms:
+                continue
+        accepted.append({"timestamp_ms": timestamp, "notional": notional,
+                         "position_side": position_side})
     if not accepted:
-        return {"state":"STALE_OR_EMPTY"}
-    buy=sum(x["notional"] for x in accepted if x["side"]=="BUY")
-    sell=sum(x["notional"] for x in accepted if x["side"]=="SELL")
-    return {"state":"AVAILABLE","events":len(accepted),"buy_liquidation_notional":buy,
-            "sell_liquidation_notional":sell,"total_notional":buy+sell}
+        return {"state": "STALE_OR_EMPTY"}
+    long_liq = sum(row["notional"] for row in accepted if row["position_side"] == "LONG")
+    short_liq = sum(row["notional"] for row in accepted if row["position_side"] == "SHORT")
+    # Preserve legacy BUY/SELL aliases while exposing unambiguous position-side
+    # totals. Legacy side=BUY historically represented buy-side liquidation.
+    buy_liq = sum(row["notional"] for row in accepted
+                  if row["position_side"] == "LONG")
+    sell_liq = sum(row["notional"] for row in accepted
+                   if row["position_side"] == "SHORT")
+    return {"state": "AVAILABLE", "events": len(accepted),
+            "long_liquidation_notional": long_liq,
+            "short_liquidation_notional": short_liq,
+            "buy_liquidation_notional": buy_liq,
+            "sell_liquidation_notional": sell_liq,
+            "total_notional": long_liq + short_liq}
 
 
 @cached_analysis

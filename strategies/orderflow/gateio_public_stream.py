@@ -43,6 +43,13 @@ class GatePublicStream:
         self._last_error = None
         self._ticker = {}
         self._contract_size = 1.0
+        self._book_bids = {}
+        self._book_asks = {}
+        self._book_update_id = None
+        self._book_timestamp_ms = None
+        self._book_updates = deque(maxlen=5000)
+        self._book_synced = False
+        self._open_interest = deque(maxlen=2000)
 
     def set_contract_size(self, value):
         try:
@@ -76,6 +83,8 @@ class GatePublicStream:
                     subscriptions = [
                         ("futures.trades", [self.contract]),
                         ("futures.tickers", [self.contract]),
+                        ("futures.order_book_update", [self.contract, "100ms", "50"]),
+                        ("futures.contract_stats", [self.contract, "1m"]),
                     ]
                     if owns_liquidations:
                         subscriptions.append(("futures.public_liquidates", ["!all"]))
@@ -168,22 +177,106 @@ class GatePublicStream:
                         stamp = int(row.get("create_time_ms") or row.get("create_time") or now_ms)
                         if stamp < 10_000_000_000:
                             stamp *= 1000
-                        size = float(row["size"])
+                        raw_size = float(row["size"])
                         price = float(row["price"])
-                        if price <= 0 or size == 0:
+                        if price <= 0 or raw_size == 0:
+                            continue
+                        # Gate futures trade size is in contracts; normalize to
+                        # base-asset quantity exactly once, like REST trades.
+                        size = float(Decimal(str(abs(raw_size))) * Decimal(str(self._contract_size)))
+                        if not math.isfinite(size) or size <= 0:
                             continue
                         self._trades.append({
-                            "timestamp_ms": stamp, "price": price, "size": abs(size),
-                            "amount": abs(size), "side": "BUY" if size > 0 else "SELL",
-                            "trade_id": str(row.get("id") or f"{stamp}:{price}:{size}"),
+                            "timestamp_ms": stamp, "price": price, "size": size,
+                            "amount": size, "raw_contract_size": abs(raw_size),
+                            "side": "BUY" if raw_size > 0 else "SELL",
+                            "trade_id": str(row.get("id") or f"{stamp}:{price}:{raw_size}"),
                         })
                     except (KeyError, TypeError, ValueError, OverflowError):
+                        continue
+            elif channel == "futures.order_book_update":
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    try:
+                        update = {"first": int(row["U"]), "last": int(row["u"]),
+                                  "timestamp_ms": int(row.get("t") or now_ms),
+                                  "bids": row.get("b") or [], "asks": row.get("a") or []}
+                    except (KeyError, TypeError, ValueError, OverflowError):
+                        continue
+                    if update["first"] > 0 and update["last"] >= update["first"]:
+                        self._book_updates.append(update)
+                        self._apply_book_update(update)
+            elif channel == "futures.contract_stats":
+                for row in rows:
+                    try:
+                        stamp = int(row.get("time") or 0)
+                        if stamp < 10_000_000_000:
+                            stamp *= 1000
+                        raw_value = row.get("open_interest")
+                        value = float(raw_value) * self._contract_size
+                        if stamp > 0 and math.isfinite(value) and value > 0:
+                            self._open_interest.append({"timestamp": stamp, "openInterestAmount": value})
+                    except (TypeError, ValueError, OverflowError):
                         continue
             elif channel == "futures.tickers" and rows:
                 self._ticker = dict(rows[0])
             self._last_message_ms = now_ms
             retained = {row["event_id"] for row in self._liquidations}
             self._seen.intersection_update(retained)
+
+    def _apply_book_update(self, update):
+        if not self._book_synced:
+            return
+        expected = int(self._book_update_id) + 1
+        if update["last"] < expected:
+            return
+        if not update["first"] <= expected <= update["last"]:
+            self._book_synced = False
+            self._book_bids.clear()
+            self._book_asks.clear()
+            self._book_update_id = None
+            return
+        for side, changes in ((self._book_bids, update["bids"]), (self._book_asks, update["asks"])):
+            for level in changes:
+                try:
+                    price = float(level.get("p") if isinstance(level, dict) else level[0])
+                    raw_size = float(level.get("s") if isinstance(level, dict) else level[1])
+                    if price <= 0 or not math.isfinite(price) or not math.isfinite(raw_size):
+                        continue
+                    if raw_size == 0:
+                        side.pop(price, None)
+                    else:
+                        size = float(Decimal(str(abs(raw_size))) * Decimal(str(self._contract_size)))
+                        if size > 0 and math.isfinite(size):
+                            side[price] = size
+                except (TypeError, ValueError, IndexError, OverflowError):
+                    continue
+        self._book_update_id = update["last"]
+        self._book_timestamp_ms = update["timestamp_ms"]
+
+    def set_orderbook_snapshot(self, snapshot):
+        """Seed L2 from a REST nonce and replay only contiguous buffered updates."""
+        try:
+            nonce = int(snapshot.get("nonce"))
+            bids = {float(p): float(q) for p, q in snapshot.get("bids", []) if float(p) > 0 and float(q) > 0}
+            asks = {float(p): float(q) for p, q in snapshot.get("asks", []) if float(p) > 0 and float(q) > 0}
+            if nonce <= 0 or not bids or not asks:
+                return False
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            return False
+        with self._lock:
+            self._book_bids, self._book_asks = bids, asks
+            self._book_update_id = nonce
+            self._book_timestamp_ms = int(snapshot.get("timestamp") or time.time() * 1000)
+            self._book_synced = True
+            for update in list(self._book_updates):
+                if update["last"] <= self._book_update_id:
+                    continue
+                self._apply_book_update(update)
+                if not self._book_synced:
+                    return False
+            return self._book_synced
 
     def snapshot(self, now_ms=None, wait_ms=None):
         now = int(now_ms or time.time() * 1000)
@@ -208,13 +301,27 @@ class GatePublicStream:
                     liquidations.append({
                         "event_id": raw["event_id"], "exchange": "GATEIO_FUTURES",
                         "symbol": self.base, "product_id": raw["contract"],
-                        "event_type": "liquidation", "side": "SELL" if size < 0 else "BUY",
+                        "event_type": "liquidation",
+                        "side": "SELL" if size < 0 else "BUY",
                         "order_side": "SELL" if size < 0 else "BUY",
+                        "position_side": "LONG" if size < 0 else "SHORT",
                         "side_semantics": "GATE_LIQUIDATION_ORDER_SIDE",
                         "timestamp_ms": raw["timestamp_ms"], "price": raw["price"],
                         "quantity": abs(size), "notional": raw["price"] * abs(size),
                         "source": "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS",
                     })
+            orderbook = None
+            # A valid incremental update may delete the final level on one side.
+            # Keep the synchronized book visible; downstream depth checks can reject
+            # a one-sided/empty book without misclassifying it as a sequence failure.
+            if self._book_synced and (self._book_bids or self._book_asks):
+                orderbook = {
+                    "symbol": self.symbol,
+                    "bids": [[p, q] for p, q in sorted(self._book_bids.items(), reverse=True)[:50]],
+                    "asks": [[p, q] for p, q in sorted(self._book_asks.items())[:50]],
+                    "timestamp": self._book_timestamp_ms, "nonce": self._book_update_id, "datetime": None,
+                }
+            open_interest = [dict(row) for row in self._open_interest if 0 <= now - row["timestamp"] <= 2 * 60 * 60 * 1000]
             connected = self._connected
             last_message = self._last_message_ms
             last_error = self._last_error
@@ -230,12 +337,15 @@ class GatePublicStream:
         return {
             "source": "GATEIO_FUTURES_PUBLIC_WEBSOCKET", "connected": connected,
             "last_message_timestamp_ms": last_message,
-            "orderbook": None, "orderbook_timestamp_ms": None, "orderbook_source": "REST",
+            "orderbook": orderbook, "orderbook_timestamp_ms": orderbook.get("timestamp") if orderbook else None,
+            "orderbook_source": "WEBSOCKET" if orderbook else "REST",
             "recent_trades": trades,
             "recent_trades_timestamp_ms": max((x["timestamp_ms"] for x in trades), default=None),
             "recent_trades_source": "WEBSOCKET" if trades else "UNAVAILABLE",
             "trade_flow_history": [buckets[k] for k in sorted(buckets)],
             "trade_flow_history_source": "WEBSOCKET" if buckets else "UNAVAILABLE",
+            "open_interest": open_interest,
+            "open_interest_source": "GATEIO_FUTURES_PUBLIC_WEBSOCKET" if len(open_interest) >= 2 else "UNAVAILABLE",
             "liquidation_events": liquidations,
             "liquidation_events_source": "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS" if liquidations else "UNAVAILABLE",
             "liquidation_events_timestamp_ms": max((x["timestamp_ms"] for x in liquidations), default=None),

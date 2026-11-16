@@ -106,12 +106,19 @@ def _liquidation_evidence(events, now_ms):
         if freshness["state"] != "FRESH":
             continue
         notional = _number(event.get("notional"))
-        side = str(event.get("side") or "").upper()
-        if notional is None or notional <= 0 or side not in {"BUY", "SELL"}:
+        # Gate BUY liquidation orders close shorts; SELL orders close longs.
+        # Prefer explicit position_side, then derive it from order_side.
+        position_side = str(event.get("position_side") or "").upper()
+        order_side = str(event.get("order_side") or "").upper()
+        if position_side not in {"LONG", "SHORT"}:
+            if order_side in {"BUY", "SELL"}:
+                position_side = "SHORT" if order_side == "BUY" else "LONG"
+            else:
+                legacy_side = str(event.get("side") or "").upper()
+                position_side = {"BUY": "LONG", "SELL": "SHORT"}.get(legacy_side)
+        if notional is None or notional <= 0 or position_side not in {"LONG", "SHORT"}:
             continue
-        # Gate.io public liquidation S is position side, not taker side:
-        # BUY = a long position was liquidated; SELL = a short was liquidated.
-        if side == "BUY":
+        if position_side == "LONG":
             long_notional += notional
         else:
             short_notional += notional

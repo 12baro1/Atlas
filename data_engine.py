@@ -121,6 +121,7 @@ def get_market_data(symbol, force_refresh=False):
     # Start one shared public stream per symbol; REST remains the fallback.
     from config import Config
     stream_snapshot = {}
+    stream = None
     try:
         from strategies.orderflow.gateio_public_stream import GatePublicStream
         stream = GatePublicStream.for_symbol(symbol)
@@ -156,6 +157,16 @@ def get_market_data(symbol, force_refresh=False):
         book_timestamp = data["orderbook"].get("timestamp") if isinstance(data["orderbook"], dict) else None
         data["orderbook_timestamp_ms"] = int(book_timestamp) if book_timestamp is not None else int(exchange.milliseconds())
         data["data_provenance"]["orderbook"] = "GATEIO_REST"
+        # Seed the local L2 book from the REST nonce, then replay buffered
+        # WebSocket deltas. Never label an unsynchronized book as WS data.
+        if stream is not None:
+            try:
+                if stream.set_orderbook_snapshot(data["orderbook"]):
+                    synchronized = stream.snapshot(int(exchange.milliseconds()))
+                    if synchronized.get("orderbook") is not None:
+                        stream_snapshot.update(synchronized)
+            except Exception:
+                pass
     except Exception:
         data["orderbook"] = None
     book_age_ms = None
@@ -187,6 +198,10 @@ def get_market_data(symbol, force_refresh=False):
         data["orderbook"] = stream_snapshot["orderbook"]
         data["orderbook_timestamp_ms"] = stream_snapshot.get("orderbook_timestamp_ms")
         data["data_provenance"]["orderbook"] = "GATEIO_FUTURES_PUBLIC_WEBSOCKET"
+        book_age_ms = (
+            max(0, data["snapshot_timestamp_ms"] - int(data["orderbook_timestamp_ms"]))
+            if data["orderbook_timestamp_ms"] is not None else None
+        )
     if stream_snapshot.get("recent_trades"):
         data["recent_trades"] = stream_snapshot["recent_trades"]
         data["recent_trades_timestamp_ms"] = stream_snapshot.get("recent_trades_timestamp_ms")
@@ -251,7 +266,7 @@ def get_market_data(symbol, force_refresh=False):
                 and (item.get("openInterestValue") is not None or item.get("openInterestAmount") is not None)
             ]
             data["open_interest"] = [
-                float(item.get("openInterestValue") or item.get("openInterestAmount"))
+                float(item.get("openInterestAmount") if item.get("openInterestAmount") is not None else item.get("openInterestValue"))
                 for item in valid_oi
             ]
             data["open_interest_timestamps_ms"] = [
@@ -262,12 +277,34 @@ def get_market_data(symbol, force_refresh=False):
         except Exception:
             data["open_interest"] = []
             data["open_interest_timestamps_ms"] = []
+    # Merge observed WS contract_stats with REST history by exchange timestamp.
+    ws_oi = stream_snapshot.get("open_interest") or []
+    if ws_oi:
+        by_timestamp = {}
+        for index, value in enumerate(data["open_interest"]):
+            if index < len(data["open_interest_timestamps_ms"]):
+                by_timestamp[int(data["open_interest_timestamps_ms"][index])] = {"openInterestValue": value}
+        for item in ws_oi:
+            if isinstance(item, dict) and item.get("timestamp") is not None:
+                value = item.get("openInterestAmount")
+                if value is None:
+                    value = item.get("openInterestValue")
+                if value is not None:
+                    by_timestamp[int(item["timestamp"])] = {"openInterestValue": float(value)}
+        ordered = sorted(by_timestamp.items())
+        data["open_interest"] = [float(item["openInterestValue"]) for _, item in ordered]
+        data["open_interest_timestamps_ms"] = [stamp for stamp, _ in ordered]
+        if data["open_interest"]:
+            data["data_provenance"]["open_interest"] = "GATEIO_FUTURES_PUBLIC_WEBSOCKET_AND_REST"
+
     if not data["open_interest"]:
         fetch_oi_snapshot = getattr(exchange, "fetch_open_interest", None)
         if callable(fetch_oi_snapshot):
             try:
                 snapshot = fetch_oi_snapshot(symbol) or {}
-                value = snapshot.get("openInterestValue") or snapshot.get("openInterestAmount")
+                value = snapshot.get("openInterestAmount")
+                if value is None:
+                    value = snapshot.get("openInterestValue")
                 if value is not None:
                     # Tek anlık snapshot, fetch zamanıyla damgalanır: seri
                     # hizalı kalır ama tek gözlem history kuramaz (hizmet
