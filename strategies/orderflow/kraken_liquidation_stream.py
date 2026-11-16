@@ -83,7 +83,8 @@ class KrakenLiquidationStream:
                     with self._lock:
                         self._product_bases = products
                     ws = websocket.create_connection(
-                        KRAKEN_FUTURES_WS, timeout=10, enable_multithread=True
+                        KRAKEN_FUTURES_WS, timeout=10, enable_multithread=True,
+                        ping_interval=20, ping_timeout=10,
                     )
                     ws.send(json.dumps({
                         "event": "subscribe",
@@ -196,7 +197,7 @@ class KrakenLiquidationStream:
             products = sum(1 for item in self._product_bases.values() if item == base)
         return {
             "events": events,
-            "source": "KRAKEN_FUTURES_PUBLIC_TRADE_WS" if connected else "UNAVAILABLE",
+            "source": "KRAKEN_FUTURES_PUBLIC_TRADE_WS" if connected and products else "UNAVAILABLE",
             "connected": connected,
             "last_message_timestamp_ms": last_message,
             "last_error": error,
