@@ -70,6 +70,9 @@ def _load_cached_candles(symbol, timeframe, since_ms, now_ms):
     try:
         with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
+        # Reject legacy caches created by any pre-Gate.io provider.
+        if not isinstance(payload, dict) or payload.get("provider") != "GATEIO":
+            return None
         rows = payload.get("rows") or []
         candles = []
         for r in rows:
@@ -105,7 +108,7 @@ def _save_cached_candles(symbol, timeframe, candles):
     try:
         rows = [[c.time, c.open, c.high, c.low, c.close, c.volume] for c in candles]
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({"rows": rows}, f)
+            json.dump({"provider": "GATEIO", "rows": rows}, f)
     except OSError as exc:
         logging.warning("Cache yazımı başarısız | %s %s: %s", symbol, timeframe, exc)
 
