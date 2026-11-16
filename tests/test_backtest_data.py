@@ -34,7 +34,7 @@ def test_load_historical_excludes_unclosed_candles(monkeypatch, timeframe):
     assert [c.time for c in data[timeframe]] == [now_ms - duration]
 
 
-def test_market_listing_time_reads_bybit_launch_timestamp(monkeypatch):
+def test_market_listing_time_reads_mexc_launch_timestamp(monkeypatch):
     class FakeExchange:
         def load_markets(self):
             return {
@@ -227,11 +227,11 @@ def test_fetch_history_clears_transient_error_after_success(monkeypatch):
 
 
 
-def test_fetch_history_uses_binance_fallback_after_bybit_geoblock(monkeypatch):
-    calls = {"bybit": 0, "fallback": 0}
+def test_fetch_history_uses_binance_fallback_after_mexc_geoblock(monkeypatch):
+    calls = {"mexc": 0, "fallback": 0}
 
     def blocked(*args, **kwargs):
-        calls["bybit"] += 1
+        calls["mexc"] += 1
         raise RuntimeError("403 Forbidden CloudFront distribution is configured to block")
 
     class FakeFallback:
@@ -245,12 +245,12 @@ def test_fetch_history_uses_binance_fallback_after_bybit_geoblock(monkeypatch):
     monkeypatch.setattr(backtest, "_create_history_fallback_exchange", FakeFallback)
     monkeypatch.setattr(backtest.time, "sleep", lambda *_: None)
     monkeypatch.setattr(backtest, "_history_fallback_exchange", None)
-    monkeypatch.setattr(backtest, "_history_provider_name", "Bybit")
+    monkeypatch.setattr(backtest, "_history_provider_name", "MEXC")
 
     candles = backtest._fetch_history("BTC/USDT:USDT", "1m", since_ms=0)
 
     assert len(candles) == 1
-    assert calls["bybit"] == 1
+    assert calls["mexc"] == 1
     # The fallback provider is paged until it returns an empty page.
     assert calls["fallback"] == 2
     assert "Binance USD-M Futures" in backtest._history_provider_name
