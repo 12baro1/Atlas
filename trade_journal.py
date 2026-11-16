@@ -2291,7 +2291,10 @@ class TradeJournal:
 
         payload = copy.deepcopy(payload or {})
         execution_costs = payload.get("execution_costs") if isinstance(payload, dict) else {}
-        market_reference = str((execution_costs or {}).get("entry_type") or "").upper() == "MARKET"
+        # Callers without execution metadata retain the legacy assumed-entry
+        # behavior; live scanner records always provide MARKET or LIMIT.
+        entry_type = str((execution_costs or {}).get("entry_type") or "MARKET").upper()
+        market_reference = entry_type == "MARKET"
 
         outcome = {
             "signal_id": signal_id,
