@@ -76,11 +76,11 @@ def main() -> int:
     if interval <= 0:
         raise ValueError("ATLAS_SCAN_INTERVAL_SECONDS must be greater than zero")
 
-    logger.info("Loading Bybit public market metadata")
+    logger.info("Loading MEXC public perpetual market metadata")
     markets = exchange.load_markets()
     symbols, selection_stats = select_live_symbols(markets, max_symbols=max_symbols)
     if not symbols:
-        raise RuntimeError("No active USDT perpetual swap symbols were found on Bybit")
+        raise RuntimeError("No active USDT perpetual swap symbols were found on MEXC")
 
     runtime = AtlasRuntime(symbols=symbols, logger=logger, full_scan=True)
     telegram_commands = create_telegram_command_service(runtime, logger=logger)
