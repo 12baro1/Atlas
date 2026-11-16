@@ -220,3 +220,54 @@ def test_gate_websocket_trade_size_is_normalized_by_contract_multiplier():
     assert snapshot["recent_trades"][0]["raw_contract_size"] == 100
     assert snapshot["recent_trades"][0]["size"] == 0.1
     assert snapshot["recent_trades"][0]["amount"] == 0.1
+
+
+def test_gate_orderbook_updates_replay_from_rest_nonce_and_normalize_sizes():
+    stream = GatePublicStream("BTC/USDT:USDT")
+    stream.set_contract_size(0.001)
+    stream._consume({
+        "channel": "futures.order_book_update", "event": "update",
+        "time_ms": 1700000001000,
+        "result": {
+            "U": 11, "u": 12, "t": 1700000001000,
+            "b": [{"p": "60000", "s": "200"}],
+            "a": [{"p": "60010", "s": "0"}],
+        },
+    })
+    assert stream.set_orderbook_snapshot({
+        "nonce": 10, "timestamp": 1700000000000,
+        "bids": [[59990, 1.0]], "asks": [[60010, 0.5]],
+    }) is True
+    book = stream.snapshot(now_ms=1700000001000)["orderbook"]
+    assert book["nonce"] == 12
+    assert [60000.0, 0.2] in book["bids"]
+    assert not any(price == 60010 for price, _ in book["asks"])
+
+
+def test_gate_orderbook_gap_fails_closed_until_resnapshot():
+    stream = GatePublicStream("BTC/USDT:USDT")
+    assert stream.set_orderbook_snapshot({
+        "nonce": 10, "bids": [[100, 1]], "asks": [[101, 1]],
+    }) is True
+    stream._consume({
+        "channel": "futures.order_book_update", "event": "update",
+        "time_ms": 1700000001000,
+        "result": {"U": 15, "u": 16, "t": 1700000001000, "b": [], "a": []},
+    })
+    assert stream.snapshot(now_ms=1700000001000)["orderbook"] is None
+
+
+def test_gate_contract_stats_produces_timestamped_normalized_oi():
+    stream = GatePublicStream("BTC/USDT:USDT")
+    stream.set_contract_size(0.001)
+    stream._consume({
+        "channel": "futures.contract_stats", "event": "update",
+        "time_ms": 1700000001000,
+        "result": [
+            {"time": 1700000000, "open_interest": "100"},
+            {"time": 1700000060, "open_interest": "120"},
+        ],
+    })
+    oi = stream.snapshot(now_ms=1700000061000)["open_interest"]
+    assert [row["timestamp"] for row in oi] == [1700000000000, 1700000060000]
+    assert [row["openInterestAmount"] for row in oi] == [0.1, 0.12]
