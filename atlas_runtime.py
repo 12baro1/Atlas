@@ -480,8 +480,9 @@ class AtlasRuntime:
 
                     self._inc("success")
                     self._register_result(result)
-                    self._latest_analysis_by_symbol[symbol] = result
-                    self._latest_analysis_at[symbol] = int(time.time() * 1000)
+                    with self._lock:
+                        self._latest_analysis_by_symbol[symbol] = result
+                        self._latest_analysis_at[symbol] = int(time.time() * 1000)
 
                     if Config.SIGNAL_TRACKING_ENABLED:
                         candles_15m = data.get("15m") or data.get("15M") or []
