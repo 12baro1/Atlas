@@ -8,7 +8,9 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from datetime import datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -40,6 +42,139 @@ def split_message(value: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
     return chunks
 
 
+def _format_rr(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return "0.00R"
+    return f"{number:+.2f}R"
+
+
+def format_daily_signal_report(outcomes, now=None):
+    """Render only the current Europe/Istanbul day; historical rows stay in SQLite."""
+    tz = ZoneInfo("Europe/Istanbul")
+    current = now.astimezone(tz) if now is not None else datetime.now(tz)
+    today = current.date()
+    daily = []
+    for item in outcomes or []:
+        try:
+            stamp = int(item.get("opened_at") or 0)
+            if stamp < 100_000_000_000:
+                stamp *= 1000
+            opened = datetime.fromtimestamp(stamp / 1000, tz=tz)
+        except (TypeError, ValueError, OSError, OverflowError):
+            continue
+        if opened.date() == today:
+            daily.append(item)
+
+    if not daily:
+        return f"ATLAS | GÜNLÜK İŞLEMLER\n{today:%d.%m.%Y}\n\nBugün henüz kayıtlı setup yok."
+
+    terminal = {"TP1", "TP2", "TP3", "SL"}
+    tracking = []
+    waiting = []
+    no_entry = []
+    completed = []
+    expired_after_entry = []
+    for item in sorted(daily, key=lambda row: int(row.get("opened_at") or 0)):
+        status = str(item.get("status") or "PENDING").upper()
+        reached = bool(item.get("entry_reached", status in terminal))
+        if status in terminal:
+            completed.append(item)
+        elif status == "EXPIRED":
+            (expired_after_entry if reached else no_entry).append(item)
+        elif status == "PENDING":
+            (tracking if reached else waiting).append(item)
+
+    def describe(item, state=None):
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        strategy = payload.get("strategy") or payload.get("strategy_id") or payload.get("setup_type")
+        label = f" | {strategy}" if strategy else ""
+        status = state or str(item.get("status") or "PENDING").upper()
+        rr = _format_rr(item.get("realized_r") or 0)
+        return (
+            f"{item.get('signal_id', 'ID yok')} | {item.get('symbol', '?')} "
+            f"{item.get('direction', '?')}{label} | {status} | {rr}"
+        )
+
+    net = sum(float(item.get("realized_r") or 0.0) for item in completed)
+    positive = sum(max(0.0, float(item.get("realized_r") or 0.0)) for item in completed)
+    negative = sum(min(0.0, float(item.get("realized_r") or 0.0)) for item in completed)
+    reached_count = sum(
+        bool(item.get("entry_reached", str(item.get("status") or "").upper() in terminal))
+        for item in daily
+    )
+    lines = [
+        "ATLAS | GÜNLÜK İŞLEMLER",
+        f"{today:%d.%m.%Y}",
+        "",
+        f"Verilen setup: {len(daily)}",
+        f"Giriş seviyesi görüldü: {reached_count}",
+        f"Giriş bekliyor: {len(waiting)}",
+        f"Giriş olmadı (süresi doldu): {len(no_entry)}",
+    ]
+    for heading, items, state in (
+        ("TAKİPTE", tracking, "TAKİPTE"),
+        ("SONUÇLANAN", completed, None),
+        ("GİRİŞ BEKLEYEN", waiting, "LIMIT BEKLİYOR"),
+        ("GİRİŞ OLMAYAN", no_entry, "GİRİŞ OLMADI"),
+        ("GİRİŞİ GÖRÜLMÜŞ / SÜRESİ DOLAN", expired_after_entry, "SÜRE DOLDU"),
+    ):
+        if items:
+            lines.extend(["", heading])
+            lines.extend(describe(item, state) for item in items)
+    lines.extend([
+        "",
+        "GÜNLÜK TOPLAM (yalnızca sonuçlananlar)",
+        f"Kazanç: {_format_rr(positive)}",
+        f"Zarar: {_format_rr(negative)}",
+        f"Net: {_format_rr(net)}",
+        "",
+        "Not: Giriş seviyesi görülmesi borsa emri/fill gerçekleştiğini kanıtlamaz.",
+    ])
+    return "\n".join(lines)
+
+
+def _format_telegram_card(card, elapsed_ms=0):
+    symbol = card.get("symbol") or "?"
+    direction = str(card.get("direction") or "").upper()
+    action = str(card.get("decision_action") or "").upper()
+    entry_type = str(card.get("entry_type") or "").upper()
+    executable = (
+        direction in {"LONG", "SHORT"}
+        and entry_type in {"MARKET", "LIMIT"}
+        and action in {"EXECUTE", "EXECUTE_WITH_CAUTION"}
+        and card.get("entry") is not None
+        and card.get("stop_loss") is not None
+        and bool(card.get("tp_levels"))
+    )
+    if not executable:
+        reason = str(card.get("reason") or "Ortak karar mekanizması işlem planı üretmedi.")
+        return f"ATLAS | {symbol}\nŞu an geçerli işlem planı yok.\n{reason[:180]}"
+
+    strategy = card.get("strategy") or card.get("strategy_id") or card.get("setup_thesis") or "—"
+    targets = card.get("tp_levels") or []
+    rr = card.get("net_rr")
+    if rr is None:
+        rr = card.get("weighted_net_rr")
+    if rr is None:
+        rr = card.get("rr")
+    lines = [
+        f"ATLAS | {symbol}",
+        f"Strateji: {strategy}",
+        f"Yön: {direction} | Emir: {entry_type}",
+        f"Giriş: {card.get('entry')}",
+        f"SL: {card.get('stop_loss')}",
+    ]
+    lines.extend(f"TP{index}: {target}" for index, target in enumerate(targets, start=1))
+    lines.append(f"Net RR: {_format_rr(rr) if rr is not None else 'Hesaplanmadı'}")
+    if entry_type == "LIMIT":
+        lines.append("Durum: Giriş seviyesi bekleniyor; emir otomatik açılmaz.")
+    else:
+        lines.append("Durum: Teorik MARKET sinyali; borsa fill teyidi değildir.")
+    return "\n".join(lines)
+
+
 def is_recognized_command(command: str) -> bool:
     """Use the same command grammar as the terminal UI."""
     from atlas_tui import (
@@ -50,7 +185,7 @@ def is_recognized_command(command: str) -> bool:
     )
 
     normalized = normalize_command(command).lower()
-    if normalized in {"yardım", "yardim", "help", "?"}:
+    if normalized in {"yardım", "yardim", "help", "?", "mevcut"}:
         return True
     return (
         _is_report_command(normalized)
@@ -169,8 +304,9 @@ class TelegramCommandService:
             _is_report_command,
             _parse_liquidity_command,
             _parse_scan_command,
+            _best_symbols,
         )
-        from utils.signal_card import build_signal_card, format_card_text
+        from utils.signal_card import build_selected_strategy_card, build_signal_card
 
         normalized = normalize_command(command)
         lowered = normalized.lower()
@@ -182,11 +318,16 @@ class TelegramCommandService:
                 "50 analiz et — 50 piyasayı tara\n"
                 "tüm piyasayı tara — desteklenen tüm USDT perpetual piyasaları\n"
                 "likidite BTC — BTC likidite haritası\n"
-                "performans — kayıtlı performans\n"
+                "performans — tüm geçmiş performans\n"
+                "mevcut — bugünün setup ve işlem takibi\n"
                 "öğrenme — öğrenme verisi\n"
                 "yardım — komutları göster\n\n"
                 "Atlas otomatik emir göndermez. Otomatik Telegram sinyal bildirimi kapalıdır."
             )
+
+        if lowered == "mevcut":
+            outcomes = self.runtime.signal_outcomes(limit=5000)
+            return format_daily_signal_report(outcomes)
 
         # The formatter and scan implementation are reused from the TUI. This
         # lightweight adapter deliberately suppresses terminal-only progress UI.
@@ -210,7 +351,44 @@ class TelegramCommandService:
                 else f"{symbol} likidite analizi yapılamadı: {outcome.get('error')}"
             )
         if scan_request is not None:
-            return AtlasTUIApp._find_best_trade(adapter, *scan_request)
+            scan_limit, result_limit = scan_request
+            symbols = _best_symbols(limit=scan_limit)
+            candidates = []
+            for symbol in symbols:
+                scanned = self.runtime.analyze_symbol(symbol, force_refresh=True)
+                if not scanned.get("ok"):
+                    continue
+                raw = scanned.get("result") or {}
+                card = (
+                    build_selected_strategy_card(raw)
+                    if isinstance(raw.get("strategy_lab"), dict)
+                    else build_signal_card(raw)
+                )
+                if not (
+                    card.get("direction") in {"LONG", "SHORT"}
+                    and card.get("entry_type") in {"MARKET", "LIMIT"}
+                    and card.get("decision_action") in {"EXECUTE", "EXECUTE_WITH_CAUTION"}
+                    and card.get("entry") is not None
+                    and card.get("stop_loss") is not None
+                    and card.get("tp_levels")
+                ):
+                    continue
+                rr = card.get("net_rr")
+                if rr is None:
+                    rr = card.get("rr")
+                try:
+                    score = float(card.get("setup_quality") or 0) * 0.55 + float(card.get("confidence") or 0) * 0.25 + min(float(rr or 0), 5.0) * 4
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                candidates.append((score, card))
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            if not candidates:
+                return f"ATLAS | TARAMA\nTaranan piyasa: {len(symbols)}\nGeçerli MARKET/LIMIT setup bulunamadı."
+            shown = candidates[:max(1, min(int(result_limit), 20))]
+            lines = [f"ATLAS | EN İYİ {len(shown)} SETUP", f"Taranan piyasa: {len(symbols)}"]
+            for rank, (_score, card) in enumerate(shown, start=1):
+                lines.extend(["", f"#{rank}", _format_telegram_card(card)])
+            return "\n".join(lines)
 
         outcome = self.runtime.analyze_symbol(normalized, force_refresh=True)
         if not outcome.get("ok"):
@@ -219,22 +397,13 @@ class TelegramCommandService:
                 f"Neden: {outcome.get('error', 'bilinmeyen hata')}\n"
                 "Sembolün USDT perpetual piyasasında bulunduğunu kontrol et."
             )
-        strategy_report = (outcome.get("result") or {}).get("strategy_lab")
-        if isinstance(strategy_report, dict):
-            return AtlasTUIApp._format_strategy_report(adapter, outcome)
-        card = build_signal_card(outcome["result"])
-        action = str(card.get("decision_action") or "").upper()
-        direction = card.get("direction") in {"LONG", "SHORT"}
-        entry_type = str(card.get("entry_type") or "").upper()
-        has_levels = bool(card.get("entry")) and bool(card.get("stop_loss")) and bool(card.get("tp_levels"))
-        executable = (
-            action in {"EXECUTE", "EXECUTE_WITH_CAUTION"}
-            and direction
-            and entry_type in {"MARKET", "LIMIT"}
-            and has_levels
+        raw = outcome.get("result") or {}
+        card = (
+            build_selected_strategy_card(raw)
+            if isinstance(raw.get("strategy_lab"), dict)
+            else build_signal_card(raw)
         )
-        result = format_card_text(card) if executable else "Şu an girilebilir MARKET/LIMIT sinyali yok."
-        return f"{result}\n\nAnaliz süresi: {outcome.get('elapsed_ms', 0) / 1000:.1f} sn"
+        return _format_telegram_card(card, outcome.get("elapsed_ms", 0))
 
 
 def create_telegram_command_service(runtime, logger=None):
