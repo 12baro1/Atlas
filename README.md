@@ -90,17 +90,19 @@ Servis, yedi stratejili analiz hattını değiştirmez. VPS modunda eski otomati
 
 Botu gruba ekledikten sonra BotFather üzerinden `/setprivacy` → botu seç → **Disable** yap. Bu ayar, botun gruptaki düz `BTC` mesajını görebilmesi için gereklidir.
 
-VPS'deki `.env` dosyasına şu ayarları ekle:
+Android UserLAnd/Ubuntu üzerinde VPS gerekmeden, proje klasöründeki `.env` dosyasına şu ayarları ekle:
 
 ```env
 ATLAS_TELEGRAM_COMMANDS_ENABLED=1
-ATLAS_TELEGRAM_BOT_TOKEN=
-ATLAS_TELEGRAM_CHAT_ID=
+ATLAS_TELEGRAM_BOT_TOKEN=BOTFATHER_TOKEN
+ATLAS_TELEGRAM_CHAT_ID=-1004279858528
 ```
 
-Token'ı depoya veya sohbetlere yazma. `ATLAS_TELEGRAM_CHAT_ID` yalnızca izin verilen grubun ID'si olmalıdır. Bot diğer sohbetleri ve tanınmayan grup mesajlarını sessizce yok sayar.
+`BOTFATHER_TOKEN` yerine kendi bot token'ını yaz. Token'ı depoya veya sohbete gönderme. Grup ID'si yalnızca `Hunters` grubu için tanımlıdır. Bot başka sohbetleri yok sayar. `./atlas` ile terminal arayüzünü başlatınca komut dinleyicisi de aynı yerel Atlas runtime'ına bağlanır; terminal kapatılınca Telegram komut servisi de durur. Ayrı VPS veya `atlas.service` gerekmez.
 
-Desteklenen örnekler: `BTC`, `ETH`, `en iyi 5 işlem`, `50 analiz et`, `tüm piyasayı tara`, `likidite BTC`, `performans`, `öğrenme`, `yardım`. Uzun taramalar tamamlanana kadar sonraki komutlar sırada bekler.
+Eski Telegram webhook'u varsa servis polling başlamadan önce kaldırır. BotFather üzerinden `/setprivacy` → `@Oakmontincbot` → **Disable** ayarını yap; aksi hâlde bot gruptaki düz `BTC` mesajlarını göremez. Aynı bot token'ıyla aynı anda ikinci bir Atlas polling süreci çalıştırma.
+
+Desteklenen örnekler: `BTC`, `ETH`, `en iyi 5 işlem`, `50 analiz et`, `tüm piyasayı tara`, `likidite BTC`, `performans`, `öğrenme`, `yardım`. Uzun taramalar tamamlanana kadar sonraki komutlar sırada bekler. Telegram yalnızca komutlara cevap verir; otomatik sinyal bildirimi göndermez.
 
 ## Kullanım
 
