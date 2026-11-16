@@ -196,52 +196,21 @@ def _disable_backtest_live_features():
     Config.TRADE_COOLDOWN_MINUTES = 0.0
 
 
-_history_fallback_exchange = None
 _history_provider_name = "Gate.io"
 
 
-def _create_history_fallback_exchange():
-    """Binance USD-M public futures OHLCV fallback for regions blocking Gate.io."""
-    return ccxt.binanceusdm({
-        "enableRateLimit": True,
-        "options": {"defaultType": "future"},
-    })
-
-
-def _is_geoblock_error(exc):
-    message = str(exc).lower()
-    return "403" in message or "cloudfront" in message or "configured to block" in message
-
-
 def _fetch_history_batch(symbol, timeframe, cursor, limit):
-    global _history_fallback_exchange, _history_provider_name
-    if _history_fallback_exchange is not None:
-        batch = _history_fallback_exchange.fetch_ohlcv(
-            symbol, timeframe, since=cursor, limit=limit
-        )
-        _history_provider_name = "Binance USD-M Futures (Gate.io 403 fallback)"
-        return batch
+    """Fetch historical candles exclusively from Gate.io; never cross exchanges."""
+    global _history_provider_name
+    _history_provider_name = "Gate.io"
     try:
         return exchange.fetch_ohlcv(symbol, timeframe, since=cursor, limit=limit)
     except Exception as exc:
-        if not _is_geoblock_error(exc):
-            raise
-        logging.warning(
-            "Gate.io 403 engeli; tarihsel OHLCV için Binance USD-M Futures deneniyor."
-        )
-        _history_fallback_exchange = _create_history_fallback_exchange()
-        try:
-            batch = _history_fallback_exchange.fetch_ohlcv(
-                symbol, timeframe, since=cursor, limit=limit
-            )
-        except Exception as fallback_exc:
-            _history_fallback_exchange = None
-            raise RuntimeError(
-                f"Gate.io 403 verdi; Binance USD-M yedeği de başarısız: "
-                f"{type(fallback_exc).__name__}: {fallback_exc}"
-            ) from fallback_exc
-        _history_provider_name = "Binance USD-M Futures (Gate.io 403 fallback)"
-        return batch
+        raise RuntimeError(
+            f"Gate.io tarihsel OHLCV alınamadı ({symbol} {timeframe}); "
+            "başka borsaya geçiş yapılmadı. "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def _fetch_history(symbol, timeframe, since_ms, limit=1000):
