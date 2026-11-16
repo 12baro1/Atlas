@@ -4,7 +4,7 @@ import math
 """Independent beta-adjusted relative_strength setup generator."""
 
 def generate(data):
-    from strategy_lab import _series, _atr, _value, _ema, _current_price, _valid_plan, _entry_reference, _structure_candle_sets, beta_stability, relative_volume, volatility_regime
+    from strategy_lab import _series, _atr, _value, _ema, _current_price, _raw_candidate, _entry_reference, beta_stability, relative_volume, volatility_regime
     """Beta-adjusted relative strength versus market and optional sector peers."""
     candles = data.get("4h") or []
     closes = _series(candles)
@@ -114,7 +114,7 @@ def generate(data):
         return None
     stop = entry - 1.5 * atr if direction == "LONG" else entry + 1.5 * atr
     strength = min(90.0, 64.0 + min(abs(residual_alpha) * 450.0, 22.0) + min(abs(beta) * 2.0, 4.0))
-    plan = _valid_plan(direction, entry, stop, atr, candles, "relative_strength", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
+    plan = _raw_candidate(direction, entry, stop, atr, "relative_strength", strength, entry_reference=_entry_reference(data))
     if plan:
         benchmark_label = "/".join(benchmark_keys)
         sector_label = f" + sector peers ({len(sector_maps)})" if use_sector else ""
