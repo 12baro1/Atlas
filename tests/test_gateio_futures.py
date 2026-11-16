@@ -30,7 +30,7 @@ def test_gate_market_symbols_and_ohlcv_normalization():
     assert list(ex.load_markets()) == ["BTC/USDT:USDT"]
     assert ex.market_id("BTC/USDT:USDT") == "BTC_USDT"
     assert ex.fetch_ohlcv("BTC/USDT:USDT", "15m") == [
-        [1700000000000, 100.0, 102.0, 99.0, 101.0, 5.0]
+        [1700000000000, 100.0, 102.0, 99.0, 101.0, 0.0005]
     ]
 
 
@@ -39,15 +39,15 @@ def test_gate_orderbook_and_trades_normalization():
     ex.load_markets()
     book = ex.fetch_order_book("BTC/USDT:USDT")
     trades = ex.fetch_trades("BTC/USDT:USDT")
-    assert book["bids"] == [[100.0, 2.0]]
-    assert book["asks"] == [[101.0, 3.0]]
+    assert book["bids"] == [[100.0, 0.0002]]
+    assert book["asks"] == [[101.0, 0.0003]]
     assert trades[0]["side"] == "buy"
-    assert trades[0]["amount"] == 2.0
+    assert trades[0]["amount"] == 0.0002
 
 
 def test_gate_ticker_open_interest_and_funding():
     ex = FakeGate()
     ex.load_markets()
     assert ex.fetch_ticker("BTC/USDT:USDT")["last"] == "101"
-    assert ex.fetch_open_interest("BTC/USDT:USDT")["openInterestAmount"] == 1234.0
+    assert ex.fetch_open_interest("BTC/USDT:USDT")["openInterestAmount"] == 0.1234
     assert ex.fetch_funding_rate_history("BTC/USDT:USDT")[0]["fundingRate"] == 0.0001
