@@ -12,6 +12,9 @@ from trade_journal import TradeJournal
 from learning_engine import LearningEngine
 from telegram_service import TelegramTradeCommandHandler
 from canonical_features import parse_fingerprint
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from telegram_command_service import format_daily_signal_report, _format_telegram_card
 
 
 def _candle(index, price=None):
@@ -687,6 +690,8 @@ def test_signal_outcome_accumulates_realized_r_across_incremental_candle_batches
 
     assert journal.resolve_signal_outcome(outcome, [first]) is None
     assert outcome["tps_hit"] == [1]
+    assert outcome["progress_status"] == "TP1"
+    assert outcome["status"] == "PENDING"  # TP2/TP3 takibi sürer.
     assert outcome["realized_r"] == pytest.approx(0.5, abs=1e-4)
     assert outcome["last_processed_candle_time"] == first.time
 
@@ -1004,3 +1009,53 @@ def test_market_signal_is_marked_as_reference_not_exchange_fill(tmp_path):
     assert outcome["entry_reached"] is True
     assert outcome["entry_tracking_source"] == "market_reference"
     assert "fill" not in outcome["entry_tracking_source"]
+
+
+def test_daily_report_shows_tp1_as_hit_while_following_later_targets():
+    now = datetime.now(ZoneInfo("Europe/Istanbul"))
+    outcome = {
+        "signal_id": "ATL-TP1-001",
+        "symbol": "BTC/USDT:USDT",
+        "direction": "LONG",
+        "status": "PENDING",
+        "opened_at": int(now.timestamp() * 1000),
+        "entry_reached": True,
+        "entry_tracking_source": "closed_ohlc",
+        "tps_hit": [1],
+        "tp1": 101.0,
+        "tp2": 102.0,
+        "tp3": 103.0,
+        "realized_r": 0.5,
+        "payload": {"strategy": "SMC"},
+    }
+
+    report = format_daily_signal_report([outcome], now=now)
+
+    assert "TP1 alındı, TP2/TP3 takipte: 1" in report
+    assert "TP1 ALINDI  |  TP2/TP3 TAKİPTE" in report
+    assert "Net: +0.00R" in report  # Açık sinyal kapanan net toplama eklenmez.
+    assert "TP1 kısmi hedef olarak kaydedilir" in report
+
+
+def test_telegram_signal_card_uses_clear_sectioned_layout():
+    card = {
+        "symbol": "BTC/USDT:USDT",
+        "strategy": "SMC",
+        "direction": "LONG",
+        "entry_type": "LIMIT",
+        "decision_action": "EXECUTE",
+        "entry": 65000.0,
+        "stop_loss": 64500.0,
+        "tp_levels": [66000.0, 67000.0, 68000.0],
+        "net_rr": 1.8,
+    }
+
+    message = _format_telegram_card(card)
+
+    assert "ATLAS  |  BTC/USDT:USDT" in message
+    assert "Strateji: SMC" in message
+    assert "Giriş: 65000.0" in message
+    assert "TP1: 66000.0" in message
+    assert "TP3: 68000.0" in message
+    assert "Net RR: +1.80R" in message
+    assert "LIMIT giriş seviyesi bekleniyor" in message

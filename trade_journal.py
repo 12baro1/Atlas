@@ -1345,6 +1345,12 @@ class TradeJournal:
             outcome[f"hit_tp{level_no}"] = level_no in reached
         outcome["hit_sl"] = hit_sl
         outcome["tps_hit"] = reached
+        # Expose the highest achieved target while keeping multi-target signals
+        # PENDING until their remaining targets or protective stop resolve.
+        outcome["progress_status"] = (
+            f"TP{max(int(level) for level in reached)}"
+            if reached else None
+        )
         outcome["trailing_stop"] = trailing_stop
         outcome["realized_r"] = round(realized, 4)
         outcome["max_favorable_excursion"] = round(mfe, 8)
