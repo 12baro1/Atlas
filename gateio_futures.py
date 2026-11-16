@@ -81,7 +81,13 @@ class GateFuturesExchange:
         return self.markets[symbol]
 
     def contract_size(self, symbol):
-        return 1.0
+        """Return Gate.io quanto multiplier for this exact futures contract."""
+        market = self.market(symbol)
+        try:
+            value = float(market.get("contractSize") or 1.0)
+        except (TypeError, ValueError, OverflowError):
+            value = 1.0
+        return value if value > 0 else 1.0
 
     def fetch_ohlcv(self, symbol, timeframe="1m", since=None, limit=None, params=None):
         interval = _INTERVALS[timeframe]
