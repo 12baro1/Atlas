@@ -2,7 +2,8 @@
 
 
 def generate(data):
-    from strategy_lab import _series, _atr, _bollinger, volatility_regime, breakout_acceptance, _value, _candle_quality, _relative_volume, _current_price, _raw_candidate, _entry_reference
+    specialist_evidence = _strategy_specialist_evidence(data, "volatility_breakout")
+    from strategy_lab import _series, _atr, _bollinger, volatility_regime, breakout_acceptance, _value, _candle_quality, _relative_volume, _current_price, _raw_candidate, _entry_reference, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
     candles = data.get("1h") or []
     closes = _series(candles)
     atr = _atr(candles)
@@ -70,5 +71,7 @@ def generate(data):
                                     "candle_range_atr": round(quality["range"] / atr, 3),
                                     "breakout_distance_atr": round(breakout_distance, 3),
                                     "acceptance": breakout_evidence, "volatility_regime": volatility_evidence}
+    if plan:
+        _attach_strategy_specialist_evidence(plan, specialist_evidence)
     return plan
 
