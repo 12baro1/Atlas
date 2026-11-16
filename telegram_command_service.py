@@ -193,14 +193,17 @@ def is_recognized_command(command: str) -> bool:
         _parse_scan_command,
     )
 
-    normalized = normalize_command(command).lower()
+    raw = str(command or "").strip()
+    normalized = normalize_command(raw).lower()
     if normalized in {"yardım", "yardim", "help", "?", "mevcut"}:
         return True
     return (
         _is_report_command(normalized)
         or _parse_liquidity_command(normalized) is not False
         or _parse_scan_command(normalized) is not None
-        or _is_symbol_input(normalized)
+        # A bare ticker in group conversation is ordinary chat. Analyze only
+        # explicit Telegram slash commands such as /btc or /btc@Oakmontincbot.
+        or (raw.startswith("/") and _is_symbol_input(normalized))
     )
 
 
@@ -322,7 +325,7 @@ class TelegramCommandService:
         if lowered in {"yardım", "yardim", "help", "?"}:
             return (
                 "ATLAS KOMUTLARI\n"
-                "BTC / ETH / SOL — 7 strateji analizi\n"
+                "/btc /eth /sol — 7 strateji analizi\n"
                 "en iyi 5 işlem — en iyi 5 kurulumu tara\n"
                 "50 analiz et — 50 piyasayı tara\n"
                 "tüm piyasayı tara — desteklenen tüm USDT perpetual piyasaları\n"
