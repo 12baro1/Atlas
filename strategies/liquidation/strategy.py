@@ -4,7 +4,8 @@ import math
 """Independent liquidation_cascade setup generator."""
 
 def generate(data):
-    from strategy_lab import _atr, _value, _candle_quality, _relative_volume, _trade_flow, _current_price, _raw_candidate, _entry_reference, liquidation_events
+    specialist_evidence = _strategy_specialist_evidence(data, "liquidation_cascade")
+    from strategy_lab import _atr, _value, _candle_quality, _relative_volume, _trade_flow, _current_price, _raw_candidate, _entry_reference, liquidation_events, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
     """Detect a liquidation-like deleveraging impulse; OI is a proxy, not event data."""
     candles = data.get("1h") or []
     oi = data.get("open_interest") or []
@@ -119,4 +120,6 @@ def generate(data):
                                       "relative_volume": round(relative_volume, 3),
                                       "taker_buy_notional_ratio": round(buy_ratio, 3),
                                       "funding_rate": funding}
+    if plan:
+        _attach_strategy_specialist_evidence(plan, specialist_evidence)
     return plan
