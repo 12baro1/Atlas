@@ -1,16 +1,14 @@
 import time
 import math
 import os
-import ccxt
 from core.candle import Candle
 from sector_universe import configured_sector_peers
 from trace_context import ensure_trace, record_stage
 
-# Bybit API olmadan sadece public veri için exchange oluştur
-exchange = ccxt.bybit({
-    "enableRateLimit": True,
-    "options": {"defaultType": "swap"},
-})
+from mexc_futures import MexcFuturesExchange
+
+# Public-only MEXC USDT perpetual market-data adapter; no trading credentials.
+exchange = MexcFuturesExchange()
 
 TIMEFRAMES = {
     "1w": 300,
@@ -36,7 +34,7 @@ _cache = {}
 def _fetch(symbol, timeframe, limit):
     """Fetch validated, fully closed candles only.
 
-    Bybit/CCXT commonly includes the currently forming candle as the final
+    MEXC/CCXT commonly includes the currently forming candle as the final
     OHLCV row. Returning it to SMC/MTF engines creates moving structure and
     inconsistent signals. Invalid, duplicate, or out-of-order rows are
     discarded; the last candle is retained only after its timeframe closes.
@@ -124,7 +122,7 @@ def get_market_data(symbol, force_refresh=False):
     from config import Config
     stream_snapshot = {}
     try:
-        from strategies.orderflow.websocket_collector import BybitPublicStream
+        from strategies.orderflow.websocket_collector import MexcPublicStream
         stream = BybitPublicStream.for_symbol(symbol)
         stream.start()
         # İlk geçerli snapshot için sınırlı bekleme: ilk mesajlar gelmeden
@@ -139,7 +137,7 @@ def get_market_data(symbol, force_refresh=False):
     record_stage(
         data,
         "DATA_COLLECTION",
-        source="BYBIT_V5_PUBLIC_WEBSOCKET",
+        source="MEXC_FUTURES_PUBLIC_WEBSOCKET",
         timestamp_ms=int(exchange.milliseconds()),
         availability="AVAILABLE" if stream_snapshot.get("last_message_timestamp_ms") else "UNAVAILABLE",
         freshness="FRESH" if stream_snapshot.get("last_message_timestamp_ms") else "NO_MESSAGE",
@@ -156,7 +154,7 @@ def get_market_data(symbol, force_refresh=False):
         data["orderbook"] = exchange.fetch_order_book(symbol, limit=50)
         book_timestamp = data["orderbook"].get("timestamp") if isinstance(data["orderbook"], dict) else None
         data["orderbook_timestamp_ms"] = int(book_timestamp) if book_timestamp is not None else int(exchange.milliseconds())
-        data["data_provenance"]["orderbook"] = "BYBIT_REST"
+        data["data_provenance"]["orderbook"] = "MEXC_REST"
     except Exception:
         data["orderbook"] = None
     book_age_ms = None
@@ -259,7 +257,7 @@ def get_market_data(symbol, force_refresh=False):
                 int(item["timestamp"]) for item in valid_oi if item.get("timestamp") is not None
             ]
             if data["open_interest"]:
-                data["data_provenance"]["open_interest"] = "BYBIT_REST_HISTORY"
+                data["data_provenance"]["open_interest"] = "MEXC_REST_HISTORY"
         except Exception:
             data["open_interest"] = []
             data["open_interest_timestamps_ms"] = []
@@ -278,7 +276,7 @@ def get_market_data(symbol, force_refresh=False):
                     data["open_interest_timestamps_ms"] = [
                         int(snapshot_time) if snapshot_time is not None else int(exchange.milliseconds())
                     ]
-                    data["data_provenance"]["open_interest"] = "BYBIT_REST_SNAPSHOT"
+                    data["data_provenance"]["open_interest"] = "MEXC_REST_SNAPSHOT"
             except Exception:
                 pass
 
@@ -355,7 +353,7 @@ def get_market_data(symbol, force_refresh=False):
     record_stage(
         data,
         "DATA_NORMALIZATION",
-        source="BYBIT_PUBLIC_REST",
+        source="MEXC_PUBLIC_REST",
         timestamp_ms=int(exchange.milliseconds()),
         freshness=("FRESH" if last_15m_age_ms is not None and last_15m_age_ms <= 30 * 60 * 1000
                    else "STALE" if last_15m_age_ms is not None else "UNKNOWN"),
@@ -388,7 +386,7 @@ def get_market_data(symbol, force_refresh=False):
         if math.isfinite(ticker_price) and ticker_price > 0 and fresh:
             data["current_price"] = ticker_price
             data["current_price_timestamp_ms"] = int(ticker_time) if ticker_time is not None else now_ms
-            data["current_price_source"] = "BYBIT_TICKER"
+            data["current_price_source"] = "MEXC_TICKER"
     except (AttributeError, TypeError, ValueError, OverflowError):
         pass
     except Exception:
@@ -412,7 +410,7 @@ def get_market_data(symbol, force_refresh=False):
     record_stage(
         data,
         "DATA_SOURCE",
-        source="BYBIT_PUBLIC_MARKET_DATA",
+        source="MEXC_FUTURES_PUBLIC_MARKET_DATA",
         timestamp_ms=data["snapshot_timestamp_ms"],
         freshness=("FRESH" if data.get("current_price_source") == "BYBIT_TICKER" else "UNKNOWN"),
         availability=("AVAILABLE" if bool(data.get("15m")) else "UNAVAILABLE"),
