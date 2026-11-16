@@ -75,9 +75,17 @@ def liquidation_events(events, now_ms=None, max_age_ms=900000):
         return {"state": "STALE_OR_EMPTY"}
     long_liq = sum(row["notional"] for row in accepted if row["position_side"] == "LONG")
     short_liq = sum(row["notional"] for row in accepted if row["position_side"] == "SHORT")
+    # Preserve legacy BUY/SELL aliases while exposing unambiguous position-side
+    # totals. Legacy side=BUY historically represented buy-side liquidation.
+    buy_liq = sum(row["notional"] for row in accepted
+                  if row["position_side"] == "LONG")
+    sell_liq = sum(row["notional"] for row in accepted
+                   if row["position_side"] == "SHORT")
     return {"state": "AVAILABLE", "events": len(accepted),
             "long_liquidation_notional": long_liq,
             "short_liquidation_notional": short_liq,
+            "buy_liquidation_notional": buy_liq,
+            "sell_liquidation_notional": sell_liq,
             "total_notional": long_liq + short_liq}
 
 
