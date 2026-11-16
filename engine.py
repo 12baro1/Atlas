@@ -810,7 +810,10 @@ class AtlasEngine:
             return recorded_quality.get("setup_fingerprint") == setup_fingerprint
 
         for existing in self.trade_journal.open_trades(symbol=symbol):
-            if same_setup(existing):
+            if not same_setup(existing):
+                continue
+            linked_signal = self.trade_journal.find_signal_outcome(existing.get("signal_id"))
+            if linked_signal is None or linked_signal.get("status") == "PENDING":
                 return existing
 
         trade = {
