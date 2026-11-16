@@ -67,7 +67,7 @@ class GateFuturesExchange:
                 "id": row.get("name"), "symbol": symbol, "base": symbol.split("/")[0],
                 "quote": "USDT", "settle": "USDT", "active": True,
                 "swap": True, "spot": False, "future": False, "contract": True,
-                "linear": True, "inverse": False, "contractSize": 1.0,
+                "linear": True, "inverse": False, "contractSize": float(row.get("quanto_multiplier") or 1.0),
                 "precision": {"price": row.get("order_price_round"), "amount": row.get("quanto_multiplier")},
                 "limits": {"amount": {"min": row.get("order_size_min"), "max": row.get("order_size_max")}},
                 "info": dict(row),
@@ -96,7 +96,7 @@ class GateFuturesExchange:
         for row in rows:
             try:
                 result.append([int(row["t"]) * 1000, float(row["o"]), float(row["h"]),
-                               float(row["l"]), float(row["c"]), abs(float(row["v"]))])
+                               float(row["l"]), float(row["c"]), abs(float(row["v"]) * self.contract_size(symbol)])
             except (KeyError, TypeError, ValueError, OverflowError):
                 continue
         return sorted(result, key=lambda x: x[0])[-count:]
@@ -129,7 +129,7 @@ class GateFuturesExchange:
                 stamp = int(row["create_time_ms"])
                 if since is not None and stamp < int(since):
                     continue
-                size = abs(float(row["size"]))
+                size = abs(float(row["size"])) * self.contract_size(symbol)
                 side = "buy" if float(row["size"]) > 0 else "sell"
                 price = float(row["price"])
                 out.append({"id": str(row.get("id", "")), "timestamp": stamp, "datetime": None,
@@ -149,7 +149,7 @@ class GateFuturesExchange:
                 "high": row.get("high_24h"), "low": row.get("low_24h"),
                 "bid": row.get("highest_bid"), "ask": row.get("lowest_ask"),
                 "last": row.get("last"), "close": row.get("last"),
-                "baseVolume": row.get("volume_24h"), "quoteVolume": row.get("volume_24h_quote"),
+                "baseVolume": (float(row.get("volume_24h") or 0) * self.contract_size(symbol)), "quoteVolume": row.get("volume_24h_quote"),
                 "info": dict(row)}
 
     def fetch_tickers(self, symbols=None, params=None):
@@ -174,7 +174,7 @@ class GateFuturesExchange:
         }) or []
         row = rows[-1] if rows else {}
         value = row.get("open_interest")
-        return {"symbol": symbol, "openInterestAmount": float(value) if value is not None else None,
+        return {"symbol": symbol, "openInterestAmount": float(value) * self.contract_size(symbol) if value is not None else None,
                 "openInterestValue": None, "timestamp": int(row.get("time") or self.milliseconds()),
                 "info": dict(row)}
 
@@ -191,7 +191,7 @@ class GateFuturesExchange:
                     stamp *= 1000
                 if since is not None and stamp < int(since):
                     continue
-                out.append({"timestamp": stamp, "openInterestAmount": float(row["open_interest"])})
+                out.append({"timestamp": stamp, "openInterestAmount": float(row["open_interest"]) * self.contract_size(symbol)})
             except (KeyError, TypeError, ValueError, OverflowError):
                 continue
         return out
