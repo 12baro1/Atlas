@@ -201,6 +201,7 @@ def is_recognized_command(command: str) -> bool:
         _is_report_command(normalized)
         or _parse_liquidity_command(normalized) is not False
         or _parse_scan_command(normalized) is not None
+        or normalized == "eniyi5"
         # A bare ticker in group conversation is ordinary chat. Analyze only
         # explicit Telegram slash commands such as /btc or /btc@Oakmontincbot.
         or (raw.startswith("/") and _is_symbol_input(normalized))
@@ -326,7 +327,8 @@ class TelegramCommandService:
             return (
                 "ATLAS KOMUTLARI\n"
                 "/btc /eth /sol — 7 strateji analizi\n"
-                "en iyi 5 işlem — en iyi 5 kurulumu tara\n"
+                "/eniyi5 — arka plan havuzundan en iyi 5 setup\n"
+                "en iyi 5 işlem — 100 piyasayı yeniden tara\n"
                 "50 analiz et — 50 piyasayı tara\n"
                 "tüm piyasayı tara — desteklenen tüm USDT perpetual piyasaları\n"
                 "likidite BTC — BTC likidite haritası\n"
@@ -348,7 +350,8 @@ class TelegramCommandService:
             _show=lambda _message: None,
             call_from_thread=lambda callback, *args, **kwargs: callback(*args, **kwargs),
         )
-        scan_request = _parse_scan_command(lowered)
+        cached_best_request = lowered == "eniyi5"
+        scan_request = _parse_scan_command("en iyi 5 işlem" if cached_best_request else lowered)
         liquidity_symbol = _parse_liquidity_command(normalized)
         if _is_report_command(normalized):
             return AtlasTUIApp._format_performance(adapter, normalized)
@@ -356,7 +359,7 @@ class TelegramCommandService:
             symbol = liquidity_symbol or self.runtime.current_symbol()
             if not symbol:
                 return "KULLANIM: likidite BTC"
-            outcome = self.runtime.analyze_symbol(symbol, force_refresh=True)
+            outcome = self.runtime.analyze_symbol(symbol, force_refresh=True, track_signal=False)
             return (
                 AtlasTUIApp._format_liquidity(adapter, outcome)
                 if outcome.get("ok")
@@ -364,13 +367,19 @@ class TelegramCommandService:
             )
         if scan_request is not None:
             scan_limit, result_limit = scan_request
-            symbols = _best_symbols(limit=scan_limit)
+            cached_items = self.runtime.latest_analyses(max_age_seconds=1800) if cached_best_request else []
+            symbols = [item.get("symbol") for item in cached_items] if cached_best_request else _best_symbols(limit=scan_limit)
             candidates = []
             for symbol in symbols:
-                scanned = self.runtime.analyze_symbol(symbol, force_refresh=True)
+                if cached_best_request:
+                    cached = next((item for item in cached_items if item.get("symbol") == symbol), None)
+                    raw = (cached or {}).get("result") or {}
+                    scanned = {"ok": bool(raw)}
+                else:
+                    scanned = self.runtime.analyze_symbol(symbol, force_refresh=True)
+                    raw = scanned.get("result") or {}
                 if not scanned.get("ok"):
                     continue
-                raw = scanned.get("result") or {}
                 card = (
                     build_selected_strategy_card(raw)
                     if isinstance(raw.get("strategy_lab"), dict)
@@ -403,8 +412,16 @@ class TelegramCommandService:
                 candidates.append((score, card))
             candidates.sort(key=lambda item: item[0], reverse=True)
             if not candidates:
-                return f"ATLAS | TARAMA\nTaranan piyasa: {len(symbols)}\nGeçerli MARKET/LIMIT setup bulunamadı."
+                if cached_best_request:
+                    return "ATLAS | EN İYİ 5 SETUP\\nArka plan tarama havuzunda henüz güncel ve geçerli setup yok. İlk tarama döngüsünün tamamlanmasını bekle."
+                return f"ATLAS | TARAMA\\nTaranan piyasa: {len(symbols)}\\nGeçerli MARKET/LIMIT setup bulunamadı."
             shown = candidates[:max(1, min(int(result_limit), 20))]
+            if cached_best_request:
+                for _score, selected_card in shown:
+                    selected_symbol = selected_card.get("symbol")
+                    selected_item = next((item for item in cached_items if item.get("symbol") == selected_symbol), None)
+                    if selected_item:
+                        self.runtime.track_requested_result(selected_item.get("result"))
             lines = [f"ATLAS | EN İYİ {len(shown)} SETUP", f"Taranan piyasa: {len(symbols)}"]
             for rank, (_score, card) in enumerate(shown, start=1):
                 lines.extend(["", f"#{rank}", _format_telegram_card(card)])
