@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 
 from strategies.orderflow.websocket_collector import (
-    BybitPublicStream,
+    MexcPublicStream,
     DEFAULT_FIRST_SNAPSHOT_WAIT_MS,
     MAX_FIRST_SNAPSHOT_WAIT_MS,
     configured_first_snapshot_wait_ms,
@@ -29,18 +29,17 @@ def stream():
 
 def inject_fresh_book(stream, now_ms):
     stream._consume({
-        "topic": f"orderbook.50.{stream.instrument}",
-        "type": "snapshot",
+        "channel": "push.depth",
         "ts": now_ms,
-        "data": {"b": [["100", "10"]], "a": [["101", "10"]]},
+        "data": {"bids": [["100", "10", "10"]], "asks": [["101", "10", "10"]]},
     })
 
 
 def inject_fresh_trades(stream, now_ms):
     stream._consume({
-        "topic": f"publicTrade.{stream.instrument}",
+        "channel": "push.deal",
         "ts": now_ms,
-        "data": [{"T": now_ms, "p": "100.5", "v": "1.5", "S": "Buy", "i": "t1"}],
+        "data": {"T": 1, "t": now_ms, "p": "100.5", "v": "1.5"},
     })
 
 
@@ -115,17 +114,12 @@ def test_snapshot_labels_sources_only_for_actually_used_fresh_data(stream):
     now_ms = int(time.time() * 1000)
     inject_fresh_book(stream, now_ms)
     inject_fresh_trades(stream, now_ms)
-    stream._consume({
-        "topic": f"allLiquidation.{stream.instrument}",
-        "ts": now_ms,
-        "data": {"T": now_ms, "p": "100", "v": "5", "S": "Sell"},
-    })
 
     snapshot = stream.snapshot(now_ms + 10, wait_ms=0)
 
     assert snapshot["orderbook_source"] == "WEBSOCKET"
     assert snapshot["recent_trades_source"] == "WEBSOCKET"
-    assert snapshot["liquidation_events_source"] == "WEBSOCKET"
+    assert snapshot["liquidation_events_source"] == "UNAVAILABLE"
     assert snapshot["trade_flow_history_source"] == "WEBSOCKET"
     assert snapshot["trade_flow_history"]  # timestamped batches exist
 
