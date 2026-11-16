@@ -138,7 +138,7 @@ def _market_listing_time_ms(symbol):
         logging.warning("%s için geçersiz listing timestamp: %r", symbol, raw_timestamp)
         return None
 
-    # Normalize second-based timestamps while preserving MEXC's millisecond values.
+    # Normalize second-based timestamps while preserving Gate.io's millisecond values.
     if timestamp < 10_000_000_000:
         timestamp *= 1000
     return timestamp
@@ -197,11 +197,11 @@ def _disable_backtest_live_features():
 
 
 _history_fallback_exchange = None
-_history_provider_name = "MEXC"
+_history_provider_name = "Gate.io"
 
 
 def _create_history_fallback_exchange():
-    """Binance USD-M public futures OHLCV fallback for regions blocking MEXC."""
+    """Binance USD-M public futures OHLCV fallback for regions blocking Gate.io."""
     return ccxt.binanceusdm({
         "enableRateLimit": True,
         "options": {"defaultType": "future"},
@@ -219,7 +219,7 @@ def _fetch_history_batch(symbol, timeframe, cursor, limit):
         batch = _history_fallback_exchange.fetch_ohlcv(
             symbol, timeframe, since=cursor, limit=limit
         )
-        _history_provider_name = "Binance USD-M Futures (MEXC 403 fallback)"
+        _history_provider_name = "Binance USD-M Futures (Gate.io 403 fallback)"
         return batch
     try:
         return exchange.fetch_ohlcv(symbol, timeframe, since=cursor, limit=limit)
@@ -227,7 +227,7 @@ def _fetch_history_batch(symbol, timeframe, cursor, limit):
         if not _is_geoblock_error(exc):
             raise
         logging.warning(
-            "MEXC 403 engeli; tarihsel OHLCV için Binance USD-M Futures deneniyor."
+            "Gate.io 403 engeli; tarihsel OHLCV için Binance USD-M Futures deneniyor."
         )
         _history_fallback_exchange = _create_history_fallback_exchange()
         try:
@@ -237,10 +237,10 @@ def _fetch_history_batch(symbol, timeframe, cursor, limit):
         except Exception as fallback_exc:
             _history_fallback_exchange = None
             raise RuntimeError(
-                f"MEXC 403 verdi; Binance USD-M yedeği de başarısız: "
+                f"Gate.io 403 verdi; Binance USD-M yedeği de başarısız: "
                 f"{type(fallback_exc).__name__}: {fallback_exc}"
             ) from fallback_exc
-        _history_provider_name = "Binance USD-M Futures (MEXC 403 fallback)"
+        _history_provider_name = "Binance USD-M Futures (Gate.io 403 fallback)"
         return batch
 
 
@@ -294,7 +294,7 @@ def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None,
                     use_cache=True):
     """Load evaluation history, clamped to the market's actual listing date.
 
-    Gerçek MEXC OHLCV verisi CCXT üzerinden indirilir ve yerel cache'e
+    Gerçek Gate.io OHLCV verisi CCXT üzerinden indirilir ve yerel cache'e
     kaydedilir. Aynı tarih aralığındaki sonraki backtest
     cache'den okunur; baştan indirilmez. Sahte veya rastgele veri üretilmez.
     ``use_cache=False`` testi ve izole ortamlar için cache'i atlar.
@@ -336,7 +336,7 @@ def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None,
         candles = _fetch_history(
             symbol, tf, since_ms=since, limit=fetch_limit
         )
-        # MEXC includes the currently-forming candle in OHLCV responses.
+        # Gate.io includes the currently-forming candle in OHLCV responses.
         # A historical decision may only use candles that were fully closed
         # at the backtest's fixed as-of timestamp.
         candles = [candle for candle in candles if candle.time + duration_ms <= now]
@@ -413,7 +413,7 @@ def _validate_backtest_history(data, symbol):
         raise RuntimeError(
             f"{symbol}: 15m geçmişi yetersiz ({counts['15m']} mum; "
             f"en az {minimum} gerekli). Backtest başlatılmadı. "
-            "MEXC OHLCV erişimini ve tarihsel veri sınırını kontrol edin."
+            "Gate.io OHLCV erişimini ve tarihsel veri sınırını kontrol edin."
         )
     return counts
 
@@ -909,7 +909,7 @@ def _effective_now_ms(data):
     """Backtest referans zamanı: veri bize verdiği son kapanmış mumun kapanışı.
 
     Backtest "gerçek şu an" yerine exchange'in sunduğu son kapanış anı üzerinden
-    replay yapar. Böylece MEXC'in henüz kapanmamış mumundan kaynaklanan
+    replay yapar. Böylece Gate.io'in henüz kapanmamış mumundan kaynaklanan
     freshness hatası alınmaz ve tarihsel veri tutarlı kalır.
     """
     last_closes = []
@@ -1207,7 +1207,7 @@ def _git_revision():
 
 def main():
     parser = argparse.ArgumentParser(description="Atlas sinyal backtest")
-    parser.add_argument("--symbol", default="BTC/USDT:USDT", help="Tek sembol (MEXC swap)")
+    parser.add_argument("--symbol", default="BTC/USDT:USDT", help="Tek sembol (Gate.io swap)")
     parser.add_argument("--symbols", help="Virgülle ayrılmış sembol listesi (çoklu tarama; --symbol'dan öncelikli)")
     parser.add_argument("--days", type=int, default=60, help="Kaç gün geriye gidilecek")
     parser.add_argument("--step", type=int, default=1, help="Kaç adet 15m mumda bir analiz yapılacağı (varsayılan: 1 = her 15 dakika)")
