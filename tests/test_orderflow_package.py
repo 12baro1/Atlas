@@ -57,6 +57,8 @@ def test_gateio_public_stream_parses_and_filters_liquidations():
     assert len(snapshot["liquidation_events"]) == 1
     assert snapshot["liquidation_events"][0]["symbol"] == "BTC"
     assert snapshot["liquidation_events"][0]["side"] == "SELL"
+    assert snapshot["liquidation_events"][0]["order_side"] == "SELL"
+    assert snapshot["liquidation_events"][0]["position_side"] == "LONG"
     assert snapshot["liquidation_events_source"] == "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS"
 
 
@@ -199,3 +201,22 @@ def test_orderflow_rejects_stale_shared_book_or_trade_evidence():
         "orderbook": {"bids": [[99, 1]], "asks": [[101, 1]]},
         "recent_trades": [{"price": 100, "size": 1, "side": "BUY"}],
     }) is None
+
+
+
+def test_gate_websocket_trade_size_is_normalized_by_contract_multiplier():
+    stream = GatePublicStream("BTC/USDT:USDT")
+    stream.set_contract_size(0.001)
+    stream._consume({
+        "channel": "futures.trades",
+        "event": "update",
+        "time_ms": 1700000001000,
+        "result": [{
+            "contract": "BTC_USDT", "create_time_ms": 1700000000000,
+            "size": "100", "price": "60000", "id": "normalized-trade",
+        }],
+    })
+    snapshot = stream.snapshot(now_ms=1700000001000)
+    assert snapshot["recent_trades"][0]["raw_contract_size"] == 100
+    assert snapshot["recent_trades"][0]["size"] == 0.1
+    assert snapshot["recent_trades"][0]["amount"] == 0.1
