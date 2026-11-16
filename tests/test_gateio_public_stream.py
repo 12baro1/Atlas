@@ -20,6 +20,8 @@ def test_public_liquidation_events_are_normalized_and_deduplicated():
     assert event["exchange"] == "GATEIO_FUTURES"
     assert event["symbol"] == "BTC"
     assert event["side"] == "SELL"
+    assert event["order_side"] == "SELL"
+    assert event["side_semantics"] == "GATE_LIQUIDATION_ORDER_SIDE"
     assert event["notional"] == 12000
     assert event["source"] == "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS"
 
