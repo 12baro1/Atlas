@@ -252,7 +252,7 @@ def get_market_data(symbol, force_refresh=False):
                 and (item.get("openInterestValue") is not None or item.get("openInterestAmount") is not None)
             ]
             data["open_interest"] = [
-                float(item.get("openInterestValue") or item.get("openInterestAmount"))
+                float(item.get("openInterestAmount") if item.get("openInterestAmount") is not None else item.get("openInterestValue"))
                 for item in valid_oi
             ]
             data["open_interest_timestamps_ms"] = [
@@ -272,7 +272,9 @@ def get_market_data(symbol, force_refresh=False):
                 by_timestamp[int(data["open_interest_timestamps_ms"][index])] = {"openInterestValue": value}
         for item in ws_oi:
             if isinstance(item, dict) and item.get("timestamp") is not None:
-                value = item.get("openInterestValue", item.get("openInterestAmount"))
+                value = item.get("openInterestAmount")
+                if value is None:
+                    value = item.get("openInterestValue")
                 if value is not None:
                     by_timestamp[int(item["timestamp"])] = {"openInterestValue": float(value)}
         ordered = sorted(by_timestamp.items())
@@ -286,7 +288,9 @@ def get_market_data(symbol, force_refresh=False):
         if callable(fetch_oi_snapshot):
             try:
                 snapshot = fetch_oi_snapshot(symbol) or {}
-                value = snapshot.get("openInterestValue") or snapshot.get("openInterestAmount")
+                value = snapshot.get("openInterestAmount")
+                if value is None:
+                    value = snapshot.get("openInterestValue")
                 if value is not None:
                     # Tek anlık snapshot, fetch zamanıyla damgalanır: seri
                     # hizalı kalır ama tek gözlem history kuramaz (hizmet
