@@ -54,7 +54,7 @@ def liquidation_data(now_ms, oi_values, oi_times, extra_fields=None):
     data = {
         "symbol": SYMBOL,
         "current_price": 100.0,
-        "current_price_source": "MEXC_TICKER",
+        "current_price_source": "GATEIO_TICKER",
         "snapshot_timestamp_ms": now_ms,
         "1h": baseline_candles() + [impulse_candle()],
         "open_interest": list(oi_values),
@@ -323,7 +323,7 @@ def test_tui_data_usage_section_lists_inputs_and_shared_sources():
         status="MISSING_DATA",
         missing_reason="INSUFFICIENT_OI_HISTORY - single snapshot",
         shared_source_status={
-            "open_interest": {"state": "INSUFFICIENT_HISTORY", "source": "MEXC_REST_SNAPSHOT"},
+            "open_interest": {"state": "INSUFFICIENT_HISTORY", "source": "GATEIO_REST_SNAPSHOT"},
             "orderbook": {"state": "UNAVAILABLE", "source": "UNAVAILABLE"},
         },
         generator_inputs={
@@ -338,7 +338,7 @@ def test_tui_data_usage_section_lists_inputs_and_shared_sources():
 
     assert "VERİ KULLANIM RAPORU" in text
     assert "Likidasyon" in text
-    assert "Open Interest: INSUFFICIENT_HISTORY | kaynak: MEXC_REST_SNAPSHOT" in text
+    assert "Open Interest: INSUFFICIENT_HISTORY | kaynak: GATEIO_REST_SNAPSHOT" in text
     assert "Orderbook: UNAVAILABLE" in text
     assert "Mumlar 1h: AVAILABLE" in text
     assert "Funding: AVAILABLE" in text
