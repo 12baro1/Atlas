@@ -53,6 +53,7 @@ class AtlasRuntime:
         self._current_symbol = self.symbols[0] if self.symbols else None
         self._last_results = []
         self._latest_analysis_by_symbol = {}
+        self._latest_analysis_at = {}
         self._market_symbols = None
         self._scanner_stats = {
             "processed": 0,
@@ -141,6 +142,42 @@ class AtlasRuntime:
                 return self._latest_analysis_by_symbol.get(latest_symbol)
             return None
 
+    def latest_analyses(self, max_age_seconds=None):
+        """Return a snapshot of cached analyses, optionally excluding stale entries."""
+        now_ms = int(time.time() * 1000)
+        max_age_ms = None if max_age_seconds is None else max(0, int(float(max_age_seconds) * 1000))
+        with self._lock:
+            items = []
+            for symbol, result in self._latest_analysis_by_symbol.items():
+                analyzed_at = int(self._latest_analysis_at.get(symbol) or 0)
+                if max_age_ms is not None and (not analyzed_at or now_ms - analyzed_at > max_age_ms):
+                    continue
+                items.append({
+                    "symbol": symbol,
+                    "result": copy.deepcopy(result),
+                    "analyzed_at_ms": analyzed_at,
+                })
+            return items
+
+    def track_requested_result(self, result):
+        """Track a cached setup only after a Telegram command explicitly requests it."""
+        if not isinstance(result, dict):
+            return None
+        signal = result.get("signal") or {}
+        decision = result.get("decision") or {}
+        if (
+            signal.get("signal") not in {"LONG", "SHORT"}
+            or decision.get("action") not in {"EXECUTE", "EXECUTE_WITH_CAUTION"}
+        ):
+            return None
+        if not bool(getattr(Config, "SIGNAL_TRACKING_ENABLED", True)):
+            return None
+        with self._journal_lock:
+            return self.engine._register_tracked_signal(
+                result.get("symbol") or "UNKNOWN",
+                result,
+            )
+
     def _ensure_market_symbols(self):
         if self._market_symbols is not None:
             return self._market_symbols
@@ -184,10 +221,10 @@ class AtlasRuntime:
             return f"{text}/USDT:USDT"
         return text
 
-    def analyze_symbol(self, raw_symbol, force_refresh=False):
+    def analyze_symbol(self, raw_symbol, force_refresh=False, track_signal=True):
         self._set_status("ANALYZING")
         try:
-            return self._analyze_symbol(raw_symbol, force_refresh=force_refresh, from_scan=False)
+            return self._analyze_symbol(raw_symbol, force_refresh=force_refresh, from_scan=False, track_signal=track_signal)
         finally:
             self._set_status("READY")
 
@@ -367,7 +404,7 @@ class AtlasRuntime:
         with self._journal_lock:
             self.engine.trade_journal.expire_stale_signal_outcomes()
 
-    def _analyze_symbol(self, raw_symbol, force_refresh=False, from_scan=False, scan_index=None, scan_total=None):
+    def _analyze_symbol(self, raw_symbol, force_refresh=False, from_scan=False, scan_index=None, scan_total=None, track_signal=None):
         symbol = self.normalize_symbol(raw_symbol)
         if not symbol:
             return {"ok": False, "error": "symbol_required"}
@@ -433,7 +470,8 @@ class AtlasRuntime:
                 data["shared_market_evidence"] = build_shared_market_evidence(data)
 
                 with self._journal_lock:
-                    result = self.engine.analyze(data)
+                    should_track_signal = (not from_scan) if track_signal is None else bool(track_signal)
+                    result = self.engine.analyze(data, track_signal=should_track_signal)
                     # AtlasEngine already ran the seven generators, common filter,
                     # and final selector before recording this result.
                     if result is None:
@@ -443,6 +481,7 @@ class AtlasRuntime:
                     self._inc("success")
                     self._register_result(result)
                     self._latest_analysis_by_symbol[symbol] = result
+                    self._latest_analysis_at[symbol] = int(time.time() * 1000)
 
                     if Config.SIGNAL_TRACKING_ENABLED:
                         candles_15m = data.get("15m") or data.get("15M") or []
