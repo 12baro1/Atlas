@@ -84,7 +84,7 @@ def test_recent_taker_trades_override_candle_color_cvd_proxy():
     ]
     flow = engine._trade_flow(trades)
     assert flow is not None
-    assert flow["cvd"]["source"] == "mexc_recent_trades"
+    assert flow["cvd"]["source"] == "gateio_recent_trades"
     assert flow["cvd"]["is_proxy"] is False
     assert flow["cvd"]["direction"] == "LONG"
     assert flow["volume_delta"]["imbalance"] > 0
@@ -119,7 +119,7 @@ def test_recent_trade_cvd_has_identity_from_newest_valid_trade():
         {"side": "buy", "amount": 1, "timestamp": 10_000},
     ]
     result = engine._trade_flow(trades, now_ms=10_000)
-    assert result["cvd"]["event_id"] == "cvd:mexc_trades:10000"
+    assert result["cvd"]["event_id"] == "cvd:gateio_trades:10000"
     assert result["volume_delta"]["event_id"] == result["cvd"]["event_id"]
 
 
