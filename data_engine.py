@@ -123,7 +123,7 @@ def get_market_data(symbol, force_refresh=False):
     stream_snapshot = {}
     try:
         from strategies.orderflow.websocket_collector import MexcPublicStream
-        stream = BybitPublicStream.for_symbol(symbol)
+        stream = MexcPublicStream.for_symbol(symbol)
         stream.start()
         # İlk geçerli snapshot için sınırlı bekleme: ilk mesajlar gelmeden
         # snapshot almak orderbook/trade verisini boş bırakırdı. Sonsuz
@@ -147,7 +147,7 @@ def get_market_data(symbol, force_refresh=False):
             "wait_ms": float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)),
         },
     )
-    # Public Bybit REST order-book snapshot; optional fallback.
+    # Public MEXC REST order-book snapshot; optional fallback.
     data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
     data["orderbook_timestamp_ms"] = None
     try:
@@ -189,13 +189,13 @@ def get_market_data(symbol, force_refresh=False):
     if stream_snapshot.get("recent_trades"):
         data["recent_trades"] = stream_snapshot["recent_trades"]
         data["recent_trades_timestamp_ms"] = stream_snapshot.get("recent_trades_timestamp_ms")
-        data["data_provenance"]["recent_trades"] = "MEXC_V5_PUBLIC_WEBSOCKET"
+        data["data_provenance"]["recent_trades"] = "MEXC_FUTURES_PUBLIC_WEBSOCKET"
     data["trade_flow_history"] = stream_snapshot.get("trade_flow_history") or []
     if data["trade_flow_history"]:
-        data["data_provenance"]["trade_flow_history"] = "MEXC_V5_PUBLIC_WEBSOCKET"
+        data["data_provenance"]["trade_flow_history"] = "MEXC_FUTURES_PUBLIC_WEBSOCKET"
     data["liquidation_events"] = stream_snapshot.get("liquidation_events") or []
     if data["liquidation_events"]:
-        data["data_provenance"]["liquidations"] = "MEXC_V5_PUBLIC_WEBSOCKET"
+        data["data_provenance"]["liquidations"] = "MEXC_FUTURES_PUBLIC_WEBSOCKET"
     # Keep the legacy aggregate field, but never use socket connection state
     # as proof that every feed is live. Per-feed provenance is authoritative.
     active_sources = {
@@ -400,7 +400,7 @@ def get_market_data(symbol, force_refresh=False):
     # their exchange timestamps are never incorrectly classified as future.
     data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
     feed_sources = set(data["data_provenance"].values()) - {"UNAVAILABLE"}
-    if "MEXC_V5_PUBLIC_WEBSOCKET" in feed_sources:
+    if "MEXC_FUTURES_PUBLIC_WEBSOCKET" in feed_sources:
         data["microstructure_source"] = (
             "MIXED" if any(source.startswith("MEXC_REST") for source in feed_sources)
             else "WEBSOCKET"
@@ -436,7 +436,7 @@ def get_market_data(symbol, force_refresh=False):
 
 
 # Cross-market evidence universe: BTC/ETH 4H candles. Dominance indexes are
-# not fetched from this Bybit data provider and must not be fabricated.
+# not fetched from this MEXC data provider and must not be fabricated.
 _CORRELATION_SYMBOLS = {
     "BTC": ("BTC/USDT:USDT", "4h", 200),
     "ETH": ("ETH/USDT:USDT", "4h", 200),
