@@ -1,8 +1,8 @@
 # Atlas
 
-Atlas, Bybit USDT perpetual piyasalarını terminal üzerinden analiz eder. Tek coin analizinde 7 ayrı stratejiyi çalıştırır: Trend Following + Pullback, Volatility Breakout, Mean Reversion, Liquidation Cascade (açık pozisyon daralması proxy'si), Order Flow Momentum, Relative Strength ve mevcut SMC motoru. Android UserLAnd/Ubuntu ve Linux üzerinde kullanılabilir.
+Atlas, MEXC USDT perpetual piyasalarını terminal üzerinden analiz eder. Tek coin analizinde 7 ayrı stratejiyi çalıştırır: Trend Following + Pullback, Volatility Breakout, Mean Reversion, Liquidation Cascade (açık pozisyon daralması proxy'si), Order Flow Momentum, Relative Strength ve mevcut SMC motoru. Android UserLAnd/Ubuntu ve Linux üzerinde kullanılabilir.
 
-**Bu sürüm analiz aracıdır; otomatik al-sat yapmaz.** Borsaya emir veya pozisyon göndermez. Analiz için herkese açık piyasa verilerini kullanır. Bybit API anahtarı gerekmez.
+**Bu sürüm analiz aracıdır; otomatik al-sat yapmaz.** Borsaya emir veya pozisyon göndermez. Analiz için herkese açık piyasa verilerini kullanır. MEXC public futures API anahtarı gerekmez.
 
 ## Gereksinimler
 
