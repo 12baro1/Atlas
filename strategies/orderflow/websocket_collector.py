@@ -89,26 +89,32 @@ class MexcPublicStream:
                         ws.send(json.dumps({"method": method, "param": param, "gzip": False}))
                     with self._lock:
                         self._connected = True
+                    last_ping = time.monotonic()
                     while not self._stop.is_set():
                         try:
                             raw = ws.recv()
+                        except websocket.WebSocketTimeoutException:
+                            raw = None
                         except Exception:
+                            break
+                        if raw:
+                            try:
+                                if isinstance(raw, bytes):
+                                    try:
+                                        raw = gzip.decompress(raw).decode("utf-8")
+                                    except (OSError, UnicodeDecodeError):
+                                        raw = raw.decode("utf-8")
+                                self._consume(json.loads(raw))
+                            except (TypeError, ValueError, UnicodeDecodeError):
+                                pass
+                        # MEXC recommends a client ping every 10-20 seconds,
+                        # even when market messages are continuously arriving.
+                        if time.monotonic() - last_ping >= 15.0:
                             try:
                                 ws.send(json.dumps({"method": "ping"}))
+                                last_ping = time.monotonic()
                             except Exception:
                                 break
-                            continue
-                        if not raw:
-                            continue
-                        try:
-                            if isinstance(raw, bytes):
-                                try:
-                                    raw = gzip.decompress(raw).decode("utf-8")
-                                except (OSError, UnicodeDecodeError):
-                                    raw = raw.decode("utf-8")
-                            self._consume(json.loads(raw))
-                        except (TypeError, ValueError, UnicodeDecodeError):
-                            continue
                 except Exception:
                     pass
                 finally:
