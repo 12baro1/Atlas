@@ -235,14 +235,17 @@ class AtlasEngine:
         for motor_name in specialist_motor_names:
             setattr(self, motor_name, self.main_engine.motors[motor_name])
 
-    def analyze(self, data):
+    def analyze(self, data, track_signal=True):
         """Route every market analysis through the single main engine."""
         # Trace kimliği burada yalnızca eksikse üretilir; data_engine ile
         # başlatılan aynı analiz aynı kimliği taşır.
         ensure_trace(data)
-        return self.main_engine.analyze(data, pipeline=self._analyze_with_motors)
+        return self.main_engine.analyze(
+            data,
+            pipeline=lambda payload: self._analyze_with_motors(payload, track_signal=track_signal),
+        )
 
-    def _analyze_with_motors(self, data):
+    def _analyze_with_motors(self, data, track_signal=True):
         """Execute registered specialist motors and assemble their evidence."""
         self._validate_market_data(data)
 
@@ -665,10 +668,9 @@ class AtlasEngine:
 
         if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)):
             self.state_engine.update_analysis_state(symbol, data, result_payload)
-            if decision_state.get("action") in ("EXECUTE", "EXECUTE_WITH_CAUTION"):
-                # Aktif işlem yanlışlıkla silinmez veya değiştirilmez: yalnızca
-                # aktif setup yokken yeni EXECUTE sonucu aktif setup olur.
-                # Varsa yeni analiz sonucu ayrı olarak analysis cache'te kalır.
+            if track_signal and decision_state.get("action") in ("EXECUTE", "EXECUTE_WITH_CAUTION"):
+                # Only explicitly requested Telegram analyses may become active setups.
+                # Background scans remain analysis/cache-only.
                 if active_setup is None:
                     self.state_engine.store_active_setup(symbol, result_payload, data=data)
                 else:
@@ -677,7 +679,11 @@ class AtlasEngine:
                         symbol, decision_state.get("action"),
                     )
             self.state_engine.sync_open_positions(self.position.open_positions())
-        if execution_state["signal"].get("signal") in ["LONG", "SHORT"] and decision_state.get("action") in ["EXECUTE", "EXECUTE_WITH_CAUTION"]:
+        if (
+            track_signal
+            and execution_state["signal"].get("signal") in ["LONG", "SHORT"]
+            and decision_state.get("action") in ["EXECUTE", "EXECUTE_WITH_CAUTION"]
+        ):
             self.cooldown.register_signal(symbol, execution_state["signal"].get("signal"))
             if getattr(Config, "SIGNAL_TRACKING_ENABLED", True) and self.trade_journal is not None:
                 self._register_tracked_signal(symbol, result_payload)
@@ -785,11 +791,37 @@ class AtlasEngine:
         if entry is None or stop_loss is None or side not in ("LONG", "SHORT"):
             return None
 
+        analysis = result_payload.get("analysis") or {}
+        setup_quality = analysis.get("setup_quality") or {}
+        setup_fingerprint = (
+            setup_quality.get("setup_fingerprint")
+            or (analysis.get("setup") or {}).get("fingerprint")
+            or None
+        )
+        target_prices = {
+            "tp1": risk.get("tp1") or (result_payload.get("dynamic_tp") or {}).get("tp1"),
+            "tp2": risk.get("tp2") or (result_payload.get("dynamic_tp") or {}).get("tp2"),
+            "tp3": risk.get("tp3") or (result_payload.get("dynamic_tp") or {}).get("tp3"),
+        }
+
+        def same_setup(record):
+            if record.get("side") != side:
+                return False
+            if any(record.get(key) != value for key, value in {
+                "entry": entry, "stop_loss": stop_loss, **target_prices
+            }.items()):
+                return False
+            recorded_analysis = record.get("analysis") or {}
+            recorded_quality = recorded_analysis.get("setup_quality") or {}
+            return recorded_quality.get("setup_fingerprint") == setup_fingerprint
+
         for existing in self.trade_journal.open_trades(symbol=symbol):
-            if existing.get("side") == side and existing.get("entry") == entry:
+            if not same_setup(existing):
+                continue
+            linked_signal = self.trade_journal.find_signal_outcome(existing.get("signal_id"))
+            if linked_signal is not None and linked_signal.get("status") == "PENDING":
                 return existing
 
-        analysis = result_payload.get("analysis") or {}
         trade = {
             "symbol": symbol,
             "side": side,
@@ -812,19 +844,18 @@ class AtlasEngine:
         # Teorik sinyal sonucu (SIGNAL OUTCOME) kaydı: TP/SL çözümlenmesi için.
         # Aynı sembol+yönde açık bir kayıt varsa tekrar açılmaz.
         opened_at = result_payload.get("decision", {}).get("executed_at") or int(time.time() * 1000)
-        analysis = result_payload.get("analysis") or {}
-        setup_quality = analysis.get("setup_quality") or {}
-        setup_fingerprint = (
-            setup_quality.get("setup_fingerprint")
-            or (analysis.get("setup") or {}).get("fingerprint")
-            or None
-        )
         setup_features = list(setup_quality.get("features") or [])
         signal_id = None
         existing = [
             o
             for o in self.trade_journal.open_signal_outcomes(symbol=symbol)
-            if o.get("direction") == side
+            if (
+                o.get("direction") == side
+                and o.get("entry") == entry
+                and o.get("stop_loss") == stop_loss
+                and all(o.get(key) == value for key, value in target_prices.items())
+                and o.get("setup_fingerprint") == setup_fingerprint
+            )
         ]
         if existing:
             signal_id = existing[0].get("signal_id")
@@ -851,6 +882,8 @@ class AtlasEngine:
                         "setup_type": (analysis.get("setup") or {}).get("type")
                         or setup_quality.get("setup")
                         or None,
+                        "strategy_id": ((result_payload.get("strategy_lab") or {}).get("selected") or {}).get("strategy_id") or "smc",
+                        "strategy": ((result_payload.get("strategy_lab") or {}).get("selected") or {}).get("strategy") or "SMC",
                         "setup_features": setup_features,
                         "learning": setup_quality.get("learning") or {},
                         "setup_quality": setup_quality,
