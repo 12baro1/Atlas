@@ -65,6 +65,9 @@ def _format_price(value):
     if not math.isfinite(number):
         return "—"
     rendered = f"{number:,.8f}".rstrip("0").rstrip(".")
+    # Keep one decimal for whole-number prices for compatibility and clarity.
+    if "." not in rendered:
+        rendered += ".0"
     return rendered or "0"
 
 
