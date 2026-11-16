@@ -63,6 +63,9 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
     now = 1_700_000_000_000
 
     class FakeExchange:
+        def contract_size(self, _symbol):
+            return 1.0
+
         def milliseconds(self):
             return now
 
@@ -88,6 +91,9 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
             return {"last": 100.0, "timestamp": now}
 
     class FakeStream:
+        def set_contract_size(self, _size):
+            return None
+
         def start(self):
             return True
 
