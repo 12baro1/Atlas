@@ -22,7 +22,7 @@ SYMBOL = "TESTUSDT/USDT:USDT"
 @pytest.fixture
 def stream():
     # Bağlantı kurulmaz: yalnızca sınıf içi durum test edilir (offline test).
-    instance = BybitPublicStream(SYMBOL)
+    instance = MexcPublicStream(SYMBOL)
     yield instance
     instance.stop()
 
