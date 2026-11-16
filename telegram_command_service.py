@@ -6,6 +6,7 @@ signals or scan results on its own; it replies only to recognized commands.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 from datetime import datetime
@@ -47,12 +48,115 @@ def _format_rr(value):
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
-        return "0.00R"
+        return "Hesaplanmadı"
+    if not math.isfinite(number):
+        return "Hesaplanmadı"
     return f"{number:+.2f}R"
 
 
+def _format_price(value, *, grouping=True):
+    """Format prices without hiding small-coin precision."""
+    if value is None:
+        return "—"
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return str(value)
+    if not math.isfinite(number):
+        return "—"
+    rendered = f"{number:,.8f}" if grouping else f"{number:.8f}"
+    rendered = rendered.rstrip("0").rstrip(".")
+    # Keep one decimal for whole-number prices for compatibility and clarity.
+    if "." not in rendered:
+        rendered += ".0"
+    return rendered or "0"
+
+
+def _outcome_strategy(item):
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    strategy = (
+        payload.get("strategy")
+        or payload.get("strategy_id")
+        or payload.get("setup_type")
+    )
+    if not strategy:
+        analysis = payload.get("analysis")
+        if isinstance(analysis, dict):
+            strategy = analysis.get("strategy") or analysis.get("strategy_id") or analysis.get("setup_type")
+    if not strategy:
+        selected = payload.get("selected_strategy")
+        if isinstance(selected, dict):
+            strategy = selected.get("strategy") or selected.get("strategy_id")
+    if not strategy:
+        lab = payload.get("strategy_lab")
+        selected = lab.get("selected") if isinstance(lab, dict) else None
+        if isinstance(selected, dict):
+            strategy = selected.get("strategy") or selected.get("strategy_id")
+    return str(strategy) if strategy else "Belirtilmedi"
+
+
+def _outcome_progress(item):
+    hit_levels = sorted({
+        int(level) for level in (item.get("tps_hit") or [])
+        if str(level).isdigit() and int(level) in (1, 2, 3)
+    })
+    available = [
+        level for level in (1, 2, 3)
+        if item.get(f"tp{level}") is not None
+    ]
+    remaining = [level for level in available if level not in hit_levels]
+    if not hit_levels:
+        return "Hedef bekleniyor", hit_levels
+    progress = "/".join(f"TP{level}" for level in hit_levels) + " ALINDI"
+    if remaining:
+        progress += "  |  " + "/".join(f"TP{level}" for level in remaining) + " TAKİPTE"
+    return progress, hit_levels
+
+
+def _format_outcome_item(item, state):
+    status = str(item.get("status") or "PENDING").upper()
+    symbol = str(item.get("symbol") or "?").replace(":USDT", "")
+    direction = str(item.get("direction") or "?").upper()
+    progress, hit_levels = _outcome_progress(item)
+    lines = [
+        f"{symbol}  |  {direction}",
+        f"Strateji: {_outcome_strategy(item)}",
+        f"Durum: {state or status}",
+    ]
+    if item.get("signal_id"):
+        lines.append(f"Sinyal ID: {item['signal_id']}")
+    if item.get("entry") is not None:
+        lines.append(f"Giriş: {_format_price(item.get('entry'))}")
+    if item.get("stop_loss") is not None:
+        lines.append(f"Stop: {_format_price(item.get('stop_loss'))}")
+    targets = [
+        f"TP{level}: {_format_price(item.get(f'tp{level}'))}"
+        for level in (1, 2, 3) if item.get(f"tp{level}") is not None
+    ]
+    if targets:
+        lines.append("Hedefler: " + "  |  ".join(targets))
+    if status == "PENDING":
+        if hit_levels:
+            lines.append(f"Hedef ilerlemesi: {progress}")
+            lines.append(f"Gerçekleşen kısmi getiri (brüt): {_format_rr(item.get('realized_r') or 0)}")
+        elif item.get("entry_tracking_source") == "market_reference":
+            lines.append("Giriş: MARKET referansı (borsa fill teyidi değil)")
+        elif not item.get("entry_reached"):
+            lines.append("Koşul: Giriş fiyatı bekleniyor")
+    elif status in {"TP1", "TP2", "TP3", "SL"}:
+        lines.append(f"Sonuç: {status}")
+        lines.append(f"Net sonuç: {_format_rr(item.get('realized_r') or 0)}")
+    elif status == "EXPIRED":
+        lines.append("Sonuç: Süre doldu")
+        if item.get("entry_reached"):
+            lines.append("Not: Giriş seviyesi görülmüştü")
+        else:
+            lines.append("Not: Giriş seviyesi görülmedi")
+    return "\n".join(lines)
+
+
 def format_daily_signal_report(outcomes, now=None):
-    """Render a compact daily report and show partial TP progress without closing tracking."""
+    """Render a readable daily setup and outcome report in Europe/Istanbul time."""
     tz = ZoneInfo("Europe/Istanbul")
     current = now.astimezone(tz) if now is not None else datetime.now(tz)
     today = current.date()
@@ -71,13 +175,13 @@ def format_daily_signal_report(outcomes, now=None):
     divider = "━━━━━━━━━━━━━━━━━━━━"
     if not daily:
         return (
-            f"{divider}\nATLAS  |  GÜNLÜK RAPOR\n{today:%d.%m.%Y}\n"
+            f"{divider}\nATLAS | BUGÜNÜN İŞLEM TAKİBİ\n{today:%d.%m.%Y}\n"
             f"{divider}\n\nBugün henüz kayıtlı setup yok."
         )
 
     terminal = {"TP1", "TP2", "TP3", "SL"}
     tracking, waiting, no_entry, completed, expired_after_entry = [], [], [], [], []
-    for item in sorted(daily, key=lambda row: int(row.get("opened_at") or 0)):
+    for item in sorted(daily, key=lambda row: int(row.get("opened_at") or 0), reverse=True):
         status = str(item.get("status") or "PENDING").upper()
         reached = bool(item.get("entry_reached", status in terminal))
         if status in terminal:
@@ -86,39 +190,6 @@ def format_daily_signal_report(outcomes, now=None):
             (expired_after_entry if reached else no_entry).append(item)
         elif status == "PENDING":
             (tracking if reached else waiting).append(item)
-
-    def describe(item, state=None):
-        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-        strategy = payload.get("strategy") or payload.get("strategy_id") or payload.get("setup_type")
-        status = state or str(item.get("status") or "PENDING").upper()
-        hit_levels = sorted({
-            int(level) for level in (item.get("tps_hit") or [])
-            if str(level).isdigit() and int(level) in (1, 2, 3)
-        })
-        if status == "TAKİPTE" and hit_levels:
-            available = [
-                level for level in (1, 2, 3)
-                if item.get(f"tp{level}") is not None
-            ]
-            remaining = [level for level in available if level not in hit_levels]
-            progress = "/".join(f"TP{level}" for level in hit_levels) + " ALINDI"
-            if remaining:
-                progress += "  |  " + "/".join(f"TP{level}" for level in remaining) + " TAKİPTE"
-            status = progress
-        rr = _format_rr(item.get("realized_r") or 0)
-        strategy_line = f"Strateji: {strategy}\n" if strategy else ""
-        lines = [
-            f"• {item.get('symbol', '?')}  |  {str(item.get('direction', '?')).upper()}",
-            f"  ID: {item.get('signal_id', 'ID yok')}",
-        ]
-        if strategy_line:
-            lines.append(f"  Strateji: {strategy}")
-        lines.append(f"  Durum: {status}")
-        if hit_levels and str(item.get("status") or "").upper() == "PENDING":
-            lines.append(f"  Kilitlenen kısmi getiri (brüt): {rr}")
-        elif status in terminal:
-            lines.append(f"  Net sonuç: {rr}")
-        return "\n".join(lines)
 
     tp1_tracking = sum(
         str(item.get("status") or "PENDING").upper() == "PENDING"
@@ -140,44 +211,52 @@ def format_daily_signal_report(outcomes, now=None):
         item.get("entry_tracking_source") == "market_reference"
         for item in daily
     )
+
     lines = [
         divider,
-        "ATLAS  |  GÜNLÜK RAPOR",
+        "ATLAS | BUGÜNÜN İŞLEM TAKİBİ",
         f"{today:%d.%m.%Y}",
         divider,
         f"Verilen setup: {len(daily)}",
-        f"Giriş seviyesi mumda görüldü: {reached_count}",
-        f"MARKET referansı (fill teyitsiz): {market_reference_count}",
+        f"Aktif takip: {len(tracking)}",
         f"Giriş bekliyor: {len(waiting)}",
+        f"Sonuçlanan: {len(completed)}",
         f"Giriş olmadı (süresi doldu): {len(no_entry)}",
         f"TP1 alındı, TP2/TP3 takipte: {tp1_tracking}",
+        f"Giriş seviyesi mumda görüldü: {reached_count}",
+        f"MARKET referansı (fill teyitsiz): {market_reference_count}",
     ]
     for heading, items, state in (
-        ("AKTİF TAKİP", tracking, "TAKİPTE"),
-        ("SONUÇLANAN", completed, None),
-        ("GİRİŞ BEKLEYEN", waiting, "LIMIT BEKLİYOR"),
-        ("GİRİŞ OLMAYAN", no_entry, "GİRİŞ OLMADI"),
-        ("GİRİŞİ GÖRÜLMÜŞ / SÜRESİ DOLAN", expired_after_entry, "SÜRE DOLDU"),
+        ("AKTİF İŞLEMLER", tracking, "İŞLEM TAKİPTE"),
+        ("GİRİŞ BEKLEYENLER", waiting, "GİRİŞ BEKLENİYOR"),
+        ("SONUÇLANANLAR", completed, None),
+        ("GİRİŞ OLMADAN SÜRESİ DOLANLAR", no_entry, "GİRİŞ OLMADI"),
+        ("GİRİŞİ GÖRÜLMÜŞ / SÜRESİ DOLANLAR", expired_after_entry, "SÜRE DOLDU"),
     ):
         if items:
-            lines.extend(["", divider, f"{heading}  ({len(items)})"])
-            lines.extend(describe(item, state) for item in items)
+            lines.extend(["", divider, f"{heading} ({len(items)})"])
+            for item in items:
+                item_state = state
+                if state == "İŞLEM TAKİPTE" and item.get("entry_tracking_source") == "market_reference":
+                    item_state = "MARKET REFERANSI — FILL TEYİTSİZ"
+                lines.extend([_format_outcome_item(item, item_state), ""])
+
     lines.extend([
-        "",
         divider,
-        "GÜNLÜK NET  |  YALNIZCA KAPANAN SİNYALLER",
-        f"Artı: {_format_rr(positive)}",
-        f"Eksi: {_format_rr(negative)}",
+        "GÜNLÜK NET SONUÇ — YALNIZCA KAPANAN SİNYALLER",
+        f"Kazanç: {_format_rr(positive)}",
+        f"Kayıp: {_format_rr(negative)}",
         f"Net: {_format_rr(net)}",
         divider,
-        "Not: TP1 kısmi hedef olarak kaydedilir; TP2/TP3 takibi sürer.",
-        "Giriş seviyesi görülmesi borsa emri/fill gerçekleştiğini kanıtlamaz.",
+        "TP1 kısmi hedef olarak kaydedilir; işlem kapanmaz ve kalan hedefler takip edilir.",
+        "Giriş seviyesinin mumda görülmesi, borsada emir/fill gerçekleştiği anlamına gelmez.",
     ])
     return "\n".join(lines)
 
 
 def _format_telegram_card(card, elapsed_ms=0):
-    symbol = card.get("symbol") or "?"
+    """Format one selected setup as a human-readable Telegram trade plan."""
+    symbol = str(card.get("symbol") or "?").replace(":USDT", "")
     direction = str(card.get("direction") or "").upper()
     action = str(card.get("decision_action") or "").upper()
     entry_type = str(card.get("entry_type") or "").upper()
@@ -191,43 +270,80 @@ def _format_telegram_card(card, elapsed_ms=0):
     )
     divider = "━━━━━━━━━━━━━━━━━━━━"
     if not executable:
-        reason = str(card.get("reason") or "Ortak karar mekanizması işlem planı üretmedi.")
-        return (
-            f"{divider}\nATLAS  |  {symbol}\n{divider}\n"
-            f"GEÇERLİ SETUP YOK\n{reason[:180]}"
-        )
+        reason = str(card.get("reason") or "Ortak karar mekanizması geçerli işlem planı üretmedi.")
+        blockers = card.get("critical_blocks") or []
+        lines = [
+            divider,
+            f"ATLAS | {symbol}",
+            divider,
+            "GEÇERLİ SETUP YOK",
+            f"Neden: {reason[:240]}",
+        ]
+        if blockers:
+            lines.append("Kontrol edilecekler: " + " | ".join(str(item) for item in blockers[:3]))
+        lines.extend([
+            "",
+            "Bu sembolde şu an işlem açılabilecek doğrulanmış bir plan bulunmadı.",
+        ])
+        return "\n".join(lines)
 
-    strategy = card.get("strategy") or card.get("strategy_id") or "SMC"
+    strategy = card.get("strategy") or card.get("strategy_id") or "Belirtilmedi"
     targets = card.get("tp_levels") or []
     rr = card.get("net_rr")
     if rr is None:
         rr = card.get("weighted_net_rr")
     if rr is None:
         rr = card.get("rr")
+
+    direction_label = "LONG" if direction == "LONG" else "SHORT"
     lines = [
+        f"ATLAS  |  {card.get('symbol') or symbol}",
+        f"{'🟢' if direction == 'LONG' else '🔴'} {symbol} — {direction_label}",
         divider,
-        f"ATLAS  |  {symbol}",
-        divider,
+        "İŞLEM PLANI",
         f"Strateji: {strategy}",
-        f"Yön: {direction} | Emir: {entry_type}",
-        "",
-        f"Giriş: {card.get('entry')}",
-        f"SL: {card.get('stop_loss')}",
-        "",
-        "HEDEFLER",
+        f"Emir tipi: {entry_type}",
+        f"Giriş: {_format_price(card.get('entry'), grouping=False)}",
+        f"Stop Loss: {_format_price(card.get('stop_loss'), grouping=False)}",
     ]
-    lines.extend(f"TP{index}: {target}" for index, target in enumerate(targets, start=1))
+    if targets:
+        lines.extend(["", "HEDEFLER"])
+        lines.extend(
+            f"TP{index}: {_format_price(target, grouping=False)}"
+            for index, target in enumerate(targets[:3], start=1)
+        )
     lines.extend([
         "",
         f"Net RR: {_format_rr(rr) if rr is not None else 'Hesaplanmadı'}",
-        divider,
+        f"Risk/Getiri (Net RR): {_format_rr(rr) if rr is not None else 'Hesaplanmadı'}",
     ])
+
+    thesis = str(card.get("setup_thesis") or "").strip()
+    supporting = card.get("supporting_evidence") or []
+    context = card.get("market_context") or []
+    opposing = card.get("opposing_evidence") or []
+    evidence_lines = []
+    if thesis and thesis.lower() != str(strategy).lower():
+        evidence_lines.append(thesis)
+    evidence_lines.extend(str(item).strip() for item in supporting if str(item).strip())
+    evidence_lines.extend(str(item).strip() for item in context if str(item).strip())
+    if evidence_lines:
+        lines.extend(["", "SETUP GEREKÇESİ"])
+        lines.extend(f"• {item[:180]}" for item in evidence_lines[:4])
+    if opposing:
+        lines.extend(["", "DİKKAT"])
+        lines.extend(f"• Karşı kanıt: {str(item)[:160]}" for item in opposing[:2])
+
+    lines.extend(["", divider])
     if entry_type == "LIMIT":
-        lines.append("DURUM      LIMIT giriş seviyesi bekleniyor.")
-        lines.append("Not: Atlas otomatik emir göndermez.")
+        lines.append("DURUM: Giriş fiyatı bekleniyor.")
+        lines.append("LIMIT giriş seviyesi bekleniyor.")
+        lines.append("Fiyat belirlenen LIMIT seviyesine gelmeden giriş varsayılmaz.")
     else:
-        lines.append("DURUM      Teorik MARKET sinyali.")
-        lines.append("Not: Borsa fill teyidi değildir.")
+        lines.append("DURUM: MARKET planı hazır.")
+        lines.append("Borsa emri veya gerçekleşmiş fill teyidi değildir.")
+        lines.append("Bu mesaj yalnızca analiz planıdır; borsada emir gönderilmez.")
+    lines.append("Atlas otomatik emir göndermez.")
     lines.append(divider)
     return "\n".join(lines)
 

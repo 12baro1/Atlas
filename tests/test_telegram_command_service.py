@@ -96,13 +96,15 @@ def test_telegram_card_is_compact_and_keeps_trade_levels():
         "net_rr": 1.25, "strategy": "SMC",
     }
     text = _format_telegram_card(card)
+    assert "BTC/USDT — LONG" in text
     assert "Strateji: SMC" in text
-    assert "Yön: LONG | Emir: LIMIT" in text
-    assert "Giriş: 100.0" in text
-    assert "SL: 99.0" in text
-    assert "TP3: 103.0" in text
-    assert "Net RR: +1.25R" in text
-    assert "motor" not in text.lower()
+    assert "Emir tipi: LIMIT" in text
+    assert "Giriş: 100" in text
+    assert "Stop Loss: 99" in text
+    assert "TP3: 103" in text
+    assert "Risk/Getiri (Net RR): +1.25R" in text
+    assert "DURUM: Giriş fiyatı bekleniyor." in text
+    assert "Atlas otomatik emir göndermez." in text
 
 
 def test_recognizes_mevcut_command():
@@ -140,3 +142,64 @@ def test_runtime_signal_tracking_is_opt_in_by_default():
 
     parameter = inspect.signature(AtlasRuntime.analyze_symbol).parameters["track_signal"]
     assert parameter.default is False
+
+
+
+def test_telegram_card_includes_strategy_thesis_and_evidence():
+    card = {
+        "symbol": "ETH/USDT:USDT", "direction": "SHORT",
+        "decision_action": "EXECUTE_WITH_CAUTION", "entry_type": "MARKET",
+        "entry": 3420.0, "stop_loss": 3455.0,
+        "tp_levels": [3385.0, 3350.0, 3310.0],
+        "net_rr": 2.1, "strategy_id": "orderflow_momentum",
+        "setup_thesis": "Satıcı baskısı devam ediyor",
+        "supporting_evidence": ["CVD negatif", "Agresif satış işlemleri"],
+        "opposing_evidence": ["Yakın destek bölgesi"],
+    }
+    message = _format_telegram_card(card)
+    assert "Strateji: orderflow_momentum" in message
+    assert "SETUP GEREKÇESİ" in message
+    assert "CVD negatif" in message
+    assert "DİKKAT" in message
+    assert "Karşı kanıt: Yakın destek bölgesi" in message
+    assert "Borsa emri veya gerçekleşmiş fill teyidi değildir" in message
+
+
+def test_mevcut_report_shows_levels_strategy_and_tp_progress():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("Europe/Istanbul")
+    now = datetime(2026, 11, 16, 12, 0, tzinfo=tz)
+    stamp = int(now.timestamp() * 1000)
+    rows = [{
+        "signal_id": "ATL-20261116-000001",
+        "symbol": "BTC/USDT:USDT",
+        "direction": "LONG",
+        "opened_at": stamp,
+        "status": "PENDING",
+        "entry_reached": True,
+        "entry_tracking_source": "closed_ohlc",
+        "entry": 96250.0,
+        "stop_loss": 95700.0,
+        "tp1": 96800.0,
+        "tp2": 97350.0,
+        "tp3": 98000.0,
+        "tps_hit": [1],
+        "realized_r": 0.5,
+        "payload": {"strategy": "SMC"},
+    }]
+    report = format_daily_signal_report(rows, now=now)
+    assert "AKTİF İŞLEMLER (1)" in report
+    assert "Strateji: SMC" in report
+    assert "Giriş: 96,250" in report
+    assert "Stop: 95,700" in report
+    assert "TP1: 96,800" in report
+    assert "TP1 ALINDI  |  TP2/TP3 TAKİPTE" in report
+    assert "Gerçekleşen kısmi getiri (brüt): +0.50R" in report
+    assert "Net: +0.00R" in report
+
+
+def test_price_formatter_preserves_small_coin_precision():
+    from telegram_command_service import _format_price
+    assert _format_price(0.00001234) == "0.00001234"
