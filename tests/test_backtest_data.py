@@ -245,7 +245,6 @@ def test_fetch_history_never_switches_away_from_gateio(monkeypatch):
 
 
 def test_fetch_history_does_not_switch_provider_for_transient_errors(monkeypatch):
-    monkeypatch.setattr(backtest, "_history_fallback_exchange", None)
     monkeypatch.setattr(backtest.exchange, "fetch_ohlcv", lambda *a, **k: (_ for _ in ()).throw(OSError("temporary")))
     monkeypatch.setattr(backtest.time, "sleep", lambda *_: None)
 
