@@ -44,7 +44,7 @@ def classify_tp_behavior(trade):
         if result == "LOSS" or "STOP" in reason:
             return "TP1_THEN_STOP"
         return "TP3_HIT" if 3 in hits else "TP2_HIT" if 2 in hits else "TP1_HIT"
-    if "STOP" in reason or "STOP_LOSS" in reason:
+    if "STOP" in reason or "STOP_LOSS" in reason or result == "LOSS":
         return "FULL_STOP"
     if result == "WIN" and ("TARGET" in reason or "TP" in reason):
         return "TP1_HIT"
