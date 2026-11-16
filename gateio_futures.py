@@ -193,9 +193,13 @@ class GateFuturesExchange:
         }) or []
         row = rows[-1] if rows else {}
         value = row.get("open_interest")
+        stamp = int(row.get("time") or self.milliseconds())
+        if stamp < 10_000_000_000:
+            stamp *= 1000
+        raw_usd = row.get("open_interest_usd")
         return {"symbol": symbol, "openInterestAmount": _scaled_contract_amount(value, self.contract_size(symbol)) if value is not None else None,
-                "openInterestValue": None, "timestamp": int(row.get("time") or self.milliseconds()),
-                "info": dict(row)}
+                "openInterestValue": float(raw_usd) if raw_usd is not None else None,
+                "timestamp": stamp, "info": dict(row)}
 
     def fetch_open_interest_history(self, symbol, timeframe="1h", since=None, limit=100, params=None):
         rows = self._get("/futures/usdt/contract_stats", {
@@ -210,7 +214,10 @@ class GateFuturesExchange:
                     stamp *= 1000
                 if since is not None and stamp < int(since):
                     continue
-                out.append({"timestamp": stamp, "openInterestAmount": _scaled_contract_amount(row["open_interest"], self.contract_size(symbol))})
+                raw_usd = row.get("open_interest_usd")
+                out.append({"timestamp": stamp,
+                            "openInterestAmount": _scaled_contract_amount(row["open_interest"], self.contract_size(symbol)),
+                            "openInterestValue": float(raw_usd) if raw_usd is not None else None})
             except (KeyError, TypeError, ValueError, OverflowError):
                 continue
         return out
