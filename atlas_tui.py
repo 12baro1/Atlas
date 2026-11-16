@@ -684,12 +684,12 @@ class AtlasTUIApp(App):
                 if not symbol:
                     result_text = "KULLANIM: likidite BTC"
                 else:
-                    outcome = self.runtime.analyze_symbol(symbol, force_refresh=True)
+                    outcome = self.runtime.analyze_symbol(symbol, force_refresh=True, track_signal=False)
                     result_text = self._format_liquidity(outcome) if outcome.get("ok") else f"{symbol} likidite analizi yapılamadı: {outcome.get('error')}"
             elif scan_request is not None:
                 result_text = self._find_best_trade(*scan_request)
             else:
-                outcome = self.runtime.analyze_symbol(command, force_refresh=True)
+                outcome = self.runtime.analyze_symbol(command, force_refresh=True, track_signal=True)
                 if not outcome.get("ok"):
                     result_text = (
                         f"{command.upper()} ANALİZ EDİLEMEDİ\n\n"
@@ -877,7 +877,7 @@ class AtlasTUIApp(App):
                 f"EN İYİ İŞLEM ARANIYOR\n\nTarama {index}/{len(symbols)}: {symbol}\n"
                 "Her sembol gerçek piyasa verisiyle ayrı analiz ediliyor…",
             )
-            outcome = self.runtime.analyze_symbol(symbol, force_refresh=True)
+            outcome = self.runtime.analyze_symbol(symbol, force_refresh=True, track_signal=False)
             if not outcome.get("ok"):
                 error_text = str(outcome.get("error") or "analiz başarısız").splitlines()[0][:180]
                 errors.append(f"{symbol}: {error_text}")
@@ -919,7 +919,7 @@ class AtlasTUIApp(App):
                 continue
             # Ranking is a heuristic sort key, not a win probability.
             score = quality * 0.55 + confidence * 0.25 + min(rr, 5.0) * 4
-            candidates.append((score, card, outcome.get("elapsed_ms", 0)))
+            candidates.append((score, card, outcome.get("elapsed_ms", 0), raw))
         if not candidates:
             message = (
                 "ŞU AN GEÇERLİ İŞLEM YOK\n\n"
@@ -947,9 +947,12 @@ class AtlasTUIApp(App):
             return message
         candidates.sort(key=lambda item: item[0], reverse=True)
         shown = candidates[:max(1, min(int(result_limit), 20))]
+        # Only setups actually shown to the user are added to daily tracking.
+        for _score, _card, _elapsed, selected_raw in shown:
+            self.runtime.track_requested_result(selected_raw)
         heading = "EN İYİ KURULUMLAR" if len(shown) > 1 else "EN İYİ BULUNAN KURULUM"
         sections = [heading]
-        for rank, (score, card, elapsed) in enumerate(shown, start=1):
+        for rank, (score, card, elapsed, _raw) in enumerate(shown, start=1):
             sections.append(
                 "\n============ #" + str(rank) + " | SIRALAMA PUANI "
                 + f"{score:.1f}" + " ============\n"

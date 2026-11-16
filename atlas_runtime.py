@@ -245,7 +245,8 @@ class AtlasRuntime:
             return f"{text}/USDT:USDT"
         return text
 
-    def analyze_symbol(self, raw_symbol, force_refresh=False, track_signal=True):
+    def analyze_symbol(self, raw_symbol, force_refresh=False, track_signal=False):
+        """Analyze one symbol; journal tracking is opt-in for explicit trade requests."""
         self._set_status("ANALYZING")
         try:
             return self._analyze_symbol(raw_symbol, force_refresh=force_refresh, from_scan=False, track_signal=track_signal)

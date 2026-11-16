@@ -1,3 +1,5 @@
+import time
+
 from telegram_command_service import (
     TelegramCommandService,
     is_recognized_command,
@@ -110,3 +112,31 @@ def test_recognizes_mevcut_command():
 def test_recognizes_cached_best_five_command():
     assert is_recognized_command("/eniyi5")
     assert is_recognized_command("/eniyi5@Oakmontincbot")
+
+
+
+def test_telegram_service_ignores_queued_stale_analysis_commands(monkeypatch):
+    service = TelegramCommandService(object(), "token", "-100123")
+    called = []
+    monkeypatch.setattr(service, "execute_command", lambda command: called.append(command) or "ok")
+    monkeypatch.setattr(service, "_api", lambda *args, **kwargs: None)
+
+    service._handle_update({
+        "update_id": 10,
+        "message": {
+            "date": int(time.time()) - 600,
+            "text": "/BTC",
+            "chat": {"id": -100123},
+            "from": {"is_bot": False},
+        },
+    })
+
+    assert called == []
+
+
+def test_runtime_signal_tracking_is_opt_in_by_default():
+    import inspect
+    from atlas_runtime import AtlasRuntime
+
+    parameter = inspect.signature(AtlasRuntime.analyze_symbol).parameters["track_signal"]
+    assert parameter.default is False

@@ -16,6 +16,7 @@ import requests
 
 TELEGRAM_API = "https://api.telegram.org"
 MAX_MESSAGE_LENGTH = 3900
+MAX_COMMAND_AGE_SECONDS = 120
 
 
 def normalize_command(value: str) -> str:
@@ -288,6 +289,16 @@ class TelegramCommandService:
         sender = message.get("from") or {}
         if str(chat.get("id", "")) != self.chat_id or sender.get("is_bot"):
             return
+        # Telegram can replay queued updates after a service restart. Ignore
+        # old commands so an outage cannot trigger unattended analyses.
+        try:
+            message_ts = int(message.get("date") or 0)
+        except (TypeError, ValueError, OverflowError):
+            message_ts = 0
+        now_ts = int(datetime.now().timestamp())
+        if not message_ts or now_ts - message_ts > MAX_COMMAND_AGE_SECONDS or message_ts - now_ts > 30:
+            self.logger.info("Ignoring stale Telegram update")
+            return
         raw_command = str(message.get("text") or "").strip()
         command = normalize_command(raw_command)
         if not command or not is_recognized_command(raw_command):
@@ -377,7 +388,9 @@ class TelegramCommandService:
                     raw = (cached or {}).get("result") or {}
                     scanned = {"ok": bool(raw)}
                 else:
-                    scanned = self.runtime.analyze_symbol(symbol, force_refresh=True)
+                    scanned = self.runtime.analyze_symbol(
+                        symbol, force_refresh=True, track_signal=False
+                    )
                     raw = scanned.get("result") or {}
                 if not scanned.get("ok"):
                     continue
@@ -417,15 +430,18 @@ class TelegramCommandService:
                     return "ATLAS | EN İYİ 5 SETUP\nArka plan tarama havuzunda henüz güncel ve geçerli setup yok. İlk tarama döngüsünün tamamlanmasını bekle."
                 return f"ATLAS | TARAMA\nTaranan piyasa: {len(symbols)}\\nGeçerli MARKET/LIMIT setup bulunamadı."
             shown = candidates[:max(1, min(int(result_limit), 20))]
-            if cached_best_request:
-                for _score, _selected_card, selected_raw in shown:
-                    self.runtime.track_requested_result(selected_raw)
+            # Bulk analysis inspects every market, but only displayed setups
+            # are registered as user-requested daily signals.
+            for _score, _selected_card, selected_raw in shown:
+                self.runtime.track_requested_result(selected_raw)
             lines = [f"ATLAS | EN İYİ {len(shown)} SETUP", f"Taranan piyasa: {len(symbols)}"]
             for rank, (_score, card, _raw) in enumerate(shown, start=1):
                 lines.extend(["", f"#{rank}", _format_telegram_card(card)])
             return "\n".join(lines)
 
-        outcome = self.runtime.analyze_symbol(normalized, force_refresh=True)
+        outcome = self.runtime.analyze_symbol(
+            normalized, force_refresh=True, track_signal=True
+        )
         if not outcome.get("ok"):
             return (
                 f"{normalized.upper()} ANALİZ EDİLEMEDİ\n\n"
