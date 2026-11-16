@@ -311,7 +311,10 @@ class GatePublicStream:
                         "source": "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS",
                     })
             orderbook = None
-            if self._book_synced and self._book_bids and self._book_asks:
+            # A valid incremental update may delete the final level on one side.
+            # Keep the synchronized book visible; downstream depth checks can reject
+            # a one-sided/empty book without misclassifying it as a sequence failure.
+            if self._book_synced and (self._book_bids or self._book_asks):
                 orderbook = {
                     "symbol": self.symbol,
                     "bids": [[p, q] for p, q in sorted(self._book_bids.items(), reverse=True)[:50]],
