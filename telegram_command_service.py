@@ -101,7 +101,15 @@ def format_daily_signal_report(outcomes, now=None):
     positive = sum(max(0.0, float(item.get("realized_r") or 0.0)) for item in completed)
     negative = sum(min(0.0, float(item.get("realized_r") or 0.0)) for item in completed)
     reached_count = sum(
-        bool(item.get("entry_reached", str(item.get("status") or "").upper() in terminal))
+        item.get("entry_tracking_source") == "closed_ohlc"
+        or (
+            "entry_tracking_source" not in item
+            and bool(item.get("entry_reached", str(item.get("status") or "").upper() in terminal))
+        )
+        for item in daily
+    )
+    market_reference_count = sum(
+        item.get("entry_tracking_source") == "market_reference"
         for item in daily
     )
     lines = [
@@ -109,7 +117,8 @@ def format_daily_signal_report(outcomes, now=None):
         f"{today:%d.%m.%Y}",
         "",
         f"Verilen setup: {len(daily)}",
-        f"Giriş seviyesi görüldü: {reached_count}",
+        f"Giriş seviyesi mumda görüldü: {reached_count}",
+        f"MARKET referansı (fill teyitsiz): {market_reference_count}",
         f"Giriş bekliyor: {len(waiting)}",
         f"Giriş olmadı (süresi doldu): {len(no_entry)}",
     ]
