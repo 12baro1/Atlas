@@ -4,7 +4,7 @@ import math
 """Independent liquidation_cascade setup generator."""
 
 def generate(data):
-    from strategy_lab import _atr, _value, _candle_quality, _relative_volume, _trade_flow, _current_price, _valid_plan, _entry_reference, _structure_candle_sets, liquidation_events
+    from strategy_lab import _atr, _value, _candle_quality, _relative_volume, _trade_flow, _current_price, _raw_candidate, _entry_reference, liquidation_events
     """Detect a liquidation-like deleveraging impulse; OI is a proxy, not event data."""
     candles = data.get("1h") or []
     oi = data.get("open_interest") or []
@@ -100,7 +100,7 @@ def generate(data):
         strength = min(95.0, strength + 3.0)
     elif event_alignment == "OPPOSING":
         strength = max(55.0, strength - 2.0)
-    plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
+    plan = _raw_candidate(direction, entry, stop, atr, "liquidation_cascade", strength, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = [
             f"Open interest contraction={oi_change * 100:.2f}% over timestamped observations",

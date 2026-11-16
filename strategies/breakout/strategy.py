@@ -2,7 +2,7 @@
 
 
 def generate(data):
-    from strategy_lab import _series, _atr, _bollinger, volatility_regime, breakout_acceptance, _value, _candle_quality, _relative_volume, _current_price, _valid_plan, _entry_reference, _structure_candle_sets
+    from strategy_lab import _series, _atr, _bollinger, volatility_regime, breakout_acceptance, _value, _candle_quality, _relative_volume, _current_price, _raw_candidate, _entry_reference
     candles = data.get("1h") or []
     closes = _series(candles)
     atr = _atr(candles)
@@ -57,7 +57,7 @@ def generate(data):
     strength = min(93.0, 61.0 + min(max(0.0, volume_ratio - 1.30) * 10.0, 15.0)
                    + min(quality["body_ratio"] * 10.0, 8.0)
                    + min(quality["range"] / atr * 5.0, 7.0))
-    plan = _valid_plan(direction, entry, stop, atr, candles, "volatility_breakout", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
+    plan = _raw_candidate(direction, entry, stop, atr, "volatility_breakout", strength, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = [
             f"1H 20-candle close breakout after volatility compression (bandwidth={prior_width:.4f})",

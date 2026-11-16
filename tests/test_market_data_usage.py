@@ -216,8 +216,11 @@ def test_liquidation_setup_from_aligned_timestamped_oi_pairs():
     assert plan["strategy_id"] == "liquidation_cascade"
     assert plan["direction"] == "LONG"
     assert plan["entry"] == 100.0
-    assert plan["stop_loss"] < 98
-    assert plan["tp1"] == pytest.approx(104.0)
+    # Native generators publish raw pattern setups; shared geometry belongs
+    # to SevenStrategyLab's common filter, not the strategy package.
+    assert plan["initial_stop_loss"] < 98
+    assert "stop_loss" not in plan
+    assert not any(key in plan for key in ("tp1", "tp2", "tp3"))
     metrics = plan["liquidation_metrics"]
     assert metrics["oi_change_pct"] == pytest.approx(-5.0)
     assert metrics["event_alignment"] == "UNAVAILABLE"

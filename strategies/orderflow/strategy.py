@@ -29,7 +29,7 @@ def _absorption_proxy(flow, candle, atr):
 def generate(data):
     from strategy_lab import (
         _atr, _ORDERBOOK_ENGINE, _value, _candle_quality, _current_price,
-        _valid_plan, _entry_reference, _structure_candle_sets, displacement,
+        _raw_candidate, _entry_reference, displacement,
         cumulative_volume_delta, build_orderflow_evidence,
     )
     from strategies.orderflow.analytics import (
@@ -143,9 +143,9 @@ def generate(data):
     if absorption or liquidation.get("confirmed"):
         strength = min(94.0, strength + 2.0)
     stop = entry + 1.5 * atr if direction == "SHORT" else entry - 1.5 * atr
-    plan = _valid_plan(
-        direction, entry, stop, atr, candles, "orderflow_momentum", strength,
-        entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data),
+    plan = _raw_candidate(
+        direction, entry, stop, atr, "orderflow_momentum", strength,
+        entry_reference=_entry_reference(data),
     )
     if plan:
         reasons = [
