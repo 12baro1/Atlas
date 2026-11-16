@@ -84,3 +84,12 @@ def test_funding_history_uses_exchange_settlement_timestamps():
         "fundingRate": 0.0002,
         "info": {"settleTime": 1699990000000, "fundingRate": 0.0002},
     }]
+
+
+def test_all_tickers_are_normalized_for_the_active_market_universe():
+    exchange = FakeMexc()
+    exchange.load_markets()
+    tickers = exchange.fetch_tickers(["BTC/USDT:USDT"])
+    assert list(tickers) == ["BTC/USDT:USDT"]
+    assert tickers["BTC/USDT:USDT"]["last"] == 101
+    assert tickers["BTC/USDT:USDT"]["baseVolume"] == 2.0
