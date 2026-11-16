@@ -126,13 +126,12 @@ Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Ge
 
 `strategies/orderflow/` altında Order Flow'a özel veri bileşenleri bulunur:
 
-- `websocket_collector.py`: Gate.io V5 public linear akışından L2 order book, public trades ve liquidation event mesajlarını toplar.
-- `analytics.py`: gerçekleşen agresör notional'ından CVD ve footprint, L2'den görüntülenen liquidity wall, trade/candle verisinden açıkça proxy olarak etiketlenen absorption kanıtı üretir.
-- `strategy_lab.py` içindeki Order Flow Momentum adayı, taze order book ve taker trade delta yanında arşivlenmiş CVD yönünü de devam işlemlerinde kullanır. CVD ters yöndeyse continuation adayı oluşturmaz. CVD geçmişi yoksa `UNAVAILABLE` kalır; geçmiş veri uydurulmaz.
-- WebSocket collector'ın tuttuğu trade akışı ve liquidation olayları yalnızca alındıkları zaman damgalarıyla raporlanır. Geçmiş L2/trade verisi geriye dönük oluşturulamaz.
+- `gateio_public_stream.py`: Gate.io USDT Futures WebSocket üzerinden public trades, ticker ve `futures.public_liquidates` (`!all`) akışını toplar. `!all` liquidation aboneliği süreç içinde tek bağlantı olarak paylaşılır.
+- Order book, OHLCV, ticker ve REST trade verileri Gate.io Futures REST API'den alınır. WebSocket order book sağlamaz; order book kaynağı REST'tir.
+- `analytics.py`: gerçekleşen agresör notional'ından CVD ve footprint, REST L2 order book'tan görüntülenen liquidity wall, trade/candle verisinden açıkça proxy olarak etiketlenen absorption kanıtı üretir.
+- Trade akışı ve liquidation olayları yalnızca Gate.io'dan gerçekten alındıkları zaman damgalarıyla raporlanır. Geçmiş L2/trade verisi geriye dönük oluşturulamaz.
+- WebSocket verisi yoksa Gate.io REST verisi kullanılabilir. Gate.io erişilemezse başka borsaya geçilmez; ilgili feed `UNAVAILABLE` kalır.
 - Absorption ve liquidity wall sonuçları kesin emir niyeti değildir: absorption bir çıkarım, wall ise iptal edilebilir görüntülenen derinliktir.
-
-WebSocket istemcisi kurulmamışsa veya bağlantı kurulamıyorsa Atlas mevcut REST fallback ile analiz yapar. Bu durumda gerçek zamanlı WebSocket kapsamı varmış gibi kabul edilmez.
 
 ## 7 strateji analizi
 
