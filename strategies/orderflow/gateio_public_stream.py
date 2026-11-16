@@ -14,6 +14,10 @@ GATE_WS_URL = "wss://fx-ws.gateio.ws/v4/ws/usdt"
 class GatePublicStream:
     _instances = {}
     _instances_lock = threading.RLock()
+    _liquidation_owner = None
+    _liquidation_lock = threading.RLock()
+    _shared_liquidations = deque(maxlen=50000)
+    _shared_liquidation_ids = set()
 
     @classmethod
     def for_symbol(cls, symbol):
@@ -57,16 +61,22 @@ class GatePublicStream:
             return False
         self._stop.clear()
 
+        with self._liquidation_lock:
+            if self.__class__._liquidation_owner is None:
+                self.__class__._liquidation_owner = self
+            owns_liquidations = self.__class__._liquidation_owner is self
+
         def worker():
             while not self._stop.is_set():
                 ws = None
                 try:
                     ws = websocket.create_connection(GATE_WS_URL, timeout=10, enable_multithread=True)
-                    subscriptions = (
+                    subscriptions = [
                         ("futures.trades", [self.contract]),
                         ("futures.tickers", [self.contract]),
-                        ("futures.public_liquidates", ["!all"]),
-                    )
+                    ]
+                    if owns_liquidations:
+                        subscriptions.append(("futures.public_liquidates", ["!all"]))
                     for channel, payload in subscriptions:
                         ws.send(json.dumps({"time": int(time.time()), "channel": channel,
                                             "event": "subscribe", "payload": payload}))
@@ -123,29 +133,30 @@ class GatePublicStream:
         rows = result if isinstance(result, list) else [result] if isinstance(result, dict) else []
         with self._lock:
             if channel == "futures.public_liquidates":
-                for row in rows:
-                    try:
-                        contract = str(row.get("contract") or "").upper()
-                        price = float(row["price"])
-                        size = float(row["size"]) * self._contract_size
-                        stamp = int(row.get("time") or now_ms)
-                        if stamp < 10_000_000_000:
-                            stamp *= 1000
-                        if not contract or price <= 0 or size == 0 or not math.isfinite(price * size):
+                # One !all feed is shared; scale only after filtering to this symbol.
+                with self.__class__._liquidation_lock:
+                    for row in rows:
+                        try:
+                            contract = str(row.get("contract") or "").upper()
+                            price = float(row["price"])
+                            raw_size = float(row["size"])
+                            stamp = int(row.get("time") or now_ms)
+                            if stamp < 10_000_000_000:
+                                stamp *= 1000
+                            if not contract or price <= 0 or raw_size == 0 or not math.isfinite(price * raw_size):
+                                continue
+                            event_id = f"gate:{contract}:{stamp}:{price}:{raw_size}"
+                            if event_id in self.__class__._shared_liquidation_ids:
+                                continue
+                            self.__class__._shared_liquidations.append({
+                                "event_id": event_id, "contract": contract, "raw_size": raw_size,
+                                "price": price, "timestamp_ms": stamp,
+                            })
+                            self.__class__._shared_liquidation_ids.add(event_id)
+                        except (KeyError, TypeError, ValueError, OverflowError):
                             continue
-                        event_id = f"gate:{contract}:{stamp}:{price}:{size}"
-                        if event_id in self._seen:
-                            continue
-                        self._liquidations.append({
-                            "event_id": event_id, "exchange": "GATEIO_FUTURES",
-                            "symbol": contract.split("_")[0], "product_id": contract,
-                            "event_type": "liquidation", "side": "SELL" if size < 0 else "BUY",
-                            "timestamp_ms": stamp, "price": price, "quantity": abs(size),
-                            "notional": price * abs(size), "source": "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS",
-                        })
-                        self._seen.add(event_id)
-                    except (KeyError, TypeError, ValueError, OverflowError):
-                        continue
+                    retained = {row["event_id"] for row in self.__class__._shared_liquidations}
+                    self.__class__._shared_liquidation_ids.intersection_update(retained)
             elif channel == "futures.trades":
                 for row in rows:
                     try:
@@ -181,8 +192,22 @@ class GatePublicStream:
             now = int(now_ms or time.time() * 1000)
         with self._lock:
             trades = [dict(row) for row in self._trades if 0 <= now - row["timestamp_ms"] <= 30000]
-            liquidations = [dict(row) for row in self._liquidations
-                            if row["symbol"] == self.base and 0 <= now - row["timestamp_ms"] <= 120000]
+            with self.__class__._liquidation_lock:
+                liquidations = []
+                for raw in self.__class__._shared_liquidations:
+                    if raw["contract"].split("_")[0] != self.base:
+                        continue
+                    if not 0 <= now - raw["timestamp_ms"] <= 120000:
+                        continue
+                    size = raw["raw_size"] * self._contract_size
+                    liquidations.append({
+                        "event_id": raw["event_id"], "exchange": "GATEIO_FUTURES",
+                        "symbol": self.base, "product_id": raw["contract"],
+                        "event_type": "liquidation", "side": "SELL" if size < 0 else "BUY",
+                        "timestamp_ms": raw["timestamp_ms"], "price": raw["price"],
+                        "quantity": abs(size), "notional": raw["price"] * abs(size),
+                        "source": "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS",
+                    })
             connected = self._connected
             last_message = self._last_message_ms
             last_error = self._last_error
