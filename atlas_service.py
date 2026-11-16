@@ -1,7 +1,7 @@
 """Headless long-running Atlas market-analysis service.
 
 This service runs the same seven-strategy AtlasRuntime used by the terminal UI.
-It only reads public Bybit market data and never submits exchange orders.
+It only reads public Gate.io market data and never submits exchange orders.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def configured_max_symbols(raw_value: str | None) -> int:
 
 
 def select_live_symbols(markets, max_symbols: int = DEFAULT_MAX_SYMBOLS):
-    """Select active Bybit USDT perpetual swaps for the headless scanner."""
+    """Select active Gate.io USDT perpetual swaps for the headless scanner."""
     from universe_engine import select_symbols
 
     return select_symbols(
@@ -76,11 +76,11 @@ def main() -> int:
     if interval <= 0:
         raise ValueError("ATLAS_SCAN_INTERVAL_SECONDS must be greater than zero")
 
-    logger.info("Loading Bybit public market metadata")
+    logger.info("Loading Gate.io public perpetual market metadata")
     markets = exchange.load_markets()
     symbols, selection_stats = select_live_symbols(markets, max_symbols=max_symbols)
     if not symbols:
-        raise RuntimeError("No active USDT perpetual swap symbols were found on Bybit")
+        raise RuntimeError("No active USDT perpetual swap symbols were found on Gate.io")
 
     runtime = AtlasRuntime(symbols=symbols, logger=logger, full_scan=True)
     telegram_commands = create_telegram_command_service(runtime, logger=logger)

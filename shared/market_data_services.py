@@ -109,7 +109,7 @@ def _liquidation_evidence(events, now_ms):
         side = str(event.get("side") or "").upper()
         if notional is None or notional <= 0 or side not in {"BUY", "SELL"}:
             continue
-        # Bybit allLiquidation S is position side, not taker side:
+        # Gate.io public liquidation S is position side, not taker side:
         # BUY = a long position was liquidated; SELL = a short was liquidated.
         if side == "BUY":
             long_notional += notional

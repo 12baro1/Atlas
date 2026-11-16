@@ -70,6 +70,9 @@ def _load_cached_candles(symbol, timeframe, since_ms, now_ms):
     try:
         with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
+        # Reject legacy caches created by any pre-Gate.io provider.
+        if not isinstance(payload, dict) or payload.get("provider") != "GATEIO":
+            return None
         rows = payload.get("rows") or []
         candles = []
         for r in rows:
@@ -105,7 +108,7 @@ def _save_cached_candles(symbol, timeframe, candles):
     try:
         rows = [[c.time, c.open, c.high, c.low, c.close, c.volume] for c in candles]
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({"rows": rows}, f)
+            json.dump({"provider": "GATEIO", "rows": rows}, f)
     except OSError as exc:
         logging.warning("Cache yazımı başarısız | %s %s: %s", symbol, timeframe, exc)
 
@@ -116,7 +119,7 @@ def _market_listing_time_ms(symbol):
         markets = exchange.load_markets()
     except Exception as exc:
         raise RuntimeError(
-            f"{symbol}: Bybit market metadata yüklenemedi: "
+            f"{symbol}: Gate.io market metadata yüklenemedi: "
             f"{type(exc).__name__}: {exc}"
         ) from exc
 
@@ -138,7 +141,7 @@ def _market_listing_time_ms(symbol):
         logging.warning("%s için geçersiz listing timestamp: %r", symbol, raw_timestamp)
         return None
 
-    # Normalize second-based timestamps while preserving Bybit's millisecond values.
+    # Normalize second-based timestamps while preserving Gate.io's millisecond values.
     if timestamp < 10_000_000_000:
         timestamp *= 1000
     return timestamp
@@ -196,52 +199,21 @@ def _disable_backtest_live_features():
     Config.TRADE_COOLDOWN_MINUTES = 0.0
 
 
-_history_fallback_exchange = None
-_history_provider_name = "Bybit"
-
-
-def _create_history_fallback_exchange():
-    """Binance USD-M public futures OHLCV fallback for regions blocking Bybit."""
-    return ccxt.binanceusdm({
-        "enableRateLimit": True,
-        "options": {"defaultType": "future"},
-    })
-
-
-def _is_geoblock_error(exc):
-    message = str(exc).lower()
-    return "403" in message or "cloudfront" in message or "configured to block" in message
+_history_provider_name = "Gate.io"
 
 
 def _fetch_history_batch(symbol, timeframe, cursor, limit):
-    global _history_fallback_exchange, _history_provider_name
-    if _history_fallback_exchange is not None:
-        batch = _history_fallback_exchange.fetch_ohlcv(
-            symbol, timeframe, since=cursor, limit=limit
-        )
-        _history_provider_name = "Binance USD-M Futures (Bybit 403 fallback)"
-        return batch
+    """Fetch historical candles exclusively from Gate.io; never cross exchanges."""
+    global _history_provider_name
+    _history_provider_name = "Gate.io"
     try:
         return exchange.fetch_ohlcv(symbol, timeframe, since=cursor, limit=limit)
     except Exception as exc:
-        if not _is_geoblock_error(exc):
-            raise
-        logging.warning(
-            "Bybit 403 engeli; tarihsel OHLCV için Binance USD-M Futures deneniyor."
-        )
-        _history_fallback_exchange = _create_history_fallback_exchange()
-        try:
-            batch = _history_fallback_exchange.fetch_ohlcv(
-                symbol, timeframe, since=cursor, limit=limit
-            )
-        except Exception as fallback_exc:
-            _history_fallback_exchange = None
-            raise RuntimeError(
-                f"Bybit 403 verdi; Binance USD-M yedeği de başarısız: "
-                f"{type(fallback_exc).__name__}: {fallback_exc}"
-            ) from fallback_exc
-        _history_provider_name = "Binance USD-M Futures (Bybit 403 fallback)"
-        return batch
+        raise RuntimeError(
+            f"Gate.io tarihsel OHLCV alınamadı ({symbol} {timeframe}); "
+            "başka borsaya geçiş yapılmadı. "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def _fetch_history(symbol, timeframe, since_ms, limit=1000):
@@ -294,7 +266,7 @@ def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None,
                     use_cache=True):
     """Load evaluation history, clamped to the market's actual listing date.
 
-    Gerçek Bybit OHLCV verisi CCXT üzerinden indirilir ve yerel cache'e
+    Gerçek Gate.io OHLCV verisi CCXT üzerinden indirilir ve yerel cache'e
     kaydedilir. Aynı tarih aralığındaki sonraki backtest
     cache'den okunur; baştan indirilmez. Sahte veya rastgele veri üretilmez.
     ``use_cache=False`` testi ve izole ortamlar için cache'i atlar.
@@ -336,7 +308,7 @@ def load_historical(symbol, days=60, now_ms=None, listing_time_ms=None,
         candles = _fetch_history(
             symbol, tf, since_ms=since, limit=fetch_limit
         )
-        # Bybit includes the currently-forming candle in OHLCV responses.
+        # Gate.io includes the currently-forming candle in OHLCV responses.
         # A historical decision may only use candles that were fully closed
         # at the backtest's fixed as-of timestamp.
         candles = [candle for candle in candles if candle.time + duration_ms <= now]
@@ -413,7 +385,7 @@ def _validate_backtest_history(data, symbol):
         raise RuntimeError(
             f"{symbol}: 15m geçmişi yetersiz ({counts['15m']} mum; "
             f"en az {minimum} gerekli). Backtest başlatılmadı. "
-            "Bybit OHLCV erişimini ve tarihsel veri sınırını kontrol edin."
+            "Gate.io OHLCV erişimini ve tarihsel veri sınırını kontrol edin."
         )
     return counts
 
@@ -909,7 +881,7 @@ def _effective_now_ms(data):
     """Backtest referans zamanı: veri bize verdiği son kapanmış mumun kapanışı.
 
     Backtest "gerçek şu an" yerine exchange'in sunduğu son kapanış anı üzerinden
-    replay yapar. Böylece Bybit'in henüz kapanmamış mumundan kaynaklanan
+    replay yapar. Böylece Gate.io'in henüz kapanmamış mumundan kaynaklanan
     freshness hatası alınmaz ve tarihsel veri tutarlı kalır.
     """
     last_closes = []
@@ -1207,7 +1179,7 @@ def _git_revision():
 
 def main():
     parser = argparse.ArgumentParser(description="Atlas sinyal backtest")
-    parser.add_argument("--symbol", default="BTC/USDT:USDT", help="Tek sembol (Bybit swap)")
+    parser.add_argument("--symbol", default="BTC/USDT:USDT", help="Tek sembol (Gate.io swap)")
     parser.add_argument("--symbols", help="Virgülle ayrılmış sembol listesi (çoklu tarama; --symbol'dan öncelikli)")
     parser.add_argument("--days", type=int, default=60, help="Kaç gün geriye gidilecek")
     parser.add_argument("--step", type=int, default=1, help="Kaç adet 15m mumda bir analiz yapılacağı (varsayılan: 1 = her 15 dakika)")

@@ -58,11 +58,14 @@ def test_fetch_keeps_valid_closed_candle_with_zero_volume(monkeypatch):
 
 def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monkeypatch):
     from core.candle import Candle
-    from strategies.orderflow.websocket_collector import BybitPublicStream
+    from strategies.orderflow.gateio_public_stream import GatePublicStream
 
     now = 1_700_000_000_000
 
     class FakeExchange:
+        def contract_size(self, _symbol):
+            return 1.0
+
         def milliseconds(self):
             return now
 
@@ -88,15 +91,18 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
             return {"last": 100.0, "timestamp": now}
 
     class FakeStream:
+        def set_contract_size(self, _size):
+            return None
+
         def start(self):
             return True
 
-        def snapshot(self, _now):
+        def snapshot(self, _now, wait_ms=None):
             # A connected socket with no topic data must not be reported as a
             # live order book/trade/liquidation feed.
             return {
                 "connected": True,
-                "source": "BYBIT_V5_PUBLIC_WEBSOCKET",
+                "source": "GATEIO_FUTURES_PUBLIC_WEBSOCKET",
                 "orderbook": None,
                 "recent_trades": [],
                 "trade_flow_history": [],
@@ -109,13 +115,13 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
         Candle(time=now - 3_600_000, open=100, high=102, low=98, close=101, volume=10)
     ])
     monkeypatch.setattr(data_engine, "configured_sector_peers", lambda _symbol: [])
-    monkeypatch.setattr(BybitPublicStream, "for_symbol", classmethod(lambda cls, _symbol: FakeStream()))
+    monkeypatch.setattr(GatePublicStream, "for_symbol", classmethod(lambda cls, _symbol: FakeStream()))
 
     data = data_engine.get_market_data("BTC/USDT:USDT", force_refresh=True)
 
-    assert data["data_provenance"]["orderbook"] == "BYBIT_REST"
-    assert data["data_provenance"]["recent_trades"] == "BYBIT_REST"
-    assert data["data_provenance"]["open_interest"] == "BYBIT_REST_SNAPSHOT"
+    assert data["data_provenance"]["orderbook"] == "GATEIO_REST"
+    assert data["data_provenance"]["recent_trades"] == "GATEIO_REST"
+    assert data["data_provenance"]["open_interest"] == "GATEIO_REST_SNAPSHOT"
     assert data["open_interest_timestamps_ms"] == [now - 2_000]
     assert data["funding_rate_timestamps_ms"] == [now - 3_000]
     assert data["shared_market_evidence"]["sources"]["orderbook"]["state"] == "FRESH"

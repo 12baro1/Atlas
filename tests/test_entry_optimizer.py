@@ -82,7 +82,7 @@ def test_proxy_evidence_has_less_entry_weight_than_live_evidence():
     live = EntryOptimizer().optimize(
         live_entry, current_price=120.0,
         institutional={"active": True, "direction": "BULLISH", "confidence": 90,
-                       "cvd": {"source": "bybit_recent_trades", "is_proxy": False}},
+                       "cvd": {"source": "gateio_recent_trades", "is_proxy": False}},
     )
     proxy = EntryOptimizer().optimize(
         proxy_entry, current_price=120.0,
@@ -116,7 +116,7 @@ def test_timestamp_validated_trade_flow_is_mixed_not_fully_native():
     result = EntryOptimizer().optimize(
         entry, current_price=120.0,
         institutional={"active": True, "direction": "BULLISH", "confidence": 90,
-                       "cvd": {"source": "bybit_recent_trades", "is_proxy": False,
+                       "cvd": {"source": "gateio_recent_trades", "is_proxy": False,
                                "timestamp_validated": True}},
     )
     evidence = next(x for x in result["evidence"] if x["source"] == "institutional_flow")

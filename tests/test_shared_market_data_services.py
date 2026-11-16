@@ -26,11 +26,11 @@ def test_shared_evidence_tracks_each_source_independently():
         "funding_rate": [0.0001],
         "funding_rate_timestamps_ms": [now - 60_000],
         "data_provenance": {
-            "orderbook": "BYBIT_V5_PUBLIC_WEBSOCKET",
-            "recent_trades": "BYBIT_REST",
-            "liquidations": "BYBIT_V5_PUBLIC_WEBSOCKET",
-            "open_interest": "BYBIT_REST_HISTORY",
-            "funding_rate": "BYBIT_REST_SNAPSHOT",
+            "orderbook": "GATEIO_FUTURES_PUBLIC_WEBSOCKET",
+            "recent_trades": "GATEIO_REST",
+            "liquidations": "TEST_FIXTURE",
+            "open_interest": "GATEIO_REST_OBSERVED_SNAPSHOTS",
+            "funding_rate": "GATEIO_REST_SNAPSHOT",
         },
         "correlation_universe": {"BTC": [1, 2]},
         "sector_peer_universe": {"SOL/USDT:USDT": {"4h": [1, 2, 3]}},
@@ -38,8 +38,8 @@ def test_shared_evidence_tracks_each_source_independently():
 
     result = build_shared_market_evidence(data)
 
-    assert result["sources"]["orderbook"]["source"] == "BYBIT_V5_PUBLIC_WEBSOCKET"
-    assert result["sources"]["trades"]["source"] == "BYBIT_REST"
+    assert result["sources"]["orderbook"]["source"] == "GATEIO_FUTURES_PUBLIC_WEBSOCKET"
+    assert result["sources"]["trades"]["source"] == "GATEIO_REST"
     assert result["orderbook"]["freshness"]["state"] == "FRESH"
     assert result["orderbook"]["imbalance"] > 0
     assert result["trades"]["trade_count"] == 2

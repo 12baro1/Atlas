@@ -1,4 +1,4 @@
-"""Historical Bybit derivatives series for leak-free strategy replay.
+"""Historical Gate.io derivatives series for leak-free strategy replay.
 
 Missing or unsupported endpoints return explicit empty series plus diagnostics;
 the caller must never substitute current snapshots for historical values.

@@ -100,7 +100,7 @@ class MarketRegimeEngine:
             "volatility_ratio": round(volatility_ratio, 4),
             "atr": round(atr_fast, 10),
             "timeframe": "4h",
-            "source": "bybit_ohlcv",
+            "source": "gateio_ohlcv",
             "reason": self._reason(regime, bias),
         }
 
@@ -124,7 +124,7 @@ class MarketRegimeEngine:
             "volatility_ratio": None,
             "atr": None,
             "timeframe": "4h",
-            "source": "bybit_ohlcv",
+            "source": "gateio_ohlcv",
             "reason": reason,
         }
 

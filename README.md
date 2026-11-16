@@ -1,8 +1,8 @@
 # Atlas
 
-Atlas, Bybit USDT perpetual piyasalarını terminal üzerinden analiz eder. Tek coin analizinde 7 ayrı stratejiyi çalıştırır: Trend Following + Pullback, Volatility Breakout, Mean Reversion, Liquidation Cascade (açık pozisyon daralması proxy'si), Order Flow Momentum, Relative Strength ve mevcut SMC motoru. Android UserLAnd/Ubuntu ve Linux üzerinde kullanılabilir.
+Atlas, Gate.io USDT perpetual piyasalarını terminal üzerinden analiz eder. Tek coin analizinde 7 ayrı stratejiyi çalıştırır: Trend Following + Pullback, Volatility Breakout, Mean Reversion, Liquidation Cascade (açık pozisyon daralması proxy'si), Order Flow Momentum, Relative Strength ve mevcut SMC motoru. Android UserLAnd/Ubuntu ve Linux üzerinde kullanılabilir.
 
-**Bu sürüm analiz aracıdır; otomatik al-sat yapmaz.** Borsaya emir veya pozisyon göndermez. Analiz için herkese açık piyasa verilerini kullanır. Bybit API anahtarı gerekmez.
+**Bu sürüm analiz aracıdır; otomatik al-sat yapmaz.** Borsaya emir veya pozisyon göndermez. Analiz için herkese açık piyasa verilerini kullanır. Gate.io public futures API anahtarı gerekmez.
 
 ## Gereksinimler
 
@@ -57,7 +57,7 @@ Belirli bir sembolle doğrudan açmak için:
 
 ## VPS üzerinde sürekli canlı analiz servisi
 
-Sunucu servisi, terminal arayüzünü açmadan aynı `AtlasRuntime` ve `AtlasEngine` analiz hattını arka planda çalıştırır. Tek coin analizindeki yedi strateji, ortak analiz servisleri ve tek karar mekanizması değiştirilmez. Varsayılan sembol sınırı yoktur; Bybit'teki desteklenen aktif USDT perpetual piyasalarının tamamı taranır. İstersen `.env` içinde `ATLAS_MAX_SYMBOLS` ile kendin sınır koyabilirsin.
+Sunucu servisi, terminal arayüzünü açmadan aynı `AtlasRuntime` ve `AtlasEngine` analiz hattını arka planda çalıştırır. Tek coin analizindeki yedi strateji, ortak analiz servisleri ve tek karar mekanizması değiştirilmez. Varsayılan sembol sınırı yoktur; Gate.io'teki desteklenen aktif USDT perpetual piyasalarının tamamı taranır. İstersen `.env` içinde `ATLAS_MAX_SYMBOLS` ile kendin sınır koyabilirsin.
 
 ```bash
 cd ~/Atlas
@@ -126,13 +126,12 @@ Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Ge
 
 `strategies/orderflow/` altında Order Flow'a özel veri bileşenleri bulunur:
 
-- `websocket_collector.py`: Bybit V5 public linear akışından L2 order book, public trades ve liquidation event mesajlarını toplar.
-- `analytics.py`: gerçekleşen agresör notional'ından CVD ve footprint, L2'den görüntülenen liquidity wall, trade/candle verisinden açıkça proxy olarak etiketlenen absorption kanıtı üretir.
-- `strategy_lab.py` içindeki Order Flow Momentum adayı, taze order book ve taker trade delta yanında arşivlenmiş CVD yönünü de devam işlemlerinde kullanır. CVD ters yöndeyse continuation adayı oluşturmaz. CVD geçmişi yoksa `UNAVAILABLE` kalır; geçmiş veri uydurulmaz.
-- WebSocket collector'ın tuttuğu trade akışı ve liquidation olayları yalnızca alındıkları zaman damgalarıyla raporlanır. Geçmiş L2/trade verisi geriye dönük oluşturulamaz.
+- `gateio_public_stream.py`: Gate.io USDT Futures WebSocket üzerinden public trades, ticker ve `futures.public_liquidates` (`!all`) akışını toplar. `!all` liquidation aboneliği süreç içinde tek bağlantı olarak paylaşılır.
+- Order book, OHLCV, ticker ve REST trade verileri Gate.io Futures REST API'den alınır. WebSocket order book sağlamaz; order book kaynağı REST'tir.
+- `analytics.py`: gerçekleşen agresör notional'ından CVD ve footprint, REST L2 order book'tan görüntülenen liquidity wall, trade/candle verisinden açıkça proxy olarak etiketlenen absorption kanıtı üretir.
+- Trade akışı ve liquidation olayları yalnızca Gate.io'dan gerçekten alındıkları zaman damgalarıyla raporlanır. Geçmiş L2/trade verisi geriye dönük oluşturulamaz.
+- WebSocket verisi yoksa Gate.io REST verisi kullanılabilir. Gate.io erişilemezse başka borsaya geçilmez; ilgili feed `UNAVAILABLE` kalır.
 - Absorption ve liquidity wall sonuçları kesin emir niyeti değildir: absorption bir çıkarım, wall ise iptal edilebilir görüntülenen derinliktir.
-
-WebSocket istemcisi kurulmamışsa veya bağlantı kurulamıyorsa Atlas mevcut REST fallback ile analiz yapar. Bu durumda gerçek zamanlı WebSocket kapsamı varmış gibi kabul edilmez.
 
 ## 7 strateji analizi
 
@@ -182,7 +181,7 @@ python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30 --persist
 
 Performans kayıtları sembol, rejim ve kod revizyonuna göre ayrılır. Kod revizyonu değiştiğinde eski sonuçlar yeni sürümün seçiminde kullanılmaz. Minimum örneklem ve güven sınırı geçilmeden deneysel strateji seçime terfi etmez.
 
-**Tarihsel veri sınırı:** OI ve funding geçmişi Bybit'in tarihsel uç noktalarından zaman damgasıyla alınır. Veri kapsaması HISTORICAL, PARTIAL veya UNAVAILABLE olarak raporlanır. Funding ödemeleri pozisyon yönüne göre modellenir; olumsuz debiler maliyete yazılır, olumlu krediler muhafazakâr biçimde kazanç sayılmaz. Kısmi funding geçmişiyle sonuç üretilebilir ancak bu sonuç strateji terfisi için kalıcı performans günlüğüne yazılmaz. Geçmiş order-book/taker-trade snapshot'ları geriye dönük üretilemez; Order Flow Momentum yalnızca yerel arşivde karar anından önce mevcut olan taze örneklerle ölçülür.
+**Tarihsel veri sınırı:** OI ve funding geçmişi Gate.io'in tarihsel uç noktalarından zaman damgasıyla alınır. Veri kapsaması HISTORICAL, PARTIAL veya UNAVAILABLE olarak raporlanır. Funding ödemeleri pozisyon yönüne göre modellenir; olumsuz debiler maliyete yazılır, olumlu krediler muhafazakâr biçimde kazanç sayılmaz. Kısmi funding geçmişiyle sonuç üretilebilir ancak bu sonuç strateji terfisi için kalıcı performans günlüğüne yazılmaz. Geçmiş order-book/taker-trade snapshot'ları geriye dönük üretilemez; Order Flow Momentum yalnızca yerel arşivde karar anından önce mevcut olan taze örneklerle ölçülür.
 
 
 ## Motor katkısı (ablation)
@@ -243,7 +242,7 @@ python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
 ```
 
 - Rapor, 5 ardışık test pencereli anchored walk-forward sonuçlarını IS/OOS sonuçlarından ayrı gösterir.
-- Bybit'in tarihsel OI ve funding uç noktaları destekleniyorsa zaman damgalı seriler yüklenir. Funding ödemesi pozisyon yönüne göre net R'ye yansıtılır.
+- Gate.io'in tarihsel OI ve funding uç noktaları destekleniyorsa zaman damgalı seriler yüklenir. Funding ödemesi pozisyon yönüne göre net R'ye yansıtılır.
 - Funding geçmişi alınamazsa `--persist` sonuçları performans günlüğüne yazmaz. Eksik maliyetli örnekler strateji seçiminde kullanılamaz.
 - Canlı order-book ve recent-trade örnekleri yerel olarak `data/microstructure/` altında JSONL arşivine kaydedilir.
 - Relative Strength, BTC/ETH beta-adjusted residual alpha kullanır. İsteğe bağlı sektör/peer grubu `ATLAS_SECTOR_PEERS_JSON` ile tanımlanır; örnek: `{"SOL":["AVAX/USDT:USDT","ADA/USDT:USDT"]}`. Bilinmeyen coinlere otomatik sektör etiketi uydurulmaz.

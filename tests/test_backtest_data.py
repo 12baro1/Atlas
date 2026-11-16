@@ -34,7 +34,7 @@ def test_load_historical_excludes_unclosed_candles(monkeypatch, timeframe):
     assert [c.time for c in data[timeframe]] == [now_ms - duration]
 
 
-def test_market_listing_time_reads_bybit_launch_timestamp(monkeypatch):
+def test_market_listing_time_reads_gateio_launch_timestamp(monkeypatch):
     class FakeExchange:
         def load_markets(self):
             return {
@@ -227,37 +227,24 @@ def test_fetch_history_clears_transient_error_after_success(monkeypatch):
 
 
 
-def test_fetch_history_uses_binance_fallback_after_bybit_geoblock(monkeypatch):
-    calls = {"bybit": 0, "fallback": 0}
+def test_fetch_history_never_switches_away_from_gateio(monkeypatch):
+    calls = {"gateio": 0}
 
     def blocked(*args, **kwargs):
-        calls["bybit"] += 1
+        calls["gateio"] += 1
         raise RuntimeError("403 Forbidden CloudFront distribution is configured to block")
 
-    class FakeFallback:
-        def fetch_ohlcv(self, *args, **kwargs):
-            calls["fallback"] += 1
-            if calls["fallback"] == 1:
-                return [[60_000, 1.0, 2.0, 0.5, 1.5, 10.0]]
-            return []
-
     monkeypatch.setattr(backtest.exchange, "fetch_ohlcv", blocked)
-    monkeypatch.setattr(backtest, "_create_history_fallback_exchange", FakeFallback)
     monkeypatch.setattr(backtest.time, "sleep", lambda *_: None)
-    monkeypatch.setattr(backtest, "_history_fallback_exchange", None)
-    monkeypatch.setattr(backtest, "_history_provider_name", "Bybit")
 
-    candles = backtest._fetch_history("BTC/USDT:USDT", "1m", since_ms=0)
+    with pytest.raises(RuntimeError, match="4 deneme başarısız"):
+        backtest._fetch_history("BTC/USDT:USDT", "1m", since_ms=0)
 
-    assert len(candles) == 1
-    assert calls["bybit"] == 1
-    # The fallback provider is paged until it returns an empty page.
-    assert calls["fallback"] == 2
-    assert "Binance USD-M Futures" in backtest._history_provider_name
+    assert calls["gateio"] == 4
+    assert backtest._history_provider_name == "Gate.io"
 
 
 def test_fetch_history_does_not_switch_provider_for_transient_errors(monkeypatch):
-    monkeypatch.setattr(backtest, "_history_fallback_exchange", None)
     monkeypatch.setattr(backtest.exchange, "fetch_ohlcv", lambda *a, **k: (_ for _ in ()).throw(OSError("temporary")))
     monkeypatch.setattr(backtest.time, "sleep", lambda *_: None)
 
@@ -281,3 +268,23 @@ def test_historical_smt_universe_uses_primary_series_and_loads_comparisons(monke
     assert result["smt_universe"]["ETH/USDT:USDT"]["15m"] == []
     assert len(calls) == 4
     assert all(call[0] == "ETH/USDT:USDT" for call in calls)
+
+
+def test_legacy_non_gate_cache_is_rejected(tmp_path, monkeypatch):
+    cache_file = tmp_path / "legacy.json"
+    cache_file.write_text('{"rows": [[60000, 1, 2, 0.5, 1.5, 10]]}', encoding="utf-8")
+    monkeypatch.setattr(backtest, "_cache_path", lambda *_args: str(cache_file))
+
+    assert backtest._load_cached_candles("BTC/USDT:USDT", "15m", 0, 10**12) is None
+
+
+def test_gate_cache_round_trip_includes_provider(tmp_path, monkeypatch):
+    cache_file = tmp_path / "gate.json"
+    monkeypatch.setattr(backtest, "_cache_path", lambda *_args: str(cache_file))
+    candle = _candle(60_000)
+
+    backtest._save_cached_candles("BTC/USDT:USDT", "15m", [candle])
+    loaded = backtest._load_cached_candles("BTC/USDT:USDT", "15m", 0, 10**12)
+
+    assert loaded and loaded[0].time == candle.time
+    assert '"provider": "GATEIO"' in cache_file.read_text(encoding="utf-8")

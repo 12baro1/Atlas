@@ -1,16 +1,14 @@
 import time
 import math
 import os
-import ccxt
 from core.candle import Candle
 from sector_universe import configured_sector_peers
 from trace_context import ensure_trace, record_stage
 
-# Bybit API olmadan sadece public veri için exchange oluştur
-exchange = ccxt.bybit({
-    "enableRateLimit": True,
-    "options": {"defaultType": "swap"},
-})
+from gateio_futures import GateFuturesExchange
+
+# Public-only GATEIO USDT perpetual market-data adapter; no trading credentials.
+exchange = GateFuturesExchange()
 
 TIMEFRAMES = {
     "1w": 300,
@@ -36,7 +34,7 @@ _cache = {}
 def _fetch(symbol, timeframe, limit):
     """Fetch validated, fully closed candles only.
 
-    Bybit/CCXT commonly includes the currently forming candle as the final
+    GATEIO commonly includes the currently forming candle as the final
     OHLCV row. Returning it to SMC/MTF engines creates moving structure and
     inconsistent signals. Invalid, duplicate, or out-of-order rows are
     discarded; the last candle is retained only after its timeframe closes.
@@ -124,8 +122,9 @@ def get_market_data(symbol, force_refresh=False):
     from config import Config
     stream_snapshot = {}
     try:
-        from strategies.orderflow.websocket_collector import BybitPublicStream
-        stream = BybitPublicStream.for_symbol(symbol)
+        from strategies.orderflow.gateio_public_stream import GatePublicStream
+        stream = GatePublicStream.for_symbol(symbol)
+        stream.set_contract_size(exchange.contract_size(symbol))
         stream.start()
         # İlk geçerli snapshot için sınırlı bekleme: ilk mesajlar gelmeden
         # snapshot almak orderbook/trade verisini boş bırakırdı. Sonsuz
@@ -139,7 +138,7 @@ def get_market_data(symbol, force_refresh=False):
     record_stage(
         data,
         "DATA_COLLECTION",
-        source="BYBIT_V5_PUBLIC_WEBSOCKET",
+        source="GATEIO_FUTURES_PUBLIC_WEBSOCKET",
         timestamp_ms=int(exchange.milliseconds()),
         availability="AVAILABLE" if stream_snapshot.get("last_message_timestamp_ms") else "UNAVAILABLE",
         freshness="FRESH" if stream_snapshot.get("last_message_timestamp_ms") else "NO_MESSAGE",
@@ -149,14 +148,14 @@ def get_market_data(symbol, force_refresh=False):
             "wait_ms": float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)),
         },
     )
-    # Public Bybit REST order-book snapshot; optional fallback.
+    # Public GATEIO REST order-book snapshot; optional fallback.
     data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
     data["orderbook_timestamp_ms"] = None
     try:
         data["orderbook"] = exchange.fetch_order_book(symbol, limit=50)
         book_timestamp = data["orderbook"].get("timestamp") if isinstance(data["orderbook"], dict) else None
         data["orderbook_timestamp_ms"] = int(book_timestamp) if book_timestamp is not None else int(exchange.milliseconds())
-        data["data_provenance"]["orderbook"] = "BYBIT_REST"
+        data["data_provenance"]["orderbook"] = "GATEIO_REST"
     except Exception:
         data["orderbook"] = None
     book_age_ms = None
@@ -174,7 +173,7 @@ def get_market_data(symbol, force_refresh=False):
         ]
         data["recent_trades_timestamp_ms"] = max(valid_trade_times) if valid_trade_times else None
         if data["recent_trades"]:
-            data["data_provenance"]["recent_trades"] = "BYBIT_REST"
+            data["data_provenance"]["recent_trades"] = "GATEIO_REST"
     except Exception:
         data["recent_trades"] = None
     trades_age_ms = None
@@ -187,26 +186,26 @@ def get_market_data(symbol, force_refresh=False):
     if stream_snapshot.get("orderbook") is not None:
         data["orderbook"] = stream_snapshot["orderbook"]
         data["orderbook_timestamp_ms"] = stream_snapshot.get("orderbook_timestamp_ms")
-        data["data_provenance"]["orderbook"] = "BYBIT_V5_PUBLIC_WEBSOCKET"
+        data["data_provenance"]["orderbook"] = "GATEIO_FUTURES_PUBLIC_WEBSOCKET"
     if stream_snapshot.get("recent_trades"):
         data["recent_trades"] = stream_snapshot["recent_trades"]
         data["recent_trades_timestamp_ms"] = stream_snapshot.get("recent_trades_timestamp_ms")
-        data["data_provenance"]["recent_trades"] = "BYBIT_V5_PUBLIC_WEBSOCKET"
+        data["data_provenance"]["recent_trades"] = "GATEIO_FUTURES_PUBLIC_WEBSOCKET"
     data["trade_flow_history"] = stream_snapshot.get("trade_flow_history") or []
     if data["trade_flow_history"]:
-        data["data_provenance"]["trade_flow_history"] = "BYBIT_V5_PUBLIC_WEBSOCKET"
+        data["data_provenance"]["trade_flow_history"] = "GATEIO_FUTURES_PUBLIC_WEBSOCKET"
     data["liquidation_events"] = stream_snapshot.get("liquidation_events") or []
     if data["liquidation_events"]:
-        data["data_provenance"]["liquidations"] = "BYBIT_V5_PUBLIC_WEBSOCKET"
+        data["data_provenance"]["liquidations"] = "GATEIO_FUTURES_PUBLIC_WEBSOCKET"
     # Keep the legacy aggregate field, but never use socket connection state
     # as proof that every feed is live. Per-feed provenance is authoritative.
     active_sources = {
         value for value in data["data_provenance"].values()
-        if value not in {"UNAVAILABLE", "BYBIT_REST"}
+        if value not in {"UNAVAILABLE", "GATEIO_REST"}
     }
     data["microstructure_source"] = (
         "MIXED" if active_sources and any(
-            value == "BYBIT_REST" for value in data["data_provenance"].values()
+            value == "GATEIO_REST" for value in data["data_provenance"].values()
         ) else "WEBSOCKET" if active_sources else "REST_FALLBACK"
     )
 
@@ -259,7 +258,7 @@ def get_market_data(symbol, force_refresh=False):
                 int(item["timestamp"]) for item in valid_oi if item.get("timestamp") is not None
             ]
             if data["open_interest"]:
-                data["data_provenance"]["open_interest"] = "BYBIT_REST_HISTORY"
+                data["data_provenance"]["open_interest"] = "GATEIO_REST_OBSERVED_SNAPSHOTS"
         except Exception:
             data["open_interest"] = []
             data["open_interest_timestamps_ms"] = []
@@ -278,7 +277,7 @@ def get_market_data(symbol, force_refresh=False):
                     data["open_interest_timestamps_ms"] = [
                         int(snapshot_time) if snapshot_time is not None else int(exchange.milliseconds())
                     ]
-                    data["data_provenance"]["open_interest"] = "BYBIT_REST_SNAPSHOT"
+                    data["data_provenance"]["open_interest"] = "GATEIO_REST_SNAPSHOT"
             except Exception:
                 pass
 
@@ -297,7 +296,7 @@ def get_market_data(symbol, force_refresh=False):
             data["funding_rate"] = [float(item["fundingRate"]) for item in valid_funding]
             data["funding_rate_timestamps_ms"] = [int(item["timestamp"]) for item in valid_funding]
             if data["funding_rate"]:
-                data["data_provenance"]["funding_rate"] = "BYBIT_REST_HISTORY"
+                data["data_provenance"]["funding_rate"] = "GATEIO_REST_HISTORY"
         except Exception:
             data["funding_rate"] = []
             data["funding_rate_timestamps_ms"] = []
@@ -313,7 +312,7 @@ def get_market_data(symbol, force_refresh=False):
                     data["funding_rate_timestamps_ms"] = [
                         int(funding_time) if funding_time is not None else int(exchange.milliseconds())
                     ]
-                    data["data_provenance"]["funding_rate"] = "BYBIT_REST_SNAPSHOT"
+                    data["data_provenance"]["funding_rate"] = "GATEIO_REST_SNAPSHOT"
             except Exception:
                 pass
     record_stage(
@@ -355,7 +354,7 @@ def get_market_data(symbol, force_refresh=False):
     record_stage(
         data,
         "DATA_NORMALIZATION",
-        source="BYBIT_PUBLIC_REST",
+        source="GATEIO_PUBLIC_REST",
         timestamp_ms=int(exchange.milliseconds()),
         freshness=("FRESH" if last_15m_age_ms is not None and last_15m_age_ms <= 30 * 60 * 1000
                    else "STALE" if last_15m_age_ms is not None else "UNKNOWN"),
@@ -388,7 +387,7 @@ def get_market_data(symbol, force_refresh=False):
         if math.isfinite(ticker_price) and ticker_price > 0 and fresh:
             data["current_price"] = ticker_price
             data["current_price_timestamp_ms"] = int(ticker_time) if ticker_time is not None else now_ms
-            data["current_price_source"] = "BYBIT_TICKER"
+            data["current_price_source"] = "GATEIO_TICKER"
     except (AttributeError, TypeError, ValueError, OverflowError):
         pass
     except Exception:
@@ -402,9 +401,9 @@ def get_market_data(symbol, force_refresh=False):
     # their exchange timestamps are never incorrectly classified as future.
     data["snapshot_timestamp_ms"] = int(exchange.milliseconds())
     feed_sources = set(data["data_provenance"].values()) - {"UNAVAILABLE"}
-    if "BYBIT_V5_PUBLIC_WEBSOCKET" in feed_sources:
+    if "GATEIO_FUTURES_PUBLIC_WEBSOCKET" in feed_sources:
         data["microstructure_source"] = (
-            "MIXED" if any(source.startswith("BYBIT_REST") for source in feed_sources)
+            "MIXED" if any(source.startswith("GATEIO_REST") for source in feed_sources)
             else "WEBSOCKET"
         )
     else:
@@ -412,9 +411,9 @@ def get_market_data(symbol, force_refresh=False):
     record_stage(
         data,
         "DATA_SOURCE",
-        source="BYBIT_PUBLIC_MARKET_DATA",
+        source="GATEIO_FUTURES_PUBLIC_MARKET_DATA",
         timestamp_ms=data["snapshot_timestamp_ms"],
-        freshness=("FRESH" if data.get("current_price_source") == "BYBIT_TICKER" else "UNKNOWN"),
+        freshness=("FRESH" if data.get("current_price_source") == "GATEIO_TICKER" else "UNKNOWN"),
         availability=("AVAILABLE" if bool(data.get("15m")) else "UNAVAILABLE"),
         reason=None if bool(data.get("15m")) else "NO_OHLCV_CANDLES",
         detail={
@@ -438,7 +437,7 @@ def get_market_data(symbol, force_refresh=False):
 
 
 # Cross-market evidence universe: BTC/ETH 4H candles. Dominance indexes are
-# not fetched from this Bybit data provider and must not be fabricated.
+# not fetched from this GATEIO data provider and must not be fabricated.
 _CORRELATION_SYMBOLS = {
     "BTC": ("BTC/USDT:USDT", "4h", 200),
     "ETH": ("ETH/USDT:USDT", "4h", 200),

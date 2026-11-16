@@ -1,5 +1,5 @@
 from strategies.orderflow.analytics import build_cvd, build_footprint, absorption_evidence, liquidity_walls
-from strategies.orderflow.websocket_collector import BybitPublicStream
+from strategies.orderflow.gateio_public_stream import GatePublicStream
 
 
 def test_cvd_uses_timestamped_aggressor_notional():
@@ -42,18 +42,22 @@ def test_liquidity_walls_are_displayed_depth_notional():
     assert "may be cancelled" in result["disclaimer"]
 
 
-def test_websocket_collector_parses_orderbook_trades_and_liquidations():
-    stream = BybitPublicStream("BTC/USDT:USDT")
-    stream._consume({"topic": "orderbook.50.BTCUSDT", "type": "snapshot",
-                     "data": {"ts": 1000, "b": [["99", "2"]], "a": [["101", "3"]]}})
-    stream._consume({"topic": "publicTrade.BTCUSDT", "data": [
-        {"T": 1100, "p": "100", "v": "2", "S": "Buy", "i": "t1"}]})
-    stream._consume({"topic": "allLiquidation.BTCUSDT", "data": [
-        {"T": 1200, "p": "100", "v": "1", "S": "Sell"}]})
-    result = stream.snapshot(1300)
-    assert result["orderbook"]["bids"] == [(99.0, 2.0)]
-    assert result["recent_trades"][0]["side"] == "BUY"
-    assert result["liquidation_events"][0]["notional"] == 100
+def test_gateio_public_stream_parses_and_filters_liquidations():
+    stream = GatePublicStream("BTC/USDT:USDT")
+    stream._consume({
+        "channel": "futures.public_liquidates",
+        "event": "update",
+        "time_ms": 1700000001000,
+        "result": [
+            {"contract": "BTC_USDT", "price": "60000", "size": "-0.2", "time": 1700000000000},
+            {"contract": "ETH_USDT", "price": "3000", "size": "1", "time": 1700000000000},
+        ],
+    })
+    snapshot = stream.snapshot(now_ms=1700000001000)
+    assert len(snapshot["liquidation_events"]) == 1
+    assert snapshot["liquidation_events"][0]["symbol"] == "BTC"
+    assert snapshot["liquidation_events"][0]["side"] == "SELL"
+    assert snapshot["liquidation_events_source"] == "GATEIO_FUTURES_PUBLIC_LIQUIDATES_WS"
 
 
 

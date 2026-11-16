@@ -139,7 +139,7 @@ def liquidation_pressure(events, recent_trades, min_share=0.65, min_trade_notion
     for event in events or []:
         if not isinstance(event, dict):
             continue
-        side = str(event.get("side") or "").upper()
+        side = str(event.get("order_side") or event.get("side") or "").upper()
         notional = _number(event.get("notional"))
         if side not in {"BUY", "SELL"} or notional is None or notional <= 0:
             continue
@@ -160,9 +160,12 @@ def liquidation_pressure(events, recent_trades, min_share=0.65, min_trade_notion
     if dominant_share < min_share or relative_size < min_trade_notional_ratio:
         return {"state": "AVAILABLE", "direction": None, "confirmed": False,
                 "dominant_share": round(dominant_share, 4), "trade_notional_ratio": round(relative_size, 4),
-                "events": valid, "buy_liquidation_notional": buy_liq, "sell_liquidation_notional": sell_liq}
-    # Bybit S is the liquidated position side: Buy means a long was liquidated,
-    # Sell means a short was liquidated. The candidate fades the exhausted side.
+                "events": valid, "buy_liquidation_order_notional": buy_liq, "sell_liquidation_order_notional": sell_liq,
+            "side_semantics": "GATE_LIQUIDATION_ORDER_SIDE_FADED_TO_CANDIDATE_DIRECTION"}
+    # Gate public_liquidates.size is the liquidation ORDER side, not the
+    # liquidated position side. A buy-to-close order liquidates shorts; fading
+    # that exhausted short side yields LONG. A sell-to-close order liquidates
+    # longs; fading them yields SHORT.
     direction = "LONG" if buy_liq > sell_liq else "SHORT"
     return {"state": "AVAILABLE", "direction": direction, "confirmed": True,
             "dominant_share": round(dominant_share, 4), "trade_notional_ratio": round(relative_size, 4),

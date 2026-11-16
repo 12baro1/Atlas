@@ -291,7 +291,7 @@ class AtlasTUIApp(App):
             yield Static(
                 Panel(
                     Text("ATLAS  /  LIVE MARKET & STRATEGY TERMINAL", style="bold bright_cyan"),
-                    subtitle="BYBIT PUBLIC DATA  •  7 STRATEGIES  •  ONE DECISION",
+                    subtitle="GATE.IO PUBLIC DATA  •  7 STRATEGIES  •  ONE DECISION",
                     border_style="bright_cyan",
                     box=box.DOUBLE,
                     padding=(0, 1),
@@ -306,7 +306,7 @@ class AtlasTUIApp(App):
                 yield Static(self._pipeline_renderable("READY"), id="pipeline")
                 yield RichLog(id="output", wrap=True, markup=False, auto_scroll=True, max_lines=3000)
                 yield RichLog(id="events", wrap=True, markup=False, auto_scroll=True, max_lines=120)
-            yield Static("● CONNECTING TO BYBIT PUBLIC MARKET DATA", id="status")
+            yield Static("● CONNECTING TO GATE.IO PUBLIC MARKET DATA", id="status")
             yield Input(placeholder="Coin / command  •  Enter to analyze", id="command")
         yield Footer()
 
@@ -325,7 +325,7 @@ class AtlasTUIApp(App):
             style = "green" if isinstance(change, (int, float)) and change >= 0 else "red"
             table.add_row(symbol.split("/")[0], last_text, Text(change_text, style=style))
         return Panel(table, title="[bold bright_cyan]LIVE MARKET WATCH[/bold bright_cyan]",
-                     subtitle="Refresh: 5s  |  Bybit", border_style="cyan", box=box.ROUNDED)
+                     subtitle="Refresh: 5s  |  Gate.io", border_style="cyan", box=box.ROUNDED)
 
     @staticmethod
     def _motors_renderable(state):
@@ -462,7 +462,7 @@ class AtlasTUIApp(App):
             "strategy_lab.generate_candidates(context)",
             "filter_gate.validate(setups, risk_profile)",
             "selector.rank(valid_candidates, net_rr=True)",
-            "market_data.refresh(exchange='bybit')",
+            "market_data.refresh(exchange='gateio')",
             "ohlcv = feed.fetch(symbol, limit=48)",
             "risk_engine.check(stop, targets, fees)",
             "decision = selector.single_best(candidates)",
@@ -472,7 +472,7 @@ class AtlasTUIApp(App):
             "execution_model.validate(entry, stop, targets)",
         ])
         self._code_frame_index = 0
-        self._set_status("BYBIT PUBLIC FEED  |  CONNECTING")
+        self._set_status("GATE.IO PUBLIC FEED  |  CONNECTING")
         self._log_event("SYSTEM READY  |  Analysis trace will appear when a command starts.")
         self.set_interval(0.22, self._animate_code_panel)
         self.query_one("#command", Input).focus()
@@ -575,9 +575,9 @@ class AtlasTUIApp(App):
         )
         self.query_one("#details", Static).update(self._details_renderable(detail))
         if last is not None:
-            self._set_status(f"BYBIT LIVE  |  {payload.get('symbol')}  |  LAST {fmt(last)}  |  REFRESH 5s")
+            self._set_status(f"GATE.IO LIVE  |  {payload.get('symbol')}  |  LAST {fmt(last)}  |  REFRESH 5s")
         else:
-            self._set_status("BYBIT FEED CONNECTED  |  SELECTED TICKER UNAVAILABLE")
+            self._set_status("GATE.IO FEED CONNECTED  |  SELECTED TICKER UNAVAILABLE")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         command = event.value.strip()
