@@ -358,13 +358,14 @@ class AtlasRuntime:
         self._set_status("STOPPED")
 
     def _scan_cycle(self):
-        # Persist expiry transitions even when a symbol has no fresh candle.
-        with self._journal_lock:
-            self.engine.trade_journal.expire_stale_signal_outcomes()
         for index, symbol in enumerate(self.symbols, start=1):
             if self._stop_event.is_set():
                 return
             self._analyze_symbol(symbol, force_refresh=False, from_scan=True, scan_index=index, scan_total=len(self.symbols))
+        # Expire only after the cycle had a chance to process the latest candles.
+        # This also handles stale symbols that produced no fresh candle.
+        with self._journal_lock:
+            self.engine.trade_journal.expire_stale_signal_outcomes()
 
     def _analyze_symbol(self, raw_symbol, force_refresh=False, from_scan=False, scan_index=None, scan_total=None):
         symbol = self.normalize_symbol(raw_symbol)
