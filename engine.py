@@ -235,7 +235,7 @@ class AtlasEngine:
         for motor_name in specialist_motor_names:
             setattr(self, motor_name, self.main_engine.motors[motor_name])
 
-    def analyze(self, data):
+    def analyze(self, data, track_signal=True):
         """Route every market analysis through the single main engine."""
         # Trace kimliği burada yalnızca eksikse üretilir; data_engine ile
         # başlatılan aynı analiz aynı kimliği taşır.
@@ -679,7 +679,7 @@ class AtlasEngine:
             self.state_engine.sync_open_positions(self.position.open_positions())
         if execution_state["signal"].get("signal") in ["LONG", "SHORT"] and decision_state.get("action") in ["EXECUTE", "EXECUTE_WITH_CAUTION"]:
             self.cooldown.register_signal(symbol, execution_state["signal"].get("signal"))
-            if getattr(Config, "SIGNAL_TRACKING_ENABLED", True) and self.trade_journal is not None:
+            if track_signal and getattr(Config, "SIGNAL_TRACKING_ENABLED", True) and self.trade_journal is not None:
                 self._register_tracked_signal(symbol, result_payload)
 
         self._notify_if_elite(
