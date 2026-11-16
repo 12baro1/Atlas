@@ -116,6 +116,9 @@ class GatePublicStream:
         thread = self._thread
         if thread and thread.is_alive():
             thread.join(timeout=2.0)
+        with self.__class__._liquidation_lock:
+            if self.__class__._liquidation_owner is self:
+                self.__class__._liquidation_owner = None
 
     def _consume(self, message):
         channel = str(message.get("channel") or "")
