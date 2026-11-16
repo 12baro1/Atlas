@@ -15,6 +15,8 @@ import threading
 import time
 from collections import deque
 
+from .kraken_liquidation_stream import KrakenLiquidationStream
+
 DEFAULT_FIRST_SNAPSHOT_WAIT_MS = 2500.0
 MAX_FIRST_SNAPSHOT_WAIT_MS = 15000.0
 
@@ -75,6 +77,9 @@ class MexcPublicStream:
         except ImportError:
             return False
         self._stop.clear()
+        # One shared Kraken connection supplies public liquidation events while
+        # MEXC remains the source for candles, depth, trades and ticker data.
+        KrakenLiquidationStream.shared().start()
 
         def worker():
             while not self._stop.is_set():
@@ -221,6 +226,7 @@ class MexcPublicStream:
         book_age = now - int(book_ts) if book_ts else None
         fresh_book = bool(bids and asks and book_age is not None and 0 <= book_age <= 15000)
         fresh_trades = [row for row in trades if 0 <= now - row["timestamp_ms"] <= 30000]
+        liquidation_snapshot = KrakenLiquidationStream.shared().snapshot(self.symbol, now_ms=now)
         return {
             "source": "MEXC_FUTURES_PUBLIC_WEBSOCKET",
             "connected": connected,
@@ -237,9 +243,16 @@ class MexcPublicStream:
             "recent_trades_source": "WEBSOCKET" if fresh_trades else "UNAVAILABLE",
             "trade_flow_history": self._minute_batches(trades, now),
             "trade_flow_history_source": "WEBSOCKET" if trades else "UNAVAILABLE",
-            # No public MEXC futures liquidation-event channel is documented.
-            "liquidation_events": [],
-            "liquidation_events_source": "UNAVAILABLE",
+            # Liquidations are sourced independently from Kraken Futures.
+            "liquidation_events": liquidation_snapshot["events"],
+            "liquidation_events_source": liquidation_snapshot["source"],
+            "liquidation_events_timestamp_ms": max(
+                (event["timestamp_ms"] for event in liquidation_snapshot["events"]),
+                default=None,
+            ),
+            "liquidation_events_connected": liquidation_snapshot["connected"],
+            "liquidation_events_last_error": liquidation_snapshot["last_error"],
+            "liquidation_events_matched_products": liquidation_snapshot["matched_products"],
         }
 
     @staticmethod
