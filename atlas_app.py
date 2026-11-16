@@ -74,13 +74,18 @@ def run_tui(initial_symbol=None):
         raise
 
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
-    # Force terminal-only mode even if old .env settings enable notifications.
+    # Read command-only Telegram credentials from the project .env on local Android/Linux.
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_repo_root() / ".env", override=False)
+    except ImportError:
+        pass
+    # Disable legacy push notifications and polling; the separate opt-in command
+    # service below is allowed to use its own token/chat configuration.
     os.environ["ATLAS_CONSOLE_SIGNAL_PRINT_ENABLED"] = "0"
     os.environ["ATLAS_TELEGRAM_ENABLED"] = "0"
     os.environ["ATLAS_TELEGRAM_POLLING_ENABLED"] = "0"
     os.environ["ATLAS_TELEGRAM_WEBHOOK_ENABLED"] = "0"
-    os.environ["ATLAS_TELEGRAM_BOT_TOKEN"] = ""
-    os.environ["ATLAS_TELEGRAM_CHAT_ID"] = ""
     Config.refresh_from_env()
 
     runtime = AtlasRuntime(symbols=[], full_scan=False)
@@ -88,15 +93,27 @@ def run_tui(initial_symbol=None):
     Config.TELEGRAM_ENABLED = False
     Config.TELEGRAM_POLLING_ENABLED = False
     Config.TELEGRAM_WEBHOOK_ENABLED = False
-    Config.TELEGRAM_BOT_TOKEN = ""
-    Config.TELEGRAM_CHAT_ID = ""
     Config.CONSOLE_SIGNAL_PRINT_ENABLED = False
+
+    telegram_commands = None
+    try:
+        from telegram_command_service import create_telegram_command_service
+        telegram_commands = create_telegram_command_service(runtime, logger=LOGGER)
+        if telegram_commands is not None:
+            if telegram_commands.start():
+                LOGGER.warning("Telegram command-only interface started for configured group")
+            else:
+                LOGGER.error("Telegram command interface could not start; check token, chat ID and bot polling")
+    except Exception:
+        LOGGER.exception("Telegram command interface initialization failed; terminal remains available")
 
     app = AtlasTUIApp(runtime, initial_symbol=initial_symbol)
     try:
         app.run()
         return 0
     finally:
+        if telegram_commands is not None:
+            telegram_commands.stop()
         runtime.stop()
 
 
