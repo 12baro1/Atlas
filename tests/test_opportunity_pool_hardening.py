@@ -342,16 +342,34 @@ def test_from_dict_drops_malformed_records(tmp_path):
     ) is None
 
 
-def test_corrupted_persisted_file_does_not_poison_pool(tmp_path):
+def test_corrupted_sqlite_store_recovers(tmp_path):
+    pool = make_pool(tmp_path)
+    pool.add_candidate(make_candidate("c1", "BTC/USDT:USDT"))
+    pool.stop()
+    # Corrupt the primary store; the pool must quarantine it and keep working.
+    # The JSON mirror is then used for migration, so no data is lost.
+    db_file = tmp_path / "pool" / "pool_state.db"
+    db_file.write_bytes(b"this is not a sqlite database at all")
+    reloaded = make_pool(tmp_path)
+    assert "c1" in reloaded._candidates  # recovered via JSON migration
+    quarantined = list((tmp_path / "pool").glob("pool_state.corrupt-*"))
+    assert quarantined, "corrupt file must be kept for forensics"
+    reloaded.stop()
+    # After recovery the new state persists in the fresh store
+    third = make_pool(tmp_path)
+    assert "c1" in third._candidates
+    third.stop()
+
+
+def test_corrupted_json_mirror_ignored_sqlite_wins(tmp_path):
     pool = make_pool(tmp_path)
     pool.add_candidate(make_candidate("c1", "BTC/USDT:USDT"))
     pool.stop()
     candidates_file = tmp_path / "pool" / "candidates.json"
     candidates_file.write_text('{"version":1,"candidates":{"c1":{"setup_id":"c1","entry_price":"junk"}}}')
     reloaded = make_pool(tmp_path)
-    # Malformed record dropped, pool stays functional
-    assert "c1" not in reloaded._candidates
-    assert reloaded.add_candidate(make_candidate("c1", "BTC/USDT:USDT")) is True
+    # SQLite is the primary store: the valid record survives the broken mirror
+    assert "c1" in reloaded._candidates
     reloaded.stop()
 
 

@@ -226,11 +226,16 @@ class OpportunityPool:
         self._validated: Dict[str, SetupCandidate] = {}       # Validated, ready for user
         self._active: Dict[str, SetupCandidate] = {}          # User-accepted
         self._history: List[Dict[str, Any]] = []              # Closed setups
+        self._history_flushed = 0                             # Rows already in SQLite
         
         # Indexes
         self._by_symbol: Dict[str, Set[str]] = defaultdict(set)
         self._by_strategy: Dict[str, Set[str]] = defaultdict(set)
         self._by_status: Dict[str, Set[str]] = defaultdict(set)
+        
+        # SQLite persistence (primary store; JSON files stay as a mirror)
+        from pool_store import PoolStore
+        self._store: Optional[PoolStore] = PoolStore(str(self.base_path))
         
         # Persistence
         self.auto_persist = bool(auto_persist)
@@ -707,37 +712,59 @@ class OpportunityPool:
     # ---------------------------------------------------------------------
     
     def save_all(self):
-        """Atomically save all pools to disk."""
+        """Save all pools: SQLite (transactional primary) + JSON mirror."""
         with self._lock:
             self.base_path.mkdir(parents=True, exist_ok=True)
             
-            # Candidates
-            self._save_json(self.CANDIDATE_DB, {
-                "version": 1,
-                "updated_at": int(time.time() * 1000),
-                "candidates": {k: v.to_dict() for k, v in self._candidates.items()}
-            })
+            if self._store is not None:
+                try:
+                    self._store.save_pool(
+                        "candidates",
+                        {k: v.to_dict() for k, v in self._candidates.items()},
+                    )
+                    self._store.save_pool(
+                        "validated",
+                        {k: v.to_dict() for k, v in self._validated.items()},
+                    )
+                    self._store.save_pool(
+                        "active",
+                        {k: v.to_dict() for k, v in self._active.items()},
+                    )
+                    new_history = self._history[self._history_flushed:]
+                    if new_history:
+                        inserted = self._store.append_history(new_history)
+                        self._history_flushed += len(new_history)
+                        if inserted < len(new_history):
+                            # Duplicates were already stored; keep the counter
+                            # aligned with what actually exists.
+                            self._history_flushed -= (len(new_history) - inserted)
+                except Exception as e:
+                    logger.error(f"SQLite pool persistence failed: {e}")
             
-            # Validated
-            self._save_json(self.VALIDATED_DB, {
-                "version": 1,
-                "updated_at": int(time.time() * 1000),
-                "validated": {k: v.to_dict() for k, v in self._validated.items()}
-            })
-            
-            # Active
-            self._save_json(self.ACTIVE_DB, {
-                "version": 1,
-                "updated_at": int(time.time() * 1000),
-                "active": {k: v.to_dict() for k, v in self._active.items()}
-            })
-            
-            # History
-            self._save_json(self.HISTORY_DB, {
-                "version": 1,
-                "updated_at": int(time.time() * 1000),
-                "history": self._history
-            })
+            # JSON mirror: best effort, kept for tooling and rollback safety
+            try:
+                self._save_json(self.CANDIDATE_DB, {
+                    "version": 1,
+                    "updated_at": int(time.time() * 1000),
+                    "candidates": {k: v.to_dict() for k, v in self._candidates.items()}
+                })
+                self._save_json(self.VALIDATED_DB, {
+                    "version": 1,
+                    "updated_at": int(time.time() * 1000),
+                    "validated": {k: v.to_dict() for k, v in self._validated.items()}
+                })
+                self._save_json(self.ACTIVE_DB, {
+                    "version": 1,
+                    "updated_at": int(time.time() * 1000),
+                    "active": {k: v.to_dict() for k, v in self._active.items()}
+                })
+                self._save_json(self.HISTORY_DB, {
+                    "version": 1,
+                    "updated_at": int(time.time() * 1000),
+                    "history": self._history
+                })
+            except Exception as e:
+                logger.error(f"JSON pool mirror failed: {e}")
     
     def _save_json(self, filename: str, data: Dict[str, Any]):
         path = self.base_path / filename
@@ -747,12 +774,53 @@ class OpportunityPool:
         os.replace(tmp_path, path)
     
     def load_all(self):
-        """Load all pools from disk."""
+        """Load all pools from SQLite (primary) or migrate from legacy JSON."""
         try:
-            self._load_json(self.CANDIDATE_DB, "candidates", self._candidates)
-            self._load_json(self.VALIDATED_DB, "validated", self._validated)
-            self._load_json(self.ACTIVE_DB, "active", self._active)
-            self._load_history()
+            if self._store is not None:
+                stored_candidates = self._store.load_pool("candidates")
+                stored_validated = self._store.load_pool("validated")
+                stored_active = self._store.load_pool("active")
+                stored_history = self._store.load_history()
+                total_stored = (
+                    len(stored_candidates) + len(stored_validated) + len(stored_active)
+                )
+                
+                # First run on a legacy directory: import the JSON files once.
+                # INSERT OR IGNORE makes this idempotent across restarts.
+                if total_stored == 0 and not self._store.json_migration_done():
+                    migrated = self._store.migrate_from_json(self.base_path)
+                    if any(migrated.values()):
+                        logger.info(
+                            f"Migrated legacy JSON pools to SQLite: {migrated}"
+                        )
+                    self._store.mark_json_migration_done()
+                    stored_candidates = self._store.load_pool("candidates")
+                    stored_validated = self._store.load_pool("validated")
+                    stored_active = self._store.load_pool("active")
+                    stored_history = self._store.load_history()
+                
+                for setup_id, payload in stored_candidates.items():
+                    record = SetupCandidate.from_dict(payload)
+                    if record is not None:
+                        self._candidates[setup_id] = record
+                for setup_id, payload in stored_validated.items():
+                    record = SetupCandidate.from_dict(payload)
+                    if record is not None:
+                        self._validated[setup_id] = record
+                for setup_id, payload in stored_active.items():
+                    record = SetupCandidate.from_dict(payload)
+                    if record is not None:
+                        self._active[setup_id] = record
+                self._history = stored_history
+                if len(self._history) > self.max_history:
+                    self._history = self._history[-self.max_history:]
+                self._history_flushed = len(self._history)
+            else:
+                # No SQLite store: fall back to the legacy JSON files.
+                self._load_json(self.CANDIDATE_DB, "candidates", self._candidates)
+                self._load_json(self.VALIDATED_DB, "validated", self._validated)
+                self._load_json(self.ACTIVE_DB, "active", self._active)
+                self._load_history()
             
             # Rebuild indexes
             self._rebuild_indexes()
@@ -822,12 +890,20 @@ class OpportunityPool:
             return self._history[-limit:]
     
     def stop(self):
-        """Stop and save."""
+        """Stop persistence, flush state and close the SQLite store."""
         self._running = False
         if self._persist_thread is not None:
             self._stop_persist.set()
             self._persist_thread.join(timeout=5)
         self.save_all()
+        if self._store is not None:
+            try:
+                self._store.checkpoint_wal()
+                self._store.close()
+            except Exception as e:
+                logger.error(f"Pool store close failed: {e}")
+            finally:
+                self._store = None
 
 
 # Global instance
