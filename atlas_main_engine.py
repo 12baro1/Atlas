@@ -445,6 +445,7 @@ class AtlasMainEngine:
         )
         try:
             entry_price = float(setup.get("entry"))
+            original_entry_price = entry_price
             requested_stop = float(setup.get("stop_loss"))
             risk_stop = risk_payload.get("stop_loss") if isinstance(risk_payload, dict) else None
             stop = float(risk_stop) if isinstance(risk_payload, dict) and risk_payload.get("risk_setup_valid") is True and risk_stop is not None else requested_stop
@@ -460,8 +461,6 @@ class AtlasMainEngine:
             entry_price = snap_price_to_tick(entry_price, tick, entry_rounding)
             stop = snap_price_to_tick(stop, tick, "floor" if side == "LONG" else "ceiling")
             setup["entry"] = entry_price
-            if isinstance(risk_payload, dict):
-                risk_payload["entry"] = entry_price
 
         if not all(math.isfinite(value) and value > 0 for value in (entry_price, stop)):
             setup.update({"valid": False, "reason": "Main authority: non-finite/non-positive entry or stop",
@@ -473,10 +472,12 @@ class AtlasMainEngine:
                 risk_entry = float(risk_entry)
             except (TypeError, ValueError, OverflowError):
                 risk_entry = float("nan")
-            if not math.isfinite(risk_entry) or abs(risk_entry - entry_price) > max(entry_price * 1e-8, 1e-8):
+            if not math.isfinite(risk_entry) or abs(risk_entry - original_entry_price) > max(original_entry_price * 1e-8, 1e-8):
                 setup.update({"valid": False, "reason": "Main authority: risk entry differs from selected setup entry",
                               "entry_reason_code": "RISK_ENTRY_MISMATCH"})
                 return {"entry": setup, "risk": risk_payload, "targets": target_payload}
+        if isinstance(risk_payload, dict):
+            risk_payload["entry"] = entry_price
         if (side == "LONG" and stop >= entry_price) or (side == "SHORT" and stop <= entry_price) or side not in {"LONG", "SHORT"}:
             setup.update({"valid": False, "reason": "Main authority: stop is not beyond structural invalidation",
                           "entry_reason_code": "INVALID_FINAL_STOP"})
