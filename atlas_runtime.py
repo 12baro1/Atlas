@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import os
 import threading
 import traceback
@@ -551,6 +552,7 @@ class AtlasRuntime:
                     if result is None:
                         self._inc("skipped")
                         return {"ok": False, "symbol": symbol, "error": "no_result"}
+                    self._inc("success")
                     
                     # Add the selected setup to the opportunity pool as a validated candidate
                     self._register_result(result)
@@ -559,11 +561,20 @@ class AtlasRuntime:
                         self._latest_analysis_at[symbol] = int(time.time() * 1000)
                     self._prune_latest_analyses()
 
-                    # Extract and add setup candidate to pool if selected
-                    selected = result.get("selected")
-                    if selected and isinstance(selected, dict):
+                    # The selected setup lives in strategy_lab; there is no
+                    # top-level "selected" key on the engine result payload.
+                    strategy_lab = result.get("strategy_lab") or {}
+                    selected = strategy_lab.get("selected")
+                    if isinstance(selected, dict):
                         try:
-                            candidate = self._setup_to_candidate(selected, symbol)
+                            analysis = result.get("analysis") or {}
+                            candidate = self._setup_to_candidate(
+                                selected,
+                                symbol,
+                                trace_id=result.get("trace_id"),
+                                regime=strategy_lab.get("regime"),
+                                market_phase=(analysis.get("market_phase") or {}).get("phase"),
+                            )
                             if candidate:
                                 pool.add_candidate(candidate)
                                 # Validate to move from candidates to validated pool
@@ -571,6 +582,11 @@ class AtlasRuntime:
                                 self.logger.debug(
                                     "Added and validated candidate from %s: %s",
                                     symbol, candidate.setup_id,
+                                )
+                            else:
+                                self.logger.debug(
+                                    "Selected setup for %s rejected by candidate validation",
+                                    symbol,
                                 )
                         except Exception as e:
                             self.logger.warning(
@@ -669,69 +685,139 @@ class AtlasRuntime:
             self._last_results = self._last_results[-250:]
             self._scanner_stats["last_update_ms"] = item["timestamp"]
 
-    def _setup_to_candidate(self, selected: Dict[str, Any], symbol: str) -> Optional[SetupCandidate]:
-        """Convert a selected setup dict into a SetupCandidate for the opportunity pool."""
+    def _setup_to_candidate(
+        self,
+        selected: Dict[str, Any],
+        symbol: str,
+        trace_id: Optional[str] = None,
+        regime: Optional[str] = None,
+        market_phase: Optional[str] = None,
+    ) -> Optional[SetupCandidate]:
+        """Convert a selected strategy setup into a SetupCandidate.
+
+        Geometry rules (release blocker):
+        - risk   = abs(entry - stop_loss)
+        - reward = abs(tp - entry) for every TP (reward measured from entry,
+          never from the stop)
+        - LONG  requires stop < entry < tp1 < tp2 < tp3
+        - SHORT requires stop > entry > tp1 > tp2 > tp3
+        - every value must be finite and positive; otherwise the setup is
+          rejected instead of being stored with fabricated numbers
+        """
         from opportunity_pool import SetupCandidate, SetupStatus, SetupType
-        
-        try:
-            entry = selected.get("entry") or selected.get("entry_price")
-            stop = selected.get("stop_loss") or selected.get("stop")
-            tp1 = selected.get("tp1")
-            tp2 = selected.get("tp2")
-            tp3 = selected.get("tp3")
-            direction = selected.get("direction") or selected.get("signal", {}).get("signal", "").upper()
-            strategy_id = selected.get("strategy_id") or selected.get("selected_by", "unknown")
-            strategy_name = selected.get("strategy") or selected.get("strategy_id", "unknown")
-            
-            if not all([entry is not None, stop is not None, tp1 is not None, tp2 is not None, tp3 is not None, direction]):
-                return None
-            
-            # Calculate RR
-            risk = abs(float(entry) - float(stop))
-            if risk <= 0:
-                return None
-            tp1_rr = abs(float(tp1) - float(stop)) / risk
-            tp2_rr = abs(float(tp2) - float(stop)) / risk
-            tp3_rr = abs(float(tp3) - float(stop)) / risk
-            net_rr = min(tp1_rr, tp2_rr, tp3_rr)  # conservative net RR
-            
-            candidate = SetupCandidate(
-                setup_id=f"setup_{symbol}_{direction}_{int(time.time() * 1000)}",
-                symbol=symbol,
-                strategy_id=strategy_id,
-                strategy_name=strategy_name,
-                direction=direction,
-                entry_type=str(selected.get("entry_type", "MARKET")).upper(),
-                entry_price=float(entry),
-                stop_loss=float(stop),
-                tp1=float(tp1),
-                tp2=float(tp2),
-                tp3=float(tp3),
-                rr_tp1=float(tp1_rr),
-                rr_tp2=float(tp2_rr),
-                rr_tp3=float(tp3_rr),
-                net_rr=float(net_rr) if net_rr > 0 else 0.0,
-                risk_reward=selected.get("risk_reward", 0.0),
-                confidence=selected.get("confidence", 0.0),
-                grade=selected.get("grade", "").upper(),
-                score=selected.get("score", 0.0),
-                net_rr_after_costs=selected.get("execution_rr", net_rr),
-                status=SetupStatus.DISCOVERED.value,
-                setup_type=SetupType.MARKET.value,
-                regime=selected.get("market_regime", "UNKNOWN"),
-                market_phase=selected.get("market_phase", "UNKNOWN"),
-                reasons=selected.get("reason", "").split(",") if selected.get("reason") else [],
-                supporting_evidence=selected.get("supporting_event_ids", []) or [],
-                opposing_evidence=selected.get("opposing_event_ids", []) or [],
-                created_at_ms=int(time.time() * 1000),
-                updated_at_ms=int(time.time() * 1000),
-                validated_at_ms=0,  # Will be set by validate_candidate
-                trace_id=selected.get("event_ids", [None])[0] if selected.get("event_ids") else None,
-            )
-            return candidate
-        except (TypeError, ValueError, OverflowError, KeyError) as e:
-            logger.warning(f"Failed to convert setup to candidate: {e}")
+
+        if not isinstance(selected, dict):
             return None
+        try:
+            direction = str(selected.get("direction") or "").upper()
+            entry_type = str(selected.get("entry_type") or "").upper()
+            if direction not in ("LONG", "SHORT"):
+                return None
+            if entry_type not in ("MARKET", "LIMIT"):
+                return None
+            entry = float(selected.get("entry"))
+            stop = float(selected.get("stop_loss"))
+            tp1 = float(selected.get("tp1"))
+            tp2 = float(selected.get("tp2"))
+            tp3 = float(selected.get("tp3"))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not all(math.isfinite(v) and v > 0 for v in (entry, stop, tp1, tp2, tp3)):
+            return None
+        risk = abs(entry - stop)
+        if risk <= 0:
+            return None
+        if direction == "LONG":
+            if not (stop < entry < tp1 < tp2 < tp3):
+                return None
+        else:
+            if not (stop > entry > tp1 > tp2 > tp3):
+                return None
+
+        # Reward is measured from the entry, never from the stop.
+        rr_tp1 = abs(tp1 - entry) / risk
+        rr_tp2 = abs(tp2 - entry) / risk
+        rr_tp3 = abs(tp3 - entry) / risk
+        if not all(math.isfinite(v) and v > 0 for v in (rr_tp1, rr_tp2, rr_tp3)):
+            return None
+
+        strategy_id = str(selected.get("strategy_id") or "unknown")
+        strategy_name = str(selected.get("strategy") or strategy_id)
+
+        # Net RR: cost-adjusted value comes from the shared risk engine via the
+        # strategy lab. Fall back to the raw partial-exit weighted RR only when
+        # the cost-adjusted figure is missing; never invent a number.
+        weights = selected.get("partial_exit_weights") or {}
+        try:
+            w_total = sum(float(weights.get(key, 0.0)) for key in ("tp1", "tp2", "tp3"))
+            weighted_rr = (
+                (
+                    float(weights.get("tp1", 0.0)) * rr_tp1
+                    + float(weights.get("tp2", 0.0)) * rr_tp2
+                    + float(weights.get("tp3", 0.0)) * rr_tp3
+                ) / w_total
+                if w_total > 0
+                else rr_tp2
+            )
+        except (TypeError, ValueError, OverflowError):
+            weighted_rr = rr_tp2
+        try:
+            net_rr_after_costs = float(selected.get("estimated_net_rr"))
+        except (TypeError, ValueError, OverflowError):
+            net_rr_after_costs = None
+        if net_rr_after_costs is None or not math.isfinite(net_rr_after_costs):
+            net_rr_after_costs = weighted_rr
+        net_rr = net_rr_after_costs
+
+        confidence = selected.get("strength")
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError, OverflowError):
+            confidence = 0.0
+        if not math.isfinite(confidence):
+            confidence = 0.0
+
+        # Deterministic id: re-scans of an unchanged setup produce the same id,
+        # so the pool stays idempotent and dedup can never merge two strategies.
+        setup_id = "setup:{}:{}:{}:{:.8g}:{:.8g}:{:.8g}".format(
+            symbol, strategy_id, direction, entry, stop, tp1
+        )
+
+        reasons = [str(r) for r in (selected.get("reasons") or []) if r]
+        candidate = SetupCandidate(
+            setup_id=setup_id,
+            symbol=symbol,
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            direction=direction,
+            entry_type=entry_type,
+            entry_price=entry,
+            stop_loss=stop,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            rr_tp1=round(rr_tp1, 4),
+            rr_tp2=round(rr_tp2, 4),
+            rr_tp3=round(rr_tp3, 4),
+            net_rr=round(net_rr, 4),
+            risk_reward=round(weighted_rr, 4),
+            confidence=confidence,
+            grade="SELECTED",
+            score=confidence,
+            net_rr_after_costs=round(net_rr_after_costs, 4),
+            status=SetupStatus.DISCOVERED.value,
+            setup_type=SetupType.LIMIT.value if entry_type == "LIMIT" else SetupType.MARKET.value,
+            regime=str(regime or selected.get("market_regime") or "UNKNOWN"),
+            market_phase=str(market_phase or selected.get("market_phase") or "UNKNOWN"),
+            reasons=reasons,
+            supporting_evidence=[str(v) for v in (selected.get("supporting_event_ids") or [])],
+            opposing_evidence=[str(v) for v in (selected.get("opposing_event_ids") or [])],
+            created_at_ms=int(time.time() * 1000),
+            updated_at_ms=int(time.time() * 1000),
+            validated_at_ms=0,  # Set by validate_candidate
+            trace_id=trace_id,
+        )
+        return candidate
 
     def _set_status(self, status):
         with self._lock:

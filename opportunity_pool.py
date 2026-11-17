@@ -114,6 +114,7 @@ class SetupCandidate:
     current_tp: int = 0  # 0=none, 1=TP1, 2=TP2, 3=TP3
     trailing_stop: Optional[float] = None
     unrealized_pnl_r: float = 0.0
+    close_price: Optional[float] = None
     
     # Expiry
     expires_at_ms: Optional[int] = None
@@ -134,9 +135,38 @@ class SetupCandidate:
             data["stop_loss"] = data.pop("sl")
         
         # Filter known fields
-        known = {f.name for f in cls.__dataclass_fields__.values()}
+        known = {f.name: f for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in known}
-        return cls(**filtered)
+        # Sanitize types so a corrupted or hand-edited JSON file can never
+        # poison the pool with a malformed record.
+        for name, fdef in known.items():
+            if name not in filtered:
+                continue
+            value = filtered[name]
+            try:
+                if fdef.type == "float":
+                    filtered[name] = None if value is None else float(value)
+                elif fdef.type == "int":
+                    filtered[name] = None if value is None else int(value)
+                elif fdef.type == "str":
+                    filtered[name] = None if value is None else str(value)
+                elif fdef.type == "bool":
+                    filtered[name] = bool(value)
+                elif fdef.type in ("List[str]", "List[Any]") and not isinstance(value, list):
+                    filtered[name] = []
+            except (TypeError, ValueError, OverflowError):
+                logger.warning(f"Dropped candidate record with invalid field {name}")
+                return None
+        required = ("setup_id", "symbol", "direction")
+        if any(not str(filtered.get(name) or "").strip() for name in required):
+            logger.warning(f"Dropped malformed candidate record: {data.get('setup_id')}")
+            return None
+        try:
+            return cls(**filtered)
+        except TypeError as exc:
+            # Missing required geometry fields: never fabricate prices.
+            logger.warning(f"Dropped incomplete candidate record {data.get('setup_id')}: {exc}")
+            return None
 
 
 class OpportunityPool:
@@ -161,6 +191,15 @@ class OpportunityPool:
     VALIDATED_DB = "validated.json"
     ACTIVE_DB = "active.json"
     HISTORY_DB = "history.json"
+    
+    # Terminal statuses: once reached, a setup leaves the active pool and is
+    # archived (never silently dropped).
+    CLOSED_STATUSES = frozenset({
+        SetupStatus.INVALIDATED.value,
+        SetupStatus.EXPIRED.value,
+        SetupStatus.CANCELLED.value,
+        SetupStatus.TP3.value,
+    })
     
     def __init__(
         self,
@@ -194,40 +233,39 @@ class OpportunityPool:
         self._by_status: Dict[str, Set[str]] = defaultdict(set)
         
         # Persistence
-        self._persistence_thread: Optional[threading.Thread] = None
+        self.auto_persist = bool(auto_persist)
+        self.persist_interval = max(1, int(persist_interval))
+        self._persist_thread: Optional[threading.Thread] = None
         self._stop_persist = threading.Event()
         
         # Load persisted state
         self.load_all()
         
-        # Start persistence thread
+        # Start persistence thread only when auto persistence is enabled
         self._running = True
-        self._persist_thread = threading.Thread(
-            target=self._persist_loop,
-            daemon=True,
-            name="OpportunityPoolPersist"
-        )
-        self._persist_thread.start()
+        if self.auto_persist:
+            self._persist_thread = threading.Thread(
+                target=self._persist_loop,
+                daemon=True,
+                name="OpportunityPoolPersist"
+            )
+            self._persist_thread.start()
         
         logger.info(f"OpportunityPool initialized: "
                    f"{len(self._candidates)} candidates, "
                    f"{len(self._validated)} validated, "
-                   f"{len(self._active)} active")
+                   f"{len(self._active)} active, "
+                   f"auto_persist={self.auto_persist}, "
+                   f"persist_interval={self.persist_interval}s")
     
     def _persist_loop(self):
-        """Background persistence loop."""
-        while not self._stop_persist.wait(30):  # 30 second interval
+        """Background persistence loop honoring auto_persist/persist_interval."""
+        while not self._stop_persist.wait(self.persist_interval):
             try:
                 self.save_all()
             except Exception as e:
                 logger.error(f"OpportunityPool persistence failed: {e}")
-    
-    def stop(self):
-        """Stop persistence and save final state."""
-        self._running = False
-        self._stop_persist.set()
-        self.save_all()
-    
+
     # ---------------------------------------------------------------------
     # Candidate Pool (Discovered setups)
     # ---------------------------------------------------------------------
@@ -255,12 +293,18 @@ class OpportunityPool:
             if len(self._candidates) >= self.max_candidates:
                 self._evict_oldest_candidate()
             
-            # Add new candidate
-            candidate.created_at_ms = int(time.time() * 1000)
-            candidate.updated_at_ms = candidate.created_at_ms
-            candidate.expires_at_ms = candidate.created_at_ms + (
-                self.expiry_hours * 3600 * 1000
-            )
+            # Add new candidate. The runtime produces a deterministic
+            # created_at_ms for freshness; only stamp it when missing so
+            # setup age is never fabricated.
+            now_ms = int(time.time() * 1000)
+            if not candidate.created_at_ms:
+                candidate.created_at_ms = now_ms
+            if not candidate.updated_at_ms:
+                candidate.updated_at_ms = candidate.created_at_ms
+            if not candidate.expires_at_ms:
+                candidate.expires_at_ms = candidate.created_at_ms + (
+                    self.expiry_hours * 3600 * 1000
+                )
             
             self._candidates[candidate.setup_id] = candidate
             self._index_candidate(candidate)
@@ -313,6 +357,8 @@ class OpportunityPool:
     def _evict_oldest_candidate(self):
         """Remove oldest expired candidate to make room; fall back to oldest by creation time."""
         now = int(time.time() * 1000)
+        if not self._candidates:
+            return
         # First try to remove expired candidates
         expired = [
             (cid, c.created_at_ms) for cid, c in self._candidates.items()
@@ -320,11 +366,21 @@ class OpportunityPool:
         ]
         if expired:
             oldest = min(expired, key=lambda x: x[1])
-            self._remove_candidate(oldest[0])
+            self._evict_candidate(oldest[0])
             return
         # No expired candidates - remove oldest by creation time
         oldest = min(self._candidates.items(), key=lambda x: x[1].created_at_ms)
-        self._remove_candidate(oldest[0])
+        self._evict_candidate(oldest[0])
+
+    def _evict_candidate(self, setup_id: str):
+        """Evict a candidate: archive first so capacity pressure never loses setups."""
+        candidate = self._candidates.get(setup_id)
+        if not candidate:
+            return
+        # Unindex while the original status is intact, then archive; otherwise
+        # the old status bucket would keep a stale id.
+        self._remove_candidate(setup_id)
+        self._archive_candidate(candidate, SetupStatus.EXPIRED.value, "EVICTED_CAPACITY")
     
     def _remove_candidate(self, setup_id: str):
         """Remove candidate from all indexes."""
@@ -341,6 +397,17 @@ class OpportunityPool:
         self._by_symbol[candidate.symbol].discard(candidate.setup_id)
         self._by_strategy[candidate.strategy_id].discard(candidate.setup_id)
         self._by_status[candidate.status].discard(candidate.setup_id)
+        # Prune empty sets so per-symbol/strategy/status maps never grow
+        # without bound over long-running scans.
+        self._prune_index(self._by_symbol, candidate.symbol)
+        self._prune_index(self._by_strategy, candidate.strategy_id)
+        self._prune_index(self._by_status, candidate.status)
+    
+    @staticmethod
+    def _prune_index(index: Dict[str, Set[str]], key: str):
+        bucket = index.get(key)
+        if bucket is not None and not bucket:
+            index.pop(key, None)
     
     # ---------------------------------------------------------------------
     # Validated Pool (Ready for user)
@@ -373,7 +440,11 @@ class OpportunityPool:
     
     def _evict_oldest_validated(self):
         oldest = min(self._validated.items(), key=lambda x: x[1].validated_at_ms)
+        candidate = self._validated.get(oldest[0])
+        if not candidate:
+            return
         self._remove_validated(oldest[0])
+        self._archive_candidate(candidate, SetupStatus.EXPIRED.value, "EVICTED_CAPACITY")
     
     def _remove_validated(self, setup_id: str):
         candidate = self._validated.pop(setup_id, None)
@@ -489,17 +560,25 @@ class OpportunityPool:
                 candidate.status = status
                 self._by_status[old_status].discard(setup_id)
                 self._by_status[status].add(setup_id)
+                self._prune_index(self._by_status, old_status)
                 
                 if status == SetupStatus.ENTERED.value:
                     candidate.entered_at_ms = int(time.time() * 1000)
                 elif status in (SetupStatus.TP1.value, SetupStatus.TP2.value, SetupStatus.TP3.value):
                     candidate.current_tp = int(status[-1]) if status[-1].isdigit() else 0
-                elif status in (SetupStatus.INVALIDATED.value, SetupStatus.EXPIRED.value):
+                elif status in self.CLOSED_STATUSES:
+                    # Terminal status: archive and leave the active pool; never
+                    # keep a closed setup actionable in memory.
                     candidate.closed_at_ms = int(time.time() * 1000)
+                    self._archive_candidate(candidate, status, "Closed via update_active_setup")
+                    self._active.pop(setup_id, None)
+                    self._unindex_candidate(candidate)
+                    return True
             
             if entry_filled_price is not None:
+                # Record the real fill without rewriting the planned entry
+                # type; the original MARKET/LIMIT decision must stay intact.
                 candidate.entry_filled_price = entry_filled_price
-                candidate.entry_type = SetupType.MARKET.value  # Filled at market
             
             if position_size is not None:
                 candidate.position_size = position_size
@@ -517,19 +596,33 @@ class OpportunityPool:
             return True
     
     def close_active_setup(self, setup_id: str, close_reason: str, close_price: float) -> bool:
-        """Close an active setup and move to history."""
+        """Close an active setup and move to history.
+
+        Only validated terminal reasons are accepted so arbitrary strings can
+        never corrupt the lifecycle; close_price is preserved on the record.
+        """
         with self._lock:
-            candidate = self._active.pop(setup_id, None)
+            candidate = self._active.get(setup_id)
             if not candidate:
                 return False
+            reason = str(close_reason or "").upper()
+            if reason not in self.CLOSED_STATUSES:
+                logger.warning(
+                    f"Rejected invalid close reason for {setup_id}: {close_reason!r}"
+                )
+                return False
+            try:
+                candidate.close_price = float(close_price)
+            except (TypeError, ValueError, OverflowError):
+                candidate.close_price = None
             
+            self._active.pop(setup_id, None)
             self._unindex_candidate(candidate)
             
-            candidate.status = close_reason
             candidate.closed_at_ms = int(time.time() * 1000)
             candidate.updated_at_ms = candidate.closed_at_ms
             
-            self._archive_candidate(candidate, close_reason)
+            self._archive_candidate(candidate, reason, reason)
             return True
     
     def get_active_setups(self, user_id: Optional[str] = None) -> List[SetupCandidate]:
@@ -680,7 +773,10 @@ class OpportunityPool:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
             for k, v in data.get(key, {}).items():
-                target[k] = SetupCandidate.from_dict(v)
+                record = SetupCandidate.from_dict(v)
+                if record is None:
+                    continue
+                target[k] = record
         except Exception as e:
             logger.error(f"Failed to load {filename}: {e}")
     
@@ -728,7 +824,7 @@ class OpportunityPool:
     def stop(self):
         """Stop and save."""
         self._running = False
-        if hasattr(self, '_persist_thread'):
+        if self._persist_thread is not None:
             self._stop_persist.set()
             self._persist_thread.join(timeout=5)
         self.save_all()
