@@ -302,14 +302,20 @@ class FakeQ:
 
 
 class FakeInv:
-    def __init__(self, symbols):
+    def __init__(self, symbols, ranked_symbols=None):
         self._symbols = list(symbols)
+        self._ranked_symbols = list(ranked_symbols if ranked_symbols is not None else symbols)
+        self._ranking_source = "fake_24h_quote_volume" if ranked_symbols is not None else "alphabetical_fallback"
 
     def get_symbols(self):
         return list(self._symbols)
 
+    def get_ranked_symbols(self, limit=None):
+        ranked = list(self._ranked_symbols)
+        return ranked if limit is None else ranked[:max(0, int(limit))]
+
     def status(self):
-        return {"symbol_count": len(self._symbols)}
+        return {"symbol_count": len(self._symbols), "ranking_source": self._ranking_source}
 
 
 def make_service(runtime, symbols, workers=2):
@@ -386,3 +392,58 @@ def test_empty_universe_reports_explicitly(tmp_path):
     result = service.start_scan(limit=20)
     assert result["started"] is False
     assert result["reason"] == "empty_universe"
+
+def test_scan_uses_ranked_symbols_and_extends_active_generation(tmp_path):
+    runtime = FakeRuntime()
+    symbols = ["AAA/USDT:USDT", "BBB/USDT:USDT", "CCC/USDT:USDT"]
+    ranked = ["CCC/USDT:USDT", "AAA/USDT:USDT", "BBB/USDT:USDT"]
+    inventory = FakeInv(symbols, ranked_symbols=ranked)
+    queue = FakeQ()
+    service = ScanService(runtime, queue, inventory, worker_count=1, analysis_gap_seconds=0.0)
+    # Prevent worker consumption so the generation can be inspected exactly.
+    service.ensure_workers = lambda: False
+    first = service.start_scan(limit=1)
+    assert first["selected_preview"] == ranked[:1]
+    assert first["ranking_source"] == "fake_24h_quote_volume"
+    generation = first["scan_generation"]
+    # Mark the first job complete and leave the generation unfinished.
+    queue.jobs[ranked[0]]["state"] = "done"
+    second = service.start_scan(limit=2)
+    assert second["resumed"] is True
+    assert second["scan_generation"] == generation
+    assert second["added"] == 1
+    assert queue.jobs[ranked[0]]["state"] == "done"
+    assert queue.jobs[ranked[1]]["state"] == "pending"
+
+
+def test_stop_scan_does_not_orphan_or_revive_inflight_worker(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingRuntime(FakeRuntime):
+        def analyze_symbol(self, symbol, force_refresh=False, track_signal=False, use_websocket=True):
+            entered.set()
+            release.wait(5)
+            return {"ok": True, "symbol": symbol}
+
+    runtime = BlockingRuntime()
+    service = make_service(runtime, ["BLOCK/USDT:USDT"], workers=1)
+    service.start_scan(limit=1)
+    assert entered.wait(2), "worker did not start analysis"
+
+    stopped = service.stop_scan(timeout_seconds=0.01)
+    assert stopped["stopped"] is False
+    assert stopped["workers_still_alive"] == ["AtlasScanWorker-0"]
+    assert service.ensure_workers() is False
+    assert len(service._workers) == 1
+
+    release.set()
+    deadline = time.time() + 3
+    while time.time() < deadline and any(w.is_alive() for w in service._workers):
+        time.sleep(0.01)
+    assert not any(w.is_alive() for w in service._workers)
+
+    # A new worker set can start only after the old worker has really exited.
+    assert service.ensure_workers() is True
+    service.stop_scan(timeout_seconds=2)
+
