@@ -1633,7 +1633,7 @@ class AtlasEngine:
                 confirmation["confirmed"] = False
                 confirmation["reason"] = entry["reason"]
 
-        risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles)
+        risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles, tick_size=data.get("tick_size"))
 
         # Profesyonel SMC kalitesi: SL otomatik olarak genişletildiyse (AUTO_EXPAND)
         # ilk TP hesabı orijinal/dar SL'e göre yapılmıştı; yeni mesafe ile gerçek
@@ -1664,7 +1664,7 @@ class AtlasEngine:
                 )
         # The main authority reconciles the structural stop, final risk stop and
         # selected structural TP ladder before any quality gate or signal consumes them.
-        final_geometry = self.main_engine.finalize_setup_geometry(entry, risk, dynamic_tp)
+        final_geometry = self.main_engine.finalize_setup_geometry(entry, risk, dynamic_tp, tick_size=data.get("tick_size"))
         entry = final_geometry["entry"]
         risk = final_geometry["risk"]
         dynamic_tp = final_geometry["targets"]
@@ -2492,7 +2492,7 @@ class AtlasEngine:
             self.logger.exception("Dynamic TP hesaplama hatasi")
             return {"tp1": None, "tp2": None, "tp3": None}
 
-    def _calculate_risk(self, entry, dynamic_tp, volume_profile=None, institutional=None, candles=None):
+    def _calculate_risk(self, entry, dynamic_tp, volume_profile=None, institutional=None, candles=None, tick_size=None):
         """Geçerli entry/SL için risk çıktısını hesaplar."""
         if entry.get("entry") is None or entry.get("stop_loss") is None:
             return None
@@ -2504,6 +2504,7 @@ class AtlasEngine:
             volume_profile=volume_profile,
             institutional=institutional,
             candles=candles,
+            tick_size=tick_size,
             entry_type=entry.get("entry_type", "LIMIT"),
             direction=entry.get("direction"),
         )
