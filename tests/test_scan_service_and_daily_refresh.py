@@ -188,6 +188,9 @@ class FakeQ:
                     added += 1
         return added
 
+    def current_generation(self):
+        return 0
+
     def rebuild(self, symbols, batch_tag=None):
         return {"added": self.enqueue(symbols, batch_tag), "progress": self.progress()}
 

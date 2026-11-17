@@ -129,18 +129,42 @@ def test_lease_expiry_recovers_crashed_worker(tmp_path):
     assert recovered["symbol"] == "A/USDT:USDT"
 
 
-def test_rebuild_keeps_existing_state(tmp_path):
+def test_rebuild_opens_new_generation_and_requeues_all(tmp_path):
+    """rebuild opens a new scan generation so completed scans never block
+    a new period; older generations keep their history."""
     queue = make_queue(tmp_path)
     queue.enqueue(["A/USDT:USDT", "B/USDT:USDT"])
     job = queue.claim_next("w1")
     queue.complete(job["symbol"], ok=True)
-    # Universe changed: a new symbol appears
+    old_progress = queue.progress(generation=0)
+    assert old_progress["done"] == 1  # gen 0: A done, B pending
+
+    # Universe changed: a new symbol appears. rebuild opens gen 1.
     result = queue.rebuild(["A/USDT:USDT", "B/USDT:USDT", "C/USDT:USDT"])
-    assert result["added"] == 1
-    progress = queue.progress()
-    assert progress["done"] == 1  # completed work preserved
+    assert result["generation"] == 1
+    assert result["added"] == 3  # all symbols are new in gen 1
+    progress = queue.progress(generation=1)
     assert progress["total"] == 3
-    assert progress["next_symbol"] in ("B/USDT:USDT", "C/USDT:USDT")
+    assert progress["pending"] == 3
+    assert progress["done"] == 0  # gen 1 starts fresh
+    assert progress["next_symbol"] in ("A/USDT:USDT", "B/USDT:USDT", "C/USDT:USDT")
+    # Old generation history is preserved
+    assert queue.progress(generation=0)["done"] == 1
+
+
+def test_rebuild_resumes_unfinished_without_new_generation(tmp_path):
+    """When the current generation has unfinished work, start_scan resumes
+    instead of opening a new generation (covered in scan_service tests, but
+    the queue level keeps jobs intact)."""
+    queue = make_queue(tmp_path)
+    queue.enqueue(["A/USDT:USDT", "B/USDT:USDT"])
+    job = queue.claim_next("w1")
+    # A is running, B is pending - no new period should be forced by enqueue.
+    added = queue.enqueue(["A/USDT:USDT", "B/USDT:USDT"])
+    assert added == 0  # same generation, already known: no-op
+    progress = queue.progress()
+    assert progress["running"] == 1
+    assert progress["pending"] == 1
 
 
 def test_state_survives_restart(tmp_path):

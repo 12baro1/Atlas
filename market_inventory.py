@@ -72,16 +72,19 @@ class MarketInventory:
         with self._lock:
             stale = (int(time.time() * 1000) - self._last_refresh_ms) >= self.ttl_seconds * 1000
             if force_refresh or stale or not self._snapshot:
-                self._refresh_locked()
+                self._refresh_locked(force=force_refresh)
             return sorted(self._snapshot.keys())
 
     def refresh(self, force: bool = True) -> Dict[str, Any]:
-        """Force a refresh and return a status summary."""
+        """Force a refresh and return a status summary.
+
+        force=True ignores the TTL so an explicit user request ("yenile")
+        always attempts a real Gate.io refresh; rate-limit backoff still
+        applies between retries.
+        """
         with self._lock:
-            if force:
-                self._refresh_locked()
-            elif (int(time.time() * 1000) - self._last_refresh_ms) >= self.ttl_seconds * 1000:
-                self._refresh_locked()
+            if force or (int(time.time() * 1000) - self._last_refresh_ms) >= self.ttl_seconds * 1000:
+                self._refresh_locked(force=force)
             return self.status()
 
     def status(self) -> Dict[str, Any]:
@@ -107,10 +110,11 @@ class MarketInventory:
     # Refresh with retries (rate-limit friendly)
     # ------------------------------------------------------------------
 
-    def _refresh_locked(self):
+    def _refresh_locked(self, force: bool = False):
         now_ms = int(time.time() * 1000)
-        # Honor the TTL even when forced: protects Gate.io rate limits.
-        if self._last_refresh_ms and (now_ms - self._last_refresh_ms) < self.ttl_seconds * 1000:
+        # Honor the TTL unless explicitly forced: protects Gate.io rate limits
+        # while still honoring an explicit user refresh request.
+        if not force and self._last_refresh_ms and (now_ms - self._last_refresh_ms) < self.ttl_seconds * 1000:
             return
         last_error: Optional[Exception] = None
         for attempt in range(1, self.max_retries + 1):

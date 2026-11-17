@@ -391,6 +391,22 @@ def test_restart_reloads_all_states(tmp_path):
     reloaded.stop()
 
 
+def test_add_candidate_persists_immediately_without_background_thread(tmp_path):
+    """Requirement E: setup eklendiginde 30 saniyelik persist araligina
+    baglanmadan SQLite'a anlik yazilmalidir (crash'te veri kaybı yok)."""
+    pool = make_pool(tmp_path, auto_persist=False)
+    pool.add_candidate(make_candidate("c1", "BTC/USDT:USDT", "smc"))
+
+    # A fresh pool instance over the same SQLite store must see the candidate
+    # immediately - no background persist thread was running.
+    reloaded = make_pool(tmp_path, auto_persist=False)
+    assert "c1" in reloaded._candidates
+    assert reloaded._candidates["c1"].symbol == "BTC/USDT:USDT"
+    assert reloaded._candidates["c1"].strategy_id == "smc"
+    pool.stop()
+    reloaded.stop()
+
+
 def test_different_strategies_are_never_merged(tmp_path):
     pool = make_pool(tmp_path)
     pool.add_candidate(make_candidate("c1", strat="smc"))

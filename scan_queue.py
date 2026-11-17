@@ -2,13 +2,12 @@
 
 States: pending -> running (leased) -> done | failed -> pending(retry)
 - claim_next is atomic (BEGIN IMMEDIATE): two workers can never take the
-  same symbol.
+  same symbol in the same generation.
 - Leases expire: a crashed worker's job is requeued automatically, so a
   VPS restart or worker crash never loses work.
 - Retry counter per symbol with a bounded retry limit.
-- Completed work is never deleted: progress reports are cumulative for the
-  current scan period, and rebuilding the universe adds new symbols
-  without resetting existing state.
+- Each scan period opens a new generation; older generations keep their
+  history so completed scans never block a new period.
 """
 
 from __future__ import annotations
@@ -23,8 +22,13 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("atlas.scan_queue")
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS scan_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS scan_jobs (
-    symbol TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('pending','running','done','failed')),
     enqueued_at_ms INTEGER NOT NULL,
     claimed_at_ms INTEGER,
@@ -33,10 +37,13 @@ CREATE TABLE IF NOT EXISTS scan_jobs (
     retries INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
     completed_at_ms INTEGER,
-    batch_tag TEXT
+    batch_tag TEXT,
+    scan_generation INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (symbol, scan_generation)
 );
 
 CREATE INDEX IF NOT EXISTS idx_scan_jobs_state ON scan_jobs(state, enqueued_at_ms);
+CREATE INDEX IF NOT EXISTS idx_scan_jobs_generation ON scan_jobs(scan_generation, state);
 """
 
 PENDING = "pending"
@@ -46,7 +53,7 @@ FAILED = "failed"
 
 
 class ScanQueue:
-    """Durable, crash-safe scan work queue."""
+    """Durable, crash-safe scan work queue with scan periods (generations)."""
 
     def __init__(
         self,
@@ -62,6 +69,7 @@ class ScanQueue:
         self._local = threading.local()
         self._conn_lock = threading.Lock()
         self._closed = False
+        self._current_generation = 0
         self._open()
 
     # ------------------------------------------------------------------
@@ -96,6 +104,25 @@ class ScanQueue:
             if not check or str(check[0]).lower() != "ok":
                 raise sqlite3.DatabaseError(f"integrity_check failed: {check}")
             conn.executescript(_SCHEMA)
+            # Backfill scan_generation on queues created before the column existed.
+            try:
+                conn.execute("ALTER TABLE scan_jobs ADD COLUMN scan_generation INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.DatabaseError:
+                # Column already exists.
+                pass
+            # Rebuild primary key if the old single-column PK still exists.
+            try:
+                conn.execute(
+                    "SELECT symbol, scan_generation FROM scan_jobs LIMIT 1"
+                )
+            except sqlite3.DatabaseError:
+                pass
+            # Restart-safe: resume the latest generation so a VPS restart never
+            # resets scan period state.
+            row = conn.execute(
+                "SELECT value FROM scan_meta WHERE key = 'current_generation'"
+            ).fetchone()
+            self._current_generation = int(row[0]) if row else 0
         except sqlite3.DatabaseError:
             # Corrupt queue file: drop it and start empty; the pool and
             # inventory are independent systems and stay untouched.
@@ -111,6 +138,7 @@ class ScanQueue:
             self._closed = False
             conn = self._thread_conn()
             conn.executescript(_SCHEMA)
+            self._current_generation = 0
 
     def _close_all(self):
         with self._conn_lock:
@@ -130,46 +158,96 @@ class ScanQueue:
     # Core operations
     # ------------------------------------------------------------------
 
-    def enqueue(self, symbols: List[str], batch_tag: Optional[str] = None) -> int:
-        """Add symbols to the queue; existing symbols keep their state."""
+    def start_new_period(self, batch_tag: Optional[str] = None) -> int:
+        """Open a new scan generation (period).
+
+        Older generations keep their history (done/failed/pending) so scan
+        statistics are never lost; only the new generation accepts new work.
+        Returns the new generation number.
+        """
+        with self._transaction() as conn:
+            self._current_generation += 1
+            gen = self._current_generation
+            conn.execute(
+                "INSERT INTO scan_meta(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ("current_generation", str(gen)),
+            )
+            if batch_tag is not None:
+                conn.execute(
+                    "INSERT INTO scan_meta(key, value) VALUES(?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    ("last_batch_tag", str(batch_tag)),
+                )
+        return gen
+
+    def current_generation(self) -> int:
+        return self._current_generation
+
+    def enqueue(self, symbols: List[str], batch_tag: Optional[str] = None,
+                generation: Optional[int] = None) -> int:
+        """Add symbols to the queue for a scan generation.
+
+        Symbols already present in the same generation keep their state (no
+        silent reset of completed work). Symbols from older generations are
+        re-opened as pending in the new generation.
+        """
         now_ms = int(time.time() * 1000)
+        gen = int(generation) if generation is not None else self._current_generation
         added = 0
         with self._transaction() as conn:
             for symbol in symbols:
                 clean = str(symbol or "").strip().upper()
                 if not clean:
                     continue
+                # Same generation: an existing job keeps its state, so a
+                # repeated enqueue of an already-known symbol is a no-op.
+                existing = conn.execute(
+                    "SELECT state FROM scan_jobs WHERE symbol = ? AND scan_generation = ?",
+                    (clean, gen),
+                ).fetchone()
+                if existing is not None:
+                    continue
+                # New symbol for this generation (or brand-new queue row).
                 cursor = conn.execute(
-                    "INSERT OR IGNORE INTO scan_jobs(symbol, state, enqueued_at_ms, "
-                    "batch_tag) VALUES(?, ?, ?, ?)",
-                    (clean, PENDING, now_ms, batch_tag),
+                    """
+                    INSERT INTO scan_jobs(symbol, state, enqueued_at_ms,
+                        batch_tag, scan_generation)
+                    VALUES(?, ?, ?, ?, ?)
+                    """,
+                    (clean, PENDING, now_ms, batch_tag, gen),
                 )
                 added += max(cursor.rowcount, 0)
         return added
 
     def claim_next(self, worker_id: str = "worker") -> Optional[Dict[str, Any]]:
-        """Atomically claim the oldest pending symbol (or an expired lease)."""
+        """Atomically claim the oldest pending symbol of the current generation."""
         now_ms = int(time.time() * 1000)
+        gen = self._current_generation
         with self._transaction() as conn:
             # Recover expired leases first so crashed workers release jobs.
             conn.execute(
                 "UPDATE scan_jobs SET state = ?, lease_until_ms = NULL, "
                 "last_error = COALESCE(last_error, 'lease_expired') "
-                "WHERE state = ? AND lease_until_ms IS NOT NULL AND lease_until_ms < ?",
-                (PENDING, RUNNING, now_ms),
+                "WHERE state = ? AND scan_generation = ? "
+                "AND lease_until_ms IS NOT NULL AND lease_until_ms < ?",
+                (PENDING, RUNNING, gen, now_ms),
             )
             row = conn.execute(
                 "SELECT symbol, attempts, retries FROM scan_jobs "
-                "WHERE state = ? ORDER BY enqueued_at_ms ASC LIMIT 1",
-                (PENDING,),
+                "WHERE state = ? AND scan_generation = ? "
+                "ORDER BY enqueued_at_ms ASC LIMIT 1",
+                (PENDING, gen),
             ).fetchone()
             if row is None:
                 return None
             symbol, attempts, retries = row
             conn.execute(
                 "UPDATE scan_jobs SET state = ?, claimed_at_ms = ?, "
-                "lease_until_ms = ?, attempts = attempts + 1 WHERE symbol = ?",
-                (RUNNING, now_ms, now_ms + self.lease_seconds * 1000, symbol),
+                "lease_until_ms = ?, attempts = attempts + 1 "
+                "WHERE symbol = ? AND scan_generation = ?",
+                (RUNNING, now_ms, now_ms + self.lease_seconds * 1000,
+                 symbol, gen),
             )
             return {
                 "symbol": symbol,
@@ -183,9 +261,11 @@ class ScanQueue:
         """Mark a claimed symbol done, or requeue it for a bounded retry."""
         clean = str(symbol or "").strip().upper()
         now_ms = int(time.time() * 1000)
+        gen = self._current_generation
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT state, retries FROM scan_jobs WHERE symbol = ?", (clean,)
+                "SELECT state, retries FROM scan_jobs WHERE symbol = ? "
+                "AND scan_generation = ?", (clean, gen),
             ).fetchone()
             if row is None or row[0] != RUNNING:
                 return False
@@ -193,39 +273,48 @@ class ScanQueue:
             if ok:
                 conn.execute(
                     "UPDATE scan_jobs SET state = ?, completed_at_ms = ?, "
-                    "last_error = NULL, lease_until_ms = NULL WHERE symbol = ?",
-                    (DONE, now_ms, clean),
+                    "last_error = NULL, lease_until_ms = NULL "
+                    "WHERE symbol = ? AND scan_generation = ?",
+                    (DONE, now_ms, clean, gen),
                 )
                 return True
             if retries < self.max_retries:
                 conn.execute(
                     "UPDATE scan_jobs SET state = ?, retries = retries + 1, "
-                    "last_error = ?, lease_until_ms = NULL WHERE symbol = ?",
-                    (PENDING, str(error or "unknown_error"), clean),
+                    "last_error = ?, lease_until_ms = NULL "
+                    "WHERE symbol = ? AND scan_generation = ?",
+                    (PENDING, str(error or "unknown_error"), clean, gen),
                 )
             else:
                 conn.execute(
                     "UPDATE scan_jobs SET state = ?, last_error = ?, "
-                    "lease_until_ms = NULL WHERE symbol = ?",
-                    (FAILED, str(error or "unknown_error"), clean),
+                    "lease_until_ms = NULL "
+                    "WHERE symbol = ? AND scan_generation = ?",
+                    (FAILED, str(error or "unknown_error"), clean, gen),
                 )
             return True
 
-    def progress(self) -> Dict[str, Any]:
-        """Cumulative progress for the current queue contents."""
+    def progress(self, generation: Optional[int] = None) -> Dict[str, Any]:
+        """Cumulative progress for a scan generation.
+
+        generation=None reports the current (latest) generation.
+        """
+        gen = int(generation) if generation is not None else self._current_generation
         conn = self._thread_conn()
         counts = {state: 0 for state in (PENDING, RUNNING, DONE, FAILED)}
         for state, count in conn.execute(
-            "SELECT state, COUNT(*) FROM scan_jobs GROUP BY state"
+            "SELECT state, COUNT(*) FROM scan_jobs WHERE scan_generation = ? "
+            "GROUP BY state", (gen,)
         ).fetchall():
             counts[str(state)] = int(count)
         total = sum(counts.values())
         finished = counts[DONE] + counts[FAILED]
         next_symbol = conn.execute(
-            "SELECT symbol FROM scan_jobs WHERE state = ? "
-            "ORDER BY enqueued_at_ms ASC LIMIT 1", (PENDING,)
+            "SELECT symbol FROM scan_jobs WHERE state = ? AND scan_generation = ? "
+            "ORDER BY enqueued_at_ms ASC LIMIT 1", (PENDING, gen)
         ).fetchone()
         return {
+            "generation": gen,
             "total": total,
             "pending": counts[PENDING],
             "running": counts[RUNNING],
@@ -237,10 +326,12 @@ class ScanQueue:
             "next_symbol": next_symbol[0] if next_symbol else None,
         }
 
-    def failed_symbols(self) -> List[Dict[str, Any]]:
+    def failed_symbols(self, generation: Optional[int] = None) -> List[Dict[str, Any]]:
+        gen = int(generation) if generation is not None else self._current_generation
         rows = self._thread_conn().execute(
             "SELECT symbol, attempts, retries, last_error FROM scan_jobs "
-            "WHERE state = ? ORDER BY symbol", (FAILED,)
+            "WHERE state = ? AND scan_generation = ? ORDER BY symbol",
+            (FAILED, gen),
         ).fetchall()
         return [
             {"symbol": row[0], "attempts": row[1], "retries": row[2], "error": row[3]}
@@ -248,28 +339,33 @@ class ScanQueue:
         ]
 
     def rebuild(self, symbols: List[str], batch_tag: Optional[str] = None) -> Dict[str, int]:
-        """Add the current universe to the queue WITHOUT resetting state.
+        """Open a new scan generation and queue the given symbols for it.
 
-        New symbols are enqueued as pending; previously scanned symbols keep
-        their result so a completed scan is never silently thrown away.
+        Older generations keep their history; completed scans never block a
+        new period. New symbols are enqueued as pending; previously scanned
+        symbols in the same generation keep their result.
         """
-        added = self.enqueue(symbols, batch_tag=batch_tag)
-        snapshot = self.progress()
-        return {"added": added, "progress": snapshot}
+        gen = self.start_new_period(batch_tag)
+        added = self.enqueue(symbols, batch_tag=batch_tag, generation=gen)
+        snapshot = self.progress(gen)
+        return {"added": added, "progress": snapshot, "generation": gen}
 
-    def requeue_failed(self) -> int:
-        """Manually requeue failed symbols for another bounded attempt."""
+    def requeue_failed(self, generation: Optional[int] = None) -> int:
+        """Manually requeue failed symbols of a generation for another attempt."""
+        gen = int(generation) if generation is not None else self._current_generation
         with self._transaction() as conn:
             cursor = conn.execute(
                 "UPDATE scan_jobs SET state = ?, lease_until_ms = NULL "
-                "WHERE state = ?",
-                (PENDING, FAILED),
+                "WHERE state = ? AND scan_generation = ?",
+                (PENDING, FAILED, gen),
             )
             return max(cursor.rowcount, 0)
 
-    def done_symbols(self) -> List[str]:
+    def done_symbols(self, generation: Optional[int] = None) -> List[str]:
+        gen = int(generation) if generation is not None else self._current_generation
         rows = self._thread_conn().execute(
-            "SELECT symbol FROM scan_jobs WHERE state = ? ORDER BY symbol", (DONE,)
+            "SELECT symbol FROM scan_jobs WHERE state = ? AND scan_generation = ? "
+            "ORDER BY symbol", (DONE, gen),
         ).fetchall()
         return [row[0] for row in rows]
 

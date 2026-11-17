@@ -203,8 +203,12 @@ class AtlasRuntime:
         return self._scan_service.status()
 
     def refresh_market_inventory(self):
-        """Force a Gate.io inventory refresh (rate-limit aware)."""
-        return self._market_inventory.refresh(force=False)
+        """Force a Gate.io inventory refresh (rate-limit aware).
+
+        A user-initiated refresh always attempts a real refresh; the TTL only
+        throttles automatic checks, never an explicit request.
+        """
+        return self._market_inventory.refresh(force=True)
 
     def resume_scan(self):
         """Resume pending queue work without adding anything new."""

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -314,6 +315,17 @@ class OpportunityPool:
             self._candidates[candidate.setup_id] = candidate
             self._index_candidate(candidate)
             
+            # Persist immediately so a crash within persist_interval never
+            # loses a newly added candidate (no 30-second silent window).
+            if self._store is not None:
+                try:
+                    self._store.save_pool(
+                        "candidates",
+                        {k: v.to_dict() for k, v in self._candidates.items()},
+                    )
+                except Exception as e:
+                    logger.error(f"SQLite candidate persist failed: {e}")
+            
             logger.info(f"New candidate added: {candidate.setup_id} "
                        f"({candidate.symbol} {candidate.direction} "
                        f"{candidate.strategy_id})")
@@ -513,9 +525,17 @@ class OpportunityPool:
         rank="net_rr" keeps the simple cost-adjusted RR ordering.
         """
         with self._lock:
-            candidates = list(self._validated.values())
+            now_ms = int(time.time() * 1000)
+            # Expired, invalidated or stale-setup candidates must never be
+            # presented as actionable best setups.
+            candidates = [
+                c for c in self._validated.values()
+                if c.status == SetupStatus.VALIDATED.value
+                and (not c.expires_at_ms or c.expires_at_ms >= now_ms)
+                and c.net_rr_after_costs is not None
+                and math.isfinite(float(c.net_rr_after_costs))
+            ]
             if rank == "composite":
-                now_ms = int(time.time() * 1000)
                 def composite(c: SetupCandidate) -> float:
                     net_rr = min(float(c.net_rr_after_costs or 0.0), 6.0)
                     rr_component = net_rr / 6.0

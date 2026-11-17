@@ -934,13 +934,15 @@ class TelegramCommandService:
                 if setup.created_at_ms else None
             )
             age_text = f"{age_hours:.1f} saat" if age_hours is not None else "bilinmiyor"
+            last_ms = setup.updated_at_ms or setup.created_at_ms
+            last_text = time.strftime("%d.%m %H:%M", time.localtime(last_ms / 1000)) if last_ms else "bilinmiyor"
             lines.extend([
                 f"{index}. {setup.symbol} | {setup.direction} | {setup.strategy_name}",
                 f"   Tür: {setup.setup_type} | Durum: {setup.status}",
                 f"   Giriş: {setup.entry_price} | SL: {setup.stop_loss}",
                 f"   TP1: {setup.tp1} | TP2: {setup.tp2} | TP3: {setup.tp3}",
                 f"   Net RR (maliyet sonrası): {setup.net_rr_after_costs}",
-                f"   Setup yaşı: {age_text} | Skor: {setup.score} (sıralama puanı, kazanma olasılığı değildir)",
+                f"   Setup yaşı: {age_text} | Son veri: {last_text} | Skor: {setup.score} (sıralama puanı, kazanma olasılığı değildir)",
             ])
             if setup.invalidation_reason:
                 lines.append(f"   Not: {setup.invalidation_reason}")
