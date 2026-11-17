@@ -137,6 +137,17 @@ def test_telegram_card_is_compact_and_keeps_trade_levels():
     assert "Atlas otomatik emir göndermez." in text
 
 
+def test_start_command_is_registered_and_recognized():
+    assert is_recognized_command("/start")
+    assert is_recognized_command("/start@Oakmontincbot")
+
+    runtime = MagicMock()
+    service = TelegramCommandService(runtime, "token", "-100123")
+    reply = service.execute_command("/start")
+    assert "Atlas Telegram komut arayüzü aktif" in reply
+    assert "/20tara" in reply
+
+
 def test_recognizes_mevcut_command():
     assert is_recognized_command("/mevcut@Oakmontincbot")
     assert is_recognized_command("/mevcut")
