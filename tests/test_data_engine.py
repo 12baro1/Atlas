@@ -66,6 +66,9 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
         def contract_size(self, _symbol):
             return 1.0
 
+        def market(self, _symbol):
+            return {"precision": {"price": "0.000001"}, "info": {"order_price_round": "0.000001"}}
+
         def milliseconds(self):
             return now
 
@@ -119,6 +122,8 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
 
     data = data_engine.get_market_data("BTC/USDT:USDT", force_refresh=True)
 
+    assert data["tick_size"] == 0.000001
+    assert data["price_precision_source"] == "GATEIO_ORDER_PRICE_ROUND"
     assert data["data_provenance"]["orderbook"] == "GATEIO_REST"
     assert data["data_provenance"]["recent_trades"] == "GATEIO_REST"
     assert data["data_provenance"]["open_interest"] == "GATEIO_REST_SNAPSHOT"
