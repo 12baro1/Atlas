@@ -90,7 +90,7 @@ class RiskEngine:
                 return float(getattr(Config, config_name, default))
 
         maker_fee_rate = _payload_rate("maker_fee_rate", "MAKER_FEE_RATE", 0.0002)
-        taker_fee_rate = _payload_rate("taker_fee_rate", "TAKER_FEE_RATE", 0.00055)
+        taker_fee_rate = _payload_rate("taker_fee_rate", "TAKER_FEE_RATE", 0.0005)
         spread_rate = _payload_rate("spread_rate", "STOP_SPREAD_BUFFER_RATE", 0.0002)
         slippage_rate = _payload_rate("slippage_rate", "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)
 
@@ -316,7 +316,7 @@ class RiskEngine:
             return max(0.0, rate) if math.isfinite(rate) else float(default)
 
         maker_fee_rate = _resolve_fee(maker_fee_rate, "MAKER_FEE_RATE", 0.0002)
-        taker_fee_rate = _resolve_fee(taker_fee_rate, "TAKER_FEE_RATE", 0.00055)
+        taker_fee_rate = _resolve_fee(taker_fee_rate, "TAKER_FEE_RATE", 0.0005)
         atr_period = int(getattr(Config, "ATR_PERIOD", 14))
         min_stop_atr_multiplier = float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75))
         min_tick_fallback = float(getattr(Config, "MIN_TICK_DISTANCE_FALLBACK", 0.01))
