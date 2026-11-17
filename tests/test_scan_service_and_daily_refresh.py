@@ -230,11 +230,13 @@ class FakeRuntime:
     def __init__(self):
         self.analyzed = []
         self._fail_symbols = set()
+        self.websocket_flags = []
         self._lock = threading.Lock()
 
-    def analyze_symbol(self, symbol, force_refresh=False, track_signal=False):
+    def analyze_symbol(self, symbol, force_refresh=False, track_signal=False, use_websocket=True):
         with self._lock:
             self.analyzed.append(symbol)
+            self.websocket_flags.append(bool(use_websocket))
         if symbol in self._fail_symbols:
             return {"ok": False, "error": "stale_15m_market_data"}
         return {"ok": True, "symbol": symbol}
@@ -330,6 +332,7 @@ def test_start_scan_enqueues_and_processes(tmp_path):
     status = service.status()
     assert status["complete"] is True
     assert status["done"] == 5
+    assert runtime.websocket_flags == [False] * 5
     service.stop_scan()
 
 
