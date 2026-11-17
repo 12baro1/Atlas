@@ -107,9 +107,24 @@ def invalidate_all():
 
 
 def get_market_data(symbol, force_refresh=False):
-    data = {"symbol": symbol}
+    data = {"symbol": symbol, "tick_size": None}
     # Trace kimliği analiz başında bir kez üretilir; tüm aşamalar aynı kimliği taşır.
     ensure_trace(data)
+    # Gate.io's order_price_round is the authoritative price increment.
+    try:
+        market = exchange.market(symbol)
+        precision = market.get("precision") or {}
+        market_info = market.get("info") or {}
+        raw_tick = precision.get("price")
+        if raw_tick is None:
+            raw_tick = market_info.get("order_price_round")
+        from price_precision import normalize_tick_size
+        data["tick_size"] = normalize_tick_size(raw_tick)
+        if data["tick_size"] is not None:
+            data["price_precision_source"] = "GATEIO_ORDER_PRICE_ROUND"
+    except Exception:
+        # Preserve candle analysis if market metadata is temporarily unavailable.
+        pass
     data["data_provenance"] = {
         "orderbook": "UNAVAILABLE",
         "recent_trades": "UNAVAILABLE",
