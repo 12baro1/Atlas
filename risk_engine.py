@@ -90,7 +90,7 @@ class RiskEngine:
                 return float(getattr(Config, config_name, default))
 
         maker_fee_rate = _payload_rate("maker_fee_rate", "MAKER_FEE_RATE", 0.0002)
-        taker_fee_rate = _payload_rate("taker_fee_rate", "TAKER_FEE_RATE", 0.00055)
+        taker_fee_rate = _payload_rate("taker_fee_rate", "TAKER_FEE_RATE", 0.0005)
         spread_rate = _payload_rate("spread_rate", "STOP_SPREAD_BUFFER_RATE", 0.0002)
         slippage_rate = _payload_rate("slippage_rate", "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)
 
@@ -343,7 +343,7 @@ class RiskEngine:
         # Reject such geometry; never move a structural invalidation level just
         # to satisfy a cost threshold.
         maker_fee_rate = float(getattr(Config, "MAKER_FEE_RATE", 0.0002))
-        taker_fee_rate = float(getattr(Config, "TAKER_FEE_RATE", 0.00055))
+        taker_fee_rate = float(getattr(Config, "TAKER_FEE_RATE", 0.0005))
         stop_cost_floor_multiple = max(
             0.0, float(getattr(Config, "MIN_STOP_COST_MULTIPLIER", 2.0))
         )
@@ -417,7 +417,7 @@ class RiskEngine:
             stop_price=adjusted_stop_loss,
             entry_type=resolved_entry_type,
             maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002)),
-            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055)),
+            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.0005)),
             spread_rate=execution_spread_rate,
             slippage_rate=execution_slippage_rate,
         )
@@ -443,7 +443,7 @@ class RiskEngine:
         account_balance = float(getattr(Config, "INITIAL_BALANCE", 1000.0))
         base_risk_percent = float(getattr(Config, "RISK_PERCENT", 1.0))
         maker_fee_rate = float(getattr(Config, "MAKER_FEE_RATE", 0.0002))
-        taker_fee_rate = float(getattr(Config, "TAKER_FEE_RATE", 0.00055))
+        taker_fee_rate = float(getattr(Config, "TAKER_FEE_RATE", 0.0005))
         minimum_rr = float(getattr(Config, "MINIMUM_RR", 3.0))
         minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
         resolved_entry_type = str(entry_type or "LIMIT").upper()
