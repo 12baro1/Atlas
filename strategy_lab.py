@@ -63,7 +63,7 @@ STRATEGY_NAMES = {
 }
 
 
-def _risk_validate_candidate(candidate):
+def _risk_validate_candidate(candidate, market_data=None):
     """Apply the same final RR and execution-friction model used by SMC risk."""
     try:
         entry = float(candidate.get("entry"))
@@ -77,6 +77,8 @@ def _risk_validate_candidate(candidate):
             "minimum_net_rr": float(Config.MINIMUM_NET_RR),
             "risk_percent_base": float(Config.RISK_PERCENT),
             "position_size_limit": float(Config.MAX_POSITION_SIZE),
+            "maker_fee_rate": (market_data or {}).get("maker_fee_rate"),
+            "taker_fee_rate": (market_data or {}).get("taker_fee_rate"),
         }
         reconciled = RiskEngine().reconcile_final_geometry_payload(risk, entry, stop, targets)
         net_rr = reconciled.get("weighted_net_rr")
@@ -910,7 +912,7 @@ class SevenStrategyLab:
                 _record_common_filter(candidate, "REJECTED", execution_rejection)
                 continue
 
-            validation = _risk_validate_candidate(candidate)
+            validation = _risk_validate_candidate(candidate, data)
             candidate["risk_validation"] = {
                 key: value for key, value in validation.items() if key != "risk_plan"
             }
