@@ -1,5 +1,6 @@
 [Unit]
 Description=Atlas seven-strategy live market analysis
+Documentation=https://github.com/12baro1/Atlas
 Wants=network-online.target
 After=network-online.target
 
@@ -15,6 +16,9 @@ TimeoutStopSec=120
 KillSignal=SIGTERM
 NoNewPrivileges=true
 PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=atlas
 
 [Install]
 WantedBy=default.target
