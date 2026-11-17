@@ -729,6 +729,44 @@ class AtlasRuntime:
             with self._lock:
                 self._scanner_stats["last_update_ms"] = int(time.time() * 1000)
 
+    def _resolve_signal_id(self, result):
+        """Resolve the journal outcome linked to an analysis result.
+
+        Prefer an ID already attached to the result. Otherwise resolve only
+        actionable LONG/SHORT outcomes through the shared manual trade service.
+        Missing/non-actionable results intentionally have no signal ID.
+        """
+        if not isinstance(result, dict):
+            return None
+
+        journal = result.get("journal")
+        signal_id = result.get("signal_id")
+        if not signal_id and isinstance(journal, dict):
+            signal_id = journal.get("signal_id")
+        if signal_id:
+            return str(signal_id)
+
+        signal = result.get("signal")
+        signal = signal if isinstance(signal, dict) else {}
+        direction = str(signal.get("signal") or "").strip().upper()
+        symbol = str(result.get("symbol") or "").strip()
+        if not symbol or direction not in {"LONG", "SHORT"}:
+            return None
+
+        try:
+            with self._journal_lock:
+                return self.manual_service.resolve_signal_id(
+                    symbol=symbol,
+                    direction=direction,
+                )
+        except Exception:
+            self.logger.exception(
+                "Signal ID resolution failed | symbol=%s direction=%s",
+                symbol,
+                direction,
+            )
+            return None
+
     def _register_result(self, result):
         signal = result.get("signal") or {}
         risk = result.get("risk") or {}
