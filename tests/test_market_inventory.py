@@ -136,3 +136,30 @@ def test_market_info_lookup(tmp_path):
     info = inventory.market_info("BTC/USDT:USDT")
     assert info["id"] == "BTC_USDT"
     assert inventory.market_info("NOPE/USDT:USDT") is None
+
+
+def test_ranked_symbols_use_bulk_24h_quote_volume(tmp_path):
+    class RankedGate(FakeGateExchange):
+        def __init__(self):
+            super().__init__(contracts=[
+                {"name": "AAA_USDT"}, {"name": "BBB_USDT"}, {"name": "CCC_USDT"},
+            ])
+
+        def fetch_tickers(self, symbols=None):
+            return {
+                "AAA/USDT:USDT": {"quoteVolume": "1000"},
+                "BBB/USDT:USDT": {"quoteVolume": "9000"},
+                "CCC/USDT:USDT": {"quoteVolume": "5000"},
+            }
+
+    inventory = make_inventory(tmp_path, RankedGate())
+    assert inventory.get_ranked_symbols(limit=2) == [
+        "BBB/USDT:USDT", "CCC/USDT:USDT"
+    ]
+    assert inventory.status()["ranking_source"] == "gateio_24h_quote_volume"
+
+
+def test_ranked_symbols_fall_back_to_full_alphabetical_inventory(tmp_path):
+    inventory = make_inventory(tmp_path, FakeGateExchange())
+    assert inventory.get_ranked_symbols(limit=1) == ["BTC/USDT:USDT"]
+    assert inventory.status()["ranking_source"] == "alphabetical_fallback"
