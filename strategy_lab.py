@@ -229,6 +229,47 @@ def _finalize_candidate_geometry(candidate, candle_sets):
     return None
 
 
+
+def _snap_candidate_to_exchange_tick(candidate, tick_size):
+    """Snap all setup prices to Gate.io's exact tick before shared validation."""
+    from price_precision import normalize_tick_size, snap_price_to_tick
+    tick = normalize_tick_size(tick_size)
+    if tick is None or not isinstance(candidate, dict):
+        return candidate
+    side = str(candidate.get("direction") or "").upper()
+    if side not in {"LONG", "SHORT"}:
+        return candidate
+    entry_type = str(candidate.get("entry_type") or "MARKET").upper()
+    entry_rounding = "nearest"
+    if entry_type == "LIMIT":
+        entry_rounding = "floor" if side == "LONG" else "ceiling"
+    try:
+        entry = snap_price_to_tick(candidate.get("entry"), tick, entry_rounding)
+        stop = snap_price_to_tick(
+            candidate.get("stop_loss"), tick, "floor" if side == "LONG" else "ceiling"
+        )
+    except (TypeError, ValueError, OverflowError):
+        return candidate
+    candidate["entry"] = entry
+    candidate["stop_loss"] = stop
+    risk_distance = abs(entry - stop)
+    for key in ("tp1", "tp2", "tp3"):
+        value = candidate.get(key)
+        if value is None:
+            continue
+        try:
+            value = snap_price_to_tick(
+                value, tick, "ceiling" if side == "LONG" else "floor"
+            )
+        except (TypeError, ValueError, OverflowError):
+            continue
+        candidate[key] = value
+        if risk_distance > 0:
+            candidate[f"rr_{key}"] = round(abs(value - entry) / risk_distance, 4)
+    candidate["tick_size"] = tick
+    candidate["price_precision_source"] = "GATEIO_ORDER_PRICE_ROUND"
+    return candidate
+
 def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_type="MARKET", entry_reference="LAST_CLOSED_15M_FALLBACK", structure_candles=None):
     """Compatibility helper for research/tests; live generators use raw candidates."""
     candidate = _raw_candidate(
@@ -804,6 +845,7 @@ class SevenStrategyLab:
 
         eligible = []
         for candidate in generated:
+            _snap_candidate_to_exchange_tick(candidate, data.get("tick_size"))
             # All seven strategies share one structural geometry filter.
             # Raw candidates must have valid entry/stop/three targets after
             # applying confirmed swing invalidation and opposing liquidity targets.
