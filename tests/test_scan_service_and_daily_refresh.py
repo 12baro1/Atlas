@@ -64,7 +64,7 @@ class FakeQueue:
 
     def rebuild(self, symbols, batch_tag=None):
         self.rebuilt.append((tuple(symbols), batch_tag))
-        return {"added": len(symbols), "progress": {}}
+        return {"added": len(symbols), "progress": {}, "generation": 1}
 
 
 class FakeInventory:
@@ -152,6 +152,74 @@ def test_refresh_failure_does_not_mark_day_done(tmp_path):
     assert result is None
     # Marker NOT set: a retry after the failure can still refresh the day
     assert refresh.last_refresh_day() is None
+
+
+class BackupFailingPool(FakePool):
+    """Pool whose store backup raises; archive_and_reset_scan_pools must
+    NOT clear live pools when backup fails."""
+
+    def __init__(self):
+        super().__init__()
+        self.cleared = False
+
+    def archive_and_reset_scan_pools(self, day_tag):
+        # Simulate: backup raises -> archive_and_reset_scan_pools re-raises
+        # before clearing pools
+        raise RuntimeError("backup failed")
+
+
+def test_backup_failure_does_not_clear_live_pools(tmp_path):
+    """Arşivleme/yedekleme başarısızsa canlı havuz temizlenmemeli."""
+    store = FakeStore()
+    pool = BackupFailingPool()
+    pool._store = store
+    queue = FakeQueue()
+    inventory = FakeInventory(["BTC/USDT:USDT"])
+    refresh = DailyPoolRefresh(pool, queue, inventory)
+    import calendar
+    midnight = calendar.timegm((2026, 11, 18, 0, 5, 0, 0, 0, 0)) * 1000
+
+    result = refresh.run_if_due(midnight)
+    assert result is None  # exception propagated, refresh not marked done
+    assert store.meta.get("last_refresh_day") is None
+    assert len(queue.rebuilt) == 0  # no new generation opened
+
+
+def test_vps_restart_reads_marker_from_sqlite_store(tmp_path):
+    """VPS restart sonrası yeni DailyPoolRefresh instance'ı
+    SQLite meta'dan last_refresh_day'ı okur (tekrar yenilemez)."""
+    store = FakeStore()
+    store.meta["last_refresh_day"] = "2026-11-18"  # simulated from previous run
+    pool = FakePool()
+    pool._store = store
+    queue = FakeQueue()
+    inventory = FakeInventory(["BTC/USDT:USDT"])
+    refresh = DailyPoolRefresh(pool, queue, inventory)
+    import calendar
+    midnight = calendar.timegm((2026, 11, 18, 1, 0, 0, 0, 0, 0)) * 1000
+
+    result = refresh.run_if_due(midnight)
+    assert result is None, "marker already set for today: no re-refresh"
+    assert len(queue.rebuilt) == 0
+
+
+def test_new_generation_opened_on_daily_refresh(tmp_path):
+    """Günlük yenileme yeni scan generation açar; eski done kayıtları
+    yeni nesilde engellemez."""
+    store = FakeStore()
+    pool = FakePool()
+    pool._store = store
+    queue = FakeQueue()
+    inventory = FakeInventory(["BTC/USDT:USDT", "ETH/USDT:USDT"])
+    refresh = DailyPoolRefresh(pool, queue, inventory)
+    import calendar
+    midnight = calendar.timegm((2026, 11, 18, 0, 5, 0, 0, 0, 0)) * 1000
+
+    result = refresh.run_if_due(midnight)
+    assert result is not None
+    assert result["scan_generation"] is not None
+    assert result["queue_added"] == 2
+    assert store.meta["last_refresh_day"] == "2026-11-18"
 
 
 # ---------------------------------------------------------------------------

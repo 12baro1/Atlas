@@ -97,32 +97,117 @@ class ScanQueue:
                     self._connections.append(conn)
         return conn
 
+    def _migrate_to_composite_pk(self, conn: sqlite3.Connection) -> None:
+        """Migrate scan_jobs from single-column PK (symbol) to composite PK (symbol, scan_generation).
+
+        Atomic and idempotent: safe to re-run after a partial/crashed migration.
+        All DDL runs inside one BEGIN IMMEDIATE transaction so a crash never
+        leaves a half-migrated schema.
+        """
+        # Determine whether migration is needed.
+        needs_migration = False
+        try:
+            conn.execute("SELECT scan_generation FROM scan_jobs LIMIT 1")
+        except sqlite3.DatabaseError:
+            needs_migration = True
+
+        if not needs_migration:
+            pk_cols = [
+                row[1]
+                for row in conn.execute("PRAGMA table_info(scan_jobs)")
+                if row[5] > 0
+            ]
+            if pk_cols != ["symbol", "scan_generation"]:
+                needs_migration = True
+
+        if not needs_migration:
+            return
+
+        # A crashed earlier migration may have left scan_jobs behind; drop it.
+        conn.execute("DROP TABLE IF EXISTS scan_jobs_new")
+
+        conn.execute(
+            """
+            CREATE TABLE scan_jobs_new (
+                symbol TEXT NOT NULL,
+                state TEXT NOT NULL CHECK (state IN ('pending','running','done','failed')),
+                enqueued_at_ms INTEGER NOT NULL,
+                claimed_at_ms INTEGER,
+                lease_until_ms INTEGER,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                retries INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                completed_at_ms INTEGER,
+                batch_tag TEXT,
+                scan_generation INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (symbol, scan_generation)
+            )
+            """
+        )
+
+        # Preserve all old records, assigning them to generation 0.
+        conn.execute(
+            """
+            INSERT INTO scan_jobs_new(
+                symbol, state, enqueued_at_ms, claimed_at_ms, lease_until_ms,
+                attempts, retries, last_error, completed_at_ms, batch_tag,
+                scan_generation
+            )
+            SELECT
+                symbol, state, enqueued_at_ms, claimed_at_ms, lease_until_ms,
+                attempts, retries, last_error, completed_at_ms, batch_tag, 0
+            FROM scan_jobs
+            """
+        )
+
+        conn.execute("DROP TABLE scan_jobs")
+        conn.execute("ALTER TABLE scan_jobs_new RENAME TO scan_jobs")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scan_jobs_state "
+            "ON scan_jobs(state, enqueued_at_ms)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scan_jobs_generation "
+            "ON scan_jobs(scan_generation, state)"
+        )
+
     def _open(self):
         conn = self._thread_conn()
         try:
             check = conn.execute("PRAGMA integrity_check").fetchone()
             if not check or str(check[0]).lower() != "ok":
                 raise sqlite3.DatabaseError(f"integrity_check failed: {check}")
-            conn.executescript(_SCHEMA)
-            # Backfill scan_generation on queues created before the column existed.
-            try:
-                conn.execute("ALTER TABLE scan_jobs ADD COLUMN scan_generation INTEGER NOT NULL DEFAULT 0")
-            except sqlite3.DatabaseError:
-                # Column already exists.
-                pass
-            # Rebuild primary key if the old single-column PK still exists.
-            try:
+            # Does scan_jobs already exist? If so it may use the old
+            # single-column-PK schema and must be migrated before _SCHEMA's
+            # indexes (which reference scan_generation) are created.
+            table_exists = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='scan_jobs'"
+            ).fetchone() is not None
+
+            if table_exists:
+                # Ensure scan_meta exists, then migrate scan_jobs in place.
                 conn.execute(
-                    "SELECT symbol, scan_generation FROM scan_jobs LIMIT 1"
+                    "CREATE TABLE IF NOT EXISTS scan_meta ("
+                    "key TEXT PRIMARY KEY, value TEXT NOT NULL)"
                 )
-            except sqlite3.DatabaseError:
-                pass
-            # Restart-safe: resume the latest generation so a VPS restart never
-            # resets scan period state.
+                self._migrate_to_composite_pk(conn)
+            else:
+                # Fresh database: create everything from _SCHEMA.
+                conn.executescript(_SCHEMA)
+
+            # Restart-safe: resume the latest generation so a VPS restart
+            # never resets scan period state.
             row = conn.execute(
                 "SELECT value FROM scan_meta WHERE key = 'current_generation'"
             ).fetchone()
             self._current_generation = int(row[0]) if row else 0
+            # Final integrity check after migration / schema creation.
+            check2 = conn.execute("PRAGMA integrity_check").fetchone()
+            if not check2 or str(check2[0]).lower() != "ok":
+                raise sqlite3.DatabaseError(
+                    f"post-migration integrity_check failed: {check2}"
+                )
         except sqlite3.DatabaseError:
             # Corrupt queue file: drop it and start empty; the pool and
             # inventory are independent systems and stay untouched.
