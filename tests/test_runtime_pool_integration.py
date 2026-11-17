@@ -131,8 +131,11 @@ def test_strategy_telemetry_accumulates_funnel(tmp_path):
     assert telemetry["common_filter_rejected"] == 2
     assert telemetry["rejection_reasons"]["MARKET_ENTRY_TOO_FAR"] == 1
     per_strategy = telemetry["per_strategy"]
+    assert per_strategy["smc"]["setups"] == 1
     assert per_strategy["smc"]["selected"] == 1
+    assert per_strategy["orderflow_momentum"]["setups"] == 1
     assert per_strategy["orderflow_momentum"]["passed"] == 1
+    assert per_strategy["trend_pullback"]["setups"] == 1
     assert per_strategy["trend_pullback"]["rejected"] == 1
 
 
