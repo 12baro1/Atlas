@@ -53,10 +53,17 @@ class ScanService:
         queue from a previous session resumes automatically.
         """
         with self._worker_lock:
-            if self._workers_started and any(w.is_alive() for w in self._workers):
+            alive = [worker for worker in self._workers if worker.is_alive()]
+            if alive:
+                # Never clear the shared stop event while a previous worker is
+                # still finishing an in-flight analysis. Doing so would revive
+                # an orphan and start a second worker set over the same queue.
+                self._workers = alive
+                self._workers_started = True
                 return False
-            self._stop_event.clear()
             self._workers = []
+            self._workers_started = False
+            self._stop_event.clear()
             for index in range(self.worker_count):
                 thread = threading.Thread(
                     target=self._worker_loop,
@@ -78,10 +85,18 @@ class ScanService:
         for worker in list(self._workers):
             worker.join(timeout=timeout_seconds)
         with self._worker_lock:
-            alive = [w.name for w in self._workers if w.is_alive()]
-            self._workers = []
-            self._workers_started = False
-        return {"stopped": True, "workers_still_alive": alive, "progress": self.status()}
+            alive_workers = [worker for worker in self._workers if worker.is_alive()]
+            alive = [worker.name for worker in alive_workers]
+            # Retain references to workers that did not finish within the
+            # timeout. ensure_workers() must see them and must not clear the
+            # stop event until they have actually exited.
+            self._workers = alive_workers
+            self._workers_started = bool(alive_workers)
+        return {
+            "stopped": not alive,
+            "workers_still_alive": alive,
+            "progress": self.status(),
+        }
 
     def is_running(self) -> bool:
         with self._worker_lock:
@@ -99,15 +114,23 @@ class ScanService:
           command resumes it instead of restarting — even when the inventory
           is temporarily unavailable.
         - If the current generation is fully complete, a new scan generation
-        is opened and the requested number of symbols (alphabetically first
-        N from the Gate.io universe) is queued into it. Completed jobs from
-        previous generations never block a new scan period.
+        is opened and the requested number of symbols is queued by 24h quote
+        turnover ranking when available, with deterministic alphabetical fallback.
+        - A larger request during an unfinished generation extends that same
+        generation without resetting completed jobs or checkpoints.
         """
         progress_before = self.queue.progress()
         has_unfinished = (
             progress_before["pending"] > 0 or progress_before["running"] > 0
         )
         universe = self.inventory.get_symbols()
+        ranker = getattr(self.inventory, "get_ranked_symbols", None)
+        if callable(ranker):
+            ranked_symbols = list(ranker(limit=limit) or [])
+        else:
+            ranked_symbols = sorted(universe)
+            if limit is not None:
+                ranked_symbols = ranked_symbols[:max(0, int(limit))]
         if not universe and not has_unfinished:
             return {
                 "started": False,
@@ -116,36 +139,41 @@ class ScanService:
                 "progress": progress_before,
             }
         if has_unfinished:
-            # Resume the current generation without adding anything new.
+            # Extend the current generation with the requested top-N symbols.
+            # enqueue() is idempotent: completed and pending jobs keep their state.
+            added = self.queue.enqueue(
+                ranked_symbols, batch_tag=f"scan_extend_{int(time.time())}"
+            ) if ranked_symbols else 0
             self.ensure_workers()
             progress_after = self.queue.progress()
+            inventory_status = self.inventory.status()
             return {
                 "started": True,
                 "universe_size": len(universe),
-                "selected": 0,
-                "added": 0,
+                "selected": len(ranked_symbols),
+                "selected_preview": ranked_symbols[:5],
+                "added": added,
                 "resumed": True,
+                "ranking_source": inventory_status.get("ranking_source", "alphabetical_fallback"),
                 "workers": self.worker_count,
                 "scan_generation": self.queue.current_generation(),
                 "progress": progress_after,
             }
-        # Current generation is complete: open a new scan period.
-        if limit is None or int(limit) >= len(universe):
-            selected = universe
-        elif universe:
-            selected = sorted(universe)[: int(limit)]
-        else:
-            selected = []  # resume-only: nothing new to enqueue
 
-        queue_result = self.queue.rebuild(selected, batch_tag=f"scan_{int(time.time())}")
+        queue_result = self.queue.rebuild(
+            ranked_symbols, batch_tag=f"scan_{int(time.time())}"
+        )
         self.ensure_workers()
         progress_after = self.queue.progress()
+        inventory_status = self.inventory.status()
         return {
             "started": True,
             "universe_size": len(universe),
-            "selected": len(selected),
+            "selected": len(ranked_symbols),
+            "selected_preview": ranked_symbols[:5],
             "added": queue_result["added"],
             "resumed": False,
+            "ranking_source": inventory_status.get("ranking_source", "alphabetical_fallback"),
             "workers": self.worker_count,
             "scan_generation": queue_result.get("generation"),
             "progress": progress_after,
