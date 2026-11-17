@@ -81,6 +81,7 @@ class GateFuturesExchange:
             markets[symbol] = {
                 "id": row.get("name"), "symbol": symbol, "base": symbol.split("/")[0],
                 "quote": "USDT", "settle": "USDT", "active": True, "status": status or "trading",
+                "contract_type": row.get("contract_type"),
                 "swap": True, "spot": False, "future": False, "contract": True,
                 "linear": True, "inverse": False, "contractSize": float(row.get("quanto_multiplier") or 1.0),
                 "precision": {"price": row.get("order_price_round"), "amount": row.get("quanto_multiplier")},
