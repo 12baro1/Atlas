@@ -106,7 +106,7 @@ def invalidate_all():
         _smt_cache.clear()
 
 
-def get_market_data(symbol, force_refresh=False):
+def get_market_data(symbol, force_refresh=False, use_websocket=True):
     data = {"symbol": symbol, "tick_size": None}
     # Trace kimliği analiz başında bir kez üretilir; tüm aşamalar aynı kimliği taşır.
     ensure_trace(data)
@@ -157,35 +157,40 @@ def get_market_data(symbol, force_refresh=False):
         "open_interest": "UNAVAILABLE",
         "funding_rate": "UNAVAILABLE",
     }
-    # Start one shared public stream per symbol; REST remains the fallback.
+    # Full-universe/background scans use REST snapshots; they must not leave
+    # one persistent WebSocket connection/thread behind for every symbol.
+    # Explicit manual analysis retains live WS history and liquidation events.
     from config import Config
     stream_snapshot = {}
     stream = None
-    try:
-        from strategies.orderflow.gateio_public_stream import GatePublicStream
-        stream = GatePublicStream.for_symbol(symbol)
-        stream.set_contract_size(exchange.contract_size(symbol))
-        stream.start()
-        # İlk geçerli snapshot için sınırlı bekleme: ilk mesajlar gelmeden
-        # snapshot almak orderbook/trade verisini boş bırakırdı. Sonsuz
-        # bekleme yoktur; süre dolarsa REST fallback kullanılır.
-        stream_snapshot = stream.snapshot(
-            int(exchange.milliseconds()),
-            wait_ms=float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)),
-        )
-    except Exception:
-        stream_snapshot = {}
+    if use_websocket:
+        try:
+            from strategies.orderflow.gateio_public_stream import GatePublicStream
+            stream = GatePublicStream.for_symbol(symbol)
+            stream.set_contract_size(exchange.contract_size(symbol))
+            stream.start()
+            stream_snapshot = stream.snapshot(
+                int(exchange.milliseconds()),
+                wait_ms=float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)),
+            )
+        except Exception:
+            stream_snapshot = {}
     record_stage(
         data,
         "DATA_COLLECTION",
         source="GATEIO_FUTURES_PUBLIC_WEBSOCKET",
         timestamp_ms=int(exchange.milliseconds()),
-        availability="AVAILABLE" if stream_snapshot.get("last_message_timestamp_ms") else "UNAVAILABLE",
-        freshness="FRESH" if stream_snapshot.get("last_message_timestamp_ms") else "NO_MESSAGE",
-        reason=None if stream_snapshot.get("last_message_timestamp_ms") else "WS_NO_FIRST_MESSAGE_BEFORE_TIMEOUT",
+        availability=("AVAILABLE" if stream_snapshot.get("last_message_timestamp_ms")
+                      else "UNAVAILABLE" if use_websocket else "NOT_REQUESTED"),
+        freshness=("FRESH" if stream_snapshot.get("last_message_timestamp_ms")
+                   else "NO_MESSAGE" if use_websocket else "NOT_REQUESTED"),
+        reason=(None if stream_snapshot.get("last_message_timestamp_ms")
+                else "WS_NO_FIRST_MESSAGE_BEFORE_TIMEOUT" if use_websocket
+                else "WEBSOCKET_DISABLED_FOR_BACKGROUND_SCAN"),
         detail={
+            "ws_enabled": bool(use_websocket),
             "ws_connected": bool(stream_snapshot.get("connected")),
-            "wait_ms": float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)),
+            "wait_ms": float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)) if use_websocket else 0.0,
         },
     )
     # Public GATEIO REST order-book snapshot; optional fallback.
