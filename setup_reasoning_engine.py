@@ -655,7 +655,7 @@ class SetupReasoningEngine:
                 else:
                     cost_weights = {"tp1": 0.5, "tp2": 0.3, "tp3": 0.2}
                 maker_fee = getattr(Config, "MAKER_FEE_RATE", 0.0002)
-                taker_fee = getattr(Config, "TAKER_FEE_RATE", 0.00055)
+                taker_fee = getattr(Config, "TAKER_FEE_RATE", 0.0005)
                 spread_rate = getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002)
                 slippage_rate = getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)
                 plan_cost = estimate_plan_cost(
