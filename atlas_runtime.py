@@ -362,11 +362,11 @@ class AtlasRuntime:
             return f"{text}/USDT:USDT"
         return text
 
-    def analyze_symbol(self, raw_symbol, force_refresh=False, track_signal=False):
+    def analyze_symbol(self, raw_symbol, force_refresh=False, track_signal=False, use_websocket=True):
         """Analyze one symbol; journal tracking is opt-in for explicit trade requests."""
         self._set_status("ANALYZING")
         try:
-            return self._analyze_symbol(raw_symbol, force_refresh=force_refresh, from_scan=False, track_signal=track_signal)
+            return self._analyze_symbol(raw_symbol, force_refresh=force_refresh, from_scan=False, track_signal=track_signal, use_websocket=use_websocket)
         finally:
             self._set_status("READY")
 
@@ -576,7 +576,7 @@ class AtlasRuntime:
         with self._journal_lock:
             self.engine.trade_journal.expire_stale_signal_outcomes()
 
-    def _analyze_symbol(self, raw_symbol, force_refresh=False, from_scan=False, scan_index=None, scan_total=None, track_signal=None):
+    def _analyze_symbol(self, raw_symbol, force_refresh=False, from_scan=False, scan_index=None, scan_total=None, track_signal=None, use_websocket=True):
         symbol = self.normalize_symbol(raw_symbol)
         if not symbol:
             return {"ok": False, "error": "symbol_required"}
@@ -599,7 +599,7 @@ class AtlasRuntime:
 
             lock = self._get_analysis_lock(symbol)
             with lock:
-                data = get_market_data(symbol, force_refresh=force_refresh)
+                data = get_market_data(symbol, force_refresh=force_refresh, use_websocket=bool(use_websocket and not from_scan))
                 # Never base live SMC confirmation on a still-forming 15m candle.
                 # Backtests use historical candles and do not pass through this live-runtime filter.
                 from timing import closed_htf_candles
