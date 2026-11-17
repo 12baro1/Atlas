@@ -180,3 +180,37 @@ def test_composite_ranking_prefers_net_rr_and_freshness(pool):
     # outranks the 10-day-old 4.0-RR setup.
     ranked = [line for line in result.splitlines() if line.startswith(("1. ", "2. "))]
     assert "FRESH/USDT:USDT" in ranked[0]
+
+def test_scan_stop_reports_worker_still_running(pool):
+    runtime = MagicMock()
+    runtime.stop_scan.return_value = {
+        "stopped": False,
+        "workers_still_alive": ["AtlasScanWorker-0"],
+        "progress": {"pending": 4, "running": 1, "done": 5},
+    }
+    result = make_service(runtime).handle_scan_stop()
+    assert "TARAMA DURDURMA İSTEĞİ" in result
+    assert "yeni worker başlatılmayacak" in result
+    assert "AtlasScanWorker-0" in result
+
+
+def test_scan_status_includes_strategy_funnel(pool):
+    runtime = MagicMock()
+    runtime.scan_status.return_value = {
+        "total": 10, "pending": 2, "running": 0, "done": 8, "failed": 0,
+        "percent": 80.0, "complete": False, "workers_running": True,
+        "inventory": {"symbol_count": 300, "ranking_source": "gateio_24h_quote_volume"},
+        "strategy_telemetry": {
+            "analyses": 10, "raw_setups_generated": 4,
+            "common_filter_passed": 2, "common_filter_rejected": 2,
+            "per_strategy": {
+                "smc": {"setups": 1, "passed": 1, "rejected": 0, "selected": 1}
+            },
+        },
+        "pool": {"validated": 2},
+    }
+    result = make_service(runtime).handle_scan_status()
+    assert "gateio_24h_quote_volume" in result
+    assert "YEDİ STRATEJİ / ORTAK FİLTRE" in result
+    assert "smc: 1 setup | 1 geçti | 0 elendi | 1 seçildi" in result
+
