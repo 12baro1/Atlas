@@ -19,6 +19,9 @@ class FakeGateExchange:
             {"name": "ETH_USDT", "quanto_multiplier": "0.01", "order_size_min": 1},
             {"name": "OLD_USDT", "quanto_multiplier": "1", "in_delisting": True},
             {"name": "SUSPENDED_USDT", "quanto_multiplier": "1", "trade_status": "suspended"},
+            {"name": "AAPL_USDT", "quanto_multiplier": "1", "contract_type": "stocks"},
+            {"name": "XAU_USDT", "quanto_multiplier": "1", "contract_type": "metals"},
+            {"name": "SPY_USDT", "quanto_multiplier": "1", "contract_type": "indices"},
         ]
         self.fail_times = int(fail_times)
         self.calls = 0
@@ -54,6 +57,9 @@ def test_discovers_all_usdt_perpetuals_no_fixed_cap(tmp_path):
     # Delisted and suspended contracts excluded
     assert "OLD/USDT:USDT" not in symbols
     assert "SUSPENDED/USDT:USDT" not in symbols
+    assert "AAPL/USDT:USDT" not in symbols
+    assert "XAU/USDT:USDT" not in symbols
+    assert "SPY/USDT:USDT" not in symbols
     status = inventory.status()
     assert status["source"] == "gateio_usdt_perpetuals"
     assert status["symbol_count"] == 2
@@ -115,6 +121,23 @@ def test_retry_exhausted_keeps_previous_snapshot(tmp_path):
     second = inventory.get_symbols()
     assert second == first  # never empties the universe on outage
     assert inventory.status()["last_error"]
+
+
+def test_legacy_unclassified_inventory_cache_is_ignored_and_refreshed(tmp_path):
+    import json
+
+    base = tmp_path / "inv"
+    base.mkdir()
+    (base / "inventory_state.json").write_text(json.dumps({
+        "version": 1,
+        "last_refresh_ms": int(time.time() * 1000),
+        "symbols": {"AAPL/USDT:USDT": {"id": "AAPL_USDT", "contract_size": 1}},
+    }), encoding="utf-8")
+
+    exchange = FakeGateExchange()
+    inventory = MarketInventory(base_path=str(base), exchange=exchange)
+    assert inventory.get_symbols() == ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+    assert exchange.calls == 1
 
 
 def test_state_survives_restart(tmp_path):
