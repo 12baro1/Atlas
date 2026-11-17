@@ -200,3 +200,34 @@ def test_orderflow_side_change_flips_data(monkeypatch):
         f"buy={buy_imbalance}, sell={sell_imbalance} must have opposite signs"
     )
     assert buy_cvd != sell_cvd, "CVD direction must flip with trade side"
+
+
+
+def test_orderflow_strategy_uses_fresh_rest_book_and_trades_without_ws_cvd(monkeypatch):
+    """Background scans can still use REST order flow when no WS CVD buffer exists."""
+    import strategies.orderflow.strategy as of_module
+
+    now_ms = int(time.time() * 1000)
+    data = _orderflow_raw_data(now_ms, side="buy", book_imbalance=0.5)
+    data["current_price"] = 100.8
+    data["15m"] = [Candle(100, 102, 99, 101.8, 150) for _ in range(15)]
+    data["orderbook"] = {
+        "bids": [[100.00, 20], [99.99, 20], [99.98, 20]],
+        "asks": [[100.01, 2], [100.02, 2], [100.03, 2]],
+    }
+    data["trade_flow_history"] = []
+    data["data_provenance"] = {
+        "orderbook": "GATEIO_REST",
+        "recent_trades": "GATEIO_REST",
+        "trade_flow_history": "UNAVAILABLE",
+    }
+    data["shared_market_evidence"] = build_shared_market_evidence(data)
+    import strategies.orderflow.analytics as analytics
+    monkeypatch.setattr(
+        analytics, "footprint_directional_evidence",
+        lambda footprint, direction: {"state": "AVAILABLE", "confirmed": True},
+    )
+
+    plan = of_module.generate(data)
+    assert plan is not None
+    assert plan["direction"] == "LONG"

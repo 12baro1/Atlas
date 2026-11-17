@@ -90,7 +90,7 @@ class RiskEngine:
                 return float(getattr(Config, config_name, default))
 
         maker_fee_rate = _payload_rate("maker_fee_rate", "MAKER_FEE_RATE", 0.0002)
-        taker_fee_rate = _payload_rate("taker_fee_rate", "TAKER_FEE_RATE", 0.00055)
+        taker_fee_rate = _payload_rate("taker_fee_rate", "TAKER_FEE_RATE", 0.0005)
         spread_rate = _payload_rate("spread_rate", "STOP_SPREAD_BUFFER_RATE", 0.0002)
         slippage_rate = _payload_rate("slippage_rate", "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)
 
@@ -282,6 +282,8 @@ class RiskEngine:
         auto_expand_stop=None,
         entry_type="LIMIT",
         direction=None,
+        maker_fee_rate=None,
+        taker_fee_rate=None,
     ):
 
         if entry is None or stop_loss is None:
@@ -306,6 +308,15 @@ class RiskEngine:
                 reason="Stop Loss is on the wrong side of the selected direction",
             )
 
+        def _resolve_fee(value, config_name, default):
+            try:
+                rate = float(value) if value is not None else float(getattr(Config, config_name, default))
+            except (TypeError, ValueError, OverflowError):
+                rate = float(getattr(Config, config_name, default))
+            return max(0.0, rate) if math.isfinite(rate) else float(default)
+
+        maker_fee_rate = _resolve_fee(maker_fee_rate, "MAKER_FEE_RATE", 0.0002)
+        taker_fee_rate = _resolve_fee(taker_fee_rate, "TAKER_FEE_RATE", 0.0005)
         atr_period = int(getattr(Config, "ATR_PERIOD", 14))
         min_stop_atr_multiplier = float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75))
         min_tick_fallback = float(getattr(Config, "MIN_TICK_DISTANCE_FALLBACK", 0.01))
@@ -342,8 +353,6 @@ class RiskEngine:
         # round-trip execution friction consumes too much of its risk distance.
         # Reject such geometry; never move a structural invalidation level just
         # to satisfy a cost threshold.
-        maker_fee_rate = float(getattr(Config, "MAKER_FEE_RATE", 0.0002))
-        taker_fee_rate = float(getattr(Config, "TAKER_FEE_RATE", 0.00055))
         stop_cost_floor_multiple = max(
             0.0, float(getattr(Config, "MIN_STOP_COST_MULTIPLIER", 2.0))
         )
@@ -416,8 +425,8 @@ class RiskEngine:
             entry_price=entry,
             stop_price=adjusted_stop_loss,
             entry_type=resolved_entry_type,
-            maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002)),
-            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055)),
+            maker_fee_rate=maker_fee_rate,
+            taker_fee_rate=taker_fee_rate,
             spread_rate=execution_spread_rate,
             slippage_rate=execution_slippage_rate,
         )
@@ -442,8 +451,6 @@ class RiskEngine:
 
         account_balance = float(getattr(Config, "INITIAL_BALANCE", 1000.0))
         base_risk_percent = float(getattr(Config, "RISK_PERCENT", 1.0))
-        maker_fee_rate = float(getattr(Config, "MAKER_FEE_RATE", 0.0002))
-        taker_fee_rate = float(getattr(Config, "TAKER_FEE_RATE", 0.00055))
         minimum_rr = float(getattr(Config, "MINIMUM_RR", 3.0))
         minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
         resolved_entry_type = str(entry_type or "LIMIT").upper()
@@ -549,9 +556,9 @@ class RiskEngine:
 
             "atr": round(atr_snapshot, 8),
 
-            "tick_size": round(resolved_tick_size, 8),
+            "tick_size": resolved_tick_size,
 
-            "minimum_tick_distance": round(minimum_tick_distance, 8),
+            "minimum_tick_distance": minimum_tick_distance,
 
             "minimum_stop_distance": round(minimum_stop_distance, 8),
             "minimum_stop_cost_distance": round(minimum_stop_cost_distance, 8),
@@ -568,7 +575,7 @@ class RiskEngine:
             "risk": round(risk, 8),
             "stop_atr_ratio": round(risk / atr_snapshot, 4) if atr_snapshot > 0 else None,
 
-            "capital_at_risk": round(capped_capital_at_risk, 2),
+            "capital_at_risk": round(round(capped_position_size, 4) * effective_risk_per_unit, 2),
 
             "capital_at_risk_target": round(target_capital_at_risk, 2),
 
@@ -649,7 +656,7 @@ class RiskEngine:
 
             "requested_risk": round(requested_risk, 8),
 
-            "effective_risk_per_unit": round(effective_risk_per_unit, 8),
+            "effective_risk_per_unit": effective_risk_per_unit,
 
         }
 
@@ -735,15 +742,10 @@ class RiskEngine:
         return self._snap_to_tick(candidate, tick_size, "up")
 
     def _snap_to_tick(self, price, tick_size, direction):
-        if tick_size is None or tick_size <= 0:
-            return round(price, 8)
-
-        scaled = price / tick_size
-        if direction == "down":
-            snapped = math.floor(scaled) * tick_size
-        else:
-            snapped = math.ceil(scaled) * tick_size
-        return round(snapped, 8)
+        from price_precision import snap_price_to_tick
+        return snap_price_to_tick(
+            price, tick_size, "floor" if direction == "down" else "ceiling"
+        )
 
     def _invalid_risk_setup(
         self,
@@ -778,7 +780,7 @@ class RiskEngine:
             side,
             round(requested_risk, 8),
             round(minimum_stop_distance, 8),
-            round(tick_size, 8),
+            tick_size,
             float(getattr(Config, "MIN_STOP_PERCENT", 0.0005)),
             round(atr, 8),
         )
@@ -795,8 +797,8 @@ class RiskEngine:
             "reason_code": reason_code,
             "atr": round(atr, 8),
             "stop_atr_ratio": None,
-            "tick_size": round(tick_size, 8),
-            "minimum_tick_distance": round(max(tick_size, 0.0), 8),
+            "tick_size": tick_size,
+            "minimum_tick_distance": max(tick_size, 0.0),
             "minimum_stop_distance": round(minimum_stop_distance, 8),
             "minimum_stop_percent": float(getattr(Config, "MIN_STOP_PERCENT", 0.0005)),
             "spread_buffer": round(spread_buffer, 8),

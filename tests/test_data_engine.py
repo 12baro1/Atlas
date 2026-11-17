@@ -66,6 +66,16 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
         def contract_size(self, _symbol):
             return 1.0
 
+        def market(self, _symbol):
+            return {
+                "precision": {"price": "0.000001"},
+                "info": {
+                    "order_price_round": "0.000001",
+                    "maker_fee_rate": "0.00013",
+                    "taker_fee_rate": "0.00072",
+                },
+            }
+
         def milliseconds(self):
             return now
 
@@ -115,10 +125,22 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
         Candle(time=now - 3_600_000, open=100, high=102, low=98, close=101, volume=10)
     ])
     monkeypatch.setattr(data_engine, "configured_sector_peers", lambda _symbol: [])
-    monkeypatch.setattr(GatePublicStream, "for_symbol", classmethod(lambda cls, _symbol: FakeStream()))
+    stream_requests = []
+    monkeypatch.setattr(
+        GatePublicStream, "for_symbol",
+        classmethod(lambda cls, _symbol: stream_requests.append(_symbol) or FakeStream()),
+    )
 
-    data = data_engine.get_market_data("BTC/USDT:USDT", force_refresh=True)
+    data = data_engine.get_market_data(
+        "BTC/USDT:USDT", force_refresh=True, use_websocket=False
+    )
+    assert stream_requests == []
 
+    assert data["tick_size"] == 0.000001
+    assert data["maker_fee_rate"] == 0.00013
+    assert data["taker_fee_rate"] == 0.00072
+    assert data["fee_rate_source"] == "GATEIO_CONTRACT_METADATA"
+    assert data["price_precision_source"] == "GATEIO_ORDER_PRICE_ROUND"
     assert data["data_provenance"]["orderbook"] == "GATEIO_REST"
     assert data["data_provenance"]["recent_trades"] == "GATEIO_REST"
     assert data["data_provenance"]["open_interest"] == "GATEIO_REST_SNAPSHOT"

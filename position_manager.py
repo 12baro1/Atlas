@@ -99,7 +99,7 @@ class PositionManager:
                         entry_price=pos["entry"], stop_price=pos["entry"],
                         entry_type=pos.get("entry_type", "LIMIT"),
                         maker_fee_rate=getattr(Config, "MAKER_FEE_RATE", 0.0002),
-                        taker_fee_rate=getattr(Config, "TAKER_FEE_RATE", 0.00055),
+                        taker_fee_rate=getattr(Config, "TAKER_FEE_RATE", 0.0005),
                         spread_rate=getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002),
                         slippage_rate=getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003),
                     )["total"]
@@ -134,7 +134,7 @@ class PositionManager:
                         entry_price=pos["entry"], stop_price=pos["entry"],
                         entry_type=pos.get("entry_type", "LIMIT"),
                         maker_fee_rate=getattr(Config, "MAKER_FEE_RATE", 0.0002),
-                        taker_fee_rate=getattr(Config, "TAKER_FEE_RATE", 0.00055),
+                        taker_fee_rate=getattr(Config, "TAKER_FEE_RATE", 0.0005),
                         spread_rate=getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002),
                         slippage_rate=getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003),
                     )["total"]

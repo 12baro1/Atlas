@@ -180,7 +180,7 @@ class ScanService:
             symbol = job["symbol"]
             try:
                 outcome = self.runtime.analyze_symbol(
-                    symbol, force_refresh=True, track_signal=False
+                    symbol, force_refresh=True, track_signal=False, use_websocket=False
                 )
                 ok = bool(outcome.get("ok"))
                 self.queue.complete(symbol, ok=ok, error=None if ok else str(outcome.get("error") or "analysis_failed"))

@@ -69,3 +69,42 @@ def test_gate_open_interest_snapshot_uses_exchange_timestamp_and_usd_value():
     assert snapshot["timestamp"] == 1700000000000
     assert snapshot["openInterestAmount"] == 0.1234
     assert snapshot["openInterestValue"] == 123400.0
+
+
+
+def test_gate_load_markets_excludes_nontrading_contract_statuses():
+    class StatusGate(FakeGate):
+        def _get(self, path, params=None):
+            if path == "/futures/usdt/contracts":
+                return [
+                    {"name": "BTC_USDT", "quanto_multiplier": "0.0001", "status": "trading"},
+                    {"name": "PRE_USDT", "quanto_multiplier": "1", "status": "prelaunch"},
+                    {"name": "DEL_USDT", "quanto_multiplier": "1", "status": "delisted"},
+                    {"name": "BRK_USDT", "quanto_multiplier": "1", "status": "circuit_breaker"},
+                    {"name": "EXIT_USDT", "quanto_multiplier": "1", "status": "delisting"},
+                    {"name": "OLD_USDT", "quanto_multiplier": "1", "in_delisting": True},
+                ]
+            return super()._get(path, params)
+
+    ex = StatusGate()
+    markets = ex.load_markets()
+    assert list(markets) == ["BTC/USDT:USDT"]
+    assert markets["BTC/USDT:USDT"]["active"] is True
+    assert markets["BTC/USDT:USDT"]["status"] == "trading"
+
+
+def test_gate_open_interest_history_is_sorted_oldest_to_newest():
+    class ReverseHistoryGate(FakeGate):
+        def _get(self, path, params=None):
+            if path == "/futures/usdt/contract_stats":
+                return [
+                    {"time": 1700003600, "open_interest": "2000", "open_interest_usd": 200000.0},
+                    {"time": 1700000000, "open_interest": "1000", "open_interest_usd": 100000.0},
+                ]
+            return super()._get(path, params)
+
+    ex = ReverseHistoryGate()
+    ex.load_markets()
+    rows = ex.fetch_open_interest_history("BTC/USDT:USDT", timeframe="1h", limit=10)
+    assert [row["timestamp"] for row in rows] == [1700000000000, 1700003600000]
+    assert [row["openInterestAmount"] for row in rows] == [0.1, 0.2]

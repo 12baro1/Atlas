@@ -399,9 +399,9 @@ def test_risk_engine_calculates_weighted_rr_for_equal_partial_exits(monkeypatch)
     assert risk["rr"] == pytest.approx(3.0)  # highest single target stays explicit
     assert risk["target_max_rr"] == pytest.approx(3.0)
     assert risk["weighted_rr"] == pytest.approx(2.0)
-    assert risk["weighted_net_rr"] == pytest.approx(1.8584, abs=1e-4)
+    assert risk["weighted_net_rr"] == pytest.approx(1.8672, abs=1e-4)
     assert risk["net_rr"] == pytest.approx(risk["weighted_net_rr"], abs=1e-9)
-    assert risk["net_rr"] == pytest.approx(1.8584, abs=1e-4)
+    assert risk["net_rr"] == pytest.approx(1.8672, abs=1e-4)
 
     report = RREngine().evaluate(risk)
     assert report["rr"] == pytest.approx(2.0)
@@ -426,7 +426,7 @@ def test_risk_engine_uses_configured_partial_weights(monkeypatch):
         "tp1": 0.5, "tp2": 0.3, "tp3": 0.2
     })
     assert risk["weighted_rr"] == pytest.approx(1.7)
-    assert risk["weighted_net_rr"] == pytest.approx(1.5740, abs=1e-4)
+    assert risk["weighted_net_rr"] == pytest.approx(1.5814, abs=1e-4)
 
 
 def test_risk_engine_normalizes_weights_only_over_valid_targets(monkeypatch):

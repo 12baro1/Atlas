@@ -708,7 +708,7 @@ def _report(stats, name):
     print(f"SONUÇ | {name}")
     print(
         f"  Maliyet varsayımları: maker={getattr(Config, 'MAKER_FEE_RATE', 0.0002):.4%}/leg | "
-        f"taker={getattr(Config, 'TAKER_FEE_RATE', 0.00055):.4%}/leg | "
+        f"taker={getattr(Config, 'TAKER_FEE_RATE', 0.0005):.4%}/leg | "
         f"spread={getattr(Config, 'STOP_SPREAD_BUFFER_RATE', 0.0002):.4%}/market leg | "
         f"slippage={getattr(Config, 'STOP_SLIPPAGE_BUFFER_RATE', 0.0003):.4%}/market leg"
     )
@@ -1070,7 +1070,7 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                 runner = BacktestRunner(
                     analyze_fn=build_analyze_fn(engine),
                     maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002)),
-                    taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055)),
+                    taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.0005)),
                     spread_rate=float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002)),
                     slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)),
                     tp_weights=_configured_partial_tp_weights(),
@@ -1240,7 +1240,7 @@ def main():
     print(
         "BACKTEST AYARLARI | "
         f"maker_fee={getattr(Config, 'MAKER_FEE_RATE', 0.0002)} | "
-        f"taker_fee={getattr(Config, 'TAKER_FEE_RATE', 0.00055)} | "
+        f"taker_fee={getattr(Config, 'TAKER_FEE_RATE', 0.0005)} | "
         f"spread_per_market_leg={getattr(Config, 'STOP_SPREAD_BUFFER_RATE', 0.0002)} | "
         f"slippage_per_market_leg={getattr(Config, 'STOP_SLIPPAGE_BUFFER_RATE', 0.0003)} | "
         f"partial_tp_weights={_configured_partial_tp_weights()} | "
@@ -1304,7 +1304,7 @@ def main():
         runner = BacktestRunner(
             analyze_fn=build_analyze_fn(engine),
             maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002)),
-            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055)),
+            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.0005)),
             spread_rate=float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002)),
             slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003)),
             tp_weights=_configured_partial_tp_weights(),

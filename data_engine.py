@@ -106,10 +106,49 @@ def invalidate_all():
         _smt_cache.clear()
 
 
-def get_market_data(symbol, force_refresh=False):
-    data = {"symbol": symbol}
+def get_market_data(symbol, force_refresh=False, use_websocket=True):
+    data = {"symbol": symbol, "tick_size": None}
     # Trace kimliği analiz başında bir kez üretilir; tüm aşamalar aynı kimliği taşır.
     ensure_trace(data)
+    # Gate.io's order_price_round is the authoritative price increment.
+    try:
+        market = exchange.market(symbol)
+        precision = market.get("precision") or {}
+        market_info = market.get("info") or {}
+        raw_tick = precision.get("price")
+        if raw_tick is None:
+            raw_tick = market_info.get("order_price_round")
+        from price_precision import normalize_fee_rate, normalize_tick_size
+        data["tick_size"] = normalize_tick_size(raw_tick)
+        if data["tick_size"] is not None:
+            data["price_precision_source"] = "GATEIO_ORDER_PRICE_ROUND"
+        # Gate contract metadata supplies per-contract fees. Explicit .env
+        # settings take precedence because they may reflect the user's VIP tier.
+        maker_override = os.getenv("ATLAS_MAKER_FEE_RATE")
+        taker_override = os.getenv("ATLAS_TAKER_FEE_RATE")
+        data["maker_fee_rate"] = (
+            normalize_fee_rate(maker_override) if maker_override is not None
+            else normalize_fee_rate(market_info.get("maker_fee_rate"))
+        )
+        data["taker_fee_rate"] = (
+            normalize_fee_rate(taker_override) if taker_override is not None
+            else normalize_fee_rate(market_info.get("taker_fee_rate"))
+        )
+        maker_fee_source = (
+            "ENV_OVERRIDE" if maker_override is not None else
+            "GATEIO_CONTRACT_METADATA" if data["maker_fee_rate"] is not None else None
+        )
+        taker_fee_source = (
+            "ENV_OVERRIDE" if taker_override is not None else
+            "GATEIO_CONTRACT_METADATA" if data["taker_fee_rate"] is not None else None
+        )
+        if maker_fee_source or taker_fee_source:
+            data["fee_rate_source"] = (
+                maker_fee_source if maker_fee_source == taker_fee_source else "MIXED"
+            )
+    except Exception:
+        # Preserve candle analysis if market metadata is temporarily unavailable.
+        pass
     data["data_provenance"] = {
         "orderbook": "UNAVAILABLE",
         "recent_trades": "UNAVAILABLE",
@@ -118,35 +157,40 @@ def get_market_data(symbol, force_refresh=False):
         "open_interest": "UNAVAILABLE",
         "funding_rate": "UNAVAILABLE",
     }
-    # Start one shared public stream per symbol; REST remains the fallback.
+    # Full-universe/background scans use REST snapshots; they must not leave
+    # one persistent WebSocket connection/thread behind for every symbol.
+    # Explicit manual analysis retains live WS history and liquidation events.
     from config import Config
     stream_snapshot = {}
     stream = None
-    try:
-        from strategies.orderflow.gateio_public_stream import GatePublicStream
-        stream = GatePublicStream.for_symbol(symbol)
-        stream.set_contract_size(exchange.contract_size(symbol))
-        stream.start()
-        # İlk geçerli snapshot için sınırlı bekleme: ilk mesajlar gelmeden
-        # snapshot almak orderbook/trade verisini boş bırakırdı. Sonsuz
-        # bekleme yoktur; süre dolarsa REST fallback kullanılır.
-        stream_snapshot = stream.snapshot(
-            int(exchange.milliseconds()),
-            wait_ms=float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)),
-        )
-    except Exception:
-        stream_snapshot = {}
+    if use_websocket:
+        try:
+            from strategies.orderflow.gateio_public_stream import GatePublicStream
+            stream = GatePublicStream.for_symbol(symbol)
+            stream.set_contract_size(exchange.contract_size(symbol))
+            stream.start()
+            stream_snapshot = stream.snapshot(
+                int(exchange.milliseconds()),
+                wait_ms=float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)),
+            )
+        except Exception:
+            stream_snapshot = {}
     record_stage(
         data,
         "DATA_COLLECTION",
         source="GATEIO_FUTURES_PUBLIC_WEBSOCKET",
         timestamp_ms=int(exchange.milliseconds()),
-        availability="AVAILABLE" if stream_snapshot.get("last_message_timestamp_ms") else "UNAVAILABLE",
-        freshness="FRESH" if stream_snapshot.get("last_message_timestamp_ms") else "NO_MESSAGE",
-        reason=None if stream_snapshot.get("last_message_timestamp_ms") else "WS_NO_FIRST_MESSAGE_BEFORE_TIMEOUT",
+        availability=("AVAILABLE" if stream_snapshot.get("last_message_timestamp_ms")
+                      else "UNAVAILABLE" if use_websocket else "NOT_REQUESTED"),
+        freshness=("FRESH" if stream_snapshot.get("last_message_timestamp_ms")
+                   else "NO_MESSAGE" if use_websocket else "NOT_REQUESTED"),
+        reason=(None if stream_snapshot.get("last_message_timestamp_ms")
+                else "WS_NO_FIRST_MESSAGE_BEFORE_TIMEOUT" if use_websocket
+                else "WEBSOCKET_DISABLED_FOR_BACKGROUND_SCAN"),
         detail={
+            "ws_enabled": bool(use_websocket),
             "ws_connected": bool(stream_snapshot.get("connected")),
-            "wait_ms": float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)),
+            "wait_ms": float(getattr(Config, "WS_FIRST_SNAPSHOT_TIMEOUT_MS", 2500.0)) if use_websocket else 0.0,
         },
     )
     # Public GATEIO REST order-book snapshot; optional fallback.

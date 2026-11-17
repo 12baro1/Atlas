@@ -204,3 +204,18 @@ def test_missing_risk_payload_is_preserved():
     )
     assert result["risk"] is None
     assert result["entry"]["valid"] is True
+
+
+
+def test_final_geometry_snaps_entry_stop_and_targets_to_exchange_tick():
+    result = AtlasMainEngine.finalize_setup_geometry(
+        _entry(entry=100.004, stop_loss=95.004),
+        _risk_payload(entry=100.004, stop_loss=95.004),
+        _targets(tp1=105.004, tp2=110.004, tp3=None),
+        tick_size=0.01,
+    )
+    entry, risk, targets = result["entry"], result["risk"], result["targets"]
+    assert entry["entry"] == pytest.approx(100.00)
+    assert entry["stop_loss"] == pytest.approx(95.00)
+    assert entry["tp1"] == targets["tp1"] == risk["tp1"] == pytest.approx(105.01)
+    assert entry["tp2"] == targets["tp2"] == risk["tp2"] == pytest.approx(110.01)

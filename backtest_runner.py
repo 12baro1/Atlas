@@ -342,7 +342,7 @@ def market_fallback_check(opened, planned_entry, stop, tp1, direction, risk=None
             entry_price=opened, targets={"tp1": tp1}, weights={"tp1": 1.0},
             entry_type="MARKET",
             maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002) if maker_fee_rate is None else maker_fee_rate),
-            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055) if taker_fee_rate is None else taker_fee_rate),
+            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.0005) if taker_fee_rate is None else taker_fee_rate),
             spread_rate=float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002) if spread_rate is None else spread_rate),
             slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003) if slippage_rate is None else slippage_rate),
         )["total"]
@@ -391,7 +391,7 @@ def rebase_remaining_targets(risk, direction, candle, tp_weights=None,
         entry_price=entry, targets=target_map, weights=rebased_weights,
         entry_type="LIMIT",
         maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002) if maker_fee_rate is None else maker_fee_rate),
-        taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055) if taker_fee_rate is None else taker_fee_rate),
+        taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.0005) if taker_fee_rate is None else taker_fee_rate),
         spread_rate=float(getattr(Config, "STOP_SPREAD_BUFFER_RATE", 0.0002) if spread_rate is None else spread_rate),
         slippage_rate=float(getattr(Config, "STOP_SLIPPAGE_BUFFER_RATE", 0.0003) if slippage_rate is None else slippage_rate),
     )
@@ -428,7 +428,7 @@ class BacktestRunner:
             getattr(Config, "MAKER_FEE_RATE", 0.0002) if maker_fee_rate is None else maker_fee_rate
         )
         self.taker_fee_rate = self._safe_cost_rate(
-            getattr(Config, "TAKER_FEE_RATE", 0.00055) if taker_fee_rate is None else taker_fee_rate
+            getattr(Config, "TAKER_FEE_RATE", 0.0005) if taker_fee_rate is None else taker_fee_rate
         )
         legacy_mode = self.legacy_fee_rate is not None
         self.spread_rate = self._safe_cost_rate(

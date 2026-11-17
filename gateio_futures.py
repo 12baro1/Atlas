@@ -70,12 +70,17 @@ class GateFuturesExchange:
         for row in rows:
             if not isinstance(row, dict) or row.get("in_delisting"):
                 continue
+            status = str(row.get("status") or "").strip().lower()
+            # Only active contracts are eligible for new analysis/setups.
+            # Prelaunch, delisting, delisted and circuit-breaker contracts are excluded.
+            if status and status != "trading":
+                continue
             symbol = self.unified_symbol(row)
             if not symbol:
                 continue
             markets[symbol] = {
                 "id": row.get("name"), "symbol": symbol, "base": symbol.split("/")[0],
-                "quote": "USDT", "settle": "USDT", "active": True,
+                "quote": "USDT", "settle": "USDT", "active": True, "status": status or "trading",
                 "swap": True, "spot": False, "future": False, "contract": True,
                 "linear": True, "inverse": False, "contractSize": float(row.get("quanto_multiplier") or 1.0),
                 "precision": {"price": row.get("order_price_round"), "amount": row.get("quanto_multiplier")},
@@ -220,7 +225,7 @@ class GateFuturesExchange:
                             "openInterestValue": float(raw_usd) if raw_usd is not None else None})
             except (KeyError, TypeError, ValueError, OverflowError):
                 continue
-        return out
+        return sorted(out, key=lambda row: row["timestamp"])
 
     def fetch_funding_rate(self, symbol, params=None):
         row = self._get("/futures/usdt/funding_rate", {"contract": self.market_id(symbol)}) or {}
