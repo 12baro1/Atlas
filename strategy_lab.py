@@ -915,6 +915,8 @@ class SevenStrategyLab:
             candidate["_market_maker_fee_rate"] = data.get("maker_fee_rate")
             candidate["_market_taker_fee_rate"] = data.get("taker_fee_rate")
             validation = _risk_validate_candidate(candidate)
+            candidate.pop("_market_maker_fee_rate", None)
+            candidate.pop("_market_taker_fee_rate", None)
             candidate["risk_validation"] = {
                 key: value for key, value in validation.items() if key != "risk_plan"
             }
