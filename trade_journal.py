@@ -1412,7 +1412,7 @@ class TradeJournal:
                 tp_weights=execution_costs.get("partial_exit_weights") or {},
                 partial_exits=True,
                 maker_fee_rate=execution_costs.get("maker_fee_rate", 0.0002),
-                taker_fee_rate=execution_costs.get("taker_fee_rate", 0.00055),
+                taker_fee_rate=execution_costs.get("taker_fee_rate", 0.0005),
                 spread_rate=execution_costs.get("spread_rate", 0.0002),
                 slippage_rate=execution_costs.get("slippage_rate", 0.0003),
             )
