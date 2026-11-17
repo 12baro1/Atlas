@@ -318,8 +318,8 @@ class TradeQualityEngine:
             distance_pct = distance / max(abs(current), 1e-12)
             entry_type = str(entry.get("entry_type") or "").upper()
             if entry_type == "LIMIT":
-                max_limit_atr = max(0.0, float(getattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_ATR", 3.0)))
-                max_limit_pct = max(0.0, float(getattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_PERCENT", 0.05)))
+                max_limit_atr = max(0.0, float(getattr(Config, "MAX_SETUP_ENTRY_DISTANCE_ATR", 2.0)))
+                max_limit_pct = max(0.0, float(getattr(Config, "MAX_SETUP_ENTRY_DISTANCE_PERCENT", 0.05)))
                 too_far_by_atr = bool(atr and atr > 0 and distance > atr * max_limit_atr)
                 too_far_by_percent = distance_pct > max_limit_pct
                 if too_far_by_atr or too_far_by_percent:

@@ -116,9 +116,6 @@ class Config:
     # Small clearance beyond the structural invalidation edge; ATR is not the stop anchor.
     # Main SetupReasoningEngine uses the tighter POI/OTE invalidation clearance.
     STOP_STRUCTURE_BUFFER_ATR = 0.10
-    # Legacy EntryEngine is evidence-only; keep its tested clearance independent
-    # so it cannot change the main authority's structural stop configuration.
-    ENTRY_ENGINE_STOP_STRUCTURE_BUFFER_ATR = 0.50
     # Target geometry: first objective must be meaningful; nearby levels in one liquidity cluster are merged.
     MIN_TP1_RR = float(_env_or_rc("ATLAS_MIN_TP1_RR", "0.80"))
     MIN_TP_TARGET_SEPARATION_R = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_R", "0.35"))
@@ -126,9 +123,6 @@ class Config:
     MIN_TP_TARGET_SEPARATION_PERCENT = float(_env_or_rc("ATLAS_MIN_TP_TARGET_SEPARATION_PERCENT", "0.0005"))
     # Sweep-triggered MARKET entry expires shortly after the confirmed close break.
     SWEEP_MARKET_ENTRY_MAX_AGE_BARS = int(os.getenv("ATLAS_SWEEP_MARKET_ENTRY_MAX_AGE_BARS", "2"))
-    # Maximum distance for pending LIMIT entries from the current market.
-    MAX_LIMIT_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_ATR", "3.0"))
-    MAX_LIMIT_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_LIMIT_ENTRY_DISTANCE_PERCENT", "0.05"))
     MAX_MARKET_ENTRY_DISTANCE_ATR = float(os.getenv("ATLAS_MAX_MARKET_ENTRY_DISTANCE_ATR", "0.35"))
     MAX_MARKET_ENTRY_DISTANCE_PERCENT = float(os.getenv("ATLAS_MAX_MARKET_ENTRY_DISTANCE_PERCENT", "0.003"))
     # Main-engine candidate generation: do not turn remote POIs into actionable LIMIT setups.
@@ -250,6 +244,8 @@ class Config:
 
     # Scanner
     MAX_SYMBOLS = int(os.getenv("ATLAS_MAX_SYMBOLS", "0").strip() or "0")
+    # Maximum concurrent symbol analyses during a scan (default 4).
+    SCAN_MAX_WORKERS = int(os.getenv("ATLAS_SCAN_MAX_WORKERS", "4") or "4")
 
     # Bybit / Auto Trading
     # Atlas is analysis + Telegram only. Keep exchange order execution hard-disabled.
@@ -551,6 +547,8 @@ class Config:
         cls.SIGNAL_OUTCOME_PARTIAL_WEIGHTS = _env_or_rc("ATLAS_SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2")
         cls.MANUAL_TRACKING_ENABLED = _env_or_rc("ATLAS_MANUAL_TRACKING_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
         cls.MANUAL_TRADE_COMMAND_ENABLED = _env_or_rc("ATLAS_MANUAL_TRADE_COMMAND_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+        # Scanner
+        cls.SCAN_MAX_WORKERS = int(_env_or_rc("ATLAS_SCAN_MAX_WORKERS", str(cls.SCAN_MAX_WORKERS)))
 
     @classmethod
     def validate(cls, logger=None, raise_on_error=False):

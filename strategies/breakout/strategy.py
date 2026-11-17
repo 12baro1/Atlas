@@ -44,13 +44,11 @@ def generate(data):
             and quality["body_ratio"] >= 0.50 and quality["close_location"] >= 0.75
             and quality["range"] >= 0.75 * atr):
         direction = "LONG"
-        stop = entry - 1.5 * atr
     elif (close < lower_boundary and breakout_evidence.get("state") == "ACCEPTED" and breakout_evidence.get("direction") == "SHORT" and entry <= close and entry >= lower_boundary - atr
             and volume_ratio >= 1.30 and quality["direction"] == "BEARISH"
             and quality["body_ratio"] >= 0.50 and quality["close_location"] <= 0.25
             and quality["range"] >= 0.75 * atr):
         direction = "SHORT"
-        stop = entry + 1.5 * atr
     else:
         return None
     boundary = upper_boundary if direction == "LONG" else lower_boundary
@@ -58,7 +56,9 @@ def generate(data):
     strength = min(93.0, 61.0 + min(max(0.0, volume_ratio - 1.30) * 10.0, 15.0)
                    + min(quality["body_ratio"] * 10.0, 8.0)
                    + min(quality["range"] / atr * 5.0, 7.0))
-    plan = _raw_candidate(direction, entry, stop, atr, "volatility_breakout", strength, entry_reference=_entry_reference(data))
+    # _valid_plan in common filter computes structural stop; pass dummy stop (ignored)
+    dummy_stop = entry - atr if direction == "LONG" else entry + atr
+    plan = _raw_candidate(direction, entry, dummy_stop, atr, "volatility_breakout", strength, entry_reference=_entry_reference(data))
     if plan:
         plan["reasons"] = [
             f"1H 20-candle close breakout after volatility compression (bandwidth={prior_width:.4f})",

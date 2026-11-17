@@ -113,9 +113,10 @@ def generate(data):
     entry = _current_price(data)
     if entry is None or (direction == "LONG" and entry <= e20) or (direction == "SHORT" and entry >= e20):
         return None
-    stop = entry - 1.5 * atr if direction == "LONG" else entry + 1.5 * atr
+    # _valid_plan in common filter computes structural stop; pass dummy stop (ignored)
+    dummy_stop = entry - atr if direction == "LONG" else entry + atr
     strength = min(90.0, 64.0 + min(abs(residual_alpha) * 450.0, 22.0) + min(abs(beta) * 2.0, 4.0))
-    plan = _raw_candidate(direction, entry, stop, atr, "relative_strength", strength, entry_reference=_entry_reference(data))
+    plan = _raw_candidate(direction, entry, dummy_stop, atr, "relative_strength", strength, entry_reference=_entry_reference(data))
     if plan:
         benchmark_label = "/".join(benchmark_keys)
         sector_label = f" + sector peers ({len(sector_maps)})" if use_sector else ""

@@ -102,8 +102,8 @@ def test_limit_entry_distance_caps_are_advisory_and_reported(monkeypatch):
     # advisory olarak raporlanır.
     monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 2.0)
     monkeypatch.setattr(Config, "QUALITY_MAX_ENTRY_DISTANCE_ATR", 1.0)
-    monkeypatch.setattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_ATR", 3.0)
-    monkeypatch.setattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_PERCENT", 0.05)
+    monkeypatch.setattr(Config, "MAX_SETUP_ENTRY_DISTANCE_ATR", 3.0)
+    monkeypatch.setattr(Config, "MAX_SETUP_ENTRY_DISTANCE_PERCENT", 0.05)
 
     result = TradeQualityEngine().evaluate(**_quality_payload(102.5))
     assert result["allowed"] is True
@@ -117,8 +117,8 @@ def test_limit_entry_percent_distance_is_advisory_even_inside_atr_cap(monkeypatc
     import utils.atr
 
     monkeypatch.setattr(utils.atr, "atr", lambda candles, period=14: 10.0)
-    monkeypatch.setattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_ATR", 3.0)
-    monkeypatch.setattr(Config, "MAX_LIMIT_ENTRY_DISTANCE_PERCENT", 0.05)
+    monkeypatch.setattr(Config, "MAX_SETUP_ENTRY_DISTANCE_ATR", 3.0)
+    monkeypatch.setattr(Config, "MAX_SETUP_ENTRY_DISTANCE_PERCENT", 0.05)
 
     result = TradeQualityEngine().evaluate(**_quality_payload(106.0))
     assert result["allowed"] is True

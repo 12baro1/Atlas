@@ -40,7 +40,10 @@ class AtlasRuntime:
         self.strategy_outcome_journal = StrategyOutcomeJournal()
         self._stop_event = threading.Event()
         self._thread = None
-        self._analysis_lock = threading.Lock()
+        # Per-symbol locks to allow parallel analysis of different symbols
+        # while protecting AtlasMainEngine.evidence_pool for the same symbol.
+        self._analysis_locks = {}
+        self._analysis_locks_lock = threading.Lock()
         self._journal_lock = threading.RLock()
         self.manual_service = ManualTradeService(
             journal=self.engine.trade_journal,
@@ -104,6 +107,15 @@ class AtlasRuntime:
             )
         except Exception:
             pass
+
+    def _get_analysis_lock(self, symbol):
+        """Get or create a per-symbol lock for analysis."""
+        with self._analysis_locks_lock:
+            lock = self._analysis_locks.get(symbol)
+            if lock is None:
+                lock = threading.Lock()
+                self._analysis_locks[symbol] = lock
+            return lock
 
 
     def boot_summary(self):
@@ -420,10 +432,38 @@ class AtlasRuntime:
         self._set_status("STOPPED")
 
     def _scan_cycle(self):
-        for index, symbol in enumerate(self.symbols, start=1):
-            if self._stop_event.is_set():
-                return
-            self._analyze_symbol(symbol, force_refresh=False, from_scan=True, scan_index=index, scan_total=len(self.symbols))
+        """Run symbol analysis in parallel with controlled concurrency."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Limit concurrent analyses to avoid overwhelming the API
+        max_workers = int(getattr(Config, "SCAN_MAX_WORKERS", "4") or "4")
+        max_workers = max(1, min(max_workers, len(self.symbols)))
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self._analyze_symbol,
+                    symbol,
+                    False,
+                    True,
+                    idx,
+                    len(self.symbols),
+                ): symbol
+                for idx, symbol in enumerate(self.symbols, start=1)
+            }
+
+            for future in as_completed(futures):
+                if self._stop_event.is_set():
+                    # Cancel remaining futures
+                    for f in futures:
+                        f.cancel()
+                    return
+                try:
+                    future.result()
+                except Exception as exc:
+                    symbol = futures[future]
+                    self._log(f"ERROR {symbol} (parallel): {exc}")
+
         # Expire only after the cycle had a chance to process the latest candles.
         # This also handles stale symbols that produced no fresh candle.
         with self._journal_lock:
@@ -450,7 +490,8 @@ class AtlasRuntime:
                 universe = {}
                 self._log(f"WARN correlation universe unavailable: {exc}")
 
-            with self._analysis_lock:
+            lock = self._get_analysis_lock(symbol)
+            with lock:
                 data = get_market_data(symbol, force_refresh=force_refresh)
                 # Never base live SMC confirmation on a still-forming 15m candle.
                 # Backtests use historical candles and do not pass through this live-runtime filter.
