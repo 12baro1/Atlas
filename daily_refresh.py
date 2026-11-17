@@ -58,6 +58,8 @@ class DailyPoolRefresh:
         self.market_inventory = market_inventory
         self.refresh_hour = int(refresh_hour)
         self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
 
     # ------------------------------------------------------------------
     # Core operation
@@ -121,13 +123,21 @@ class DailyPoolRefresh:
         00:00 still performs the pending refresh on the next tick.
         """
         def loop():
-            while True:
+            while not self._stop_event.is_set():
                 try:
                     self.run_if_due()
                 except Exception as exc:  # pragma: no cover
                     logger.error(f"Daily refresh loop error: {exc}")
-                time.sleep(max(10, int(check_interval_seconds)))
+                if self._stop_event.wait(max(10, int(check_interval_seconds))):
+                    break
 
-        thread = threading.Thread(target=loop, daemon=True, name="AtlasDailyRefresh")
-        thread.start()
-        return thread
+        self._thread = threading.Thread(target=loop, daemon=True, name="AtlasDailyRefresh")
+        self._thread.start()
+        return self._thread
+
+    def stop(self, timeout: float = 5.0):
+        """Stop the background refresh thread."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(0.0, timeout))
+            self._thread = None

@@ -144,6 +144,11 @@ class AtlasRuntime:
                 self._scan_queue.close()
         except Exception:
             pass
+        try:
+            if getattr(self, "_daily_refresh", None) is not None:
+                self._daily_refresh.stop(timeout=timeout)
+        except Exception:
+            pass
         if self._telegram_service is not None:
             try:
                 self._telegram_service.stop()
