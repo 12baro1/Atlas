@@ -665,6 +665,27 @@ class AtlasRuntime:
                     # Add the selected setup to the opportunity pool as a validated candidate
                     self._register_result(result)
                     self._accumulate_strategy_telemetry(result)
+                    strategy_lab = result.get("strategy_lab") or {}
+                    diagnostics = strategy_lab.get("diagnostics") or {}
+                    strategy_rows = diagnostics.get("strategies") or []
+                    strategy_summary = ",".join(
+                        "{}={}".format(
+                            str(row.get("strategy_id") or "unknown"),
+                            str(row.get("status") or "UNKNOWN"),
+                        )
+                        for row in strategy_rows
+                        if isinstance(row, dict)
+                    )
+                    self.logger.info(
+                        "Strategy pipeline completed | symbol=%s trace_id=%s "
+                        "strategies=%s raw=%s filter_passed=%s selected=%s",
+                        symbol,
+                        result.get("trace_id") or strategy_lab.get("trace_id") or "-",
+                        strategy_summary or "NO_STRATEGY_DIAGNOSTICS",
+                        diagnostics.get("raw_setup_count", 0),
+                        diagnostics.get("common_filter_passed_count", 0),
+                        diagnostics.get("selected_strategy_id") or "NONE",
+                    )
                     with self._lock:
                         self._latest_analysis_by_symbol[symbol] = result
                         self._latest_analysis_at[symbol] = int(time.time() * 1000)
