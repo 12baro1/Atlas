@@ -90,7 +90,7 @@ def test_category_grouping():
     assert len(performance_cmds) == 3  # performans, istatistik, ogrenme
 
     system_cmds = get_commands_by_category("system")
-    assert len(system_cmds) == 3  # durum, sistem, yardim
+    assert len(system_cmds) == 4  # start, durum, sistem, yardim
 
 
 def test_all_categories_ordered():
@@ -110,7 +110,7 @@ def test_help_text_contains_all_commands():
 
 def test_command_count():
     """Verify expected total command count."""
-    assert len(TELEGRAM_COMMANDS) == 29
+    assert len(TELEGRAM_COMMANDS) == 30
 
 
 def test_specific_commands_exist():
@@ -122,7 +122,7 @@ def test_specific_commands_exist():
         "taramadurum", "taramadurdur", "taramadevam", "yenile",
         "mevcut", "setuplar", "takip", "likidite", "havuzdurum",
         "performans", "istatistik", "ogrenme",
-        "durum", "sistem", "yardim",
+        "start", "durum", "sistem", "yardim",
     }
     actual = {cmd.name for cmd in TELEGRAM_COMMANDS}
     assert required == actual, f"Mismatch: missing={required-actual}, extra={actual-required}"
