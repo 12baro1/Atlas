@@ -9,7 +9,7 @@ import os
 import threading
 import traceback
 import time
-from collections import deque
+from collections import defaultdict, deque
 from typing import Any, Dict, Optional
 from config import Config
 from data_engine import exchange, get_correlation_universe, get_market_data, get_smt_universe
@@ -77,6 +77,34 @@ class AtlasRuntime:
         self._error = None
         self._telegram_service = None
         self._ai_state = {"provider": "disabled", "status": "DISABLED", "detail": "AI is not part of terminal Atlas."}
+        # Production telemetry (requirement H): strategy generation funnel.
+        self._strategy_telemetry = {
+            "analyses": 0,
+            "raw_setups_generated": 0,
+            "common_filter_passed": 0,
+            "common_filter_rejected": 0,
+            "rejection_reasons": defaultdict(int),
+            "per_strategy": defaultdict(lambda: {
+                "setups": 0, "passed": 0, "rejected": 0, "selected": 0,
+            }),
+        }
+        # Scan infrastructure: Gate.io inventory, durable queue, background
+        # workers and the 00:00 Istanbul daily refresh. All independent of
+        # the Telegram service lifecycle.
+        from market_inventory import get_market_inventory
+        from scan_queue import ScanQueue
+        from scan_service import ScanService
+        from daily_refresh import DailyPoolRefresh
+        self._market_inventory = get_market_inventory()
+        self._scan_queue = ScanQueue()
+        self._scan_service = ScanService(
+            runtime=self, queue=self._scan_queue, inventory=self._market_inventory
+        )
+        self._daily_refresh = DailyPoolRefresh(
+            pool=self._opportunity_pool(),
+            scan_queue=self._scan_queue,
+            market_inventory=self._market_inventory,
+        )
 
         with self._journal_lock:
             perf = self.engine.trade_journal.manual_trade_performance()
@@ -87,6 +115,13 @@ class AtlasRuntime:
         }
 
     def start(self, daemon=True):
+        # Scan infrastructure resumes regardless of who started the runtime:
+        # pending queue work continues and the daily refresh stays scheduled.
+        try:
+            self._scan_service.ensure_workers()
+            self._daily_refresh.start_background()
+        except Exception as exc:
+            self.logger.error(f"Scan infrastructure startup failed: {exc}")
         if self.full_scan and self.symbols:
             if self._thread and self._thread.is_alive():
                 return
@@ -99,6 +134,16 @@ class AtlasRuntime:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
+        try:
+            if getattr(self, "_scan_service", None) is not None:
+                self._scan_service.stop_scan(timeout_seconds=timeout)
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_scan_queue", None) is not None:
+                self._scan_queue.close()
+        except Exception:
+            pass
         if self._telegram_service is not None:
             try:
                 self._telegram_service.stop()
@@ -134,6 +179,49 @@ class AtlasRuntime:
 
     def attach_telegram_service(self, service):
         self._telegram_service = service
+
+    def _opportunity_pool(self):
+        return get_opportunity_pool()
+
+    # ------------------------------------------------------------------
+    # Scan service facade (Telegram-independent, requirement F)
+    # ------------------------------------------------------------------
+
+    def start_scan(self, limit=None):
+        """Enqueue a scan of the Gate.io universe and ensure workers run."""
+        return self._scan_service.start_scan(limit)
+
+    def stop_scan(self):
+        return self._scan_service.stop_scan()
+
+    def scan_status(self):
+        return self._scan_service.status()
+
+    def refresh_market_inventory(self):
+        """Force a Gate.io inventory refresh (rate-limit aware)."""
+        return self._market_inventory.refresh(force=False)
+
+    def resume_scan(self):
+        """Resume pending queue work without adding anything new."""
+        self._scan_service.ensure_workers()
+        return self._scan_service.status()
+
+    def strategy_telemetry(self):
+        with self._lock:
+            return self._strategy_telemetry_locked()
+
+    def _strategy_telemetry_locked(self):
+        return {
+            "analyses": self._strategy_telemetry["analyses"],
+            "raw_setups_generated": self._strategy_telemetry["raw_setups_generated"],
+            "common_filter_passed": self._strategy_telemetry["common_filter_passed"],
+            "common_filter_rejected": self._strategy_telemetry["common_filter_rejected"],
+            "rejection_reasons": dict(self._strategy_telemetry["rejection_reasons"]),
+            "per_strategy": {
+                strategy_id: dict(counts)
+                for strategy_id, counts in self._strategy_telemetry["per_strategy"].items()
+            },
+        }
 
     @property
     def scanner(self):
@@ -282,6 +370,8 @@ class AtlasRuntime:
                 "current_signal": self._current_signal,
                 "recent": list(self._last_results),
                 "error": self._error,
+                "scan_queue": self._scan_service.status() if getattr(self, "_scan_service", None) else None,
+                "strategy_telemetry": self._strategy_telemetry_locked() if hasattr(self, "_strategy_telemetry") else None,
             }
 
     def telegram_status(self):
@@ -556,6 +646,7 @@ class AtlasRuntime:
                     
                     # Add the selected setup to the opportunity pool as a validated candidate
                     self._register_result(result)
+                    self._accumulate_strategy_telemetry(result)
                     with self._lock:
                         self._latest_analysis_by_symbol[symbol] = result
                         self._latest_analysis_at[symbol] = int(time.time() * 1000)
@@ -818,6 +909,37 @@ class AtlasRuntime:
             trace_id=trace_id,
         )
         return candidate
+
+    def _accumulate_strategy_telemetry(self, result):
+        """Update the strategy generation funnel from the strategy lab report."""
+        try:
+            lab = result.get("strategy_lab") or {}
+            diagnostics = lab.get("diagnostics") or {}
+            with self._lock:
+                telemetry = self._strategy_telemetry
+                telemetry["analyses"] += 1
+                telemetry["raw_setups_generated"] += int(diagnostics.get("raw_setup_count") or 0)
+                passed = int(diagnostics.get("common_filter_passed_count") or 0)
+                telemetry["common_filter_passed"] += passed
+                raw = int(diagnostics.get("raw_setup_count") or 0)
+                telemetry["common_filter_rejected"] += max(0, raw - passed)
+                for row in diagnostics.get("strategies") or []:
+                    strategy_id = str(row.get("strategy_id") or "unknown")
+                    counts = telemetry["per_strategy"][strategy_id]
+                    if row.get("selected"):
+                        counts["selected"] += 1
+                        counts["passed"] += 1
+                    status = str(row.get("status") or "")
+                    if status in ("SELECTED", "FILTERED_NOT_SELECTED"):
+                        counts["passed"] += 0 if row.get("selected") else 1
+                        for reason in row.get("rejection_reasons") or []:
+                            telemetry["rejection_reasons"][f"SINGLE_DECISION:{reason}"] += 1
+                    elif status == "BLOCKED_COMMON_FILTER":
+                        counts["rejected"] += 1
+                        for reason in row.get("rejection_reasons") or []:
+                            telemetry["rejection_reasons"][str(reason)] += 1
+        except Exception as exc:
+            self.logger.debug(f"Telemetry accumulation skipped: {exc}")
 
     def _set_status(self, status):
         with self._lock:

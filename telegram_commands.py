@@ -28,13 +28,22 @@ TELEGRAM_COMMANDS = [
     TelegramCommand("sol", "SOL analizi yap", "handle_analyze_symbol", "market"),
     TelegramCommand("analiz", "Belirtilen coin analizi (örn: /analiz BTC)", "handle_analyze_symbol", "market", True, "symbol"),
 
-    # Piyasa tarama
+    # Piyasa tarama (gerçek scan queue üzerinden; kalıcı, devam edebilir)
     TelegramCommand("20tara", "20 piyasa tara", "handle_scan", "scan"),
     TelegramCommand("30tara", "30 piyasa tara", "handle_scan", "scan"),
     TelegramCommand("50tara", "50 piyasa tara", "handle_scan", "scan"),
     TelegramCommand("100tara", "100 piyasa tara", "handle_scan", "scan"),
+    TelegramCommand("200tara", "200 piyasa tara", "handle_scan", "scan"),
+    TelegramCommand("500tara", "500 piyasa tara", "handle_scan", "scan"),
+    TelegramCommand("1000tara", "1000 piyasa tara", "handle_scan", "scan"),
     TelegramCommand("tumtara", "Tüm desteklenen USDT perpetual piyasaları tara", "handle_scan_all", "scan"),
-    TelegramCommand("eniyi5", "Arka plan havuzundan en iyi 5 setup'ı getir (yeni tarama başlatmaz)", "handle_best_five", "scan"),
+    TelegramCommand("taramadurum", "Tarama durumu (kuyruk, ilerleme, checkpoint)", "handle_scan_status", "scan"),
+    TelegramCommand("taramadurdur", "Arka plan taramasını durdur", "handle_scan_stop", "scan"),
+    TelegramCommand("taramadevam", "Duraklatılmış taramayı kaldığı yerden sürdür", "handle_scan_resume", "scan"),
+    TelegramCommand("yenile", "Gate.io piyasa envanterini yenile", "handle_refresh", "scan"),
+    TelegramCommand("eniyi5", "Havuzdan en iyi 5 setup (salt okunur, yeni tarama başlatmaz)", "handle_best_five", "scan"),
+    TelegramCommand("eniyi10", "Havuzdan en iyi 10 setup (salt okunur, yeni tarama başlatmaz)", "handle_best_ten", "scan"),
+    TelegramCommand("havuzdurum", "Setup havuzu ve kuyruk durumu", "handle_pool_status", "setup"),
 
     # Setup ve takip
     TelegramCommand("mevcut", "Bugünün setup ve işlem takibi", "handle_mevcut", "setup"),
