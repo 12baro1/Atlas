@@ -214,3 +214,30 @@ def test_scan_status_includes_strategy_funnel(pool):
     assert "YEDİ STRATEJİ / ORTAK FİLTRE" in result
     assert "smc: 1 setup | 1 geçti | 0 elendi | 1 seçildi" in result
 
+@pytest.mark.parametrize(("message", "limit"), [
+    ("20 tara", 20),
+    ("30 tara", 30),
+    ("100 tara", 100),
+])
+def test_plain_text_scan_aliases_queue_requested_limit(pool, message, limit):
+    runtime = MagicMock()
+    runtime.start_scan.return_value = {
+        "started": True, "universe_size": 300, "selected": limit,
+        "added": limit, "ranking_source": "gateio_24h_quote_volume",
+        "progress": {"done": 0, "pending": limit, "percent": 0.0},
+    }
+    service = make_service(runtime)
+    assert is_recognized_command(message)
+    service.execute_command(message)
+    runtime.start_scan.assert_called_once_with(limit)
+
+
+def test_plain_text_best_five_does_not_start_scan(pool):
+    make_validated(pool, "plain-best-five")
+    runtime = MagicMock()
+    service = make_service(runtime)
+    result = service.execute_command("en iyi 5")
+    runtime.start_scan.assert_not_called()
+    runtime.analyze_symbol.assert_not_called()
+    assert "EN İYİ 1" in result
+
