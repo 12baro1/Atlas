@@ -17,7 +17,7 @@ DEFAULT_SCAN_INTERVAL_SECONDS = 900
 
 
 def configured_max_symbols(raw_value: str | None) -> int:
-    """Return the configured symbol cap; zero explicitly means unlimited."""
+    """Return the scanner cap; legacy zero/unlimited settings are clamped to 300."""
     if raw_value is None or not str(raw_value).strip():
         return DEFAULT_MAX_SYMBOLS
     try:
@@ -25,8 +25,10 @@ def configured_max_symbols(raw_value: str | None) -> int:
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("ATLAS_MAX_SYMBOLS must be a non-negative integer") from exc
     if value < 0:
-        raise ValueError("ATLAS_MAX_SYMBOLS must be zero (unlimited) or a positive integer")
-    return value
+        raise ValueError("ATLAS_MAX_SYMBOLS must be a non-negative integer")
+    if value == 0:
+        return DEFAULT_MAX_SYMBOLS
+    return min(value, DEFAULT_MAX_SYMBOLS)
 
 
 def select_live_symbols(markets, max_symbols: int = DEFAULT_MAX_SYMBOLS, exchange_client=None):
