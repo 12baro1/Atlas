@@ -32,6 +32,8 @@ def test_live_universe_contains_only_active_usdt_perpetual_swaps_and_applies_cap
         "XRP/USDT:USDT": {"active": False, "swap": True},
         "DOGE/USDT": {"active": True, "swap": False},
         "ADA/USDT:USDT": {"active": True, "swap": False},
+        "AAPL/USDT:USDT": {"active": True, "swap": True, "info": {"contract_type": "stocks"}},
+        "XAU/USDT:USDT": {"active": True, "swap": True, "info": {"contract_type": "metals"}},
     }
 
     symbols, stats = select_live_symbols(markets, max_symbols=2)
@@ -40,6 +42,7 @@ def test_live_universe_contains_only_active_usdt_perpetual_swaps_and_applies_cap
     assert stats["kept"] == 2
     assert stats["skipped_inactive"] == 1
     assert stats["skipped_not_swap"] == 1
+    assert stats["skipped_non_crypto"] == 2
     assert stats["limited"] == 1
 
 
