@@ -549,9 +549,9 @@ class RiskEngine:
 
             "atr": round(atr_snapshot, 8),
 
-            "tick_size": round(resolved_tick_size, 8),
+            "tick_size": resolved_tick_size,
 
-            "minimum_tick_distance": round(minimum_tick_distance, 8),
+            "minimum_tick_distance": minimum_tick_distance,
 
             "minimum_stop_distance": round(minimum_stop_distance, 8),
             "minimum_stop_cost_distance": round(minimum_stop_cost_distance, 8),
@@ -735,15 +735,10 @@ class RiskEngine:
         return self._snap_to_tick(candidate, tick_size, "up")
 
     def _snap_to_tick(self, price, tick_size, direction):
-        if tick_size is None or tick_size <= 0:
-            return round(price, 8)
-
-        scaled = price / tick_size
-        if direction == "down":
-            snapped = math.floor(scaled) * tick_size
-        else:
-            snapped = math.ceil(scaled) * tick_size
-        return round(snapped, 8)
+        from price_precision import snap_price_to_tick
+        return snap_price_to_tick(
+            price, tick_size, "floor" if direction == "down" else "ceiling"
+        )
 
     def _invalid_risk_setup(
         self,
@@ -778,7 +773,7 @@ class RiskEngine:
             side,
             round(requested_risk, 8),
             round(minimum_stop_distance, 8),
-            round(tick_size, 8),
+            tick_size,
             float(getattr(Config, "MIN_STOP_PERCENT", 0.0005)),
             round(atr, 8),
         )
@@ -795,8 +790,8 @@ class RiskEngine:
             "reason_code": reason_code,
             "atr": round(atr, 8),
             "stop_atr_ratio": None,
-            "tick_size": round(tick_size, 8),
-            "minimum_tick_distance": round(max(tick_size, 0.0), 8),
+            "tick_size": tick_size,
+            "minimum_tick_distance": max(tick_size, 0.0),
             "minimum_stop_distance": round(minimum_stop_distance, 8),
             "minimum_stop_percent": float(getattr(Config, "MIN_STOP_PERCENT", 0.0005)),
             "spread_buffer": round(spread_buffer, 8),
