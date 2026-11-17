@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -314,6 +315,17 @@ class OpportunityPool:
             self._candidates[candidate.setup_id] = candidate
             self._index_candidate(candidate)
             
+            # Persist immediately so a crash within persist_interval never
+            # loses a newly added candidate (no 30-second silent window).
+            if self._store is not None:
+                try:
+                    self._store.save_pool(
+                        "candidates",
+                        {k: v.to_dict() for k, v in self._candidates.items()},
+                    )
+                except Exception as e:
+                    logger.error(f"SQLite candidate persist failed: {e}")
+            
             logger.info(f"New candidate added: {candidate.setup_id} "
                        f"({candidate.symbol} {candidate.direction} "
                        f"{candidate.strategy_id})")
@@ -511,11 +523,42 @@ class OpportunityPool:
           - mid-target richness (rr_tp2), TP structure is monotonic by design
           - setup age penalty (older setups carry staler market data)
         rank="net_rr" keeps the simple cost-adjusted RR ordering.
+
+        Freshness checks (each evaluated independently):
+          - Setup expiry (expires_at_ms must be in the future)
+          - Setup age (created_at_ms must be within expiry window)
+          - Last data time (updated_at_ms must be present and recent)
+          - RR validity (net_rr_after_costs must be finite and > 0)
+        Setups with missing or stale timestamps are excluded rather than
+        presented with fabricated freshness.
         """
         with self._lock:
-            candidates = list(self._validated.values())
+            now_ms = int(time.time() * 1000)
+            max_age_ms = self.expiry_hours * 3600 * 1000
+            # Expired, invalidated or stale-setup candidates must never be
+            # presented as actionable best setups.
+            candidates = []
+            for c in self._validated.values():
+                if c.status != SetupStatus.VALIDATED.value:
+                    continue
+                # 1. Setup expiry
+                if c.expires_at_ms is not None and c.expires_at_ms < now_ms:
+                    continue
+                # 2. Setup age (created_at_ms within expiry window)
+                if c.created_at_ms and (now_ms - c.created_at_ms) > max_age_ms:
+                    continue
+                # 3. Last data time (updated_at_ms present and recent)
+                if not c.updated_at_ms or (now_ms - c.updated_at_ms) > max_age_ms:
+                    continue
+                # 4. RR validity (finite and strictly positive)
+                try:
+                    net_rr = float(c.net_rr_after_costs)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if not math.isfinite(net_rr) or net_rr <= 0:
+                    continue
+                candidates.append(c)
             if rank == "composite":
-                now_ms = int(time.time() * 1000)
                 def composite(c: SetupCandidate) -> float:
                     net_rr = min(float(c.net_rr_after_costs or 0.0), 6.0)
                     rr_component = net_rr / 6.0
@@ -907,6 +950,9 @@ class OpportunityPool:
         reason (never silently deleted), a consistent SQLite backup is
         written to the archive directory, then the two live pools are
         cleared for the new day. Active (user-accepted) setups are kept.
+
+        If the archive backup fails, the live pools are NOT cleared so that
+        a retry can attempt archiving again without data loss.
         """
         with self._lock:
             counts = {"candidates": len(self._candidates), "validated": len(self._validated)}
@@ -916,8 +962,9 @@ class OpportunityPool:
                     archived_dir.mkdir(parents=True, exist_ok=True)
                     self._store.backup(archived_dir / "pool_state.db")
                 except Exception as e:
-                    logger.error(f"Daily archive backup failed: {e}")
-            
+                    logger.error(f"Daily archive backup failed: live pools NOT cleared: {e}")
+                    raise  # Do not clear live pools; caller will not mark day done
+
             reason = f"DAILY_REFRESH:{day_tag}"
             for candidate in list(self._candidates.values()):
                 self._remove_candidate(candidate.setup_id)

@@ -95,12 +95,13 @@ class ScanService:
         """Enqueue the requested scan and make sure workers are running.
 
         - limit=None scans the whole current Gate.io universe.
-        - If the queue still has unfinished work, the command resumes it
-          instead of restarting from scratch — even when the inventory is
-          temporarily unavailable.
-        - If the queue is fully complete, the requested number of completed
-          symbols is requeued for an explicit user-driven re-scan (the
-          service never auto-resets results on its own).
+        - If the current scan generation still has unfinished work, the
+          command resumes it instead of restarting — even when the inventory
+          is temporarily unavailable.
+        - If the current generation is fully complete, a new scan generation
+        is opened and the requested number of symbols (alphabetically first
+        N from the Gate.io universe) is queued into it. Completed jobs from
+        previous generations never block a new scan period.
         """
         progress_before = self.queue.progress()
         has_unfinished = (
@@ -114,7 +115,22 @@ class ScanService:
                 "message": "Gate.io evreni boş; envanter yenilenemedi.",
                 "progress": progress_before,
             }
-        if universe and (limit is None or int(limit) >= len(universe)):
+        if has_unfinished:
+            # Resume the current generation without adding anything new.
+            self.ensure_workers()
+            progress_after = self.queue.progress()
+            return {
+                "started": True,
+                "universe_size": len(universe),
+                "selected": 0,
+                "added": 0,
+                "resumed": True,
+                "workers": self.worker_count,
+                "scan_generation": self.queue.current_generation(),
+                "progress": progress_after,
+            }
+        # Current generation is complete: open a new scan period.
+        if limit is None or int(limit) >= len(universe):
             selected = universe
         elif universe:
             selected = sorted(universe)[: int(limit)]
@@ -129,8 +145,9 @@ class ScanService:
             "universe_size": len(universe),
             "selected": len(selected),
             "added": queue_result["added"],
-            "resumed": progress_before["pending"] > 0 or progress_before["running"] > 0,
+            "resumed": False,
             "workers": self.worker_count,
+            "scan_generation": queue_result.get("generation"),
             "progress": progress_after,
         }
 

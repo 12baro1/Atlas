@@ -391,6 +391,22 @@ def test_restart_reloads_all_states(tmp_path):
     reloaded.stop()
 
 
+def test_add_candidate_persists_immediately_without_background_thread(tmp_path):
+    """Requirement E: setup eklendiginde 30 saniyelik persist araligina
+    baglanmadan SQLite'a anlik yazilmalidir (crash'te veri kaybı yok)."""
+    pool = make_pool(tmp_path, auto_persist=False)
+    pool.add_candidate(make_candidate("c1", "BTC/USDT:USDT", "smc"))
+
+    # A fresh pool instance over the same SQLite store must see the candidate
+    # immediately - no background persist thread was running.
+    reloaded = make_pool(tmp_path, auto_persist=False)
+    assert "c1" in reloaded._candidates
+    assert reloaded._candidates["c1"].symbol == "BTC/USDT:USDT"
+    assert reloaded._candidates["c1"].strategy_id == "smc"
+    pool.stop()
+    reloaded.stop()
+
+
 def test_different_strategies_are_never_merged(tmp_path):
     pool = make_pool(tmp_path)
     pool.add_candidate(make_candidate("c1", strat="smc"))
@@ -416,4 +432,125 @@ def test_index_pruning_keeps_maps_bounded(tmp_path):
     assert "BTC/USDT:USDT" not in pool._by_symbol
     assert "smc" not in pool._by_strategy
     assert SetupStatus.DISCOVERED.value not in pool._by_status
+    pool.stop()
+
+
+# ---------------------------------------------------------------------------
+# Pool freshness / best-5/10 filtering
+# ---------------------------------------------------------------------------
+
+def _make_validated_candidate(pool, sid, sym="BTC/USDT:USDT", strat="smc",
+                              net_rr=3.2, now_ms=None, age_hours=0,
+                              updated_age_hours=0, expired=False):
+    if now_ms is None:
+        now_ms = int(time.time() * 1000)
+    c = SetupCandidate(
+        setup_id=sid, symbol=sym, strategy_id=strat, strategy_name=strat,
+        direction="LONG", entry_type="LIMIT", entry_price=50000.0,
+        stop_loss=49500.0, tp1=51000.0, tp2=52000.0, tp3=53000.0,
+        rr_tp1=2.0, rr_tp2=4.0, rr_tp3=6.0, net_rr=net_rr,
+        risk_reward=net_rr, confidence=85.0, grade="A+", score=85.0,
+        net_rr_after_costs=net_rr, status=SetupStatus.VALIDATED.value,
+        setup_type=SetupType.LIMIT.value, regime="TREND", market_phase="Expansion",
+        created_at_ms=now_ms - int(age_hours * 3600_000),
+        updated_at_ms=now_ms - int(updated_age_hours * 3600_000),
+        validated_at_ms=now_ms - int(age_hours * 3600_000),
+    )
+    if expired:
+        c.expires_at_ms = now_ms - 3600_000  # already expired
+    else:
+        c.expires_at_ms = now_ms + pool.expiry_hours * 3600_000
+    pool._validated[sid] = c
+    pool._index_candidate(c)
+    return c
+
+
+def test_best_setups_excludes_expired_setups(tmp_path):
+    """Süresi geçmiş setup'lar en iyi 5/10 listesinde olmamalı."""
+    pool = make_pool(tmp_path, expiry_hours=24)
+    now_ms = int(time.time() * 1000)
+    _make_validated_candidate(pool, "good", net_rr=3.2, now_ms=now_ms)
+    _make_validated_candidate(pool, "expired", net_rr=5.0, now_ms=now_ms, expired=True)
+
+    best = pool.get_best_setups(limit=5)
+    symbols = {c.setup_id for c in best}
+    assert "good" in symbols
+    assert "expired" not in symbols
+    pool.stop()
+
+
+def test_best_setups_excludes_stale_updated_at(tmp_path):
+    """updated_at_ms çok eski (bayat veri) setup'lar dışlanmalı."""
+    pool = make_pool(tmp_path, expiry_hours=24)
+    now_ms = int(time.time() * 1000)
+    _make_validated_candidate(pool, "fresh", net_rr=3.2, now_ms=now_ms,
+                              updated_age_hours=1)
+    _make_validated_candidate(pool, "stale", net_rr=5.0, now_ms=now_ms,
+                              updated_age_hours=100)  # 100 hours old
+
+    best = pool.get_best_setups(limit=5)
+    symbols = {c.setup_id for c in best}
+    assert "fresh" in symbols
+    assert "stale" not in symbols
+    pool.stop()
+
+
+def test_best_setups_excludes_invalid_rr(tmp_path):
+    """net_rr_after_costs 0, negatif veya olmayan setup'lar dışlanmalı."""
+    pool = make_pool(tmp_path, expiry_hours=24)
+    now_ms = int(time.time() * 1000)
+    _make_validated_candidate(pool, "valid", net_rr=3.2, now_ms=now_ms)
+    _make_validated_candidate(pool, "zero_rr", net_rr=0.0, now_ms=now_ms)
+    _make_validated_candidate(pool, "neg_rr", net_rr=-1.0, now_ms=now_ms)
+
+    best = pool.get_best_setups(limit=5)
+    symbols = {c.setup_id for c in best}
+    assert "valid" in symbols
+    assert "zero_rr" not in symbols
+    assert "neg_rr" not in symbols
+    pool.stop()
+
+
+def test_best_setups_excludes_missing_timestamps(tmp_path):
+    """created_at_ms veya updated_at_ms eksik setup'lar dışlanmalı."""
+    pool = make_pool(tmp_path, expiry_hours=24)
+    now_ms = int(time.time() * 1000)
+
+    c = SetupCandidate(
+        setup_id="no_created", symbol="BTC/USDT:USDT", strategy_id="smc",
+        strategy_name="smc", direction="LONG", entry_type="LIMIT",
+        entry_price=50000.0, stop_loss=49500.0, tp1=51000.0, tp2=52000.0,
+        tp3=53000.0, rr_tp1=2.0, rr_tp2=4.0, rr_tp3=6.0, net_rr=3.2,
+        risk_reward=3.2, confidence=85.0, grade="A+", score=85.0,
+        net_rr_after_costs=3.2, status=SetupStatus.VALIDATED.value,
+        setup_type=SetupType.LIMIT.value, regime="TREND", market_phase="Expansion",
+        created_at_ms=0, updated_at_ms=0, validated_at_ms=0,
+        expires_at_ms=now_ms + pool.expiry_hours * 3600_000,
+    )
+    pool._validated["no_created"] = c
+    pool._index_candidate(c)
+
+    _make_validated_candidate(pool, "valid", net_rr=3.2, now_ms=now_ms)
+
+    best = pool.get_best_setups(limit=5)
+    symbols = {c.setup_id for c in best}
+    assert "valid" in symbols
+    assert "no_created" not in symbols
+    pool.stop()
+
+
+def test_best_setups_only_reads_validated_pool(tmp_path):
+    """en iyi 5/10 sadece doğrulanmış havuzu okur; kuyruk/havuzu değiştirmez."""
+    pool = make_pool(tmp_path, auto_persist=False)
+    now_ms = int(time.time() * 1000)
+    _make_validated_candidate(pool, "v1", net_rr=3.2, now_ms=now_ms)
+
+    stats_before = pool.get_stats()
+    best = pool.get_best_setups(limit=5)
+    stats_after = pool.get_stats()
+
+    assert len(best) == 1
+    assert best[0].setup_id == "v1"
+    # Read-only: stats unchanged
+    assert stats_before == stats_after
     pool.stop()

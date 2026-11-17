@@ -32,6 +32,7 @@ def pool(tmp_path, monkeypatch):
 
 
 def make_validated(pool, sid, symbol="BTC/USDT:USDT", strategy="smc", net_rr=2.5):
+    now_ms = int(time_mod.time() * 1000)
     candidate = SetupCandidate(
         setup_id=sid, symbol=symbol, strategy_id=strategy, strategy_name=strategy,
         direction="LONG", entry_type="LIMIT", entry_price=50000.0, stop_loss=49500.0,
@@ -39,7 +40,7 @@ def make_validated(pool, sid, symbol="BTC/USDT:USDT", strategy="smc", net_rr=2.5
         net_rr=3.5, risk_reward=3.5, confidence=85.0, grade="A+", score=85.0,
         net_rr_after_costs=net_rr, status=SetupStatus.VALIDATED.value,
         setup_type=SetupType.LIMIT.value, regime="TREND", market_phase="Expansion",
-        created_at_ms=1700000000000, validated_at_ms=1700000000000,
+        created_at_ms=now_ms, validated_at_ms=now_ms,
     )
     pool.add_candidate(candidate)
     pool.validate_candidate(sid)

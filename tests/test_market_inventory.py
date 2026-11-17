@@ -75,11 +75,23 @@ def test_ttl_cache_prevents_rate_limit_abuse(tmp_path):
     assert exchange.calls == first_calls  # TTL honored, no extra API calls
 
 
-def test_force_refresh_within_ttl_still_rate_limited(tmp_path):
+def test_force_refresh_attempts_real_api_call(tmp_path):
+    """force=True (user-initiated 'yenile') always attempts a real Gate.io
+    refresh instead of being silently skipped by TTL. Rate-limit backoff
+    still applies between retries on failure."""
+    exchange = FakeGateExchange()
+    inventory = make_inventory(tmp_path, exchange, ttl_seconds=600)
+    inventory.get_symbols()          # first call: 1 API call
+    inventory.refresh(force=True)    # explicit refresh: another real API call
+    assert exchange.calls == 2
+
+
+def test_refresh_without_force_respects_ttl(tmp_path):
+    """Automatic (non-forced) refresh still respects the TTL."""
     exchange = FakeGateExchange()
     inventory = make_inventory(tmp_path, exchange, ttl_seconds=600)
     inventory.get_symbols()
-    inventory.refresh(force=True)  # forced refresh must still respect TTL
+    inventory.refresh(force=False)   # within TTL: no new API call
     assert exchange.calls == 1
 
 

@@ -91,15 +91,16 @@ class DailyPoolRefresh:
                 inventory = self.market_inventory.status()
                 universe = self.market_inventory.get_symbols()
                 counts = self.pool.archive_and_reset_scan_pools(today)
-                # New period: make sure the whole current universe is queued
-                # for scanning. Existing job states are preserved by the
-                # queue (no silent reset of completed work).
-                queue_result = self.scan_queue.rebuild(universe)
+                # New period: open a fresh scan generation so completed jobs
+                # from the previous day never block today's scan. rebuild()
+                # starts the generation and queues the whole universe into it.
+                queue_result = self.scan_queue.rebuild(universe, batch_tag=f"refresh_{today}")
                 store = getattr(self.pool, "_store", None)
                 if store is not None:
                     store.set_meta("last_refresh_day", today)
                 result = {
                     "day": today,
+                    "scan_generation": queue_result.get("generation"),
                     "archived_candidates": counts["candidates"],
                     "archived_validated": counts["validated"],
                     "universe_size": len(universe),
