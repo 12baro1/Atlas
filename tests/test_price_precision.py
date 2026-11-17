@@ -59,8 +59,9 @@ def test_gate_contract_fee_rates_flow_into_strategy_common_risk_filter():
         "tp3": 108.0,
         "atr": 1.0,
     }
-    market_data = {"maker_fee_rate": 0.00013, "taker_fee_rate": 0.00072}
-    validation = _risk_validate_candidate(candidate, market_data)
+    candidate["_market_maker_fee_rate"] = 0.00013
+    candidate["_market_taker_fee_rate"] = 0.00072
+    validation = _risk_validate_candidate(candidate)
     assert validation["risk_plan"]["maker_fee_rate"] == 0.00013
     assert validation["risk_plan"]["taker_fee_rate"] == 0.00072
 
