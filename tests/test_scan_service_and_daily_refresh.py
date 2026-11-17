@@ -230,11 +230,13 @@ class FakeRuntime:
     def __init__(self):
         self.analyzed = []
         self._fail_symbols = set()
+        self.websocket_flags = []
         self._lock = threading.Lock()
 
-    def analyze_symbol(self, symbol, force_refresh=False, track_signal=False):
+    def analyze_symbol(self, symbol, force_refresh=False, track_signal=False, use_websocket=True):
         with self._lock:
             self.analyzed.append(symbol)
+            self.websocket_flags.append(bool(use_websocket))
         if symbol in self._fail_symbols:
             return {"ok": False, "error": "stale_15m_market_data"}
         return {"ok": True, "symbol": symbol}
@@ -375,6 +377,7 @@ def test_telegram_independence_resume_after_restart(tmp_path):
         time.sleep(0.05)
     assert service2.status()["complete"] is True
     assert len(runtime.analyzed) == 8
+    assert runtime.websocket_flags == [False] * 8
     service2.stop_scan()
 
 
