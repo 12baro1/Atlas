@@ -575,7 +575,7 @@ class RiskEngine:
             "risk": round(risk, 8),
             "stop_atr_ratio": round(risk / atr_snapshot, 4) if atr_snapshot > 0 else None,
 
-            "capital_at_risk": round(capped_capital_at_risk, 2),
+            "capital_at_risk": round(round(capped_position_size, 4) * effective_risk_per_unit, 2),
 
             "capital_at_risk_target": round(target_capital_at_risk, 2),
 
@@ -656,7 +656,7 @@ class RiskEngine:
 
             "requested_risk": round(requested_risk, 8),
 
-            "effective_risk_per_unit": round(effective_risk_per_unit, 8),
+            "effective_risk_per_unit": effective_risk_per_unit,
 
         }
 
