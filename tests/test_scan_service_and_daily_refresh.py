@@ -406,18 +406,19 @@ def test_scan_uses_ranked_symbols_and_extends_active_generation(tmp_path):
     service = ScanService(runtime, queue, inventory, worker_count=1, analysis_gap_seconds=0.0)
     # Prevent worker consumption so the generation can be inspected exactly.
     service.ensure_workers = lambda: False
-    first = service.start_scan(limit=1)
-    assert first["selected_preview"] == ranked[:1]
+    first = service.start_scan(limit=2)
+    assert first["selected_preview"] == ranked[:2]
     assert first["ranking_source"] == "fake_24h_quote_volume"
     generation = first["scan_generation"]
     # Mark the first job complete and leave the generation unfinished.
     queue.jobs[ranked[0]]["state"] = "done"
-    second = service.start_scan(limit=2)
+    second = service.start_scan(limit=3)
     assert second["resumed"] is True
     assert second["scan_generation"] == generation
     assert second["added"] == 1
     assert queue.jobs[ranked[0]]["state"] == "done"
     assert queue.jobs[ranked[1]]["state"] == "pending"
+    assert queue.jobs[ranked[2]]["state"] == "pending"
 
 
 def test_stop_scan_does_not_orphan_or_revive_inflight_worker(tmp_path):
