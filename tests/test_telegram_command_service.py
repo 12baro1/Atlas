@@ -153,7 +153,7 @@ def test_telegram_service_ignores_queued_stale_analysis_commands(monkeypatch):
     service._handle_update({
         "update_id": 10,
         "message": {
-            "date": int(time.time()) - 600,
+            "date": int(time.time()) - 1200,
             "text": "/BTC",
             "chat": {"id": -100123},
             "from": {"is_bot": False},
