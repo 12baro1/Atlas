@@ -100,10 +100,10 @@ class Config:
     DYNAMIC_TP_ALLOW_SYNTHETIC_FALLBACK = _env_or_rc("ATLAS_ALLOW_SYNTHETIC_TP_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
     # Require higher-timeframe direction by default; 15m-only direction is legacy opt-in.
     ENTRY_ALLOW_STRUCTURE_DIRECTION_FALLBACK = _env_or_rc("ATLAS_ENTRY_ALLOW_STRUCTURE_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
-    # Bybit USDT perpetual VIP0 defaults; rates apply per filled order leg.
-    # Override with ATLAS_MAKER_FEE_RATE / ATLAS_TAKER_FEE_RATE for account-specific fees.
+    # Gate.io USDT-M perpetual VIP0 base fees; account tier/discounts may differ.
+    # Override with ATLAS_MAKER_FEE_RATE / ATLAS_TAKER_FEE_RATE for the actual account rates.
     MAKER_FEE_RATE = float(os.getenv("ATLAS_MAKER_FEE_RATE", "0.0002"))
-    TAKER_FEE_RATE = float(os.getenv("ATLAS_TAKER_FEE_RATE", "0.00055"))
+    TAKER_FEE_RATE = float(os.getenv("ATLAS_TAKER_FEE_RATE", "0.0005"))
     # Legacy single-rate proxy retained only for older integrations.
     ROUND_TRIP_COST_RATE = float(os.getenv("ATLAS_ROUND_TRIP_COST_RATE", "0.0020"))
     ATR_PERIOD = 14
