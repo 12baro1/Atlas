@@ -211,6 +211,7 @@ class AtlasEngine:
         )
         self._warm_learning_index()
         self.scanner = ScannerEngine()
+        self._scanner_lock = threading.Lock()
         self.statistics = StatisticsEngine()
         self.backtest = BacktestEngine()
         # Explicit specialist inventory: services/state containers are not motors.
@@ -234,6 +235,11 @@ class AtlasEngine:
         )
         for motor_name in specialist_motor_names:
             setattr(self, motor_name, self.main_engine.motors[motor_name])
+
+    def clear_scanner(self):
+        """Thread-safe scanner clear."""
+        with self._scanner_lock:
+            self.scanner.clear()
 
     def analyze(self, data, track_signal=True):
         """Route every market analysis through the single main engine."""
@@ -665,7 +671,8 @@ class AtlasEngine:
             detail={"signal": execution_state["signal"].get("signal")},
         )
 
-        self.scanner.add(symbol, result_payload)
+        with self._scanner_lock:
+            self.scanner.add(symbol, result_payload)
         self.statistics.record_payload(result_payload)
         if execution_state["signal"].get("signal") in ("LONG", "SHORT"):
             self.backtest.record(result_payload)
@@ -738,6 +745,11 @@ class AtlasEngine:
         birincildir. Manuel veri yoksa scanner tarafından takip edilen gerçek
         işlemler, onlar da yoksa teorik sinyal sonuçları kullanılır. Böylece
         aynı sinyalin teorik sonucu gerçek kullanıcı sonucunu gölgeleyemez.
+
+        Sadece nihai duruma ulaşmış (TP1/TP2/TP3/SL) kayıtlar öğrenmeye girer.
+        PENDING ve EXPIRED kayıtlar look-ahead bias ve yanlış performans etiketi
+        riski nedeniyle kesinlikle dışlanır. Bu filtreleme
+        trade_journal.learning_records() içinde gerçekleşir.
         """
         if not bool(getattr(Config, "LEARNING_ENGINE_ENABLED", True)):
             return None

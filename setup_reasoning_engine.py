@@ -535,7 +535,7 @@ class SetupReasoningEngine:
                 # natural entry-to-edge risk is already sufficient.
                 natural_risk = abs(entry_price - stop_reference)
                 min_risk = (
-                    atr_value * float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.35))
+                    atr_value * float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75))
                     if atr_value
                     else 0.0
                 )

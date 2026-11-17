@@ -963,9 +963,9 @@ class TelegramCommandService:
 
         scan_limit, result_limit = scan_request
 
-        # Clear previous scan results unless using cached pool
-        if not cached_best_request:
-            self.runtime.scanner.clear()
+        # Do NOT clear scanner on each scan. The scanner accumulates results
+        # across scans; the persistent OpportunityPool handles capacity/eviction.
+        # Clearing here would wipe the pool that /eniyi5 and background scans rely on.
 
         if cached_best_request:
             # Use existing pool

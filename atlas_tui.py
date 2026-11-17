@@ -865,8 +865,8 @@ class AtlasTUIApp(App):
         return "\n".join(lines)
 
     def _find_best_trade(self, scan_limit=DEFAULT_SCAN_LIMIT, result_limit=1) -> str:
-        # Clear previous scan results
-        self.runtime.scanner.clear()
+        # Clear previous scan results (thread-safe)
+        self.runtime.engine.clear_scanner()
         symbols = _best_symbols(limit=scan_limit)
         if not symbols:
             return "Uygun piyasa bulunamadı. Veri sağlayıcısını kontrol et."
