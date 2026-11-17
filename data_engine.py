@@ -118,10 +118,27 @@ def get_market_data(symbol, force_refresh=False):
         raw_tick = precision.get("price")
         if raw_tick is None:
             raw_tick = market_info.get("order_price_round")
-        from price_precision import normalize_tick_size
+        from price_precision import normalize_fee_rate, normalize_tick_size
         data["tick_size"] = normalize_tick_size(raw_tick)
         if data["tick_size"] is not None:
             data["price_precision_source"] = "GATEIO_ORDER_PRICE_ROUND"
+        # Gate contract metadata supplies per-contract fees. Explicit .env
+        # settings take precedence because they may reflect the user's VIP tier.
+        maker_override = os.getenv("ATLAS_MAKER_FEE_RATE")
+        taker_override = os.getenv("ATLAS_TAKER_FEE_RATE")
+        data["maker_fee_rate"] = (
+            normalize_fee_rate(maker_override) if maker_override is not None
+            else normalize_fee_rate(market_info.get("maker_fee_rate"))
+        )
+        data["taker_fee_rate"] = (
+            normalize_fee_rate(taker_override) if taker_override is not None
+            else normalize_fee_rate(market_info.get("taker_fee_rate"))
+        )
+        if data["maker_fee_rate"] is not None or data["taker_fee_rate"] is not None:
+            data["fee_rate_source"] = (
+                "ENV_OVERRIDE" if maker_override is not None or taker_override is not None
+                else "GATEIO_CONTRACT_METADATA"
+            )
     except Exception:
         # Preserve candle analysis if market metadata is temporarily unavailable.
         pass
