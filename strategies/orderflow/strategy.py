@@ -160,11 +160,17 @@ def generate(data):
         entry_reference=_entry_reference(data),
     )
     if plan:
+        footprint_imbalance = footprint_confirmation.get("imbalance")
+        footprint_imbalance_text = (
+            f"{float(footprint_imbalance):+.3f}"
+            if isinstance(footprint_imbalance, (int, float))
+            else "unavailable"
+        )
         reasons = [
             f"Orderflow setup={setup_type}",
             f"Depth-weighted order-book notional imbalance={imbalance:+.2f}",
             f"Recent taker notional delta={trade_delta:+.2f} across {trade_count} trades",
-            f"Footprint buy/sell imbalance={footprint_confirmation.get('imbalance'):+.3f} across {footprint_confirmation.get('price_levels')} price levels",
+            f"Footprint buy/sell imbalance={footprint_imbalance_text} across {footprint_confirmation.get('price_levels')} price levels",
             f"Spread={spread_pct:.4f}%; bid/ask depth notional={flow.get('bid_notional')}/{flow.get('ask_notional')}",
             f"15m candle body={quality['body_ratio']:.2f}; close-location={quality['close_location']:.2f}",
         ]
