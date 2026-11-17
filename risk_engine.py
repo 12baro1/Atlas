@@ -260,7 +260,7 @@ class RiskEngine:
         risk["position_size_pre_cap"] = round(adjusted_position_size, 4)
         risk["position_size"] = round(capped_position_size, 4)
         risk["position_size_capped"] = capped_position_size < adjusted_position_size
-        risk["capital_at_risk"] = round(capped_position_size * effective_risk_per_unit, 2)
+        risk["capital_at_risk"] = round(risk["position_size"] * effective_risk_per_unit, 2)
         risk["stop_cost_quote_per_unit"] = round(stop_cost["total"], 10)
         risk["stop_cost_breakdown"] = stop_cost
         risk["effective_risk_per_unit"] = effective_risk_per_unit
