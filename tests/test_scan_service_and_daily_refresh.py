@@ -302,19 +302,29 @@ class FakeQ:
 
 
 class FakeInv:
-    def __init__(self, symbols):
+    def __init__(self, symbols, ranked_symbols=None):
         self._symbols = list(symbols)
+        self._ranked_symbols = list(ranked_symbols or symbols)
+        self._ranking_source = "fake_24h_volume"
 
     def get_symbols(self):
         return list(self._symbols)
 
+    def get_ranked_symbols(self, limit=None):
+        ranked = list(self._ranked_symbols)
+        return ranked if limit is None else ranked[:max(0, int(limit))]
+
     def status(self):
-        return {"symbol_count": len(self._symbols)}
+        return {
+            "symbol_count": len(self._symbols),
+            "ranking_source": self._ranking_source,
+        }
 
 
-def make_service(runtime, symbols, workers=2):
+def make_service(runtime, symbols, workers=2, ranked_symbols=None):
     return ScanService(
-        runtime=runtime, queue=FakeQ(), inventory=FakeInv(symbols),
+        runtime=runtime, queue=FakeQ(),
+        inventory=FakeInv(symbols, ranked_symbols=ranked_symbols),
         worker_count=workers, analysis_gap_seconds=0.0,
     )
 
@@ -386,3 +396,35 @@ def test_empty_universe_reports_explicitly(tmp_path):
     result = service.start_scan(limit=20)
     assert result["started"] is False
     assert result["reason"] == "empty_universe"
+
+
+def test_start_scan_uses_liquidity_ranked_symbols_not_alphabetical(tmp_path):
+    runtime = FakeRuntime()
+    symbols = ["AAA/USDT:USDT", "BBB/USDT:USDT", "CCC/USDT:USDT"]
+    ranked = ["CCC/USDT:USDT", "AAA/USDT:USDT", "BBB/USDT:USDT"]
+    service = make_service(runtime, symbols, workers=1, ranked_symbols=ranked)
+    result = service.start_scan(limit=2)
+    assert result["selected"] == 2
+    assert result["selected_preview"] == ranked[:2]
+    assert result["ranking_source"] == "fake_24h_volume"
+    deadline = time.time() + 10
+    while time.time() < deadline and not service.status()["complete"]:
+        time.sleep(0.05)
+    service.stop_scan()
+
+
+def test_active_scan_enqueues_requested_symbols_without_resetting_checkpoint(tmp_path):
+    runtime = FakeRuntime()
+    symbols = ["AAA/USDT:USDT", "BBB/USDT:USDT", "CCC/USDT:USDT"]
+    ranked = ["CCC/USDT:USDT", "AAA/USDT:USDT", "BBB/USDT:USDT"]
+    service = make_service(runtime, symbols, workers=1, ranked_symbols=ranked)
+    service.queue.enqueue(["OLD/USDT:USDT"])
+    # Keep workers stopped so the checkpoint can be inspected deterministically.
+    service.ensure_workers = lambda: False
+    result = service.start_scan(limit=2)
+    assert result["resumed"] is True
+    assert result["added"] == 2
+    assert set(service.queue.jobs) == {
+        "OLD/USDT:USDT", "CCC/USDT:USDT", "AAA/USDT:USDT"
+    }
+    assert service.queue.jobs["OLD/USDT:USDT"]["state"] == "pending"
