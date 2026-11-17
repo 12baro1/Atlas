@@ -40,7 +40,10 @@ class AtlasRuntime:
         self.strategy_outcome_journal = StrategyOutcomeJournal()
         self._stop_event = threading.Event()
         self._thread = None
-        self._analysis_lock = threading.Lock()
+        # Per-symbol locks to allow parallel analysis of different symbols
+        # while protecting AtlasMainEngine.evidence_pool for the same symbol.
+        self._analysis_locks = {}
+        self._analysis_locks_lock = threading.Lock()
         self._journal_lock = threading.RLock()
         self.manual_service = ManualTradeService(
             journal=self.engine.trade_journal,
@@ -104,6 +107,15 @@ class AtlasRuntime:
             )
         except Exception:
             pass
+
+    def _get_analysis_lock(self, symbol):
+        """Get or create a per-symbol lock for analysis."""
+        with self._analysis_locks_lock:
+            lock = self._analysis_locks.get(symbol)
+            if lock is None:
+                lock = threading.Lock()
+                self._analysis_locks[symbol] = lock
+            return lock
 
 
     def boot_summary(self):
@@ -478,7 +490,8 @@ class AtlasRuntime:
                 universe = {}
                 self._log(f"WARN correlation universe unavailable: {exc}")
 
-            with self._analysis_lock:
+            lock = self._get_analysis_lock(symbol)
+            with lock:
                 data = get_market_data(symbol, force_refresh=force_refresh)
                 # Never base live SMC confirmation on a still-forming 15m candle.
                 # Backtests use historical candles and do not pass through this live-runtime filter.
