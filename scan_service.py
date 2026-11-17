@@ -125,7 +125,7 @@ class ScanService:
         )
         universe = self.inventory.get_symbols()
         ranker = getattr(self.inventory, "get_ranked_symbols", None)
-        if callable(ranker):
+        if universe and callable(ranker):
             ranked_symbols = list(ranker(limit=limit) or [])
         else:
             ranked_symbols = sorted(universe)
