@@ -795,6 +795,26 @@ class TelegramCommandService:
         ]
         if inventory.get("last_error"):
             lines.append(f"Envanter hatası: {inventory['last_error']}")
+        if inventory.get("ranking_source"):
+            lines.append(f"Sembol sıralaması: {inventory['ranking_source']}")
+        telemetry = status.get("strategy_telemetry") or {}
+        pool_stats = status.get("pool") or {}
+        if telemetry:
+            lines.extend([
+                "",
+                "YEDİ STRATEJİ / ORTAK FİLTRE",
+                f"Analiz: {telemetry.get('analyses', 0)}",
+                f"Ham setup: {telemetry.get('raw_setups_generated', 0)}",
+                f"Ortak filtreden geçen: {telemetry.get('common_filter_passed', 0)}",
+                f"Ortak filtrede elenen: {telemetry.get('common_filter_rejected', 0)}",
+                f"Doğrulanmış havuz: {pool_stats.get('validated', 0)}",
+            ])
+            for strategy_id, counts in sorted((telemetry.get("per_strategy") or {}).items()):
+                lines.append(
+                    f"  {strategy_id}: {counts.get('setups', 0)} setup | "
+                    f"{counts.get('passed', 0)} geçti | {counts.get('rejected', 0)} elendi | "
+                    f"{counts.get('selected', 0)} seçildi"
+                )
         failed = self.runtime._scan_queue.failed_symbols() if hasattr(self.runtime, "_scan_queue") else []
         if failed:
             lines.append("")
@@ -810,14 +830,22 @@ class TelegramCommandService:
         """Handle /taramadurdur — stop workers; claimed leases requeue on expiry."""
         result = self.runtime.stop_scan()
         progress = result.get("progress") or {}
-        return "\n".join([
-            "ATLAS | TARAMA DURDURULDU",
+        alive = result.get("workers_still_alive") or []
+        lines = [
+            "ATLAS | TARAMA DURDURMA İSTEĞİ",
             "",
-            f"Worker'lar durduruldu.",
+            (
+                "Worker'lar durdu."
+                if result.get("stopped")
+                else "Bazı worker'lar mevcut analizini bitiriyor; yeni worker başlatılmayacak."
+            ),
             f"Kuyruk korunuyor: {progress.get('pending', 0)} bekleyen, "
-            f"{progress.get('done', 0)} tamamlanan.",
-            "Devam için: /taramadevam",
-        ])
+            f"{progress.get('running', 0)} devam eden, {progress.get('done', 0)} tamamlanan.",
+        ]
+        if alive:
+            lines.append("Hâlâ çalışan: " + ", ".join(alive))
+        lines.append("Devam için: /taramadevam")
+        return "\n".join(lines)
 
     def handle_scan_resume(self) -> str:
         """Handle /taramadevam — resume pending queue work (checkpoint kept)."""
@@ -913,6 +941,11 @@ class TelegramCommandService:
             lines.append(f"Bu taramada taranacak: {result['selected']}")
         if "added" in result:
             lines.append(f"Kuyruğa yeni eklenen: {result['added']}")
+        if result.get("ranking_source"):
+            lines.append(f"Sıralama: {result['ranking_source']}")
+        preview = result.get("selected_preview") or []
+        if preview:
+            lines.append("İlk semboller: " + ", ".join(str(symbol) for symbol in preview))
         lines.extend([
             f"Tamamlanan: {progress.get('done', 0)} | Bekleyen: {progress.get('pending', 0)}",
             f"İlerleme: %{progress.get('percent', 0.0)}",
