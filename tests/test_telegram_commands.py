@@ -81,10 +81,10 @@ def test_category_grouping():
     assert {c.name for c in market_cmds} == {"btc", "eth", "sol", "analiz"}
 
     scan_cmds = get_commands_by_category("scan")
-    assert len(scan_cmds) == 6  # 20tara, 30tara, 50tara, 100tara, tumtara, eniyi5
+    assert len(scan_cmds) == 14  # 20/30/50/100/200/500/1000tara, tumtara, durum/durdur/devam, yenile, eniyi5, eniyi10
 
     setup_cmds = get_commands_by_category("setup")
-    assert len(setup_cmds) == 4  # mevcut, setuplar, takip, likidite
+    assert len(setup_cmds) == 5  # mevcut, setuplar, takip, likidite, havuzdurum
 
     performance_cmds = get_commands_by_category("performance")
     assert len(performance_cmds) == 3  # performans, istatistik, ogrenme
@@ -110,15 +110,17 @@ def test_help_text_contains_all_commands():
 
 def test_command_count():
     """Verify expected total command count."""
-    assert len(TELEGRAM_COMMANDS) == 20
+    assert len(TELEGRAM_COMMANDS) == 29
 
 
 def test_specific_commands_exist():
     """Verify all required commands from spec exist."""
     required = {
         "btc", "eth", "sol", "analiz",
-        "20tara", "30tara", "50tara", "100tara", "tumtara", "eniyi5",
-        "mevcut", "setuplar", "takip", "likidite",
+        "20tara", "30tara", "50tara", "100tara", "200tara", "500tara", "1000tara",
+        "tumtara", "eniyi5", "eniyi10",
+        "taramadurum", "taramadurdur", "taramadevam", "yenile",
+        "mevcut", "setuplar", "takip", "likidite", "havuzdurum",
         "performans", "istatistik", "ogrenme",
         "durum", "sistem", "yardim",
     }

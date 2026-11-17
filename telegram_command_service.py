@@ -26,10 +26,12 @@ import threading
 import time
 from datetime import datetime
 from types import SimpleNamespace
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 import requests
 
+from opportunity_pool import get_opportunity_pool
 from telegram_commands import (
     TELEGRAM_COMMANDS,
     TelegramCommand,
@@ -416,7 +418,11 @@ def is_recognized_command(command: str) -> bool:
         _is_report_command(normalized)
         or _parse_liquidity_command(normalized) is not False
         or _parse_scan_command(normalized) is not None
-        or normalized == "eniyi5"
+        or normalized in {"eniyi5", "en iyi 5", "en iyi 5 işlem", "en iyi 5 islem"}
+        or normalized in {"eniyi10", "en iyi 10", "en iyi 10 işlem", "en iyi 10 islem"}
+        or normalized in {"tarama durumu", "taramadurum", "tarama durdur", "taramadurdur",
+                          "tarama devam", "taramadevam", "yenile", "envanter yenile",
+                          "havuz durumu", "havuzdurum"}
         # Bare ticker in group chat is ordinary chat; only analyze explicit slash commands
         or (raw.startswith("/") and _is_symbol_input(normalized))
     )
@@ -621,6 +627,9 @@ class TelegramCommandService:
                         if handler_name == "handle_analyze_symbol":
                             # The command name itself is the symbol (btc, eth, sol)
                             return handler(cmd_name.upper())
+                        # Scan commands need the requested limit (e.g. /200tara)
+                        if handler_name == "handle_scan":
+                            return handler(cmd_name)
                         return handler()
                 else:
                     self.logger.error("Handler not found: %s", handler_name)
@@ -633,6 +642,24 @@ class TelegramCommandService:
         if lowered == "mevcut":
             return self.handle_mevcut()
 
+        # Best-N legacy text ("en iyi 5", "en iyi 10"): strictly read-only
+        # pool reads, never a new scan and never the old scan path.
+        if lowered in {"en iyi 5", "eniyi5", "en iyi 5 işlem", "en iyi 5 islem"}:
+            return self.handle_best_five()
+        if lowered in {"en iyi 10", "eniyi10", "en iyi 10 işlem", "en iyi 10 islem"}:
+            return self.handle_best_ten()
+        # Scan lifecycle legacy text
+        if lowered in {"tarama durumu", "taramadurum"}:
+            return self.handle_scan_status()
+        if lowered in {"tarama durdur", "taramadurdur"}:
+            return self.handle_scan_stop()
+        if lowered in {"tarama devam", "taramadevam"}:
+            return self.handle_scan_resume()
+        if lowered in {"yenile", "envanter yenile"}:
+            return self.handle_refresh()
+        if lowered in {"havuz durumu", "havuzdurum"}:
+            return self.handle_pool_status()
+
         # Reuse TUI formatting and scan logic
         adapter = SimpleNamespace(
             runtime=self.runtime,
@@ -640,8 +667,7 @@ class TelegramCommandService:
             call_from_thread=lambda callback, *args, **kwargs: callback(*args, **kwargs),
         )
 
-        cached_best_request = lowered == "eniyi5"
-        scan_request = _parse_scan_command("en iyi 5 işlem" if cached_best_request else lowered)
+        scan_request = _parse_scan_command(lowered)
         liquidity_symbol = _parse_liquidity_command(normalized)
 
         if _is_report_command(normalized):
@@ -659,7 +685,8 @@ class TelegramCommandService:
             )
 
         if scan_request is not None:
-            return self._execute_scan(scan_request, cached_best_request)
+            # All legacy scan text also goes through the real scan queue.
+            return self._queue_scan_report(scan_request[0])
 
         # Single symbol analysis (legacy plain-text like "BTC")
         if _is_symbol_input(normalized) and not raw.startswith("/"):
@@ -719,27 +746,208 @@ class TelegramCommandService:
             card["strategy"] = analysis.get("strategy") or "SMC"
         return _format_telegram_card(card, outcome.get("elapsed_ms", 0))
 
-    def handle_scan(self) -> str:
-        """Handle /20tara, /30tara, /50tara, /100tara"""
-        from atlas_tui import _parse_scan_command
-
-        # Extract number from command name like "20tara"
-        cmd_name = normalize_command(self._last_raw_command or "").split()[0]
-        # We don't have the raw command here, so we'll parse from the command
-        # This is a limitation - we'll need to pass the raw command
-        # For now, default to configured scan limit
-        return self._execute_scan((None, 5), False)
+    def handle_scan(self, cmd_name=None) -> str:
+        """Handle /20tara ... /1000tara — real scan queue, resumable."""
+        limit = self._parse_scan_limit(cmd_name)
+        return self._queue_scan_report(limit)
 
     def handle_scan_all(self) -> str:
-        """Handle /tumtara - scan all supported markets"""
-        from atlas_tui import _best_symbols
+        """Handle /tumtara — scan the whole Gate.io universe via the queue."""
+        return self._queue_scan_report(None)
 
-        scan_limit = None  # None means all
-        return self._execute_scan((scan_limit, 5), False)
+    def handle_scan_status(self) -> str:
+        """Handle /taramadurum — read-only queue progress report."""
+        status = self.runtime.scan_status()
+        inventory = status.get("inventory") or {}
+        lines = [
+            "ATLAS | TARAMA DURUMU",
+            "",
+            f"Kuyruk: {status.get('total', 0)} sembol",
+            f"Tamamlanan: {status.get('done', 0)}",
+            f"Devam eden: {status.get('running', 0)}",
+            f"Bekleyen: {status.get('pending', 0)}",
+            f"Başarısız: {status.get('failed', 0)}",
+            f"İlerleme: %{status.get('percent', 0.0)}",
+            f"Worker'lar: {'çalışıyor' if status.get('workers_running') else 'durduruldu'}",
+            "",
+            (
+                f"Gate.io envanteri: {inventory.get('symbol_count', 0)} sözleşme"
+                + (
+                    f" (son yenileme {inventory.get('last_refresh_age_seconds', '?')} sn önce)"
+                    if inventory.get("last_refresh_age_seconds") is not None
+                    else ""
+                )
+            ),
+        ]
+        if inventory.get("last_error"):
+            lines.append(f"Envanter hatası: {inventory['last_error']}")
+        failed = self.runtime._scan_queue.failed_symbols() if hasattr(self.runtime, "_scan_queue") else []
+        if failed:
+            lines.append("")
+            lines.append(f"Başarısız semboller ({len(failed)}):")
+            for item in failed[:5]:
+                lines.append(f"  {item['symbol']}: {item['error']}")
+            if len(failed) > 5:
+                lines.append(f"  … +{len(failed) - 5} sembol daha")
+            lines.append("Tekrar denemek için /taramadevam")
+        return "\n".join(lines)
+
+    def handle_scan_stop(self) -> str:
+        """Handle /taramadurdur — stop workers; claimed leases requeue on expiry."""
+        result = self.runtime.stop_scan()
+        progress = result.get("progress") or {}
+        return "\n".join([
+            "ATLAS | TARAMA DURDURULDU",
+            "",
+            f"Worker'lar durduruldu.",
+            f"Kuyruk korunuyor: {progress.get('pending', 0)} bekleyen, "
+            f"{progress.get('done', 0)} tamamlanan.",
+            "Devam için: /taramadevam",
+        ])
+
+    def handle_scan_resume(self) -> str:
+        """Handle /taramadevam — resume pending queue work (checkpoint kept)."""
+        result = self.runtime.resume_scan()
+        return self._format_scan_progress(result, resumed=True)
+
+    def handle_refresh(self) -> str:
+        """Handle /yenile — refresh the Gate.io market inventory."""
+        status = self.runtime.refresh_market_inventory()
+        if status.get("last_error"):
+            return (
+                "ATLAS | ENVANTER YENİLENEMEDİ\n\n"
+                f"Hata: {status['last_error']}\n"
+                "Mevcut snapshot korunuyor ve tarama onunla devam ediyor."
+            )
+        return (
+            "ATLAS | ENVANTER YENİLENDİ\n\n"
+            f"Gate.io USDT perpetual: {status.get('symbol_count', 0)} sözleşme\n"
+            "Kaynak: yalnızca Gate.io (fallback yok)"
+        )
 
     def handle_best_five(self) -> str:
-        """Handle /eniyi5 - get best 5 from existing pool, no new scan"""
-        return self._execute_scan((None, 5), True)
+        """Handle /eniyi5 — strictly read-only from the Setup Pool."""
+        return self._format_best_setups(5)
+
+    def handle_best_ten(self) -> str:
+        """Handle /eniyi10 — strictly read-only from the Setup Pool."""
+        return self._format_best_setups(10)
+
+    def handle_pool_status(self) -> str:
+        """Handle /havuzdurum — read-only pool and queue summary."""
+        pool = get_opportunity_pool()
+        stats = pool.get_stats()
+        queue = self.runtime.scan_status()
+        best = pool.get_best_setups(limit=1)
+        lines = [
+            "ATLAS | HAVUZ DURUMU",
+            "",
+            f"Adaylar: {stats.get('candidates', 0)}",
+            f"Doğrulanmış: {stats.get('validated', 0)}",
+            f"Aktif takip: {stats.get('active', 0)}",
+            f"Arşiv: {stats.get('history', 0)}",
+            "",
+            "Tarama kuyruğu:",
+            f"  Tamamlanan: {queue.get('done', 0)} | Bekleyen: {queue.get('pending', 0)} "
+            f"| Başarısız: {queue.get('failed', 0)}",
+        ]
+        if best:
+            top = best[0]
+            lines.append("")
+            lines.append(
+                f"En iyi: {top.symbol} {top.direction} | {top.strategy_id} | "
+                f"net RR {top.net_rr_after_costs}"
+            )
+        else:
+            lines.append("")
+            lines.append("Doğrulanmış setup yok: /20tara ile tarama başlatın.")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _parse_scan_limit(cmd_name) -> Optional[int]:
+        """Extract the requested scan size from a command name like '200tara'."""
+        import re as _re
+        text = str(cmd_name or "")
+        match = _re.search(r"(\d+)", text)
+        if not match:
+            return None
+        try:
+            limit = int(match.group(1))
+        except ValueError:
+            return None
+        return max(1, min(limit, 1000))
+
+    def _queue_scan_report(self, limit: Optional[int]) -> str:
+        """Start/queue a scan via the runtime scan service and report progress."""
+        result = self.runtime.start_scan(limit)
+        if not result.get("started"):
+            return str(result.get("message") or "Tarama başlatılamadı.")
+        return self._format_scan_progress(result)
+
+    def _format_scan_progress(self, result: dict, resumed: bool = False) -> str:
+        progress = result.get("progress") or {}
+        lines = [
+            "ATLAS | TARAMA DEVAM EDİYOR" if resumed else "ATLAS | TARAMA BAŞLADI",
+            "",
+        ]
+        if resumed:
+            lines.append("Kuyruk kaldığı yerden sürdürülüyor (checkpoint korunur).")
+            lines.append("")
+        if "universe_size" in result:
+            lines.append(f"Toplam uygun sözleşme: {result['universe_size']}")
+        if "selected" in result and result.get("selected") is not None:
+            lines.append(f"Bu taramada taranacak: {result['selected']}")
+        if "added" in result:
+            lines.append(f"Kuyruğa yeni eklenen: {result['added']}")
+        lines.extend([
+            f"Tamamlanan: {progress.get('done', 0)} | Bekleyen: {progress.get('pending', 0)}",
+            f"İlerleme: %{progress.get('percent', 0.0)}",
+            f"Worker'lar: {'çalışıyor' if progress.get('workers_running') else 'başlatılıyor'}",
+            "",
+            "Durum: /taramadurum | Durdur: /taramadurdur | Sonuçlar: /eniyi5",
+        ])
+        return "\n".join(lines)
+
+    def _format_best_setups(self, count: int) -> str:
+        """Read-only best-N report (requirement G).
+
+        Reads ONLY the validated Setup Pool: no scan is started, the scan
+        queue and its cursor are untouched, no setup is created, deleted or
+        re-statused. If the pool is empty the report says so explicitly.
+        """
+        setup_pool = get_opportunity_pool()
+        best = setup_pool.get_best_setups(limit=count)
+        if not best:
+            return (
+                f"ATLAS | EN İYİ {count}\n\n"
+                "Doğrulanmış setup havuzu boş.\n"
+                "Yeni tarama için: /20tara (tarama kalıcı kuyruk üzerinden çalışır)."
+            )
+        now_ms = int(time.time() * 1000)
+        lines = [
+            f"ATLAS | EN İYİ {len(best)} (salt okunur havuz raporu)",
+            "",
+        ]
+        for index, setup in enumerate(best, start=1):
+            age_hours = (
+                max(0.0, (now_ms - setup.created_at_ms) / 3_600_000.0)
+                if setup.created_at_ms else None
+            )
+            age_text = f"{age_hours:.1f} saat" if age_hours is not None else "bilinmiyor"
+            lines.extend([
+                f"{index}. {setup.symbol} | {setup.direction} | {setup.strategy_name}",
+                f"   Tür: {setup.setup_type} | Durum: {setup.status}",
+                f"   Giriş: {setup.entry_price} | SL: {setup.stop_loss}",
+                f"   TP1: {setup.tp1} | TP2: {setup.tp2} | TP3: {setup.tp3}",
+                f"   Net RR (maliyet sonrası): {setup.net_rr_after_costs}",
+                f"   Setup yaşı: {age_text} | Skor: {setup.score} (sıralama puanı, kazanma olasılığı değildir)",
+            ])
+            if setup.invalidation_reason:
+                lines.append(f"   Not: {setup.invalidation_reason}")
+            lines.append("")
+        lines.append("Sıralama: bileşik puan = net RR (maliyet sonrası) + karar gücü + "
+                     "orta hedef kalitesi + tazelik. Yeni tarama başlatılmadı.")
+        return "\n".join(lines)
 
     def handle_mevcut(self) -> str:
         """Handle /mevcut - today's setup and trade tracking"""
@@ -952,165 +1160,6 @@ class TelegramCommandService:
         ]
         return "\n".join(lines)
 
-    def _execute_scan(self, scan_request, cached_best_request: bool) -> str:
-        """Execute a scan request and return formatted results."""
-        from atlas_tui import (
-            _parse_scan_command,
-            _best_symbols,
-            AtlasTUIApp,
-        )
-        from utils.signal_card import build_selected_strategy_card, build_signal_card
-
-        scan_limit, result_limit = scan_request
-
-        # Do NOT clear scanner on each scan. The scanner accumulates results
-        # across scans; the persistent OpportunityPool handles capacity/eviction.
-        # Clearing here would wipe the pool that /eniyi5 and background scans rely on.
-
-        if cached_best_request:
-            # Use existing pool
-            cached_items = self.runtime.latest_analyses()
-            symbols = [item.get("symbol") for item in cached_items]
-        else:
-            symbols = _best_symbols(limit=scan_limit)
-
-        if not symbols:
-            return "Uygun piyasa bulunamadı. Veri sağlayıcısını kontrol et."
-
-        candidates = []
-        errors = []
-        blocker_counts = {}
-        diagnostics = {
-            "long": 0, "short": 0, "execute": 0,
-            "entry_too_far": 0, "entry_zone_crossed": 0,
-            "no_entry": 0, "wait_or_skip": 0,
-        }
-
-        for index, symbol in enumerate(symbols, start=1):
-            if cached_best_request:
-                cached = next((item for item in cached_items if item.get("symbol") == symbol), None)
-                raw = (cached or {}).get("result") or {}
-                scanned = {"ok": bool(raw)}
-            else:
-                scanned = self.runtime.analyze_symbol(
-                    symbol, force_refresh=True, track_signal=False
-                )
-                raw = scanned.get("result") or {}
-
-            if not scanned.get("ok"):
-                error_text = str(scanned.get("error") or "analiz başarısız").splitlines()[0][:180]
-                errors.append(f"{symbol}: {error_text}")
-                continue
-
-            card = (
-                build_selected_strategy_card(raw)
-                if isinstance(raw.get("strategy_lab"), dict)
-                else build_signal_card(raw)
-            )
-
-            direction = str(card.get("direction") or "").upper()
-            if direction == "LONG":
-                diagnostics["long"] += 1
-            elif direction == "SHORT":
-                diagnostics["short"] += 1
-
-            if card.get("entry_distance_label") == "FAR" or (card.get("entry_distance_atr") is not None and card.get("entry_distance_atr") > 3):
-                diagnostics["entry_too_far"] += 1
-            if not card.get("entry"):
-                diagnostics["no_entry"] += 1
-
-            pending_limit = (
-                card.get("decision_action") in {"EXECUTE", "EXECUTE_WITH_CAUTION"}
-                and card.get("entry_type") == "LIMIT"
-                and card.get("direction") in {"LONG", "SHORT"}
-                and card.get("entry") is not None
-                and card.get("stop_loss") is not None
-                and card.get("tp_levels")
-            )
-            executable_market = (
-                card.get("decision_action") in {"EXECUTE", "EXECUTE_WITH_CAUTION"}
-                and card.get("entry_type") == "MARKET"
-                and card.get("direction") in {"LONG", "SHORT"}
-            )
-
-            if not (executable_market or pending_limit):
-                diagnostics["wait_or_skip"] += 1
-                reasons = card.get("critical_blocks") or [card.get("reason")]
-                for reason in reasons:
-                    label = str(reason or "").strip()
-                    if label:
-                        blocker_counts[label] = blocker_counts.get(label, 0) + 1
-                continue
-
-            if executable_market:
-                diagnostics["execute"] += 1
-
-            rr = card.get("net_rr")
-            if rr is None:
-                rr = card.get("rr")
-            try:
-                rr_value = float(rr)
-                if rr_value <= 0:
-                    continue
-                quality = float(card.get("setup_quality") or 0)
-                confidence = float(card.get("confidence") or 0)
-                score = quality * 0.55 + confidence * 0.25 + min(rr_value, 5.0) * 4
-            except (TypeError, ValueError, OverflowError):
-                continue
-
-            if not card.get("strategy") and not card.get("strategy_id"):
-                analysis = raw.get("analysis") or {}
-                card["strategy"] = analysis.get("strategy") or "SMC"
-
-            candidates.append((score, card, raw))
-
-        if not candidates:
-            if cached_best_request:
-                return "ATLAS | EN İYİ 5 SETUP\nArka plan tarama havuzunda henüz güncel ve geçerli setup yok. İlk tarama döngüsünün tamamlanmasını bekle."
-            message = (
-                "ŞU AN GEÇERLİ İŞLEM YOK\n\n"
-                "Taranan piyasalarda Atlas'ın işlem koşullarını geçen kurulum bulunmadı. "
-                "Zorla LONG/SHORT üretmek yerine İŞLEME GİRME."
-            )
-            message += (
-                "\n\nTARAMA TEŞHİSİ"
-                f"\nLONG yön adayı: {diagnostics['long']}"
-                f"\nSHORT yön adayı: {diagnostics['short']}"
-                f"\nUzak LIMIT nedeniyle elenen: {diagnostics['entry_too_far']}"
-                f"\nPOI geçilmiş: {diagnostics['entry_zone_crossed']}"
-                f"\nGiriş seviyesi üretilemeyen: {diagnostics['no_entry']}"
-                f"\nKarar filtresinde kalan: {diagnostics['wait_or_skip']}"
-            )
-            if blocker_counts:
-                top_blockers = sorted(
-                    blocker_counts.items(), key=lambda item: (-item[1], item[0])
-                )[:5]
-                message += "\n\nEN SIK ENGELLER"
-                for reason, count in top_blockers:
-                    message += f"\n{count}x {reason}"
-            if errors:
-                message += "\n\nAnaliz edilemeyenler: " + "; ".join(errors[:3])
-            return message
-
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        shown = candidates[:max(1, min(int(result_limit), 20))]
-
-        for _score, _selected_card, selected_raw in shown:
-            self.runtime.track_requested_result(selected_raw)
-
-        lines = [f"ATLAS | EN İYİ {len(shown)} SETUP", f"Taranan piyasa: {len(symbols)}"]
-        for rank, (score, card, _raw) in enumerate(shown, start=1):
-            lines.extend(["", f"#{rank}", _format_telegram_card(card)])
-        lines.append(
-            f"\nTarama: {len(symbols)} piyasa | Geçerli kurulum: {len(candidates)}"
-            f" | Gösterilen: {len(shown)}"
-            f"\nSıralama puanı kazanma olasılığı değildir."
-        )
-        if errors:
-            lines.append("Analiz hatası: " + "; ".join(errors[:3]))
-        return "\n".join(lines)
-
-    def _format_uptime(self, seconds: float) -> str:
         if seconds < 60:
             return f"{seconds:.0f} sn"
         minutes = seconds / 60

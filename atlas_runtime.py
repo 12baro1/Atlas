@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import os
 import threading
 import traceback
 import time
-from collections import deque
+from collections import defaultdict, deque
+from typing import Any, Dict, Optional
 from config import Config
 from data_engine import exchange, get_correlation_universe, get_market_data, get_smt_universe
 from engine import AtlasEngine
 from strategy_outcome_journal import StrategyOutcomeJournal
 from manual_trade_service import ManualTradeService
+from opportunity_pool import get_opportunity_pool, SetupCandidate
 
 def _is_fresh_15m_data(candles, now_ms, max_age_seconds):
     """Return False for absent, future, or stale last-closed 15m candles."""
@@ -74,6 +77,34 @@ class AtlasRuntime:
         self._error = None
         self._telegram_service = None
         self._ai_state = {"provider": "disabled", "status": "DISABLED", "detail": "AI is not part of terminal Atlas."}
+        # Production telemetry (requirement H): strategy generation funnel.
+        self._strategy_telemetry = {
+            "analyses": 0,
+            "raw_setups_generated": 0,
+            "common_filter_passed": 0,
+            "common_filter_rejected": 0,
+            "rejection_reasons": defaultdict(int),
+            "per_strategy": defaultdict(lambda: {
+                "setups": 0, "passed": 0, "rejected": 0, "selected": 0,
+            }),
+        }
+        # Scan infrastructure: Gate.io inventory, durable queue, background
+        # workers and the 00:00 Istanbul daily refresh. All independent of
+        # the Telegram service lifecycle.
+        from market_inventory import get_market_inventory
+        from scan_queue import ScanQueue
+        from scan_service import ScanService
+        from daily_refresh import DailyPoolRefresh
+        self._market_inventory = get_market_inventory()
+        self._scan_queue = ScanQueue()
+        self._scan_service = ScanService(
+            runtime=self, queue=self._scan_queue, inventory=self._market_inventory
+        )
+        self._daily_refresh = DailyPoolRefresh(
+            pool=self._opportunity_pool(),
+            scan_queue=self._scan_queue,
+            market_inventory=self._market_inventory,
+        )
 
         with self._journal_lock:
             perf = self.engine.trade_journal.manual_trade_performance()
@@ -84,6 +115,13 @@ class AtlasRuntime:
         }
 
     def start(self, daemon=True):
+        # Scan infrastructure resumes regardless of who started the runtime:
+        # pending queue work continues and the daily refresh stays scheduled.
+        try:
+            self._scan_service.ensure_workers()
+            self._daily_refresh.start_background()
+        except Exception as exc:
+            self.logger.error(f"Scan infrastructure startup failed: {exc}")
         if self.full_scan and self.symbols:
             if self._thread and self._thread.is_alive():
                 return
@@ -96,6 +134,21 @@ class AtlasRuntime:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
+        try:
+            if getattr(self, "_scan_service", None) is not None:
+                self._scan_service.stop_scan(timeout_seconds=timeout)
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_scan_queue", None) is not None:
+                self._scan_queue.close()
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_daily_refresh", None) is not None:
+                self._daily_refresh.stop(timeout=timeout)
+        except Exception:
+            pass
         if self._telegram_service is not None:
             try:
                 self._telegram_service.stop()
@@ -131,6 +184,49 @@ class AtlasRuntime:
 
     def attach_telegram_service(self, service):
         self._telegram_service = service
+
+    def _opportunity_pool(self):
+        return get_opportunity_pool()
+
+    # ------------------------------------------------------------------
+    # Scan service facade (Telegram-independent, requirement F)
+    # ------------------------------------------------------------------
+
+    def start_scan(self, limit=None):
+        """Enqueue a scan of the Gate.io universe and ensure workers run."""
+        return self._scan_service.start_scan(limit)
+
+    def stop_scan(self):
+        return self._scan_service.stop_scan()
+
+    def scan_status(self):
+        return self._scan_service.status()
+
+    def refresh_market_inventory(self):
+        """Force a Gate.io inventory refresh (rate-limit aware)."""
+        return self._market_inventory.refresh(force=False)
+
+    def resume_scan(self):
+        """Resume pending queue work without adding anything new."""
+        self._scan_service.ensure_workers()
+        return self._scan_service.status()
+
+    def strategy_telemetry(self):
+        with self._lock:
+            return self._strategy_telemetry_locked()
+
+    def _strategy_telemetry_locked(self):
+        return {
+            "analyses": self._strategy_telemetry["analyses"],
+            "raw_setups_generated": self._strategy_telemetry["raw_setups_generated"],
+            "common_filter_passed": self._strategy_telemetry["common_filter_passed"],
+            "common_filter_rejected": self._strategy_telemetry["common_filter_rejected"],
+            "rejection_reasons": dict(self._strategy_telemetry["rejection_reasons"]),
+            "per_strategy": {
+                strategy_id: dict(counts)
+                for strategy_id, counts in self._strategy_telemetry["per_strategy"].items()
+            },
+        }
 
     @property
     def scanner(self):
@@ -279,6 +375,8 @@ class AtlasRuntime:
                 "current_signal": self._current_signal,
                 "recent": list(self._last_results),
                 "error": self._error,
+                "scan_queue": self._scan_service.status() if getattr(self, "_scan_service", None) else None,
+                "strategy_telemetry": self._strategy_telemetry_locked() if hasattr(self, "_strategy_telemetry") else None,
             }
 
     def telegram_status(self):
@@ -540,6 +638,7 @@ class AtlasRuntime:
                 from shared.market_data_services import build_shared_market_evidence
                 data["shared_market_evidence"] = build_shared_market_evidence(data)
 
+                pool = get_opportunity_pool()
                 with self._journal_lock:
                     should_track_signal = (not from_scan) if track_signal is None else bool(track_signal)
                     result = self.engine.analyze(data, track_signal=should_track_signal)
@@ -548,13 +647,47 @@ class AtlasRuntime:
                     if result is None:
                         self._inc("skipped")
                         return {"ok": False, "symbol": symbol, "error": "no_result"}
-
                     self._inc("success")
+                    
+                    # Add the selected setup to the opportunity pool as a validated candidate
                     self._register_result(result)
+                    self._accumulate_strategy_telemetry(result)
                     with self._lock:
                         self._latest_analysis_by_symbol[symbol] = result
                         self._latest_analysis_at[symbol] = int(time.time() * 1000)
                     self._prune_latest_analyses()
+
+                    # The selected setup lives in strategy_lab; there is no
+                    # top-level "selected" key on the engine result payload.
+                    strategy_lab = result.get("strategy_lab") or {}
+                    selected = strategy_lab.get("selected")
+                    if isinstance(selected, dict):
+                        try:
+                            analysis = result.get("analysis") or {}
+                            candidate = self._setup_to_candidate(
+                                selected,
+                                symbol,
+                                trace_id=result.get("trace_id"),
+                                regime=strategy_lab.get("regime"),
+                                market_phase=(analysis.get("market_phase") or {}).get("phase"),
+                            )
+                            if candidate:
+                                pool.add_candidate(candidate)
+                                # Validate to move from candidates to validated pool
+                                pool.validate_candidate(candidate.setup_id)
+                                self.logger.debug(
+                                    "Added and validated candidate from %s: %s",
+                                    symbol, candidate.setup_id,
+                                )
+                            else:
+                                self.logger.debug(
+                                    "Selected setup for %s rejected by candidate validation",
+                                    symbol,
+                                )
+                        except Exception as e:
+                            self.logger.warning(
+                                "Failed to add candidate from %s to pool: %s", symbol, e
+                            )
 
                     if Config.SIGNAL_TRACKING_ENABLED:
                         candles_15m = data.get("15m") or data.get("15M") or []
@@ -648,19 +781,170 @@ class AtlasRuntime:
             self._last_results = self._last_results[-250:]
             self._scanner_stats["last_update_ms"] = item["timestamp"]
 
-    def _resolve_signal_id(self, result):
-        symbol = result.get("symbol")
-        direction = (result.get("signal") or {}).get("signal")
-        with self._journal_lock:
-            outcomes = self.engine.trade_journal.signal_outcomes(symbol=symbol, limit=30)
+    def _setup_to_candidate(
+        self,
+        selected: Dict[str, Any],
+        symbol: str,
+        trace_id: Optional[str] = None,
+        regime: Optional[str] = None,
+        market_phase: Optional[str] = None,
+    ) -> Optional[SetupCandidate]:
+        """Convert a selected strategy setup into a SetupCandidate.
 
-        pending = [item for item in outcomes if item.get("status") == "PENDING"]
-        if pending:
-            outcomes = pending
-        for outcome in outcomes:
-            if outcome.get("direction") == direction:
-                return outcome.get("signal_id")
-        return None
+        Geometry rules (release blocker):
+        - risk   = abs(entry - stop_loss)
+        - reward = abs(tp - entry) for every TP (reward measured from entry,
+          never from the stop)
+        - LONG  requires stop < entry < tp1 < tp2 < tp3
+        - SHORT requires stop > entry > tp1 > tp2 > tp3
+        - every value must be finite and positive; otherwise the setup is
+          rejected instead of being stored with fabricated numbers
+        """
+        from opportunity_pool import SetupCandidate, SetupStatus, SetupType
+
+        if not isinstance(selected, dict):
+            return None
+        try:
+            direction = str(selected.get("direction") or "").upper()
+            entry_type = str(selected.get("entry_type") or "").upper()
+            if direction not in ("LONG", "SHORT"):
+                return None
+            if entry_type not in ("MARKET", "LIMIT"):
+                return None
+            entry = float(selected.get("entry"))
+            stop = float(selected.get("stop_loss"))
+            tp1 = float(selected.get("tp1"))
+            tp2 = float(selected.get("tp2"))
+            tp3 = float(selected.get("tp3"))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not all(math.isfinite(v) and v > 0 for v in (entry, stop, tp1, tp2, tp3)):
+            return None
+        risk = abs(entry - stop)
+        if risk <= 0:
+            return None
+        if direction == "LONG":
+            if not (stop < entry < tp1 < tp2 < tp3):
+                return None
+        else:
+            if not (stop > entry > tp1 > tp2 > tp3):
+                return None
+
+        # Reward is measured from the entry, never from the stop.
+        rr_tp1 = abs(tp1 - entry) / risk
+        rr_tp2 = abs(tp2 - entry) / risk
+        rr_tp3 = abs(tp3 - entry) / risk
+        if not all(math.isfinite(v) and v > 0 for v in (rr_tp1, rr_tp2, rr_tp3)):
+            return None
+
+        strategy_id = str(selected.get("strategy_id") or "unknown")
+        strategy_name = str(selected.get("strategy") or strategy_id)
+
+        # Net RR: cost-adjusted value comes from the shared risk engine via the
+        # strategy lab. Fall back to the raw partial-exit weighted RR only when
+        # the cost-adjusted figure is missing; never invent a number.
+        weights = selected.get("partial_exit_weights") or {}
+        try:
+            w_total = sum(float(weights.get(key, 0.0)) for key in ("tp1", "tp2", "tp3"))
+            weighted_rr = (
+                (
+                    float(weights.get("tp1", 0.0)) * rr_tp1
+                    + float(weights.get("tp2", 0.0)) * rr_tp2
+                    + float(weights.get("tp3", 0.0)) * rr_tp3
+                ) / w_total
+                if w_total > 0
+                else rr_tp2
+            )
+        except (TypeError, ValueError, OverflowError):
+            weighted_rr = rr_tp2
+        try:
+            net_rr_after_costs = float(selected.get("estimated_net_rr"))
+        except (TypeError, ValueError, OverflowError):
+            net_rr_after_costs = None
+        if net_rr_after_costs is None or not math.isfinite(net_rr_after_costs):
+            net_rr_after_costs = weighted_rr
+        net_rr = net_rr_after_costs
+
+        confidence = selected.get("strength")
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError, OverflowError):
+            confidence = 0.0
+        if not math.isfinite(confidence):
+            confidence = 0.0
+
+        # Deterministic id: re-scans of an unchanged setup produce the same id,
+        # so the pool stays idempotent and dedup can never merge two strategies.
+        setup_id = "setup:{}:{}:{}:{:.8g}:{:.8g}:{:.8g}".format(
+            symbol, strategy_id, direction, entry, stop, tp1
+        )
+
+        reasons = [str(r) for r in (selected.get("reasons") or []) if r]
+        candidate = SetupCandidate(
+            setup_id=setup_id,
+            symbol=symbol,
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            direction=direction,
+            entry_type=entry_type,
+            entry_price=entry,
+            stop_loss=stop,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            rr_tp1=round(rr_tp1, 4),
+            rr_tp2=round(rr_tp2, 4),
+            rr_tp3=round(rr_tp3, 4),
+            net_rr=round(net_rr, 4),
+            risk_reward=round(weighted_rr, 4),
+            confidence=confidence,
+            grade="SELECTED",
+            score=confidence,
+            net_rr_after_costs=round(net_rr_after_costs, 4),
+            status=SetupStatus.DISCOVERED.value,
+            setup_type=SetupType.LIMIT.value if entry_type == "LIMIT" else SetupType.MARKET.value,
+            regime=str(regime or selected.get("market_regime") or "UNKNOWN"),
+            market_phase=str(market_phase or selected.get("market_phase") or "UNKNOWN"),
+            reasons=reasons,
+            supporting_evidence=[str(v) for v in (selected.get("supporting_event_ids") or [])],
+            opposing_evidence=[str(v) for v in (selected.get("opposing_event_ids") or [])],
+            created_at_ms=int(time.time() * 1000),
+            updated_at_ms=int(time.time() * 1000),
+            validated_at_ms=0,  # Set by validate_candidate
+            trace_id=trace_id,
+        )
+        return candidate
+
+    def _accumulate_strategy_telemetry(self, result):
+        """Update the strategy generation funnel from the strategy lab report."""
+        try:
+            lab = result.get("strategy_lab") or {}
+            diagnostics = lab.get("diagnostics") or {}
+            with self._lock:
+                telemetry = self._strategy_telemetry
+                telemetry["analyses"] += 1
+                telemetry["raw_setups_generated"] += int(diagnostics.get("raw_setup_count") or 0)
+                passed = int(diagnostics.get("common_filter_passed_count") or 0)
+                telemetry["common_filter_passed"] += passed
+                raw = int(diagnostics.get("raw_setup_count") or 0)
+                telemetry["common_filter_rejected"] += max(0, raw - passed)
+                for row in diagnostics.get("strategies") or []:
+                    strategy_id = str(row.get("strategy_id") or "unknown")
+                    counts = telemetry["per_strategy"][strategy_id]
+                    if row.get("selected"):
+                        counts["selected"] += 1
+                        counts["passed"] += 1
+                    status = str(row.get("status") or "")
+                    if status in ("SELECTED", "FILTERED_NOT_SELECTED"):
+                        counts["passed"] += 0 if row.get("selected") else 1
+                        for reason in row.get("rejection_reasons") or []:
+                            telemetry["rejection_reasons"][f"SINGLE_DECISION:{reason}"] += 1
+                    elif status == "BLOCKED_COMMON_FILTER":
+                        counts["rejected"] += 1
+                        for reason in row.get("rejection_reasons") or []:
+                            telemetry["rejection_reasons"][str(reason)] += 1
+        except Exception as exc:
+            self.logger.debug(f"Telemetry accumulation skipped: {exc}")
 
     def _set_status(self, status):
         with self._lock:
