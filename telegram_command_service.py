@@ -832,7 +832,7 @@ class TelegramCommandService:
         progress = result.get("progress") or {}
         alive = result.get("workers_still_alive") or []
         lines = [
-            "ATLAS | TARAMA DURDURMA İSTEĞİ",
+            "ATLAS | TARAMA DURDURULDU" if result.get("stopped") else "ATLAS | TARAMA DURDURMA İSTEĞİ",
             "",
             (
                 "Worker'lar durdu."
