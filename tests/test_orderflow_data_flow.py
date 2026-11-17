@@ -222,8 +222,9 @@ def test_orderflow_strategy_uses_fresh_rest_book_and_trades_without_ws_cvd(monke
         "trade_flow_history": "UNAVAILABLE",
     }
     data["shared_market_evidence"] = build_shared_market_evidence(data)
+    import strategies.orderflow.analytics as analytics
     monkeypatch.setattr(
-        of_module, "footprint_directional_evidence",
+        analytics, "footprint_directional_evidence",
         lambda footprint, direction: {"state": "AVAILABLE", "confirmed": True},
     )
 
