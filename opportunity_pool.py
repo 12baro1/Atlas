@@ -243,9 +243,10 @@ class OpportunityPool:
             # Check for duplicate (same symbol, direction, strategy)
             existing_id = self._find_duplicate(candidate)
             if existing_id:
-                # Update existing with newer data only if newer
-                existing = self._candidates[existing_id]
-                if candidate.created_at_ms > existing.created_at_ms:
+                # Refresh a still-candidate duplicate with newer data; a setup
+                # that already reached validated/active stays untouched.
+                existing = self._candidates.get(existing_id)
+                if existing is not None and candidate.created_at_ms > existing.created_at_ms:
                     self._update_candidate(existing, candidate)
                     logger.debug(f"Updated existing candidate: {existing_id}")
                 return False
@@ -270,14 +271,20 @@ class OpportunityPool:
             return True
     
     def _find_duplicate(self, candidate: SetupCandidate) -> Optional[str]:
-        """Find existing candidate with same symbol, direction, and strategy fingerprint."""
-        for cid in self._by_symbol.get(candidate.symbol, set()):
-            existing = self._candidates.get(cid)
-            if not existing:
-                continue
-            # Exact match: same direction and strategy
-            if existing.direction == candidate.direction and existing.strategy_id == candidate.strategy_id:
-                return cid
+        """Find existing setup with same symbol, direction, and strategy fingerprint.
+
+        Searches every live pool (candidates, validated, active) so a setup
+        that already advanced to another pool is never re-added as a duplicate.
+        """
+        pools = (self._candidates, self._validated, self._active)
+        for pool in pools:
+            for cid in self._by_symbol.get(candidate.symbol, set()):
+                existing = pool.get(cid)
+                if not existing:
+                    continue
+                # Exact match: same direction and strategy
+                if existing.direction == candidate.direction and existing.strategy_id == candidate.strategy_id:
+                    return cid
         return None
     
     def _update_candidate(self, existing: SetupCandidate, new: SetupCandidate):
