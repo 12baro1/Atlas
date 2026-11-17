@@ -469,6 +469,7 @@ class AtlasEngine:
             daily_fvg=context_state.get("daily_fvg", []),
             inducement=structure_state.get("inducement"),
             trendline_liquidity=structure_state.get("trendline_liquidity", []),
+            tick_size=tick_size,
         )
 
         # Seven raw setups (SMC included) share one filter and one final selector.
@@ -1313,6 +1314,7 @@ class AtlasEngine:
         daily_fvg=None,
         inducement=None,
         trendline_liquidity=None,
+        tick_size=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(
@@ -1633,7 +1635,7 @@ class AtlasEngine:
                 confirmation["confirmed"] = False
                 confirmation["reason"] = entry["reason"]
 
-        risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles, tick_size=data.get("tick_size"))
+        risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles, tick_size=tick_size)
 
         # Profesyonel SMC kalitesi: SL otomatik olarak genişletildiyse (AUTO_EXPAND)
         # ilk TP hesabı orijinal/dar SL'e göre yapılmıştı; yeni mesafe ile gerçek
@@ -1654,7 +1656,7 @@ class AtlasEngine:
                     stop_price=expanded_stop,
                     exclude_targets_through=target_exclusion_price,
                 )
-                risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles, tick_size=data.get("tick_size"))
+                risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles, tick_size=tick_size)
                 self.logger.info(
                     "Dynamic TP rebuilt after stop expand | stop=%s tp1=%s tp2=%s tp3=%s",
                     expanded_stop,
@@ -1664,7 +1666,7 @@ class AtlasEngine:
                 )
         # The main authority reconciles the structural stop, final risk stop and
         # selected structural TP ladder before any quality gate or signal consumes them.
-        final_geometry = self.main_engine.finalize_setup_geometry(entry, risk, dynamic_tp, tick_size=data.get("tick_size"))
+        final_geometry = self.main_engine.finalize_setup_geometry(entry, risk, dynamic_tp, tick_size=tick_size)
         entry = final_geometry["entry"]
         risk = final_geometry["risk"]
         dynamic_tp = final_geometry["targets"]
