@@ -141,7 +141,7 @@ def test_telegram_service_queues_fresh_commands_without_blocking_poll(monkeypatc
     queued_command, label = service._command_queue.get_nowait()
     service._command_queue.task_done()
     assert queued_command == "/BTC"
-    assert label == "btc"
+    assert label == "BTC"
     assert called == []
     assert api_calls[0][0][0] == "sendMessage"
     assert "İşleniyor..." in api_calls[0][0][1]["text"]
