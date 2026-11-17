@@ -180,3 +180,66 @@ def test_composite_ranking_prefers_net_rr_and_freshness(pool):
     # outranks the 10-day-old 4.0-RR setup.
     ranked = [line for line in result.splitlines() if line.startswith(("1. ", "2. "))]
     assert "FRESH/USDT:USDT" in ranked[0]
+
+def test_scan_stop_reports_worker_still_running(pool):
+    runtime = MagicMock()
+    service = make_service(runtime)
+    runtime.stop_scan.return_value = {
+        "stopped": False,
+        "workers_still_alive": ["AtlasScanWorker-0"],
+        "progress": {"pending": 4, "running": 1, "done": 5},
+    }
+    result = service.handle_scan_stop()
+    assert "TARAMA DURDURMA İSTEĞİ" in result
+    assert "yeni worker başlatılmayacak" in result
+    assert "AtlasScanWorker-0" in result
+
+
+def test_scan_status_includes_strategy_funnel(pool):
+    runtime = MagicMock()
+    service = make_service(runtime)
+    runtime.scan_status.return_value = {
+        "total": 10, "pending": 2, "running": 0, "done": 8, "failed": 0,
+        "percent": 80.0, "complete": False, "workers_running": True,
+        "inventory": {"symbol_count": 300, "ranking_source": "gateio_24h_quote_volume"},
+        "strategy_telemetry": {
+            "analyses": 10, "raw_setups_generated": 4,
+            "common_filter_passed": 2, "common_filter_rejected": 2,
+            "per_strategy": {
+                "smc": {"setups": 1, "passed": 1, "rejected": 0, "selected": 1}
+            },
+        },
+        "pool": {"validated": 2},
+    }
+    result = service.handle_scan_status()
+    assert "gateio_24h_quote_volume" in result
+    assert "YEDİ STRATEJİ / ORTAK FİLTRE" in result
+    assert "smc: 1 setup | 1 geçti | 0 elendi | 1 seçildi" in result
+
+@pytest.mark.parametrize(("message", "limit"), [
+    ("20 tara", 20),
+    ("30 tara", 30),
+    ("100 tara", 100),
+])
+def test_plain_text_scan_aliases_queue_requested_limit(pool, message, limit):
+    runtime = MagicMock()
+    runtime.start_scan.return_value = {
+        "started": True, "universe_size": 300, "selected": limit,
+        "added": limit, "ranking_source": "gateio_24h_quote_volume",
+        "progress": {"done": 0, "pending": limit, "percent": 0.0},
+    }
+    service = make_service(runtime)
+    assert is_recognized_command(message)
+    service.execute_command(message)
+    runtime.start_scan.assert_called_once_with(limit)
+
+
+def test_plain_text_best_five_does_not_start_scan(pool):
+    make_validated(pool, "plain-best-five")
+    runtime = MagicMock()
+    service = make_service(runtime)
+    result = service.execute_command("en iyi 5")
+    runtime.start_scan.assert_not_called()
+    runtime.analyze_symbol.assert_not_called()
+    assert "EN İYİ 1" in result
+

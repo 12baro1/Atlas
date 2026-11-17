@@ -136,3 +136,28 @@ def test_market_info_lookup(tmp_path):
     info = inventory.market_info("BTC/USDT:USDT")
     assert info["id"] == "BTC_USDT"
     assert inventory.market_info("NOPE/USDT:USDT") is None
+
+def test_ranked_symbols_use_bulk_gateio_quote_turnover(tmp_path):
+    class RankedGate(FakeGateExchange):
+        def fetch_tickers(self, symbols=None):
+            return {
+                "BTC/USDT:USDT": {"quoteVolume": "1000"},
+                "ETH/USDT:USDT": {"quoteVolume": "9000"},
+            }
+
+    inventory = make_inventory(tmp_path, RankedGate())
+    assert inventory.get_ranked_symbols(limit=1) == ["ETH/USDT:USDT"]
+    assert inventory.status()["ranking_source"] == "gateio_24h_quote_volume"
+
+
+def test_ranked_symbols_fall_back_to_alphabetical_when_tickers_fail(tmp_path):
+    class BrokenTickerGate(FakeGateExchange):
+        def fetch_tickers(self, symbols=None):
+            raise RuntimeError("temporary ticker outage")
+
+    inventory = make_inventory(tmp_path, BrokenTickerGate())
+    assert inventory.get_ranked_symbols(limit=2) == [
+        "BTC/USDT:USDT", "ETH/USDT:USDT"
+    ]
+    assert inventory.status()["ranking_source"] == "alphabetical_fallback"
+

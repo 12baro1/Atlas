@@ -200,7 +200,12 @@ class AtlasRuntime:
         return self._scan_service.stop_scan()
 
     def scan_status(self):
-        return self._scan_service.status()
+        status = self._scan_service.status()
+        # Queue progress alone cannot explain an empty setup pool. Expose the
+        # seven-strategy generation funnel and validated pool alongside it.
+        status["strategy_telemetry"] = self.strategy_telemetry()
+        status["pool"] = self._opportunity_pool().get_stats()
+        return status
 
     def refresh_market_inventory(self):
         """Force a Gate.io inventory refresh (rate-limit aware).
@@ -973,10 +978,12 @@ class AtlasRuntime:
                 for row in diagnostics.get("strategies") or []:
                     strategy_id = str(row.get("strategy_id") or "unknown")
                     counts = telemetry["per_strategy"][strategy_id]
+                    status = str(row.get("status") or "")
+                    if status in ("SELECTED", "FILTERED_NOT_SELECTED", "BLOCKED_COMMON_FILTER"):
+                        counts["setups"] += 1
                     if row.get("selected"):
                         counts["selected"] += 1
                         counts["passed"] += 1
-                    status = str(row.get("status") or "")
                     if status in ("SELECTED", "FILTERED_NOT_SELECTED"):
                         counts["passed"] += 0 if row.get("selected") else 1
                         for reason in row.get("rejection_reasons") or []:
