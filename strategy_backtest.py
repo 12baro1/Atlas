@@ -115,7 +115,7 @@ def _directional_r(direction, entry, exit_price, risk):
     return move / risk
 
 
-def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee=0.00055,
+def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee=0.0005,
                        spread_rate=0.0002, slippage_rate=0.0003, max_bars=32,
                        limit_expiry_bars=8, funding_events=(), signal_candle=None):
     """Replay a selected plan through the same fill/exit/cost contract as SMC backtest."""
@@ -413,7 +413,7 @@ def _accumulate_pipeline_metrics(metrics_by_strategy, report):
 
 
 def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
-                                limit_expiry_bars=8, maker_fee=0.0002, taker_fee=0.00055,
+                                limit_expiry_bars=8, maker_fee=0.0002, taker_fee=0.0005,
                                 spread_rate=0.0002, slippage_rate=0.0003,
                                 persist_outcomes=False):
     _disable_backtest_live_features()
