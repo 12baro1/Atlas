@@ -112,6 +112,34 @@ class ScanService:
     # Scan commands
     # ------------------------------------------------------------------
 
+    def enforce_universe_limit(self) -> Optional[Dict[str, Any]]:
+        """Move oversized persisted queues to a new top-300 generation.
+
+        The previous generation remains in SQLite as history; no queue or
+        opportunity-pool records are deleted.
+        """
+        progress = self.queue.progress()
+        if int(progress.get("total") or 0) <= DEFAULT_SCAN_UNIVERSE_LIMIT:
+            return None
+        universe = self.inventory.get_symbols()
+        ranker = getattr(self.inventory, "get_ranked_symbols", None)
+        if universe and callable(ranker):
+            symbols = list(ranker(limit=DEFAULT_SCAN_UNIVERSE_LIMIT) or [])
+        else:
+            symbols = sorted(universe)[:DEFAULT_SCAN_UNIVERSE_LIMIT]
+        if not symbols:
+            return None
+        result = self.queue.rebuild(
+            symbols, batch_tag=f"top_{DEFAULT_SCAN_UNIVERSE_LIMIT}_{int(time.time())}"
+        )
+        logger.warning(
+            "Oversized persisted scan generation replaced by bounded generation | "
+            "previous_total=%s new_total=%s ranking=%s",
+            progress.get("total"), len(symbols),
+            self.inventory.status().get("ranking_source", "alphabetical_fallback"),
+        )
+        return result
+
     def start_scan(self, limit: Optional[int] = None) -> Dict[str, Any]:
         """Enqueue the requested scan and make sure workers are running.
 
