@@ -134,10 +134,17 @@ def get_market_data(symbol, force_refresh=False):
             normalize_fee_rate(taker_override) if taker_override is not None
             else normalize_fee_rate(market_info.get("taker_fee_rate"))
         )
-        if data["maker_fee_rate"] is not None or data["taker_fee_rate"] is not None:
+        maker_fee_source = (
+            "ENV_OVERRIDE" if maker_override is not None else
+            "GATEIO_CONTRACT_METADATA" if data["maker_fee_rate"] is not None else None
+        )
+        taker_fee_source = (
+            "ENV_OVERRIDE" if taker_override is not None else
+            "GATEIO_CONTRACT_METADATA" if data["taker_fee_rate"] is not None else None
+        )
+        if maker_fee_source or taker_fee_source:
             data["fee_rate_source"] = (
-                "ENV_OVERRIDE" if maker_override is not None or taker_override is not None
-                else "GATEIO_CONTRACT_METADATA"
+                maker_fee_source if maker_fee_source == taker_fee_source else "MIXED"
             )
     except Exception:
         # Preserve candle analysis if market metadata is temporarily unavailable.
