@@ -73,13 +73,11 @@ def generate(data):
             and relative_volume >= 1.25 and buy_ratio is not None and buy_ratio >= 0.56
             and funding <= 0.0003):
         direction = "LONG"
-        stop = entry - 1.5 * atr
     elif (oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0
             and quality["direction"] == "BEARISH" and quality["close_location"] <= 0.30
             and relative_volume >= 1.25 and buy_ratio is not None and buy_ratio <= 0.44
             and funding >= -0.0003):
         direction = "SHORT"
-        stop = entry + 1.5 * atr
     else:
         return None
     event_evidence = liquidation_events(data.get("liquidation_events") or [], now_ms=now_ms)
@@ -100,7 +98,9 @@ def generate(data):
         strength = min(95.0, strength + 3.0)
     elif event_alignment == "OPPOSING":
         strength = max(55.0, strength - 2.0)
-    plan = _valid_plan(direction, entry, stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
+    # _valid_plan computes its own structural stop/targets; pass a dummy stop (ignored)
+    dummy_stop = entry - atr if direction == "LONG" else entry + atr
+    plan = _valid_plan(direction, entry, dummy_stop, atr, candles, "liquidation_cascade", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
         plan["reasons"] = [
             f"Open interest contraction={oi_change * 100:.2f}% over timestamped observations",

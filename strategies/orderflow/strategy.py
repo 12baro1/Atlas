@@ -142,9 +142,10 @@ def generate(data):
                    + min(abs(trade_delta) * 25.0, 10.0))
     if absorption or liquidation.get("confirmed"):
         strength = min(94.0, strength + 2.0)
-    stop = entry + 1.5 * atr if direction == "SHORT" else entry - 1.5 * atr
+    # _valid_plan computes its own structural stop/targets; pass a dummy stop (ignored)
+    dummy_stop = entry - atr if direction == "LONG" else entry + atr
     plan = _valid_plan(
-        direction, entry, stop, atr, candles, "orderflow_momentum", strength,
+        direction, entry, dummy_stop, atr, candles, "orderflow_momentum", strength,
         entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data),
     )
     if plan:

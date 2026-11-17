@@ -35,15 +35,11 @@ def generate(data):
             and close > prev_close and quality["direction"] == "BULLISH"
             and quality["close_location"] >= 0.60 and quality["body_ratio"] >= 0.25):
         direction = "LONG"
-        swing = min(_value(item, "low") for item in h1[-10:] if _value(item, "low") is not None)
-        stop = min(entry - 1.0 * atr, swing - 0.1 * atr)
     elif (e20 < e50 and bearish_dmi and entry < e1 and entry >= e1 - 1.25 * atr
             and (high >= e1 * 0.997 or prev_high >= e1 * 0.997)
             and close < prev_close and quality["direction"] == "BEARISH"
             and quality["close_location"] <= 0.40 and quality["body_ratio"] >= 0.25):
         direction = "SHORT"
-        swing = max(_value(item, "high") for item in h1[-10:] if _value(item, "high") is not None)
-        stop = max(entry + 1.0 * atr, swing + 0.1 * atr)
     else:
         return None
     trend_separation = abs(e20 - e50) / atr
@@ -57,7 +53,9 @@ def generate(data):
                    + min(efficiency * 10.0, 7.0)
                    + min(abs(directional["plus_di"] - directional["minus_di"]) * 0.15, 6.0)
                    + max(0.0, 7.0 - pullback_distance * 5.0))
-    plan = _valid_plan(direction, entry, stop, atr, h1, "trend_pullback", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
+    # _valid_plan computes its own structural stop/targets; pass a dummy stop (ignored)
+    dummy_stop = entry - atr if direction == "LONG" else entry + atr
+    plan = _valid_plan(direction, entry, dummy_stop, atr, h1, "trend_pullback", strength, entry_reference=_entry_reference(data), structure_candles=_structure_candle_sets(data))
     if plan:
         plan["reasons"] = [
             f"4H EMA20/EMA50 trend alignment; EMA20 slope={trend_slope:.2f} ATR",
