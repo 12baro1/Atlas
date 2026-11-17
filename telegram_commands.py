@@ -57,6 +57,7 @@ TELEGRAM_COMMANDS = [
     TelegramCommand("ogrenme", "Öğrenme motoru verisi", "handle_learning", "performance"),
 
     # Sistem ve yardım
+    TelegramCommand("start", "Atlas komutlarını göster", "handle_start", "system"),
     TelegramCommand("durum", "Bot ve servis durumu (VPS, tarama, bağlantı)", "handle_status", "system"),
     TelegramCommand("sistem", "Sistem kaynakları ve çalışma durumu", "handle_system", "system"),
     TelegramCommand("yardim", "Komut listesi ve kullanım", "handle_help", "system"),
