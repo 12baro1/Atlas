@@ -616,15 +616,18 @@ class TelegramCommandService:
             self._command_queue.put_nowait((raw_command, command))
             # Acknowledge from the polling thread immediately; a previous long
             # analysis in the command worker must not delay this confirmation.
-            self._api(
-                "sendMessage",
-                {
-                    "chat_id": self.chat_id,
-                    "text": f"Atlas komutu alındı: {command[:80]}\nİşleniyor...",
-                    "disable_web_page_preview": True,
-                },
-                timeout=10,
-            )
+            try:
+                self._api(
+                    "sendMessage",
+                    {
+                        "chat_id": self.chat_id,
+                        "text": f"Atlas komutu alındı: {command[:80]}\nİşleniyor...",
+                        "disable_web_page_preview": True,
+                    },
+                    timeout=10,
+                )
+            except Exception:
+                self.logger.exception("Telegram command acknowledgement could not be sent")
         except queue.Full:
             self.logger.warning("Telegram command queue full; rejecting command: %s", command[:80])
             try:
