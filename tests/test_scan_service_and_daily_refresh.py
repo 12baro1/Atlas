@@ -262,7 +262,11 @@ class FakeQ:
         return 0
 
     def rebuild(self, symbols, batch_tag=None):
-        return {"added": self.enqueue(symbols, batch_tag), "progress": self.progress()}
+        return {
+            "added": self.enqueue(symbols, batch_tag),
+            "progress": self.progress(),
+            "generation": self.current_generation(),
+        }
 
     def claim_next(self, worker_id="worker"):
         with self._lock:
