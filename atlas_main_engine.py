@@ -427,7 +427,7 @@ class AtlasMainEngine:
         return decision
 
     @staticmethod
-    def finalize_setup_geometry(entry, risk, targets):
+    def finalize_setup_geometry(entry, risk, targets, tick_size=None):
         """Main authority publishes one reconciled entry/SL/TP geometry."""
         import math
 
@@ -438,6 +438,11 @@ class AtlasMainEngine:
             return {"entry": setup, "risk": risk_payload, "targets": target_payload}
 
         side = str(setup.get("direction") or "").upper()
+        from price_precision import normalize_tick_size, snap_price_to_tick
+        tick = normalize_tick_size(
+            tick_size if tick_size is not None else
+            (risk_payload.get("tick_size") if isinstance(risk_payload, dict) else None)
+        )
         try:
             entry_price = float(setup.get("entry"))
             requested_stop = float(setup.get("stop_loss"))
@@ -447,6 +452,16 @@ class AtlasMainEngine:
             setup.update({"valid": False, "reason": "Main authority: invalid entry/stop geometry",
                           "entry_reason_code": "INVALID_FINAL_GEOMETRY"})
             return {"entry": setup, "risk": risk_payload, "targets": target_payload}
+
+        if tick is not None:
+            entry_rounding = "nearest"
+            if str(setup.get("entry_type") or "").upper() == "LIMIT":
+                entry_rounding = "floor" if side == "LONG" else "ceiling"
+            entry_price = snap_price_to_tick(entry_price, tick, entry_rounding)
+            stop = snap_price_to_tick(stop, tick, "floor" if side == "LONG" else "ceiling")
+            setup["entry"] = entry_price
+            if isinstance(risk_payload, dict):
+                risk_payload["entry"] = entry_price
 
         if not all(math.isfinite(value) and value > 0 for value in (entry_price, stop)):
             setup.update({"valid": False, "reason": "Main authority: non-finite/non-positive entry or stop",
@@ -481,6 +496,8 @@ class AtlasMainEngine:
                 continue
             if not math.isfinite(value) or value <= 0:
                 continue
+            if tick is not None:
+                value = snap_price_to_tick(value, tick, "ceiling" if side == "LONG" else "floor")
             if (side == "LONG" and value <= entry_price) or (side == "SHORT" and value >= entry_price):
                 continue
             ordered.append(value)
