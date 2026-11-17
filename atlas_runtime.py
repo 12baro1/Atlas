@@ -9,11 +9,13 @@ import threading
 import traceback
 import time
 from collections import deque
+from typing import Any, Dict, Optional
 from config import Config
 from data_engine import exchange, get_correlation_universe, get_market_data, get_smt_universe
 from engine import AtlasEngine
 from strategy_outcome_journal import StrategyOutcomeJournal
 from manual_trade_service import ManualTradeService
+from opportunity_pool import get_opportunity_pool, SetupCandidate
 
 def _is_fresh_15m_data(candles, now_ms, max_age_seconds):
     """Return False for absent, future, or stale last-closed 15m candles."""
@@ -540,6 +542,7 @@ class AtlasRuntime:
                 from shared.market_data_services import build_shared_market_evidence
                 data["shared_market_evidence"] = build_shared_market_evidence(data)
 
+                pool = get_opportunity_pool()
                 with self._journal_lock:
                     should_track_signal = (not from_scan) if track_signal is None else bool(track_signal)
                     result = self.engine.analyze(data, track_signal=should_track_signal)
@@ -548,13 +551,31 @@ class AtlasRuntime:
                     if result is None:
                         self._inc("skipped")
                         return {"ok": False, "symbol": symbol, "error": "no_result"}
-
-                    self._inc("success")
+                    
+                    # Add the selected setup to the opportunity pool as a validated candidate
                     self._register_result(result)
                     with self._lock:
                         self._latest_analysis_by_symbol[symbol] = result
                         self._latest_analysis_at[symbol] = int(time.time() * 1000)
                     self._prune_latest_analyses()
+
+                    # Extract and add setup candidate to pool if selected
+                    selected = result.get("selected")
+                    if selected and isinstance(selected, dict):
+                        try:
+                            candidate = self._setup_to_candidate(selected, symbol)
+                            if candidate:
+                                pool.add_candidate(candidate)
+                                # Validate to move from candidates to validated pool
+                                pool.validate_candidate(candidate.setup_id)
+                                self.logger.debug(
+                                    "Added and validated candidate from %s: %s",
+                                    symbol, candidate.setup_id,
+                                )
+                        except Exception as e:
+                            self.logger.warning(
+                                "Failed to add candidate from %s to pool: %s", symbol, e
+                            )
 
                     if Config.SIGNAL_TRACKING_ENABLED:
                         candles_15m = data.get("15m") or data.get("15M") or []
@@ -648,19 +669,69 @@ class AtlasRuntime:
             self._last_results = self._last_results[-250:]
             self._scanner_stats["last_update_ms"] = item["timestamp"]
 
-    def _resolve_signal_id(self, result):
-        symbol = result.get("symbol")
-        direction = (result.get("signal") or {}).get("signal")
-        with self._journal_lock:
-            outcomes = self.engine.trade_journal.signal_outcomes(symbol=symbol, limit=30)
-
-        pending = [item for item in outcomes if item.get("status") == "PENDING"]
-        if pending:
-            outcomes = pending
-        for outcome in outcomes:
-            if outcome.get("direction") == direction:
-                return outcome.get("signal_id")
-        return None
+    def _setup_to_candidate(self, selected: Dict[str, Any], symbol: str) -> Optional[SetupCandidate]:
+        """Convert a selected setup dict into a SetupCandidate for the opportunity pool."""
+        from opportunity_pool import SetupCandidate, SetupStatus, SetupType
+        
+        try:
+            entry = selected.get("entry") or selected.get("entry_price")
+            stop = selected.get("stop_loss") or selected.get("stop")
+            tp1 = selected.get("tp1")
+            tp2 = selected.get("tp2")
+            tp3 = selected.get("tp3")
+            direction = selected.get("direction") or selected.get("signal", {}).get("signal", "").upper()
+            strategy_id = selected.get("strategy_id") or selected.get("selected_by", "unknown")
+            strategy_name = selected.get("strategy") or selected.get("strategy_id", "unknown")
+            
+            if not all([entry is not None, stop is not None, tp1 is not None, tp2 is not None, tp3 is not None, direction]):
+                return None
+            
+            # Calculate RR
+            risk = abs(float(entry) - float(stop))
+            if risk <= 0:
+                return None
+            tp1_rr = abs(float(tp1) - float(stop)) / risk
+            tp2_rr = abs(float(tp2) - float(stop)) / risk
+            tp3_rr = abs(float(tp3) - float(stop)) / risk
+            net_rr = min(tp1_rr, tp2_rr, tp3_rr)  # conservative net RR
+            
+            candidate = SetupCandidate(
+                setup_id=f"setup_{symbol}_{direction}_{int(time.time() * 1000)}",
+                symbol=symbol,
+                strategy_id=strategy_id,
+                strategy_name=strategy_name,
+                direction=direction,
+                entry_type=str(selected.get("entry_type", "MARKET")).upper(),
+                entry_price=float(entry),
+                stop_loss=float(stop),
+                tp1=float(tp1),
+                tp2=float(tp2),
+                tp3=float(tp3),
+                rr_tp1=float(tp1_rr),
+                rr_tp2=float(tp2_rr),
+                rr_tp3=float(tp3_rr),
+                net_rr=float(net_rr) if net_rr > 0 else 0.0,
+                risk_reward=selected.get("risk_reward", 0.0),
+                confidence=selected.get("confidence", 0.0),
+                grade=selected.get("grade", "").upper(),
+                score=selected.get("score", 0.0),
+                net_rr_after_costs=selected.get("execution_rr", net_rr),
+                status=SetupStatus.DISCOVERED.value,
+                setup_type=SetupType.MARKET.value,
+                regime=selected.get("market_regime", "UNKNOWN"),
+                market_phase=selected.get("market_phase", "UNKNOWN"),
+                reasons=selected.get("reason", "").split(",") if selected.get("reason") else [],
+                supporting_evidence=selected.get("supporting_event_ids", []) or [],
+                opposing_evidence=selected.get("opposing_event_ids", []) or [],
+                created_at_ms=int(time.time() * 1000),
+                updated_at_ms=int(time.time() * 1000),
+                validated_at_ms=0,  # Will be set by validate_candidate
+                trace_id=selected.get("event_ids", [None])[0] if selected.get("event_ids") else None,
+            )
+            return candidate
+        except (TypeError, ValueError, OverflowError, KeyError) as e:
+            logger.warning(f"Failed to convert setup to candidate: {e}")
+            return None
 
     def _set_status(self, status):
         with self._lock:
