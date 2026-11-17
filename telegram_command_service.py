@@ -795,6 +795,28 @@ class TelegramCommandService:
         ]
         if inventory.get("last_error"):
             lines.append(f"Envanter hatası: {inventory['last_error']}")
+        if inventory.get("ranking_source"):
+            lines.append(f"Sembol sıralaması: {inventory['ranking_source']}")
+        telemetry = status.get("strategy_telemetry") or {}
+        pool_stats = status.get("pool") or {}
+        if telemetry:
+            lines.extend([
+                "",
+                "ANALİZ SONUÇLARI",
+                f"Analiz edilen: {telemetry.get('analyses', 0)}",
+                f"Ham setup: {telemetry.get('raw_setups_generated', 0)}",
+                f"Ortak filtreden geçen: {telemetry.get('common_filter_passed', 0)}",
+                f"Ortak filtrede elenen: {telemetry.get('common_filter_rejected', 0)}",
+                f"Doğrulanmış havuz: {pool_stats.get('validated', 0)}",
+            ])
+            strategy_rows = telemetry.get("per_strategy") or {}
+            if strategy_rows:
+                lines.append("Strateji bazında seçilen setup:")
+                for strategy_id, counts in sorted(strategy_rows.items()):
+                    lines.append(
+                        f"  {strategy_id}: {counts.get('selected', 0)} seçildi, "
+                        f"{counts.get('rejected', 0)} filtrede elendi"
+                    )
         failed = self.runtime._scan_queue.failed_symbols() if hasattr(self.runtime, "_scan_queue") else []
         if failed:
             lines.append("")
@@ -913,6 +935,11 @@ class TelegramCommandService:
             lines.append(f"Bu taramada taranacak: {result['selected']}")
         if "added" in result:
             lines.append(f"Kuyruğa yeni eklenen: {result['added']}")
+        if result.get("ranking_source"):
+            lines.append(f"Sıralama: {result['ranking_source']}")
+        preview = result.get("selected_preview") or []
+        if preview:
+            lines.append("İlk semboller: " + ", ".join(str(symbol) for symbol in preview))
         lines.extend([
             f"Tamamlanan: {progress.get('done', 0)} | Bekleyen: {progress.get('pending', 0)}",
             f"İlerleme: %{progress.get('percent', 0.0)}",
