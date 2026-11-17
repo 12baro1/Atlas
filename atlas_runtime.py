@@ -132,6 +132,11 @@ class AtlasRuntime:
     def attach_telegram_service(self, service):
         self._telegram_service = service
 
+    @property
+    def scanner(self):
+        """Return the engine's scanner with thread-safe access."""
+        return self.engine.scanner
+
     def set_symbols(self, symbols):
         with self._lock:
             self.symbols = list(symbols or [])

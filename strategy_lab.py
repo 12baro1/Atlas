@@ -804,9 +804,10 @@ class SevenStrategyLab:
 
         eligible = []
         for candidate in generated:
-            # Non-SMC strategies publish their raw pattern setup first. Shared
-            # structural stop/TP geometry is applied here, never inside a strategy.
-            if candidate.get("strategy_id") != "smc" and not all(
+            # All seven strategies share one structural geometry filter.
+            # Raw candidates must have valid entry/stop/three targets after
+            # applying confirmed swing invalidation and opposing liquidity targets.
+            if not all(
                 candidate.get(key) is not None for key in ("stop_loss", "tp1", "tp2", "tp3")
             ):
                 geometry_reason = _finalize_candidate_geometry(
@@ -818,7 +819,10 @@ class SevenStrategyLab:
                     candidate["rejection_reasons"] = [geometry_reason]
                     _record_common_filter(candidate, "REJECTED", geometry_reason)
                     continue
-
+                # _finalize_candidate_geometry mutates candidate with stop_loss, tp1, tp2, tp3
+                # Fall through to geometry validation below.
+            
+            # Validate geometry for ALL candidates (including SMC with pre-populated targets).
             direction = str(candidate.get("direction") or "").upper()
             try:
                 entry = float(candidate.get("entry"))

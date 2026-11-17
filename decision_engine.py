@@ -48,9 +48,19 @@ class DecisionEngine:
 
         return max(eligible, key=rank)
 
-    def decide(self, analysis=None, **kwargs):
-        """Bundle tabanlı karar üretir; eski kwargs tabanlı çağrıları da destekler."""
+    def decide(self, analysis=None, skip_eligibility_gates=False, **kwargs):
+        """Bundle tabanlı karar üretir; eski kwargs tabanlı çağrıları da destekler.
+
+        Args:
+            analysis: Analysis bundle or None for kwargs mode
+            skip_eligibility_gates: When True, skip confidence/RR/MTF/confluence
+                eligibility checks. Used by AtlasMainEngine after the common
+                filter has already validated all candidates.
+            **kwargs: Legacy kwargs-style inputs
+        """
         context = self._normalize_context(analysis, kwargs)
+        # If common filter already ran, skip duplicate eligibility gates.
+        skip_gates = bool(skip_eligibility_gates)
 
         signal = context["signal"]
         confluence = context["confluence"]
@@ -99,44 +109,56 @@ class DecisionEngine:
             position_size=position_size,
         )
 
-        quality_blockers = self._collect_quality_blockers(
-            signal_grade=signal_grade,
-            signal_confidence=signal_confidence,
-            rr_value=execution_rr,
-            minimum_rr=minimum_rr,
-            direction=signal_dir,
-            mtf=mtf,
-            cisd=cisd,
-            market_phase=market_phase,
-            confluence=confluence,
-        )
-
-        # WAIT means the setup is not ready yet, not that its trade geometry is broken.
-        # Keep execution blocked, but avoid reporting missing direction/entry/RR as failures.
-        waiting_for_setup = signal_dir == "WAIT"
-        quality_gate_active = isinstance(trade_quality, dict) and "allowed" in trade_quality
-        critical_blockers = []
-        if not waiting_for_setup:
-            self._append_unique(critical_blockers, "Signal direction invalid" if signal_dir not in ["LONG", "SHORT"] else None)
-            self._append_unique(critical_blockers, "Entry invalid" if not entry_valid else None)
-            # Legacy score/confidence thresholds are diagnostic only when the
-            # cross-motor execution gate is present. Actual execution is then
-            # determined by structure, entry geometry, risk and target validity.
-            if not quality_gate_active:
-                self._append_unique(
-                    critical_blockers,
-                    f"Confidence below minimum: {self._fmt_number(signal_confidence)} < {self._fmt_number(minimum_confidence)}"
-                    if signal_confidence < minimum_confidence
-                    else None,
-                )
-            for blocker in risk_blockers:
-                self._append_unique(critical_blockers, blocker)
-            if not quality_gate_active:
-                for blocker in quality_blockers:
+        # Skip quality/eligibility gates when common filter already validated.
+        if skip_gates:
+            quality_blockers = []
+            # Still need risk_valid for downstream logic
+            critical_blockers = []
+            waiting_for_setup = signal_dir == "WAIT"
+            if not waiting_for_setup:
+                self._append_unique(critical_blockers, "Signal direction invalid" if signal_dir not in ["LONG", "SHORT"] else None)
+                self._append_unique(critical_blockers, "Entry invalid" if not entry_valid else None)
+                for blocker in risk_blockers:
                     self._append_unique(critical_blockers, blocker)
-            if quality_gate_active and not trade_quality.get("allowed", False):
-                for blocker in trade_quality.get("blockers", []) or [trade_quality.get("reason", "Trade quality gate rejected setup")]:
-                    self._append_unique(critical_blockers, f"Trade quality: {blocker}")
+        else:
+            quality_blockers = self._collect_quality_blockers(
+                signal_grade=signal_grade,
+                signal_confidence=signal_confidence,
+                rr_value=execution_rr,
+                minimum_rr=minimum_rr,
+                direction=signal_dir,
+                mtf=mtf,
+                cisd=cisd,
+                market_phase=market_phase,
+                confluence=confluence,
+            )
+
+            # WAIT means the setup is not ready yet, not that its trade geometry is broken.
+            # Keep execution blocked, but avoid reporting missing direction/entry/RR as failures.
+            waiting_for_setup = signal_dir == "WAIT"
+            quality_gate_active = isinstance(trade_quality, dict) and "allowed" in trade_quality
+            critical_blockers = []
+            if not waiting_for_setup:
+                self._append_unique(critical_blockers, "Signal direction invalid" if signal_dir not in ["LONG", "SHORT"] else None)
+                self._append_unique(critical_blockers, "Entry invalid" if not entry_valid else None)
+                # Legacy score/confidence thresholds are diagnostic only when the
+                # cross-motor execution gate is present. Actual execution is then
+                # determined by structure, entry geometry, risk and target validity.
+                if not quality_gate_active:
+                    self._append_unique(
+                        critical_blockers,
+                        f"Confidence below minimum: {self._fmt_number(signal_confidence)} < {self._fmt_number(minimum_confidence)}"
+                        if signal_confidence < minimum_confidence
+                        else None,
+                    )
+                for blocker in risk_blockers:
+                    self._append_unique(critical_blockers, blocker)
+                if not quality_gate_active:
+                    for blocker in quality_blockers:
+                        self._append_unique(critical_blockers, blocker)
+                if quality_gate_active and not trade_quality.get("allowed", False):
+                    for blocker in trade_quality.get("blockers", []) or [trade_quality.get("reason", "Trade quality gate rejected setup")]:
+                        self._append_unique(critical_blockers, f"Trade quality: {blocker}")
             # Directional sweep quality is evaluated symmetrically by
             # TradeQualityEngine. Do not impose a second SHORT-only hard gate
             # here: it suppresses valid trend-continuation shorts and has no

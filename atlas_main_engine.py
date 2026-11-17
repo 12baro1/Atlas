@@ -521,8 +521,8 @@ class AtlasMainEngine:
         return {"entry": setup, "risk": risk_payload, "targets": target_payload}
 
     def decide(self, **motor_outputs):
-        """Only final decision entry point."""
-        decision = self.decision_engine.decide(**motor_outputs)
+        """Only final decision entry point. Common filter already ran; skip eligibility gates."""
+        decision = self.decision_engine.decide(skip_eligibility_gates=True, **motor_outputs)
         decision = dict(decision or {})
         if motor_outputs.get("current_price") is not None:
             decision = self._validate_execution_geometry(
