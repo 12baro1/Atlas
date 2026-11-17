@@ -282,6 +282,8 @@ class RiskEngine:
         auto_expand_stop=None,
         entry_type="LIMIT",
         direction=None,
+        maker_fee_rate=None,
+        taker_fee_rate=None,
     ):
 
         if entry is None or stop_loss is None:
@@ -306,6 +308,15 @@ class RiskEngine:
                 reason="Stop Loss is on the wrong side of the selected direction",
             )
 
+        def _resolve_fee(value, config_name, default):
+            try:
+                rate = float(value) if value is not None else float(getattr(Config, config_name, default))
+            except (TypeError, ValueError, OverflowError):
+                rate = float(getattr(Config, config_name, default))
+            return max(0.0, rate) if math.isfinite(rate) else float(default)
+
+        maker_fee_rate = _resolve_fee(maker_fee_rate, "MAKER_FEE_RATE", 0.0002)
+        taker_fee_rate = _resolve_fee(taker_fee_rate, "TAKER_FEE_RATE", 0.00055)
         atr_period = int(getattr(Config, "ATR_PERIOD", 14))
         min_stop_atr_multiplier = float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75))
         min_tick_fallback = float(getattr(Config, "MIN_TICK_DISTANCE_FALLBACK", 0.01))
@@ -342,8 +353,6 @@ class RiskEngine:
         # round-trip execution friction consumes too much of its risk distance.
         # Reject such geometry; never move a structural invalidation level just
         # to satisfy a cost threshold.
-        maker_fee_rate = float(getattr(Config, "MAKER_FEE_RATE", 0.0002))
-        taker_fee_rate = float(getattr(Config, "TAKER_FEE_RATE", 0.00055))
         stop_cost_floor_multiple = max(
             0.0, float(getattr(Config, "MIN_STOP_COST_MULTIPLIER", 2.0))
         )
@@ -416,8 +425,8 @@ class RiskEngine:
             entry_price=entry,
             stop_price=adjusted_stop_loss,
             entry_type=resolved_entry_type,
-            maker_fee_rate=float(getattr(Config, "MAKER_FEE_RATE", 0.0002)),
-            taker_fee_rate=float(getattr(Config, "TAKER_FEE_RATE", 0.00055)),
+            maker_fee_rate=maker_fee_rate,
+            taker_fee_rate=taker_fee_rate,
             spread_rate=execution_spread_rate,
             slippage_rate=execution_slippage_rate,
         )
@@ -442,8 +451,6 @@ class RiskEngine:
 
         account_balance = float(getattr(Config, "INITIAL_BALANCE", 1000.0))
         base_risk_percent = float(getattr(Config, "RISK_PERCENT", 1.0))
-        maker_fee_rate = float(getattr(Config, "MAKER_FEE_RATE", 0.0002))
-        taker_fee_rate = float(getattr(Config, "TAKER_FEE_RATE", 0.00055))
         minimum_rr = float(getattr(Config, "MINIMUM_RR", 3.0))
         minimum_net_rr = float(getattr(Config, "MINIMUM_NET_RR", 1.5))
         resolved_entry_type = str(entry_type or "LIMIT").upper()
