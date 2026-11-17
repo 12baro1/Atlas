@@ -614,6 +614,17 @@ class TelegramCommandService:
         self.logger.info("Telegram command queued: %s (chat_id=%s)", command[:80], chat_id)
         try:
             self._command_queue.put_nowait((raw_command, command))
+            # Acknowledge from the polling thread immediately; a previous long
+            # analysis in the command worker must not delay this confirmation.
+            self._api(
+                "sendMessage",
+                {
+                    "chat_id": self.chat_id,
+                    "text": f"Atlas komutu alındı: {command[:80]}\nİşleniyor...",
+                    "disable_web_page_preview": True,
+                },
+                timeout=10,
+            )
         except queue.Full:
             self.logger.warning("Telegram command queue full; rejecting command: %s", command[:80])
             try:
@@ -649,9 +660,6 @@ class TelegramCommandService:
             except queue.Empty:
                 continue
             try:
-                self._send_command_reply(
-                    f"Atlas komutu aldı: {command_label[:80]}\nİşleniyor..."
-                )
                 self.logger.info("Telegram command execution started: %s", command_label[:80])
                 try:
                     result = self.execute_command(raw_command)
