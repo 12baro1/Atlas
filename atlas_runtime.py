@@ -420,10 +420,38 @@ class AtlasRuntime:
         self._set_status("STOPPED")
 
     def _scan_cycle(self):
-        for index, symbol in enumerate(self.symbols, start=1):
-            if self._stop_event.is_set():
-                return
-            self._analyze_symbol(symbol, force_refresh=False, from_scan=True, scan_index=index, scan_total=len(self.symbols))
+        """Run symbol analysis in parallel with controlled concurrency."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Limit concurrent analyses to avoid overwhelming the API
+        max_workers = int(getattr(Config, "SCAN_MAX_WORKERS", "4") or "4")
+        max_workers = max(1, min(max_workers, len(self.symbols)))
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self._analyze_symbol,
+                    symbol,
+                    False,
+                    True,
+                    idx,
+                    len(self.symbols),
+                ): symbol
+                for idx, symbol in enumerate(self.symbols, start=1)
+            }
+
+            for future in as_completed(futures):
+                if self._stop_event.is_set():
+                    # Cancel remaining futures
+                    for f in futures:
+                        f.cancel()
+                    return
+                try:
+                    future.result()
+                except Exception as exc:
+                    symbol = futures[future]
+                    self._log(f"ERROR {symbol} (parallel): {exc}")
+
         # Expire only after the cycle had a chance to process the latest candles.
         # This also handles stale symbols that produced no fresh candle.
         with self._journal_lock:
