@@ -263,7 +263,7 @@ class RiskEngine:
         risk["capital_at_risk"] = round(capped_position_size * effective_risk_per_unit, 2)
         risk["stop_cost_quote_per_unit"] = round(stop_cost["total"], 10)
         risk["stop_cost_breakdown"] = stop_cost
-        risk["effective_risk_per_unit"] = round(effective_risk_per_unit, 8)
+        risk["effective_risk_per_unit"] = effective_risk_per_unit
         risk["final_geometry_reconciled"] = True
         return risk
 
