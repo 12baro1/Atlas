@@ -57,6 +57,7 @@ class MarketInventory:
         self._last_refresh_ms: int = 0
         self._last_error: Optional[str] = None
         self._last_error_ms: int = 0
+        self._last_ranking_source = "alphabetical_fallback"
         self._load_state()
 
     # ------------------------------------------------------------------
@@ -100,7 +101,69 @@ class MarketInventory:
                 "last_error": self._last_error,
                 "last_error_ms": self._last_error_ms,
                 "source": "gateio_usdt_perpetuals",
+                "ranking_source": self._last_ranking_source,
             }
+
+    def get_ranked_symbols(self, limit: Optional[int] = None) -> List[str]:
+        """Return the Gate.io universe ranked by 24h quote turnover.
+
+        Fetches all tickers in one public API request. If ticker data is
+        temporarily unavailable, retain the complete inventory and fall back
+        to deterministic alphabetical ordering rather than returning no coins.
+        """
+        symbols = self.get_symbols()
+        if not symbols:
+            self._last_ranking_source = "empty_inventory"
+            return []
+
+        fetch_tickers = getattr(self._exchange, "fetch_tickers", None)
+        ranked = []
+        if callable(fetch_tickers):
+            try:
+                tickers = fetch_tickers(symbols=symbols) or {}
+                scores = {}
+                for symbol in symbols:
+                    ticker = tickers.get(symbol) if isinstance(tickers, dict) else None
+                    if not isinstance(ticker, dict):
+                        continue
+                    info = ticker.get("info") if isinstance(ticker.get("info"), dict) else {}
+                    raw_volume = (
+                        ticker.get("quoteVolume")
+                        if ticker.get("quoteVolume") is not None
+                        else info.get("volume_24h_quote")
+                    )
+                    try:
+                        volume = float(raw_volume)
+                    except (TypeError, ValueError, OverflowError):
+                        volume = 0.0
+                    if not (volume >= 0 and volume < float("inf")):
+                        volume = 0.0
+                    if volume <= 0:
+                        try:
+                            last = float(ticker.get("last") or ticker.get("close") or 0)
+                            base_volume = float(ticker.get("baseVolume") or 0)
+                            volume = last * base_volume
+                        except (TypeError, ValueError, OverflowError):
+                            volume = 0.0
+                    if volume > 0:
+                        scores[symbol] = volume
+                if scores:
+                    ranked = sorted(
+                        symbols,
+                        key=lambda symbol: (scores.get(symbol, -1.0), symbol),
+                        reverse=True,
+                    )
+                    self._last_ranking_source = "gateio_24h_quote_volume"
+            except Exception as exc:
+                logger.warning("Gate.io ticker ranking unavailable; using full inventory: %s", exc)
+
+        if not ranked:
+            ranked = sorted(symbols)
+            self._last_ranking_source = "alphabetical_fallback"
+
+        if limit is not None:
+            ranked = ranked[:max(0, int(limit))]
+        return ranked
 
     def market_info(self, symbol: str) -> Optional[Dict[str, Any]]:
         with self._lock:
