@@ -452,3 +452,17 @@ def test_stop_scan_does_not_orphan_or_revive_inflight_worker(tmp_path):
     assert service.ensure_workers() is True
     service.stop_scan(timeout_seconds=2)
 
+
+
+def test_unbounded_scan_command_is_capped_to_top_300(tmp_path):
+    symbols = [f"COIN{i:03d}/USDT:USDT" for i in range(350)]
+    ranked = list(reversed(symbols))
+    service = ScanService(
+        FakeRuntime(), FakeQ(), FakeInv(symbols, ranked_symbols=ranked),
+        worker_count=1, analysis_gap_seconds=0.0,
+    )
+    service.ensure_workers = lambda: False
+    result = service.start_scan()
+    assert result["selected"] == 300
+    assert result["selected_preview"] == ranked[:5]
+    assert result["ranking_source"] == "fake_24h_quote_volume"
