@@ -455,14 +455,15 @@ class TelegramCommandService:
         if self._thread and self._thread.is_alive():
             return True
         self.stop_flag.clear()
+        # Resolve bot identity before starting long polling; requests.Session is
+        # then owned by the polling thread instead of being used concurrently.
+        self._fetch_bot_info()
         self._thread = threading.Thread(
             target=self._poll_loop,
             name="atlas-telegram-commands",
             daemon=True,
         )
         self._thread.start()
-        # Fetch bot username for @BotName command support
-        self._fetch_bot_info()
         return True
 
     def stop(self, timeout: float = 25.0) -> None:
@@ -511,7 +512,7 @@ class TelegramCommandService:
             try:
                 payload = {
                     "timeout": 15,
-                    "allowed_updates": ["message"],
+                    "allowed_updates": ["message", "edited_message"],
                 }
                 if self._offset is not None:
                     payload["offset"] = self._offset
@@ -539,14 +540,20 @@ class TelegramCommandService:
         sender_id = sender.get("id")
         is_bot = sender.get("is_bot", False)
 
-        self.logger.debug(
-            "Update received: chat_id=%s sender_id=%s is_bot=%s text=%s",
-            chat_id, sender_id, is_bot, str(message.get("text", ""))[:80]
+        # INFO-level diagnostics are intentional: the production service runs
+        # at INFO, so DEBUG-only update logs made delivery failures invisible.
+        self.logger.info(
+            "Telegram update received | chat_id=%s sender_id=%s is_bot=%s has_text=%s",
+            chat_id, sender_id, is_bot, bool(message.get("text"))
         )
 
         # Chat ID validation
         if chat_id != self.chat_id:
-            self.logger.debug("Chat ID mismatch: expected=%s got=%s", self.chat_id, chat_id)
+            self.logger.warning(
+                "Telegram message ignored: configured group chat ID does not match "
+                "(configured=%s received=%s)",
+                self.chat_id, chat_id,
+            )
             return
         if is_bot:
             self.logger.debug("Ignoring message from bot")
@@ -568,7 +575,7 @@ class TelegramCommandService:
 
         command = normalize_command(raw_command)
         if not command or not is_recognized_command(raw_command):
-            self.logger.debug("Unrecognized command ignored: %s", raw_command[:80])
+            self.logger.info("Telegram text received but not recognized as a command: %s", raw_command[:80])
             return
 
         self.logger.info("Telegram command received: %s (chat_id=%s)", command[:80], chat_id)
@@ -714,6 +721,13 @@ class TelegramCommandService:
         return _format_telegram_card(card, outcome.get("elapsed_ms", 0))
 
     # --- Command Handlers ---
+
+    def handle_start(self) -> str:
+        """Handle Telegram's conventional /start command."""
+        return (
+            "Atlas Telegram komut arayüzü aktif.\n\n"
+            + format_help_text()
+        )
 
     def handle_help(self) -> str:
         return format_help_text()
