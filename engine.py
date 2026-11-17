@@ -1654,7 +1654,7 @@ class AtlasEngine:
                     stop_price=expanded_stop,
                     exclude_targets_through=target_exclusion_price,
                 )
-                risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles)
+                risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles, tick_size=data.get("tick_size"))
                 self.logger.info(
                     "Dynamic TP rebuilt after stop expand | stop=%s tp1=%s tp2=%s tp3=%s",
                     expanded_stop,
