@@ -200,7 +200,12 @@ class AtlasRuntime:
         return self._scan_service.stop_scan()
 
     def scan_status(self):
-        return self._scan_service.status()
+        status = self._scan_service.status()
+        # Expose the strategy funnel alongside queue progress so an empty
+        # best-setups pool can be distinguished from an undiscovered universe.
+        status["strategy_telemetry"] = self.strategy_telemetry()
+        status["pool"] = get_opportunity_pool().get_stats()
+        return status
 
     def refresh_market_inventory(self):
         """Force a Gate.io inventory refresh (rate-limit aware).
