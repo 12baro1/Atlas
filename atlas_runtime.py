@@ -978,10 +978,12 @@ class AtlasRuntime:
                 for row in diagnostics.get("strategies") or []:
                     strategy_id = str(row.get("strategy_id") or "unknown")
                     counts = telemetry["per_strategy"][strategy_id]
+                    status = str(row.get("status") or "")
+                    if status in ("SELECTED", "FILTERED_NOT_SELECTED", "BLOCKED_COMMON_FILTER"):
+                        counts["setups"] += 1
                     if row.get("selected"):
                         counts["selected"] += 1
                         counts["passed"] += 1
-                    status = str(row.get("status") or "")
                     if status in ("SELECTED", "FILTERED_NOT_SELECTED"):
                         counts["passed"] += 0 if row.get("selected") else 1
                         for reason in row.get("rejection_reasons") or []:
