@@ -23,6 +23,11 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("atlas.market_inventory")
 
 STATE_FILE = "inventory_state.json"
+STATE_VERSION = 2
+CRYPTO_CONTRACT_TYPES = {
+    "crypto", "cryptocurrency", "cryptocurrencies",
+    "digital_asset", "digital_assets", "digital currency",
+}
 DEFAULT_TTL_SECONDS = 15 * 60          # refresh at most every 15 minutes
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_BACKOFF_SECONDS = 2.0
@@ -231,6 +236,13 @@ class MarketInventory:
                 return False
             if raw.get("in_delisting"):
                 return False
+        category = str(
+            info.get("contract_type")
+            or (raw.get("contract_type") if isinstance(raw, dict) else "")
+            or ""
+        ).strip().lower()
+        if category and category not in CRYPTO_CONTRACT_TYPES:
+            return False
         return True
 
     # ------------------------------------------------------------------
@@ -241,7 +253,7 @@ class MarketInventory:
         path = self.base_path / STATE_FILE
         tmp_path = path.with_name(f".{path.stem}.{os.getpid()}.tmp")
         payload = {
-            "version": 1,
+            "version": STATE_VERSION,
             "last_refresh_ms": self._last_refresh_ms,
             "last_error": self._last_error,
             "last_error_ms": self._last_error_ms,
@@ -249,6 +261,8 @@ class MarketInventory:
                 symbol: {
                     "id": info.get("id"),
                     "contract_size": info.get("contractSize"),
+                    "contract_type": info.get("contract_type")
+                    or ((info.get("info") or {}).get("contract_type") if isinstance(info.get("info"), dict) else None),
                 }
                 for symbol, info in self._snapshot.items()
             },
@@ -263,6 +277,12 @@ class MarketInventory:
             return
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
+            if int(data.get("version") or 1) < STATE_VERSION:
+                # Legacy snapshots lack contract categories and can contain
+                # stocks, indices or commodities. Keep the file untouched,
+                # but force a fresh categorized Gate.io snapshot.
+                logger.info("Ignoring legacy unclassified market inventory cache; refreshing Gate.io metadata")
+                return
             self._last_refresh_ms = int(data.get("last_refresh_ms") or 0)
             self._last_error = data.get("last_error")
             self._last_error_ms = int(data.get("last_error_ms") or 0)
@@ -273,6 +293,8 @@ class MarketInventory:
                         "id": str(info.get("id") or ""),
                         "symbol": str(symbol),
                         "contractSize": float(info.get("contract_size") or 1.0),
+                        "contract_type": info.get("contract_type"),
+                        "info": {"contract_type": info.get("contract_type")} if info.get("contract_type") else {},
                     }
                     for symbol, info in symbols.items()
                     if isinstance(info, dict)

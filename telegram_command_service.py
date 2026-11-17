@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import queue
 import threading
 import time
 from datetime import datetime
@@ -42,7 +43,8 @@ from telegram_commands import (
 
 TELEGRAM_API = "https://api.telegram.org"
 MAX_MESSAGE_LENGTH = 3900
-MAX_COMMAND_AGE_SECONDS = 120
+MAX_COMMAND_AGE_SECONDS = 900
+MAX_QUEUED_COMMANDS = 8
 
 LOGGER = logging.getLogger("atlas.telegram.commands")
 
@@ -440,6 +442,9 @@ class TelegramCommandService:
         self._thread = None
         self._offset = None
         self._session = requests.Session()
+        self._reply_session = requests.Session()
+        self._command_queue = queue.Queue(maxsize=MAX_QUEUED_COMMANDS)
+        self._command_thread = None
         self._bot_username = None
         self._bot_info_cache = None
         self._bot_info_cache_time = 0
@@ -458,6 +463,12 @@ class TelegramCommandService:
         # Resolve bot identity before starting long polling; requests.Session is
         # then owned by the polling thread instead of being used concurrently.
         self._fetch_bot_info()
+        self._command_thread = threading.Thread(
+            target=self._command_worker_loop,
+            name="atlas-telegram-command-worker",
+            daemon=True,
+        )
+        self._command_thread.start()
         self._thread = threading.Thread(
             target=self._poll_loop,
             name="atlas-telegram-commands",
@@ -470,7 +481,10 @@ class TelegramCommandService:
         self.stop_flag.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=max(0.0, float(timeout)))
+        if self._command_thread and self._command_thread.is_alive():
+            self._command_thread.join(timeout=max(0.0, float(timeout)))
         self._session.close()
+        self._reply_session.close()
 
     def _fetch_bot_info(self) -> None:
         """Fetch bot username for @BotName command parsing."""
@@ -483,12 +497,13 @@ class TelegramCommandService:
         except Exception:
             self.logger.exception("Failed to fetch bot info")
 
-    def _api(self, method: str, payload: dict, timeout=25):
+    def _api(self, method: str, payload: dict, timeout=25, session=None):
         """Make Telegram API call with diagnostics logging."""
         start = time.perf_counter()
         self.logger.debug("Telegram API call: %s", method)
         try:
-            response = self._session.post(
+            http_session = session or self._session
+            response = http_session.post(
                 f"{TELEGRAM_API}/bot{self.token}/{method}",
                 json=payload,
                 timeout=(5, timeout),
@@ -500,6 +515,8 @@ class TelegramCommandService:
                 self.logger.error("Telegram API error: %s | %s", method, result.get("description"))
                 raise RuntimeError(str(result.get("description") or "Telegram API request failed"))
             self.logger.debug("Telegram API success: %s (%.3fs)", method, elapsed)
+            if method == "sendMessage":
+                self.logger.info("Telegram reply sent | characters=%s", len(str(payload.get("text") or "")))
             return result.get("result")
         except requests.RequestException as exc:
             elapsed = time.perf_counter() - start
@@ -508,6 +525,22 @@ class TelegramCommandService:
 
     def _poll_loop(self) -> None:
         self.logger.info("Telegram command polling started for configured group")
+        # Discard messages queued before startup. A stale backlog must not
+        # delay or age out commands sent after this process becomes available.
+        try:
+            pending = self._api(
+                "getUpdates",
+                {"offset": -1, "timeout": 0, "allowed_updates": ["message", "edited_message"]},
+                timeout=5,
+            ) or []
+            if pending:
+                self._offset = max(int(item.get("update_id", 0)) for item in pending) + 1
+                self.logger.info(
+                    "Discarded pre-start Telegram backlog | updates=%s next_offset=%s",
+                    len(pending), self._offset,
+                )
+        except Exception:
+            self.logger.exception("Could not synchronize Telegram update offset; continuing polling")
         while not self.stop_flag.is_set():
             try:
                 payload = {
@@ -578,25 +611,68 @@ class TelegramCommandService:
             self.logger.info("Telegram text received but not recognized as a command: %s", raw_command[:80])
             return
 
-        self.logger.info("Telegram command received: %s (chat_id=%s)", command[:80], chat_id)
+        self.logger.info("Telegram command queued: %s (chat_id=%s)", command[:80], chat_id)
         try:
-            result = self.execute_command(raw_command)
-        except Exception:
-            self.logger.exception("Telegram command failed: %s", command[:80])
-            result = "Komut işlenirken hata oluştu. VPS günlüklerini kontrol et."
+            self._command_queue.put_nowait((raw_command, command))
+            # Acknowledge from the polling thread immediately; a previous long
+            # analysis in the command worker must not delay this confirmation.
+            try:
+                self._api(
+                    "sendMessage",
+                    {
+                        "chat_id": self.chat_id,
+                        "text": f"Atlas komutu alındı: {command[:80]}\nİşleniyor...",
+                        "disable_web_page_preview": True,
+                    },
+                    timeout=10,
+                )
+            except Exception:
+                self.logger.exception("Telegram command acknowledgement could not be sent")
+        except queue.Full:
+            self.logger.warning("Telegram command queue full; rejecting command: %s", command[:80])
+            try:
+                self._api(
+                    "sendMessage",
+                    {
+                        "chat_id": self.chat_id,
+                        "text": "Atlas önceki komutu işliyor. Biraz sonra tekrar deneyin.",
+                        "disable_web_page_preview": True,
+                    },
+                    timeout=10,
+                )
+            except Exception:
+                self.logger.exception("Telegram queue-full reply could not be sent")
 
-        for part in split_message(result):
-            if self.stop_flag.is_set():
-                break
+    def _send_command_reply(self, message: str) -> None:
+        for part in split_message(message):
             try:
                 self._api(
                     "sendMessage",
                     {"chat_id": self.chat_id, "text": part, "disable_web_page_preview": True},
                     timeout=10,
+                    session=self._reply_session,
                 )
             except Exception:
                 self.logger.exception("Telegram command reply could not be sent")
                 break
+
+    def _command_worker_loop(self) -> None:
+        while not self.stop_flag.is_set() or not self._command_queue.empty():
+            try:
+                raw_command, command_label = self._command_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                self.logger.info("Telegram command execution started: %s", command_label[:80])
+                try:
+                    result = self.execute_command(raw_command)
+                except Exception:
+                    self.logger.exception("Telegram command failed: %s", command_label[:80])
+                    result = "Komut işlenirken hata oluştu. VPS günlüklerini kontrol et."
+                self._send_command_reply(result)
+                self.logger.info("Telegram command execution completed: %s", command_label[:80])
+            finally:
+                self._command_queue.task_done()
 
     def execute_command(self, command: str) -> str:
         """Execute a recognized command and return formatted response."""

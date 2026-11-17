@@ -41,6 +41,7 @@ def select_live_symbols(markets, max_symbols: int = DEFAULT_MAX_SYMBOLS, exchang
         require_active=True,
         require_swap=True,
         max_symbols=0,
+        require_crypto=True,
     )
     if not symbols:
         return symbols, stats
@@ -148,13 +149,16 @@ def main() -> int:
 
     logger.info(
         "Atlas live analysis service starting | symbols=%s cap=%s interval=%ss "
-        "market_count=%s skipped_inactive=%s skipped_non_swap=%s",
+        "market_count=%s skipped_inactive=%s skipped_non_swap=%s "
+        "skipped_non_crypto=%s ranking=%s",
         len(symbols),
         "unlimited" if max_symbols == 0 else max_symbols,
         int(interval),
         selection_stats["total_markets"],
         selection_stats["skipped_inactive"],
         selection_stats["skipped_not_swap"],
+        selection_stats["skipped_non_crypto"],
+        selection_stats.get("ranking_source", "unknown"),
     )
     logger.info("Selected symbols: %s", ", ".join(symbols))
 

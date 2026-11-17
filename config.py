@@ -244,8 +244,8 @@ class Config:
 
     # Scanner
     MAX_SYMBOLS = int(os.getenv("ATLAS_MAX_SYMBOLS", "0").strip() or "0")
-    # Maximum concurrent symbol analyses during a scan (default 4).
-    SCAN_MAX_WORKERS = int(os.getenv("ATLAS_SCAN_MAX_WORKERS", "4") or "4")
+    # Keep concurrent analyses low on small VPS instances; raise explicitly on larger hosts.
+    SCAN_MAX_WORKERS = int(os.getenv("ATLAS_SCAN_MAX_WORKERS", "1") or "1")
 
     # Bybit / Auto Trading
     # Atlas is analysis + Telegram only. Keep exchange order execution hard-disabled.
@@ -417,7 +417,7 @@ class Config:
 
     # Background analysis cache: one result per symbol, with bounded age and size.
     ANALYSIS_CACHE_MAX_AGE_SECONDS = int(os.getenv("ATLAS_ANALYSIS_CACHE_MAX_AGE_SECONDS", "86400"))
-    ANALYSIS_CACHE_MAX_SYMBOLS = int(os.getenv("ATLAS_ANALYSIS_CACHE_MAX_SYMBOLS", "1100"))
+    ANALYSIS_CACHE_MAX_SYMBOLS = int(os.getenv("ATLAS_ANALYSIS_CACHE_MAX_SYMBOLS", "40"))
 
     # Canlı sinyal sonuç takibi (trade journal)
     SIGNAL_TRACKING_ENABLED = os.getenv("ATLAS_SIGNAL_TRACKING_ENABLED", "1").strip().lower() in {"1", "true", "yes"}

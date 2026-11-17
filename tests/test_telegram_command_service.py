@@ -120,6 +120,33 @@ def test_recognizes_cached_best_five_command():
 
 
 
+def test_telegram_service_queues_fresh_commands_without_blocking_poll(monkeypatch):
+    service = TelegramCommandService(object(), "token", "-100123")
+    called = []
+    api_calls = []
+    monkeypatch.setattr("telegram_command_service.is_recognized_command", lambda command: True)
+    monkeypatch.setattr(service, "execute_command", lambda command: called.append(command) or "ok")
+    monkeypatch.setattr(service, "_api", lambda *args, **kwargs: api_calls.append((args, kwargs)))
+
+    service._handle_update({
+        "update_id": 11,
+        "message": {
+            "date": int(time.time()),
+            "text": "/BTC",
+            "chat": {"id": -100123},
+            "from": {"is_bot": False},
+        },
+    })
+
+    queued_command, label = service._command_queue.get_nowait()
+    service._command_queue.task_done()
+    assert queued_command == "/BTC"
+    assert label == "BTC"
+    assert called == []
+    assert api_calls[0][0][0] == "sendMessage"
+    assert "İşleniyor..." in api_calls[0][0][1]["text"]
+
+
 def test_telegram_service_ignores_queued_stale_analysis_commands(monkeypatch):
     service = TelegramCommandService(object(), "token", "-100123")
     called = []
@@ -129,7 +156,7 @@ def test_telegram_service_ignores_queued_stale_analysis_commands(monkeypatch):
     service._handle_update({
         "update_id": 10,
         "message": {
-            "date": int(time.time()) - 600,
+            "date": int(time.time()) - 1200,
             "text": "/BTC",
             "chat": {"id": -100123},
             "from": {"is_bot": False},

@@ -32,7 +32,7 @@ class ScanService:
         runtime,
         queue,
         inventory,
-        worker_count: int = 2,
+        worker_count: int = 1,
         analysis_gap_seconds: float = 0.5,
     ):
         self.runtime = runtime
