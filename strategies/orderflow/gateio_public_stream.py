@@ -290,6 +290,9 @@ class GatePublicStream:
             now = int(now_ms or time.time() * 1000)
         with self._lock:
             trades = [dict(row) for row in self._trades if 0 <= now - row["timestamp_ms"] <= 30000]
+            # Copy the deque while holding the lock; iterating it after unlock
+            # races the WebSocket consumer and can raise 'deque mutated'.
+            trades_for_history = list(self._trades)
             with self.__class__._liquidation_lock:
                 liquidations = []
                 for raw in self.__class__._shared_liquidations:
@@ -326,7 +329,7 @@ class GatePublicStream:
             last_message = self._last_message_ms
             last_error = self._last_error
         buckets = {}
-        for trade in self._trades:
+        for trade in trades_for_history:
             stamp = int(trade["timestamp_ms"])
             if stamp < now - 6 * 60 * 60 * 1000:
                 continue
