@@ -64,12 +64,16 @@ def main() -> int:
     from data_engine import exchange
     from atlas_runtime import AtlasRuntime
     from telegram_command_service import create_telegram_command_service
+    from telegram_botfather import auto_register_on_startup
 
     # The VPS Telegram integration is command/reply only. Never enable the
     # legacy automatic signal notifier or its independent polling integration.
     Config.TELEGRAM_ENABLED = False
     Config.TELEGRAM_POLLING_ENABLED = False
     Config.TELEGRAM_WEBHOOK_ENABLED = False
+
+    # Register BotFather command menu on startup
+    auto_register_on_startup()
 
     max_symbols = configured_max_symbols(os.getenv("ATLAS_MAX_SYMBOLS"))
     interval = float(os.getenv("ATLAS_SCAN_INTERVAL_SECONDS", str(DEFAULT_SCAN_INTERVAL_SECONDS)))

@@ -59,32 +59,51 @@ Belirli bir sembolle doğrudan açmak için:
 
 Sunucu servisi, terminal arayüzünü açmadan aynı `AtlasRuntime` ve `AtlasEngine` analiz hattını arka planda çalıştırır. Tek coin analizindeki yedi strateji, ortak analiz servisleri ve tek karar mekanizması değiştirilmez. Varsayılan sembol sınırı yoktur; Gate.io'teki desteklenen aktif USDT perpetual piyasalarının tamamı taranır. İstersen `.env` içinde `ATLAS_MAX_SYMBOLS` ile kendin sınır koyabilirsin.
 
+### Otomatik kurulum (önerilen)
+
+```bash
+cd ~/Atlas
+./deploy/setup_vps.sh
+```
+
+Bu script:
+1. Python sanal ortamı ve bağımlılıkları kurar
+2. `.env` dosyasını oluşturur (`.env.example` varsa)
+3. Testleri çalıştırır
+4. systemd user servisini kurar ve başlatır
+5. `loginctl enable-linger` ayarını yapar (SSH kapanınca/yeniden başlatılda servisin devam etmesi için)
+
+### Manuel kurulum
+
 ```bash
 cd ~/Atlas
 cp .env.example .env
 # İsteğe bağlı ayarları .env içinde düzenle.
 source .venv/bin/activate
-python -m pytest -q tests/test_atlas_service.py
+python -m pip install -r requirements.txt
+python -m pytest -q tests/test_atlas_service.py tests/test_telegram_command_service.py
 mkdir -p ~/.config/systemd/user
 cp deploy/atlas.service ~/.config/systemd/user/atlas.service
 systemctl --user daemon-reload
 systemctl --user enable --now atlas.service
+sudo loginctl enable-linger $(whoami)
 ```
 
-SSH oturumu kapandıktan ve VPS yeniden başladıktan sonra da kullanıcı servisi çalışsın diye bir kez:
-```bash
-sudo loginctl enable-linger administrator
-```
+### Doğrulama komutları
 
-Durum ve günlükler:
 ```bash
 systemctl --user status atlas.service
-journalctl --user -u atlas.service -f
+journalctl --user -u atlas.service -n 100 --no-pager
 systemctl --user restart atlas.service
-systemctl --user stop atlas.service
 ```
 
 Servis, yedi stratejili analiz hattını değiştirmez. VPS modunda eski otomatik Telegram sinyal bildirimi ve eski Telegram polling kapalı tutulur; yeni Telegram entegrasyonu yalnızca tanınan grup komutlarına cevap verir, kendi kendine sinyal göndermez. Otomatik emir gönderimi de kapalıdır.
+
+BotFather komut menüsü servis başlangıcında `setMyCommands` API'si ile otomatik yüklenir. Elle doğrulamak için:
+```bash
+source .venv/bin/activate
+python -m telegram_botfather verify
+```
 
 ### Telegram grup komutları
 
@@ -100,7 +119,43 @@ ATLAS_TELEGRAM_CHAT_ID=
 
 Token'ı depoya veya sohbetlere yazma. `ATLAS_TELEGRAM_CHAT_ID` yalnızca izin verilen grubun ID'si olmalıdır. Bot diğer sohbetleri ve tanınmayan grup mesajlarını sessizce yok sayar.
 
-Desteklenen örnekler: `BTC`, `ETH`, `en iyi 5 işlem`, `50 analiz et`, `tüm piyasayı tara`, `likidite BTC`, `performans`, `öğrenme`, `yardım`. Uzun taramalar tamamlanana kadar sonraki komutlar sırada bekler.
+Komutlar **sadece slash (`/`) formatında** çalışır:
+- `/btc` `/eth` `/sol` — Hızlı coin analizi
+- `/analiz BTC` — Belirtilen coin analizi
+- `/20tara` `/30tara` `/50tara` `/100tara` — N piyasa tara
+- `/tumtara` — Tüm desteklenen USDT perpetual piyasaları tara
+- `/eniyi5` — Arka plan havuzundan en iyi 5 setup (yeni tarama **başlatmaz**)
+- `/mevcut` `/setuplar` `/takip` `/likidite BTC` — Setup ve takip
+- `/performans` `/istatistik` `/ogrenme` — Performans ve öğrenme
+- `/durum` `/sistem` `/yardim` — Sistem durumu ve yardım
+
+Bot username eklenmiş biçim de çalışır: `/btc@BotAdi`, `/analiz BTC@BotAdi`. Komut isimleri büyük/küçük harf duyarsızdır.
+
+**BotFather komut menüsü** (kod ile birebir eşleşir, `setMyCommands` ile otomatik yüklenir):
+```
+btc - BTC analizi yap
+eth - ETH analizi yap
+sol - SOL analizi yap
+analiz - Belirtilen coin analizi (örn: /analiz BTC)
+20tara - 20 piyasa tara
+30tara - 30 piyasa tara
+50tara - 50 piyasa tara
+100tara - 100 piyasa tara
+tumtara - Tüm desteklenen USDT perpetual piyasaları tara
+eniyi5 - Arka plan havuzundan en iyi 5 setup'ı getir (yeni tarama başlatmaz)
+mevcut - Bugünün setup ve işlem takibi
+setuplar - Aktif setup havuzunu listele
+takip - Açık sinyal takibi
+likidite - Belirtilen coin için likidite haritası (örn: /likidite BTC)
+performans - Tüm geçmiş performans istatistikleri
+istatistik - Sinyal ve manuel işlem istatistikleri
+ogrenme - Öğrenme motoru verisi
+durum - Bot ve servis durumu (VPS, tarama, bağlantı)
+sistem - Sistem kaynakları ve çalışma durumu
+yardim - Komut listesi ve kullanım
+```
+
+Eski normal-metin komutlar (örn. `btc`, `en iyi 5 işlem`) geriye dönük uyumluluk için desteklenir ama slash komutları önerilir.
 
 ## Kullanım
 
