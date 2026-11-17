@@ -115,37 +115,51 @@ class ScanService:
                 "message": "Gate.io evreni boş; envanter yenilenemedi.",
                 "progress": progress_before,
             }
+
+        # Prefer bulk 24h quote-turnover ranking over alphabetical selection.
+        # This prevents small scans from repeatedly overlooking liquid markets.
+        ranker = getattr(self.inventory, "get_ranked_symbols", None)
+        if callable(ranker):
+            selected = list(ranker(limit=limit) or [])
+        else:
+            selected = sorted(universe)
+            if limit is not None:
+                selected = selected[:max(0, int(limit))]
+
         if has_unfinished:
-            # Resume the current generation without adding anything new.
+            # Keep the existing checkpoint and add any newly requested symbols
+            # to the same generation. Existing jobs are never reset.
+            added = self.queue.enqueue(
+                selected, batch_tag="scan_extend_" + str(int(time.time()))
+            ) if selected else 0
             self.ensure_workers()
             progress_after = self.queue.progress()
             return {
                 "started": True,
                 "universe_size": len(universe),
-                "selected": 0,
-                "added": 0,
+                "selected": len(selected),
+                "selected_preview": selected[:5],
+                "added": added,
                 "resumed": True,
+                "ranking_source": self.inventory.status().get("ranking_source", "fallback"),
                 "workers": self.worker_count,
                 "scan_generation": self.queue.current_generation(),
                 "progress": progress_after,
             }
-        # Current generation is complete: open a new scan period.
-        if limit is None or int(limit) >= len(universe):
-            selected = universe
-        elif universe:
-            selected = sorted(universe)[: int(limit)]
-        else:
-            selected = []  # resume-only: nothing new to enqueue
 
-        queue_result = self.queue.rebuild(selected, batch_tag=f"scan_{int(time.time())}")
+        queue_result = self.queue.rebuild(
+            selected, batch_tag="scan_" + str(int(time.time()))
+        )
         self.ensure_workers()
         progress_after = self.queue.progress()
         return {
             "started": True,
             "universe_size": len(universe),
             "selected": len(selected),
+            "selected_preview": selected[:5],
             "added": queue_result["added"],
             "resumed": False,
+            "ranking_source": self.inventory.status().get("ranking_source", "fallback"),
             "workers": self.worker_count,
             "scan_generation": queue_result.get("generation"),
             "progress": progress_after,
