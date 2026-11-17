@@ -305,6 +305,55 @@ def test_service_handles_slash_btc_directly():
     assert "Atlas otomatik emir göndermez" in result
 
 
+def test_btc_no_selected_setup_includes_each_strategy_diagnostic():
+    runtime = MagicMock()
+    rows = [
+        {"strategy_id": "trend_pullback", "status": "CONDITION_NOT_MET",
+         "reason": "CONDITION_NOT_MET: trend absent"},
+        {"strategy_id": "volatility_breakout", "status": "BLOCKED_COMMON_FILTER",
+         "rejection_reasons": ["INSUFFICIENT_OPPOSING_SWING_TARGETS:1/3"]},
+        {"strategy_id": "mean_reversion", "status": "NO_SETUP",
+         "reason": "CONDITION_NOT_MET: deviation absent"},
+        {"strategy_id": "liquidation_cascade", "status": "MISSING_DATA",
+         "reason": "MISSING_DATA: open_interest"},
+        {"strategy_id": "orderflow_momentum", "status": "MISSING_DATA",
+         "reason": "MISSING_DATA: recent_trades"},
+        {"strategy_id": "relative_strength", "status": "NO_SETUP",
+         "reason": "CONDITION_NOT_MET: alpha absent"},
+        {"strategy_id": "smc", "status": "BLOCKED_COMMON_FILTER",
+         "rejection_reasons": ["COMMON_NET_RR_TOO_LOW"]},
+    ]
+    runtime.analyze_symbol.return_value = {
+        "ok": True, "symbol": "BTC/USDT:USDT", "elapsed_ms": 120,
+        "result": {
+            "symbol": "BTC/USDT:USDT",
+            "signal": {"signal": "WAIT"},
+            "decision": {"action": "SKIP", "reason": "No setup passed"},
+            "analysis": {"entry": {"valid": False}},
+            "strategy_lab": {
+                "selected": None,
+                "trace_id": "trace-test-123",
+                "diagnostics": {
+                    "raw_setup_count": 2,
+                    "common_filter_passed_count": 0,
+                    "selected_strategy_id": None,
+                    "strategies": rows,
+                },
+            },
+        },
+    }
+    service = TelegramCommandService(runtime, "token", "-100123")
+    message = service.handle_analyze_symbol("BTC")
+    assert "YEDİ STRATEJİ TEŞHİSİ" in message
+    for strategy_id in (
+        "trend_pullback", "volatility_breakout", "mean_reversion",
+        "liquidation_cascade", "orderflow_momentum", "relative_strength", "smc",
+    ):
+        assert strategy_id in message
+    assert "INSUFFICIENT_OPPOSING_SWING_TARGETS:1/3" in message
+    assert "Ortak filtre geçen: 0/2" in message
+
+
 def test_service_handles_analiz_with_parameter():
     """Test /analiz BTC format."""
     runtime = MagicMock()

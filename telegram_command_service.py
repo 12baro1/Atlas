@@ -786,15 +786,59 @@ class TelegramCommandService:
                 "Sembolün USDT perpetual piyasasında bulunduğunu kontrol et."
             )
         raw_result = outcome.get("result") or {}
+        strategy_report = raw_result.get("strategy_lab")
         card = (
             build_selected_strategy_card(raw_result)
-            if isinstance(raw_result.get("strategy_lab"), dict)
+            if isinstance(strategy_report, dict)
             else build_signal_card(raw_result)
         )
         if not card.get("strategy") and not card.get("strategy_id"):
             analysis = raw_result.get("analysis") or {}
             card["strategy"] = analysis.get("strategy") or "SMC"
-        return _format_telegram_card(card, outcome.get("elapsed_ms", 0))
+
+        message = _format_telegram_card(card, outcome.get("elapsed_ms", 0))
+        if isinstance(strategy_report, dict) and not isinstance(strategy_report.get("selected"), dict):
+            diagnostics = strategy_report.get("diagnostics") or {}
+            rows = diagnostics.get("strategies") or []
+            self.logger.info(
+                "Telegram analysis has no selected strategy | symbol=%s trace_id=%s "
+                "raw=%s filter_passed=%s statuses=%s",
+                raw_result.get("symbol") or symbol,
+                raw_result.get("trace_id") or strategy_report.get("trace_id") or "-",
+                diagnostics.get("raw_setup_count", 0),
+                diagnostics.get("common_filter_passed_count", 0),
+                ",".join(
+                    "{}={}".format(
+                        str(row.get("strategy_id") or "unknown"),
+                        str(row.get("status") or "UNKNOWN"),
+                    )
+                    for row in rows if isinstance(row, dict)
+                ) or "NO_STRATEGY_ROWS",
+            )
+            if rows:
+                lines = ["", "YEDİ STRATEJİ TEŞHİSİ"]
+                for row in rows[:7]:
+                    if not isinstance(row, dict):
+                        continue
+                    strategy_id = str(row.get("strategy_id") or "unknown")
+                    status = str(row.get("status") or "UNKNOWN")
+                    reasons = row.get("rejection_reasons") or []
+                    reason = row.get("reason")
+                    if not reason and reasons:
+                        reason = reasons[0]
+                    reason_text = str(reason or "Ayrıntılı ret nedeni kaydedilmemiş")
+                    if len(reason_text) > 115:
+                        reason_text = reason_text[:112] + "..."
+                    lines.append(f"- {strategy_id}: {status} | {reason_text}")
+                lines.append(
+                    "Ortak filtre geçen: {}/{} | Seçilen: {}".format(
+                        diagnostics.get("common_filter_passed_count", 0),
+                        diagnostics.get("raw_setup_count", 0),
+                        diagnostics.get("selected_strategy_id") or "YOK",
+                    )
+                )
+                message += "\n".join(lines)
+        return message
 
     # --- Command Handlers ---
 
