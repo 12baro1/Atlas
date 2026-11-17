@@ -837,7 +837,7 @@ class TelegramCommandService:
                         diagnostics.get("selected_strategy_id") or "YOK",
                     )
                 )
-                message += "\\n".join(lines)
+                message += "\n".join(lines)
         return message
 
     # --- Command Handlers ---
