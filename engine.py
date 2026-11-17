@@ -469,7 +469,9 @@ class AtlasEngine:
             daily_fvg=context_state.get("daily_fvg", []),
             inducement=structure_state.get("inducement"),
             trendline_liquidity=structure_state.get("trendline_liquidity", []),
-            tick_size=tick_size,
+            tick_size=data.get("tick_size"),
+            maker_fee_rate=data.get("maker_fee_rate"),
+            taker_fee_rate=data.get("taker_fee_rate"),
         )
 
         # Seven raw setups (SMC included) share one filter and one final selector.
@@ -1315,6 +1317,8 @@ class AtlasEngine:
         inducement=None,
         trendline_liquidity=None,
         tick_size=None,
+        maker_fee_rate=None,
+        taker_fee_rate=None,
     ):
         """Entry, confirmation, confluence, signal, risk ve RR katmanını üretir."""
         entry = self.entry.generate(
@@ -1635,7 +1639,7 @@ class AtlasEngine:
                 confirmation["confirmed"] = False
                 confirmation["reason"] = entry["reason"]
 
-        risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles, tick_size=tick_size)
+        risk = self._calculate_risk(entry, dynamic_tp, volume_profile, institutional, candles=candles, tick_size=tick_size, maker_fee_rate=maker_fee_rate, taker_fee_rate=taker_fee_rate)
 
         # Profesyonel SMC kalitesi: SL otomatik olarak genişletildiyse (AUTO_EXPAND)
         # ilk TP hesabı orijinal/dar SL'e göre yapılmıştı; yeni mesafe ile gerçek
@@ -2494,7 +2498,7 @@ class AtlasEngine:
             self.logger.exception("Dynamic TP hesaplama hatasi")
             return {"tp1": None, "tp2": None, "tp3": None}
 
-    def _calculate_risk(self, entry, dynamic_tp, volume_profile=None, institutional=None, candles=None, tick_size=None):
+    def _calculate_risk(self, entry, dynamic_tp, volume_profile=None, institutional=None, candles=None, tick_size=None, maker_fee_rate=None, taker_fee_rate=None):
         """Geçerli entry/SL için risk çıktısını hesaplar."""
         if entry.get("entry") is None or entry.get("stop_loss") is None:
             return None
@@ -2507,6 +2511,8 @@ class AtlasEngine:
             institutional=institutional,
             candles=candles,
             tick_size=tick_size,
+            maker_fee_rate=maker_fee_rate,
+            taker_fee_rate=taker_fee_rate,
             entry_type=entry.get("entry_type", "LIMIT"),
             direction=entry.get("direction"),
         )
