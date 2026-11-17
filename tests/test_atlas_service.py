@@ -7,9 +7,9 @@ from atlas_service import (
 )
 
 
-def test_default_symbol_cap_preserves_full_universe():
-    assert configured_max_symbols(None) == DEFAULT_MAX_SYMBOLS == 0
-    assert configured_max_symbols("") == 0
+def test_default_symbol_cap_is_top_300():
+    assert configured_max_symbols(None) == DEFAULT_MAX_SYMBOLS == 300
+    assert configured_max_symbols("") == 300
 
 
 def test_symbol_cap_accepts_positive_and_unlimited_values():
