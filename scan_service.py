@@ -20,6 +20,9 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("atlas.scan_service")
 
+# Hard ceiling shared by Telegram scan commands and the durable scan queue.
+DEFAULT_SCAN_UNIVERSE_LIMIT = 300
+
 
 class ScanService:
     """Claim-based background scanner over the persistent scan queue."""
@@ -109,10 +112,38 @@ class ScanService:
     # Scan commands
     # ------------------------------------------------------------------
 
+    def enforce_universe_limit(self) -> Optional[Dict[str, Any]]:
+        """Move oversized persisted queues to a new top-300 generation.
+
+        The previous generation remains in SQLite as history; no queue or
+        opportunity-pool records are deleted.
+        """
+        progress = self.queue.progress()
+        if int(progress.get("total") or 0) <= DEFAULT_SCAN_UNIVERSE_LIMIT:
+            return None
+        universe = self.inventory.get_symbols()
+        ranker = getattr(self.inventory, "get_ranked_symbols", None)
+        if universe and callable(ranker):
+            symbols = list(ranker(limit=DEFAULT_SCAN_UNIVERSE_LIMIT) or [])
+        else:
+            symbols = sorted(universe)[:DEFAULT_SCAN_UNIVERSE_LIMIT]
+        if not symbols:
+            return None
+        result = self.queue.rebuild(
+            symbols, batch_tag=f"top_{DEFAULT_SCAN_UNIVERSE_LIMIT}_{int(time.time())}"
+        )
+        logger.warning(
+            "Oversized persisted scan generation replaced by bounded generation | "
+            "previous_total=%s new_total=%s ranking=%s",
+            progress.get("total"), len(symbols),
+            self.inventory.status().get("ranking_source", "alphabetical_fallback"),
+        )
+        return result
+
     def start_scan(self, limit: Optional[int] = None) -> Dict[str, Any]:
         """Enqueue the requested scan and make sure workers are running.
 
-        - limit=None scans the whole current Gate.io universe.
+        - limit=None scans the top 300 Gate.io contracts by 24h quote turnover.
         - If the current scan generation still has unfinished work, the
           command resumes it instead of restarting — even when the inventory
           is temporarily unavailable.
@@ -122,6 +153,13 @@ class ScanService:
         - A larger request during an unfinished generation extends that same
         generation without resetting completed jobs or checkpoints.
         """
+        # "Scan all" means all of the configured liquid universe. Preserve
+        # smaller requests and clamp unbounded/larger requests to top 300.
+        if limit is None:
+            limit = DEFAULT_SCAN_UNIVERSE_LIMIT
+        else:
+            limit = min(max(0, int(limit)), DEFAULT_SCAN_UNIVERSE_LIMIT)
+
         progress_before = self.queue.progress()
         has_unfinished = (
             progress_before["pending"] > 0 or progress_before["running"] > 0

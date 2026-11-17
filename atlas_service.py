@@ -12,12 +12,12 @@ import threading
 from pathlib import Path
 
 
-DEFAULT_MAX_SYMBOLS = 0
+DEFAULT_MAX_SYMBOLS = 300
 DEFAULT_SCAN_INTERVAL_SECONDS = 900
 
 
 def configured_max_symbols(raw_value: str | None) -> int:
-    """Return the configured symbol cap; zero explicitly means unlimited."""
+    """Return the scanner cap; legacy zero/unlimited settings are clamped to 300."""
     if raw_value is None or not str(raw_value).strip():
         return DEFAULT_MAX_SYMBOLS
     try:
@@ -25,21 +25,67 @@ def configured_max_symbols(raw_value: str | None) -> int:
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("ATLAS_MAX_SYMBOLS must be a non-negative integer") from exc
     if value < 0:
-        raise ValueError("ATLAS_MAX_SYMBOLS must be zero (unlimited) or a positive integer")
-    return value
+        raise ValueError("ATLAS_MAX_SYMBOLS must be a non-negative integer")
+    if value == 0:
+        return DEFAULT_MAX_SYMBOLS
+    return min(value, DEFAULT_MAX_SYMBOLS)
 
 
-def select_live_symbols(markets, max_symbols: int = DEFAULT_MAX_SYMBOLS):
-    """Select active Gate.io USDT perpetual swaps for the headless scanner."""
+def select_live_symbols(markets, max_symbols: int = DEFAULT_MAX_SYMBOLS, exchange_client=None):
+    """Select the highest-turnover active Gate.io USDT perpetual swaps."""
     from universe_engine import select_symbols
 
-    return select_symbols(
+    symbols, stats = select_symbols(
         markets,
         suffix="/USDT:USDT",
         require_active=True,
         require_swap=True,
-        max_symbols=max_symbols,
+        max_symbols=0,
     )
+    if not symbols:
+        return symbols, stats
+
+    # Rank before applying the cap; alphabetical truncation can exclude liquid markets.
+    scores = {}
+    fetch_tickers = getattr(exchange_client, "fetch_tickers", None)
+    if callable(fetch_tickers):
+        try:
+            tickers = fetch_tickers(symbols=symbols) or {}
+            for symbol in symbols:
+                ticker = tickers.get(symbol) if isinstance(tickers, dict) else None
+                if not isinstance(ticker, dict):
+                    continue
+                info = ticker.get("info") if isinstance(ticker.get("info"), dict) else {}
+                raw_volume = ticker.get("quoteVolume")
+                if raw_volume is None:
+                    raw_volume = info.get("volume_24h_quote")
+                try:
+                    volume = float(raw_volume or 0)
+                except (TypeError, ValueError, OverflowError):
+                    volume = 0.0
+                if not (0 < volume < float("inf")):
+                    try:
+                        volume = float(ticker.get("last") or ticker.get("close") or 0) * float(ticker.get("baseVolume") or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        volume = 0.0
+                if 0 < volume < float("inf"):
+                    scores[symbol] = volume
+        except Exception:
+            # Stay available during a temporary ticker endpoint failure.
+            scores = {}
+
+    if scores:
+        symbols.sort(key=lambda symbol: (scores.get(symbol, -1.0), symbol), reverse=True)
+        stats["ranking_source"] = "gateio_24h_quote_volume"
+    else:
+        symbols.sort()
+        stats["ranking_source"] = "alphabetical_fallback"
+
+    if max_symbols > 0 and len(symbols) > max_symbols:
+        stats["limited"] = len(symbols) - max_symbols
+        symbols = symbols[:max_symbols]
+    stats["kept"] = len(symbols)
+    return symbols, stats
 
 
 def _load_environment() -> None:
@@ -82,7 +128,7 @@ def main() -> int:
 
     logger.info("Loading Gate.io public perpetual market metadata")
     markets = exchange.load_markets()
-    symbols, selection_stats = select_live_symbols(markets, max_symbols=max_symbols)
+    symbols, selection_stats = select_live_symbols(markets, max_symbols=max_symbols, exchange_client=exchange)
     if not symbols:
         raise RuntimeError("No active USDT perpetual swap symbols were found on Gate.io")
 

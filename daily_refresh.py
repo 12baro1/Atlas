@@ -89,7 +89,11 @@ class DailyPoolRefresh:
                 return None
             try:
                 inventory = self.market_inventory.status()
-                universe = self.market_inventory.get_symbols()
+                ranker = getattr(self.market_inventory, "get_ranked_symbols", None)
+                if callable(ranker):
+                    universe = list(ranker(limit=300) or [])
+                else:
+                    universe = sorted(self.market_inventory.get_symbols())[:300]
                 counts = self.pool.archive_and_reset_scan_pools(today)
                 # New period: open a fresh scan generation so completed jobs
                 # from the previous day never block today's scan. rebuild()

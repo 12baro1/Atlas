@@ -118,6 +118,10 @@ class AtlasRuntime:
         # Scan infrastructure resumes regardless of who started the runtime:
         # pending queue work continues and the daily refresh stays scheduled.
         try:
+            # Preserve oversized historical queue generations, but resume work
+            # only from a fresh top-300 generation to avoid repeating the old
+            # 1,000+ market backlog after deployment.
+            self._scan_service.enforce_universe_limit()
             self._scan_service.ensure_workers()
             self._daily_refresh.start_background()
         except Exception as exc:
