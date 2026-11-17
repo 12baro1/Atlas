@@ -64,7 +64,7 @@ def _leg(price, order_type, maker_fee_rate, taker_fee_rate,
 
 
 def estimate_plan_cost(entry_price, targets, weights, entry_type="LIMIT",
-                       maker_fee_rate=0.0002, taker_fee_rate=0.00055,
+                       maker_fee_rate=0.0002, taker_fee_rate=0.0005,
                        spread_rate=0.0002, slippage_rate=0.0003):
     """Expected fee drag for weighted TP exits, in quote units per unit size."""
     entry = _leg(entry_price, entry_type, maker_fee_rate, taker_fee_rate,
@@ -85,7 +85,7 @@ def estimate_plan_cost(entry_price, targets, weights, entry_type="LIMIT",
 
 
 def estimate_stop_cost(entry_price, stop_price, entry_type="LIMIT",
-                       maker_fee_rate=0.0002, taker_fee_rate=0.00055,
+                       maker_fee_rate=0.0002, taker_fee_rate=0.0005,
                        spread_rate=0.0002, slippage_rate=0.0003):
     """Worst-case round trip: planned entry followed by a market stop exit."""
     entry = _leg(entry_price, entry_type, maker_fee_rate, taker_fee_rate,
@@ -104,7 +104,7 @@ def estimate_stop_cost(entry_price, stop_price, entry_type="LIMIT",
 def realized_trade_cost(entry_price, exit_price, entry_type, exit_reason,
                         targets, reached_levels=None, tp_weights=None,
                         partial_exits=True, maker_fee_rate=0.0002,
-                        taker_fee_rate=0.00055, spread_rate=0.0002,
+                        taker_fee_rate=0.0005, spread_rate=0.0002,
                         slippage_rate=0.0003):
     """Actual modeled cost for the fills recorded by the OHLCV simulator."""
     entry = _leg(entry_price, entry_type, maker_fee_rate, taker_fee_rate,
