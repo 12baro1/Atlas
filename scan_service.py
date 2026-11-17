@@ -81,11 +81,14 @@ class ScanService:
         Claimed jobs keep their lease; an unfinished lease expires and is
         requeued automatically, so stopping never loses work.
         """
-        self._stop_event.set()
-        for worker in list(self._workers):
-            worker.join(timeout=timeout_seconds)
         with self._worker_lock:
-            alive_workers = [worker for worker in self._workers if worker.is_alive()]
+            # Serialize shutdown against ensure_workers(): otherwise a new
+            # start could clear the stop event between set() and join().
+            self._stop_event.set()
+            workers = list(self._workers)
+            for worker in workers:
+                worker.join(timeout=timeout_seconds)
+            alive_workers = [worker for worker in workers if worker.is_alive()]
             alive = [worker.name for worker in alive_workers]
             # Retain references to workers that did not finish within the
             # timeout. ensure_workers() must see them and must not clear the
