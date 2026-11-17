@@ -183,12 +183,13 @@ def test_composite_ranking_prefers_net_rr_and_freshness(pool):
 
 def test_scan_stop_reports_worker_still_running(pool):
     runtime = MagicMock()
+    service = make_service(runtime)
     runtime.stop_scan.return_value = {
         "stopped": False,
         "workers_still_alive": ["AtlasScanWorker-0"],
         "progress": {"pending": 4, "running": 1, "done": 5},
     }
-    result = make_service(runtime).handle_scan_stop()
+    result = service.handle_scan_stop()
     assert "TARAMA DURDURMA İSTEĞİ" in result
     assert "yeni worker başlatılmayacak" in result
     assert "AtlasScanWorker-0" in result
@@ -196,6 +197,7 @@ def test_scan_stop_reports_worker_still_running(pool):
 
 def test_scan_status_includes_strategy_funnel(pool):
     runtime = MagicMock()
+    service = make_service(runtime)
     runtime.scan_status.return_value = {
         "total": 10, "pending": 2, "running": 0, "done": 8, "failed": 0,
         "percent": 80.0, "complete": False, "workers_running": True,
@@ -209,7 +211,7 @@ def test_scan_status_includes_strategy_funnel(pool):
         },
         "pool": {"validated": 2},
     }
-    result = make_service(runtime).handle_scan_status()
+    result = service.handle_scan_status()
     assert "gateio_24h_quote_volume" in result
     assert "YEDİ STRATEJİ / ORTAK FİLTRE" in result
     assert "smc: 1 setup | 1 geçti | 0 elendi | 1 seçildi" in result
