@@ -500,12 +500,41 @@ class OpportunityPool:
             candidates.sort(key=lambda c: (c.net_rr_after_costs, c.confidence), reverse=True)
             return candidates[:limit]
     
-    def get_best_setups(self, limit: int = 5) -> List[SetupCandidate]:
-        """Get the best setups from the validated pool based on net RR and confidence."""
+    def get_best_setups(self, limit: int = 5, rank: str = "composite") -> List[SetupCandidate]:
+        """Read-only ranking of the validated pool.
+
+        rank="composite" (default) uses a transparent heuristic score built
+        ONLY from stored, evidence-backed fields — this is a ranking score,
+        never a win probability:
+          - net RR after costs (dominant, already cost-adjusted)
+          - decision-engine strength (confidence)
+          - mid-target richness (rr_tp2), TP structure is monotonic by design
+          - setup age penalty (older setups carry staler market data)
+        rank="net_rr" keeps the simple cost-adjusted RR ordering.
+        """
         with self._lock:
             candidates = list(self._validated.values())
-            # Sort by net RR after costs desc, then confidence desc, then RR desc
-            candidates.sort(key=lambda c: (c.net_rr_after_costs or 0, c.confidence or 0, c.net_rr or 0), reverse=True)
+            if rank == "composite":
+                now_ms = int(time.time() * 1000)
+                def composite(c: SetupCandidate) -> float:
+                    net_rr = min(float(c.net_rr_after_costs or 0.0), 6.0)
+                    rr_component = net_rr / 6.0
+                    confidence_component = max(0.0, min(float(c.confidence or 0.0), 100.0)) / 100.0
+                    mid_target = min(max(float(c.rr_tp2 or 0.0), 0.0), 6.0) / 6.0
+                    age_hours = 0.0
+                    if c.created_at_ms:
+                        age_hours = max(0.0, (now_ms - c.created_at_ms) / 3_600_000.0)
+                    age_component = 2.718281828 ** (-age_hours / 48.0)
+                    return (
+                        0.45 * rr_component
+                        + 0.20 * confidence_component
+                        + 0.15 * mid_target
+                        + 0.20 * age_component
+                    )
+                candidates.sort(key=composite, reverse=True)
+            else:
+                # Sort by net RR after costs desc, then confidence desc, then RR desc
+                candidates.sort(key=lambda c: (c.net_rr_after_costs or 0, c.confidence or 0, c.net_rr or 0), reverse=True)
             return candidates[:limit]
     
     # ---------------------------------------------------------------------
@@ -871,6 +900,35 @@ class OpportunityPool:
             for candidate in pool.values():
                 self._index_candidate(candidate)
     
+    def archive_and_reset_scan_pools(self, day_tag: str) -> Dict[str, int]:
+        """Daily refresh (requirement K): archive the previous day's pools.
+
+        Candidates and validated setups are archived with a DAILY_REFRESH
+        reason (never silently deleted), a consistent SQLite backup is
+        written to the archive directory, then the two live pools are
+        cleared for the new day. Active (user-accepted) setups are kept.
+        """
+        with self._lock:
+            counts = {"candidates": len(self._candidates), "validated": len(self._validated)}
+            archived_dir = self.base_path / "archive" / day_tag
+            if self._store is not None:
+                try:
+                    archived_dir.mkdir(parents=True, exist_ok=True)
+                    self._store.backup(archived_dir / "pool_state.db")
+                except Exception as e:
+                    logger.error(f"Daily archive backup failed: {e}")
+            
+            reason = f"DAILY_REFRESH:{day_tag}"
+            for candidate in list(self._candidates.values()):
+                self._remove_candidate(candidate.setup_id)
+                self._archive_candidate(candidate, SetupStatus.EXPIRED.value, reason)
+            for candidate in list(self._validated.values()):
+                self._remove_validated(candidate.setup_id)
+                self._archive_candidate(candidate, SetupStatus.EXPIRED.value, reason)
+            self._history_flushed = 0  # archive rows are re-appended on save
+            self.save_all()
+            return counts
+
     def get_stats(self) -> Dict[str, Any]:
         """Get pool statistics."""
         with self._lock:
