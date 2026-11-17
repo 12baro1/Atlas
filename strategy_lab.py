@@ -845,7 +845,6 @@ class SevenStrategyLab:
 
         eligible = []
         for candidate in generated:
-            _snap_candidate_to_exchange_tick(candidate, data.get("tick_size"))
             # All seven strategies share one structural geometry filter.
             # Raw candidates must have valid entry/stop/three targets after
             # applying confirmed swing invalidation and opposing liquidity targets.
@@ -864,6 +863,7 @@ class SevenStrategyLab:
                 # _finalize_candidate_geometry mutates candidate with stop_loss, tp1, tp2, tp3
                 # Fall through to geometry validation below.
             
+            _snap_candidate_to_exchange_tick(candidate, data.get("tick_size"))
             # Validate geometry for ALL candidates (including SMC with pre-populated targets).
             direction = str(candidate.get("direction") or "").upper()
             try:
