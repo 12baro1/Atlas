@@ -115,9 +115,16 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
         Candle(time=now - 3_600_000, open=100, high=102, low=98, close=101, volume=10)
     ])
     monkeypatch.setattr(data_engine, "configured_sector_peers", lambda _symbol: [])
-    monkeypatch.setattr(GatePublicStream, "for_symbol", classmethod(lambda cls, _symbol: FakeStream()))
+    stream_requests = []
+    monkeypatch.setattr(
+        GatePublicStream, "for_symbol",
+        classmethod(lambda cls, _symbol: stream_requests.append(_symbol) or FakeStream()),
+    )
 
-    data = data_engine.get_market_data("BTC/USDT:USDT", force_refresh=True)
+    data = data_engine.get_market_data(
+        "BTC/USDT:USDT", force_refresh=True, use_websocket=False
+    )
+    assert stream_requests == [], "background scans must not start per-symbol WebSockets"
 
     assert data["data_provenance"]["orderbook"] == "GATEIO_REST"
     assert data["data_provenance"]["recent_trades"] == "GATEIO_REST"
