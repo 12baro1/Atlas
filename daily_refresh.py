@@ -95,7 +95,8 @@ class DailyPoolRefresh:
                 counts = self.pool.archive_and_reset_scan_pools(today)
                 # The queue decides under the SQLite write lock whether to roll over.
                 queue_result = self.scan_queue.rebuild(
-                    universe, batch_tag=f"refresh_{today}", preserve_unfinished=True
+                    universe, batch_tag=f"refresh_{today}", preserve_unfinished=True,
+                    ranking_source=inventory.get("ranking_source", "unknown")
                 )
                 store = getattr(self.pool, "_store", None)
                 if store is not None:

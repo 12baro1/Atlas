@@ -186,3 +186,16 @@ def test_meta_roundtrip(tmp_path):
         assert store.get_meta("last_refresh_day") == "2026-11-18"
     finally:
         store.close()
+
+
+def test_snapshot_failure_rolls_back_all_pools_and_history(tmp_path):
+    import pytest
+    store = PoolStore(str(tmp_path))
+    original = {"s1": sample_payload()}
+    store.save_snapshot(original, {}, {}, [])
+    with pytest.raises(TypeError):
+        store.save_snapshot({}, {}, original, [{"invalid_json": object()}])
+    assert store.load_pool("candidates") == original
+    assert store.load_pool("active") == {}
+    assert store.load_history() == []
+    store.close()

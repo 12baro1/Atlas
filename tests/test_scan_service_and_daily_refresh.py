@@ -63,7 +63,7 @@ class FakeQueue:
     def __init__(self):
         self.rebuilt = []
 
-    def rebuild(self, symbols, batch_tag=None, *, preserve_unfinished=False):
+    def rebuild(self, symbols, batch_tag=None, *, preserve_unfinished=False, ranking_source=None):
         self.rebuilt.append((tuple(symbols), batch_tag))
         return {"added": len(symbols), "progress": {}, "generation": 1}
 
@@ -307,13 +307,21 @@ class FakeQ:
         self.jobs = ordered
         return len(pending)
 
-    def rebuild(self, symbols, batch_tag=None, *, preserve_unfinished=False):
+    def extend_ranked(self, symbols, batch_tag, source, revalidate=()):
+        added = self.enqueue(symbols, batch_tag)
+        reopened = self.requeue_completed(revalidate, batch_tag)
+        self.reorder_pending(symbols)
+        self.set_generation_ranking(symbols, source)
+        return added, reopened
+
+    def rebuild(self, symbols, batch_tag=None, *, preserve_unfinished=False, ranking_source=None):
         progress = self.progress()
         if preserve_unfinished and (progress["running"] or progress["pending"]):
             return {"rebuilt": False, "generation": self.generation, "added": 0, "progress": progress}
         self.generation += 1
         self.jobs = {}
         added = self.enqueue(symbols, batch_tag)
+        self.set_generation_ranking(symbols, ranking_source)
         return {
             "added": added,
             "rebuilt": True,

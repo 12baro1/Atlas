@@ -856,8 +856,8 @@ class OpportunityPool:
         
         self._history.append(candidate.to_dict())
         
-        # Trim history
-        if len(self._history) > self.max_history:
+        # Never discard uncommitted transitions to make room in the display cache.
+        if self._store is None and self.max_history > 0:
             self._history = self._history[-self.max_history:]
     
     # ---------------------------------------------------------------------
@@ -871,26 +871,16 @@ class OpportunityPool:
             
             if self._store is not None:
                 try:
-                    self._store.save_pool(
-                        "candidates",
-                        {k: v.to_dict() for k, v in self._candidates.items()},
-                    )
-                    self._store.save_pool(
-                        "validated",
-                        {k: v.to_dict() for k, v in self._validated.items()},
-                    )
-                    self._store.save_pool(
-                        "active",
-                        {k: v.to_dict() for k, v in self._active.items()},
-                    )
                     new_history = self._history[self._history_flushed:]
-                    if new_history:
-                        inserted = self._store.append_history(new_history)
-                        self._history_flushed += len(new_history)
-                        if inserted < len(new_history):
-                            # Duplicates were already stored; keep the counter
-                            # aligned with what actually exists.
-                            self._history_flushed -= (len(new_history) - inserted)
+                    self._store.save_snapshot(
+                        {k: v.to_dict() for k, v in self._candidates.items()},
+                        {k: v.to_dict() for k, v in self._validated.items()},
+                        {k: v.to_dict() for k, v in self._active.items()},
+                        new_history,
+                    )
+                    if self.max_history > 0:
+                        self._history = self._history[-self.max_history:]
+                    self._history_flushed = len(self._history)
                 except Exception as e:
                     logger.error(f"SQLite pool persistence failed: {e}")
             

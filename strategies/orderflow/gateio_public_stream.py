@@ -100,7 +100,7 @@ class GatePublicStream:
                         except websocket.WebSocketTimeoutException:
                             continue
                         if not raw:
-                            continue
+                            raise ConnectionError("Gate.io WebSocket closed by peer")
                         try:
                             self._consume(json.loads(raw))
                         except (TypeError, ValueError, UnicodeDecodeError):
@@ -111,6 +111,10 @@ class GatePublicStream:
                 finally:
                     with self._lock:
                         self._connected = False
+                        self._book_synced = False
+                        self._book_update_id = None
+                        self._book_updates.clear()
+                        self._last_message_ms = None
                     try:
                         if ws:
                             ws.close()
@@ -179,7 +183,7 @@ class GatePublicStream:
                             stamp *= 1000
                         raw_size = float(row["size"])
                         price = float(row["price"])
-                        if price <= 0 or raw_size == 0:
+                        if not math.isfinite(price) or price <= 0 or raw_size == 0:
                             continue
                         # Gate futures trade size is in contracts; normalize to
                         # base-asset quantity exactly once, like REST trades.
@@ -330,7 +334,7 @@ class GatePublicStream:
         buckets = {}
         for trade in trades_for_history:
             stamp = int(trade["timestamp_ms"])
-            if stamp < now - 6 * 60 * 60 * 1000:
+            if not now - 6 * 60 * 60 * 1000 <= stamp <= now:
                 continue
             bucket = stamp // 60000 * 60000
             item = buckets.setdefault(bucket, {"timestamp_ms": bucket, "buy_notional": 0.0, "sell_notional": 0.0})

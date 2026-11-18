@@ -13,6 +13,7 @@ States: pending -> running (leased) -> done | failed -> pending(retry)
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 import logging
 import sqlite3
 import threading
@@ -516,7 +517,7 @@ class ScanQueue:
         ]
 
     def rebuild(self, symbols: List[str], batch_tag: Optional[str] = None,
-                *, preserve_unfinished: bool = False) -> Dict[str, Any]:
+                *, preserve_unfinished: bool = False, ranking_source=None) -> Dict[str, Any]:
         """Open a new scan generation and queue the given symbols for it.
 
         Older generations keep their history; completed scans never block a
@@ -545,6 +546,8 @@ class ScanQueue:
                     ((symbol, now + index, batch_tag, gen) for index, symbol in enumerate(ordered)),
                 )
                 added = len(ordered)
+                if ranking_source is not None:
+                    self.set_generation_ranking(ordered, ranking_source, generation=gen)
         snapshot = self.progress(gen)
         return {"added": added, "progress": snapshot, "generation": gen, "rebuilt": rebuilt}
 
@@ -567,8 +570,21 @@ class ScanQueue:
         ).fetchall()
         return [row[0] for row in rows]
 
+    def extend_ranked(self, symbols, batch_tag, source, revalidate=()):
+        """Commit new jobs, reopened jobs and the ordering workers will see together."""
+        with self._transaction():
+            added = self.enqueue(symbols, batch_tag=batch_tag)
+            reopened = self.requeue_completed(revalidate, batch_tag=batch_tag)
+            existing = self.generation_ranking()["symbols"] + self.generation_symbols()
+            ordered = list(dict.fromkeys([*symbols, *existing]))
+            self.reorder_pending(ordered)
+            self.set_generation_ranking(ordered, source)
+            return added, reopened
+
     def _transaction(self):
-        return _WriteTransaction(self._thread_conn())
+        conn = self._thread_conn()
+        # All callers propagate exceptions to the owning write transaction.
+        return nullcontext(conn) if conn.in_transaction else _WriteTransaction(conn)
 
 
 class _WriteTransaction:

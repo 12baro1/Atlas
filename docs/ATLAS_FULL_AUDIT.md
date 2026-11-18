@@ -50,7 +50,13 @@ Aktif havuzda dolum sonrası eski giriş süresi dolsa da pozisyon izlenir. Kull
 
 Aynı makinede 300 satırlık 15 SQLite generation oluşturma işleminin medyanı 7,22 ms'den 4,11 ms'ye indi. Deneyde geçici veritabanları kullanıldı. Canlı 300 sembollük tarama, üretim CPU/RAM, WS yeniden bağlanma gecikmesi ve Telegram teslim süresi bu ölçümün kapsamı dışındadır.
 
-Kalan riskler arasında pool tablolarının ayrı transaction'larda kaydedilmesi, manuel genişletme ve sıralama metadata güncellemelerinin ayrı yapılması, canlı L2 arşivinin sembol ve tarihe bağlı kapsaması bulunur. Statik grafikte çağrısı bulunmayan modüller dinamik yükleme olasılığı nedeniyle silinmedi. Özel Telegram hesabı veya üretim journal'ı kullanılmadı.
+### Takip denetimi
+
+- Aday, doğrulanmış, aktif ve geçmiş kayıtları artık tek SQLite transaction'ında yazılıyor. Geçmiş serileştirmesini son adımda bozarak eski adayın korunması ve kısmi aktif kaydın görülmemesi test edildi. Bellek içi geçmiş limiti dolduğunda yeni arşiv satırlarının kaybolmasına karşı da regresyon testi var.
+- Manuel kuyruk genişletmesinde yeni işler, yeniden doğrulama, sıra ve sıralama kaynağı birlikte kaydediliyor. Generation açılırken sıralama yazımı hata verirse dönem numarası ve işler de geri alınıyor.
+- BTC public WebSocket gözleminde 30 saniyelik 17 örnek boyunca bağlantı ve yeni işlemler görüldü. Dördüncü örnekten hemen sonra bağlantı test amacıyla kapatıldı; beşinci örnekte ikinci bağlantı ve son 30 saniyede 181 işlem vardı. Kesin yeniden bağlanma süresi bu örnekleme sıklığıyla ölçülemez. EOF sonrası L2 geçersizleştirme, sonsuz fiyat ve gelecekteki işlemlerin CVD'ye girmemesi ayrıca çevrimdışı test edildi.
+- İzole 300 sembollük gerçek Gate.io kuyruğunun ilk 16 analizi 702 saniyede tamamlandı (kuyruğa yazımdan itibaren 1,37 sembol/dakika). Bu noktada 283 iş bekliyor, bir iş çalışıyordu. Gözlenen tepe RSS 217.860 KiB. Bu ara ölçüm üretim kapasitesi veya tam tarama süresi olarak yorumlanamaz.
+- Telegram komut yanıtı gönderilirken ağ hatasındaki bot URL'si ve özel mesaj metninin loglara çıkması önlendi. Canlı uçtan uca teslim için yetkili test sohbeti ve yapılandırılmış bot gerekli. Üretim journal'ı kullanılmadı. Canlı L2 arşiv kapsamı hâlâ sembol ve tarihe bağlıdır.
 
 ## Mevcut VPS kurulumu için operatör adımları
 

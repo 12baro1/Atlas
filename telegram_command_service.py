@@ -592,16 +592,18 @@ class TelegramCommandService:
             response.raise_for_status()
             result = response.json()
             if not result.get("ok"):
-                self.logger.error("Telegram API error: %s | %s", method, result.get("description"))
-                raise RuntimeError(str(result.get("description") or "Telegram API request failed"))
+                raise RuntimeError(f"Telegram {method} was rejected")
             self.logger.debug("Telegram API success: %s (%.3fs)", method, elapsed)
             if method == "sendMessage":
                 self.logger.info("Telegram reply sent | characters=%s", len(str(payload.get("text") or "")))
             return result.get("result")
         except requests.RequestException as exc:
             elapsed = time.perf_counter() - start
-            self.logger.error("Telegram API network error: %s | %s (%.3fs)", method, exc, elapsed)
-            raise
+            status = getattr(exc.response, "status_code", None)
+            self.logger.error("Telegram %s failed | type=%s status=%s (%.3fs)",
+                              method, type(exc).__name__, status, elapsed)
+            # requests exceptions can contain the entire bot-token URL.
+            raise requests.RequestException(f"Telegram {method} failed (HTTP {status})") from None
 
     def _poll_loop(self) -> None:
         self.logger.info("Telegram command polling started for configured group")
@@ -688,7 +690,7 @@ class TelegramCommandService:
 
         command = normalize_command(raw_command)
         if not command or not is_recognized_command(raw_command):
-            self.logger.info("Telegram text received but not recognized as a command: %s", raw_command[:80])
+            self.logger.debug("Telegram text ignored: unrecognized command")
             return
 
         self.logger.info("Telegram command queued: %s (chat_id=%s)", command[:80], chat_id)

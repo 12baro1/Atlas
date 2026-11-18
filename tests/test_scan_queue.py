@@ -256,6 +256,26 @@ def test_guarded_refresh_after_restart_preserves_lease_and_pending(tmp_path):
     queue.close()
 
 
+def test_ranked_extension_and_rollover_rollback_with_ranking_failure(tmp_path, monkeypatch):
+    import sqlite3
+    queue = make_queue(tmp_path)
+    try:
+        generation = queue.rebuild(["BTC", "ETH"], ranking_source="original")["generation"]
+        original = queue.generation_ranking()
+        def fail(*args, **kwargs):
+            raise sqlite3.OperationalError("simulated ranking error")
+        monkeypatch.setattr(queue, "set_generation_ranking", fail)
+        with pytest.raises(sqlite3.OperationalError):
+            queue.extend_ranked(["SOL"], "manual", "new")
+        with pytest.raises(sqlite3.OperationalError):
+            queue.rebuild(["SOL"], ranking_source="new")
+        assert queue.current_generation() == generation
+        assert queue.generation_symbols() == ["BTC", "ETH"]
+        assert queue.generation_ranking() == original
+    finally:
+        queue.close()
+
+
 def test_old_claim_cannot_complete_recovered_lease(tmp_path):
     queue = make_queue(tmp_path)
     queue.enqueue(["BTC"])
