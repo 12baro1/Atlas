@@ -89,6 +89,36 @@ def select_live_symbols(markets, max_symbols: int = DEFAULT_MAX_SYMBOLS, exchang
     return symbols, stats
 
 
+
+def load_startup_symbols(
+    inventory,
+    max_symbols: int,
+    stop_event: threading.Event,
+    logger,
+    retry_interval_seconds: float = 30.0,
+):
+    """Wait for a successful Gate.io inventory refresh instead of crashing startup."""
+    last_status = {}
+    while not stop_event.is_set():
+        try:
+            last_status = inventory.refresh(force=True) or {}
+            if not last_status.get("last_error") and int(last_status.get("symbol_count") or 0) > 0:
+                symbols = inventory.get_ranked_symbols(limit=max_symbols)
+                if symbols:
+                    return symbols, inventory.status()
+                logger.warning("Gate.io inventory returned no ranked USDT perpetuals; retrying")
+            else:
+                logger.warning(
+                    "Gate.io inventory unavailable; keeping Atlas alive and retrying | error=%s",
+                    last_status.get("last_error") or "empty_inventory",
+                )
+        except Exception as exc:
+            logger.warning("Gate.io startup inventory request failed; retrying | %s", exc)
+        if stop_event.wait(max(1.0, float(retry_interval_seconds))):
+            break
+    return [], last_status
+
+
 def _load_environment() -> None:
     # Load local settings before importing Config or any Atlas runtime modules.
     try:
@@ -110,33 +140,9 @@ def main() -> int:
     from config import Config
     from data_engine import exchange
     from atlas_runtime import AtlasRuntime
+    from market_inventory import get_market_inventory
     from telegram_command_service import create_telegram_command_service
     from telegram_botfather import auto_register_on_startup
-
-    # The VPS Telegram integration is command/reply only. Never enable the
-    # legacy automatic signal notifier or its independent polling integration.
-    Config.TELEGRAM_ENABLED = False
-    Config.TELEGRAM_POLLING_ENABLED = False
-    Config.TELEGRAM_WEBHOOK_ENABLED = False
-
-    # Register BotFather command menu on startup
-    auto_register_on_startup()
-
-    max_symbols = configured_max_symbols(os.getenv("ATLAS_MAX_SYMBOLS"))
-    interval = float(os.getenv("ATLAS_SCAN_INTERVAL_SECONDS", str(DEFAULT_SCAN_INTERVAL_SECONDS)))
-    if interval <= 0:
-        raise ValueError("ATLAS_SCAN_INTERVAL_SECONDS must be greater than zero")
-
-    logger.info("Loading Gate.io public perpetual market metadata")
-    markets = exchange.load_markets()
-    symbols, selection_stats = select_live_symbols(markets, max_symbols=max_symbols, exchange_client=exchange)
-    if not symbols:
-        raise RuntimeError("No active USDT perpetual swap symbols were found on Gate.io")
-
-    runtime = AtlasRuntime(symbols=symbols, logger=logger, full_scan=True)
-    telegram_commands = create_telegram_command_service(runtime, logger=logger)
-    if telegram_commands is not None:
-        runtime.attach_telegram_service(telegram_commands)
 
     stop_event = threading.Event()
 
@@ -144,20 +150,56 @@ def main() -> int:
         logger.info("Shutdown requested (signal=%s)", signum)
         stop_event.set()
 
+    # Install signal handlers before any network operation so systemd can stop
+    # Atlas cleanly even while Gate.io is temporarily unavailable.
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
 
+    # The VPS Telegram integration is command/reply only. Never enable the
+    # legacy automatic signal notifier or its independent polling integration.
+    Config.TELEGRAM_ENABLED = False
+    Config.TELEGRAM_POLLING_ENABLED = False
+    Config.TELEGRAM_WEBHOOK_ENABLED = False
+
+    max_symbols = configured_max_symbols(os.getenv("ATLAS_MAX_SYMBOLS"))
+    interval = float(os.getenv("ATLAS_SCAN_INTERVAL_SECONDS", str(DEFAULT_SCAN_INTERVAL_SECONDS)))
+    if interval <= 0:
+        raise ValueError("ATLAS_SCAN_INTERVAL_SECONDS must be greater than zero")
+
+    # Reuse the same persistent inventory instance as ScanService. The adapter
+    # owns endpoint retries; avoid multiplying them with inventory-level retries.
+    # The inventory still persists and preserves its last successful snapshot.
+    inventory = get_market_inventory(exchange=exchange, max_retries=1)
+    logger.info("Loading Gate.io public perpetual market metadata")
+    symbols, selection_stats = load_startup_symbols(
+        inventory,
+        max_symbols=max_symbols,
+        stop_event=stop_event,
+        logger=logger,
+    )
+    if stop_event.is_set():
+        logger.info("Shutdown requested before market inventory became available")
+        return 0
+    if not symbols:
+        raise RuntimeError("No active USDT perpetual swap symbols were found on Gate.io")
+
+    # Preserve the BotFather command menu registration from the previous startup.
+    auto_register_on_startup()
+
+    # The durable ScanService is the only background analysis pipeline.
+    # The legacy full_scan loop would analyze the same 300 symbols a second time.
+    runtime = AtlasRuntime(symbols=symbols, logger=logger, full_scan=False)
+    telegram_commands = create_telegram_command_service(runtime, logger=logger)
+    if telegram_commands is not None:
+        runtime.attach_telegram_service(telegram_commands)
+
     logger.info(
         "Atlas live analysis service starting | symbols=%s cap=%s interval=%ss "
-        "market_count=%s skipped_inactive=%s skipped_non_swap=%s "
-        "skipped_non_crypto=%s ranking=%s",
+        "market_count=%s ranking=%s scan_pipeline=durable_queue",
         len(symbols),
         "unlimited" if max_symbols == 0 else max_symbols,
         int(interval),
-        selection_stats["total_markets"],
-        selection_stats["skipped_inactive"],
-        selection_stats["skipped_not_swap"],
-        selection_stats["skipped_non_crypto"],
+        selection_stats.get("symbol_count", 0),
         selection_stats.get("ranking_source", "unknown"),
     )
     logger.info("Selected symbols: %s", ", ".join(symbols))
@@ -165,25 +207,53 @@ def main() -> int:
     runtime.start(daemon=True)
     if telegram_commands is not None:
         telegram_commands.start()
-    last_cycle = 0
+    last_generation = None
+    last_complete = False
+    next_scheduled_scan = time.monotonic() + interval
     try:
         while not stop_event.wait(5):
-            worker = runtime._thread
-            if worker is None or not worker.is_alive():
-                raise RuntimeError("Atlas scanner worker stopped unexpectedly")
-            snapshot = runtime.snapshot()
-            stats = snapshot.get("scanner") or {}
-            cycle = int(stats.get("cycle") or 0)
-            if cycle > last_cycle and stats.get("status") == "SLEEP":
-                last_cycle = cycle
+            scan_status = runtime.scan_status()
+            if not scan_status.get("workers_running"):
+                logger.error("Durable scan worker stopped; attempting recovery")
+                runtime.resume_scan()
+                scan_status = runtime.scan_status()
+                if not scan_status.get("workers_running"):
+                    raise RuntimeError("Atlas durable scan worker stopped unexpectedly")
+
+            generation = int(scan_status.get("generation") or 0)
+            complete = bool(scan_status.get("complete"))
+            if generation != last_generation or (complete and not last_complete):
                 logger.info(
-                    "Scan cycle %s complete | processed=%s success=%s failed=%s skipped=%s",
-                    cycle,
-                    stats.get("processed", 0),
-                    stats.get("success", 0),
-                    stats.get("failed", 0),
-                    stats.get("skipped", 0),
+                    "Scan queue status | generation=%s total=%s done=%s failed=%s pending=%s running=%s",
+                    generation,
+                    scan_status.get("total", 0),
+                    scan_status.get("done", 0),
+                    scan_status.get("failed", 0),
+                    scan_status.get("pending", 0),
+                    scan_status.get("running", 0),
                 )
+            last_generation = generation
+            last_complete = complete
+
+            # Replace the old parallel full-scan loop with a scheduled enqueue
+            # into the same durable queue. No second set of analysis workers.
+            if time.monotonic() >= next_scheduled_scan:
+                if complete:
+                    scheduled = runtime.start_scan(limit=max_symbols)
+                    logger.info(
+                        "Scheduled scan enqueued | started=%s selected=%s generation=%s",
+                        scheduled.get("started", False),
+                        scheduled.get("selected", 0),
+                        scheduled.get("scan_generation"),
+                    )
+                else:
+                    logger.info(
+                        "Scheduled scan deferred; current generation still has work | "
+                        "pending=%s running=%s",
+                        scan_status.get("pending", 0),
+                        scan_status.get("running", 0),
+                    )
+                next_scheduled_scan = time.monotonic() + interval
     finally:
         logger.info("Stopping Atlas runtime")
         runtime.stop(timeout=30.0)

@@ -1,3 +1,5 @@
+import requests
+
 from gateio_futures import GateFuturesExchange
 
 
@@ -125,3 +127,63 @@ def test_gate_open_interest_history_is_sorted_oldest_to_newest():
     rows = ex.fetch_open_interest_history("BTC/USDT:USDT", timeframe="1h", limit=10)
     assert [row["timestamp"] for row in rows] == [1700000000000, 1700003600000]
     assert [row["openInterestAmount"] for row in rows] == [0.1, 0.2]
+
+
+
+def test_gate_get_retries_transient_network_errors(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True}
+
+    class FlakySession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls < 3:
+                raise requests.Timeout("temporary Gate.io timeout")
+            return Response()
+
+    monkeypatch.setattr("gateio_futures.time.sleep", lambda _delay: None)
+    session = FlakySession()
+    exchange = GateFuturesExchange(
+        session=session,
+        max_retries=3,
+        retry_backoff_seconds=0,
+    )
+
+    assert exchange._get("/futures/usdt/contracts") == {"ok": True}
+    assert session.calls == 3
+
+
+def test_gate_get_does_not_retry_non_transient_http_errors(monkeypatch):
+    class BadResponse:
+        status_code = 400
+
+        def raise_for_status(self):
+            raise requests.HTTPError("bad request", response=self)
+
+    class BadSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            return BadResponse()
+
+    monkeypatch.setattr("gateio_futures.time.sleep", lambda _delay: None)
+    session = BadSession()
+    exchange = GateFuturesExchange(
+        session=session,
+        max_retries=3,
+        retry_backoff_seconds=0,
+    )
+
+    import pytest
+    with pytest.raises(requests.HTTPError):
+        exchange._get("/futures/usdt/contracts")
+    assert session.calls == 1

@@ -145,35 +145,65 @@ class AtlasRuntime:
         self._set_status("READY")
 
     def stop(self, timeout=5.0):
+        """Stop runtime services within one shared shutdown deadline."""
+        deadline = time.monotonic() + max(0.0, float(timeout))
+
+        def remaining():
+            return max(0.0, deadline - time.monotonic())
+
         self._stop_event.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=timeout)
-        try:
-            if getattr(self, "_scan_service", None) is not None:
-                self._scan_service.stop_scan(timeout_seconds=timeout)
-        except Exception:
-            pass
-        try:
-            if getattr(self, "_scan_queue", None) is not None:
-                self._scan_queue.close()
-        except Exception:
-            pass
-        try:
-            if getattr(self, "_daily_refresh", None) is not None:
-                self._daily_refresh.stop(timeout=timeout)
-        except Exception:
-            pass
+
+        # Stop Telegram intake first so no new commands can enqueue work while
+        # the durable scanner is shutting down.
         if self._telegram_service is not None:
             try:
-                self._telegram_service.stop()
+                self._telegram_service.stop(timeout=remaining())
             except Exception:
-                pass
+                self.logger.exception("Telegram command service shutdown failed")
+
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=remaining())
+            if self._thread.is_alive():
+                self.logger.warning("Legacy full-scan thread did not stop before shutdown deadline")
+
+        scan_stopped = True
         try:
-            self.engine.flush_telegram_notifications(
-                join_timeout=float(getattr(Config, "TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", 0.5))
-            )
+            if getattr(self, "_scan_service", None) is not None:
+                result = self._scan_service.stop_scan(timeout_seconds=remaining())
+                scan_stopped = bool(result.get("stopped"))
+                if not scan_stopped:
+                    self.logger.warning(
+                        "Scan workers still finishing at shutdown: %s",
+                        result.get("workers_still_alive", []),
+                    )
         except Exception:
-            pass
+            scan_stopped = False
+            self.logger.exception("Durable scan service shutdown failed")
+
+        # Never close SQLite connections underneath an in-flight scan worker.
+        if scan_stopped:
+            try:
+                if getattr(self, "_scan_queue", None) is not None:
+                    self._scan_queue.close()
+            except Exception:
+                self.logger.exception("Scan queue close failed")
+
+        try:
+            if getattr(self, "_daily_refresh", None) is not None:
+                if not self._daily_refresh.stop(timeout=remaining()):
+                    self.logger.warning("Daily refresh thread still finishing at shutdown")
+        except Exception:
+            self.logger.exception("Daily refresh shutdown failed")
+
+        flush_timeout = min(
+            remaining(),
+            max(0.0, float(getattr(Config, "TELEGRAM_ASYNC_FLUSH_TIMEOUT_SECONDS", 0.5))),
+        )
+        if flush_timeout > 0:
+            try:
+                self.engine.flush_telegram_notifications(join_timeout=flush_timeout)
+            except Exception:
+                self.logger.exception("Telegram notification flush failed")
 
     def _get_analysis_lock(self, symbol):
         """Get or create a per-symbol lock for analysis."""

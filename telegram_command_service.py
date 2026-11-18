@@ -522,15 +522,44 @@ class TelegramCommandService:
         self._thread.start()
         return True
 
-    def stop(self, timeout: float = 25.0) -> None:
+    def stop(self, timeout: float = 25.0) -> bool:
+        """Stop polling, command execution and active analyses within one deadline."""
+        deadline = time.monotonic() + max(0.0, float(timeout))
+
+        def remaining():
+            return max(0.0, deadline - time.monotonic())
+
         self.stop_flag.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=max(0.0, float(timeout)))
-        if self._command_thread and self._command_thread.is_alive():
-            self._command_thread.join(timeout=max(0.0, float(timeout)))
-        self._session.close()
-        # Background analysis threads may still be finishing after the command
-        # worker stops. Keep their reply session alive until process teardown.
+        for thread in (self._thread, self._command_thread):
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=remaining())
+
+        with self._analysis_lock:
+            analysis_threads = list(self._analysis_threads.values())
+        for thread in analysis_threads:
+            if thread.is_alive():
+                thread.join(timeout=remaining())
+
+        polling_alive = bool(self._thread and self._thread.is_alive())
+        command_alive = bool(self._command_thread and self._command_thread.is_alive())
+        analysis_alive = [thread.name for thread in analysis_threads if thread.is_alive()]
+
+        # A Session must not be closed while another thread is using it.
+        if not polling_alive:
+            self._session.close()
+        else:
+            self.logger.warning("Telegram polling thread still active at shutdown")
+
+        if not analysis_alive and not command_alive:
+            self._reply_session.close()
+        else:
+            if analysis_alive:
+                self.logger.warning(
+                    "Telegram analyses still finishing at shutdown: %s", analysis_alive
+                )
+            if command_alive:
+                self.logger.warning("Keeping Telegram reply session open while command worker exits")
+        return not polling_alive and not command_alive and not analysis_alive
 
     def _fetch_bot_info(self) -> None:
         """Fetch bot username for @BotName command parsing."""
