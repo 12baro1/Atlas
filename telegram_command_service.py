@@ -749,10 +749,10 @@ class TelegramCommandService:
                 daemon=True,
             )
             self._analysis_threads[symbol] = thread
+            self._send_command_reply(
+                f"ATLAS | {symbol} ANALİZİ BAŞLADI\\nSonuç hazır olduğunda bu gruba gönderilecek."
+            )
             thread.start()
-        self._send_command_reply(
-            f"ATLAS | {symbol} ANALİZİ BAŞLADI\\nSonuç hazır olduğunda bu gruba gönderilecek."
-        )
         return True
 
     def _command_worker_loop(self) -> None:
