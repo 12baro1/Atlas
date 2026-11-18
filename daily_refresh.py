@@ -140,9 +140,14 @@ class DailyPoolRefresh:
         self._thread.start()
         return self._thread
 
-    def stop(self, timeout: float = 5.0):
-        """Stop the background refresh thread."""
+    def stop(self, timeout: float = 5.0) -> bool:
+        """Stop the background refresh thread without losing a live thread reference."""
         self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=max(0.0, timeout))
+        thread = self._thread
+        if thread is None:
+            return True
+        thread.join(timeout=max(0.0, float(timeout)))
+        stopped = not thread.is_alive()
+        if stopped:
             self._thread = None
+        return stopped
