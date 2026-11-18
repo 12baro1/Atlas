@@ -257,8 +257,8 @@ def test_orderflow_diagnostic_reports_spread_limit():
     now_ms = int(time.time() * 1000)
     data = _orderflow_raw_data(now_ms)
     data["orderbook"] = {
-        "bids": [[99.0, 20], [98.9, 20], [98.8, 20]],
-        "asks": [[101.0, 20], [101.1, 20], [101.2, 20]],
+        "bids": [[99.90, 20], [99.89, 20], [99.88, 20]],
+        "asks": [[100.10, 20], [100.11, 20], [100.12, 20]],
     }
     data["shared_market_evidence"] = {}
 
