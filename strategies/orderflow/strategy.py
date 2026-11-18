@@ -60,8 +60,10 @@ def generate(data):
         return None
 
     # Depth-normalized order-book imbalance and actual recent taker flow.
-    # Reuse the main specialist's already-computed order-book analysis for
-    # this exact snapshot. Fall back only for direct generator use in tests.
+    # Specialist outputs are optional analysis context, not setup approvals.
+    # Reuse an assigned order-book calculation when available; otherwise the
+    # strategy computes the same native flow from its own fresh book/trades.
+    # No other specialist's direction or decision may veto this strategy.
     specialist_orderbook = next(
         (
             item.get("output") for item in specialist_evidence

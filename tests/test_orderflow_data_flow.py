@@ -268,3 +268,46 @@ def test_orderflow_diagnostic_reports_spread_limit():
 
     assert "SPREAD_LIMIT_EXCEEDED" in reason
     assert "maximum=0.08" in reason
+
+
+
+def test_orderflow_specialists_are_optional_and_cannot_veto_native_setup(monkeypatch):
+    """Native fresh book/trade rules must work without specialist approval."""
+    import strategies.orderflow.strategy as of_module
+    import strategies.orderflow.analytics as analytics
+
+    now_ms = int(time.time() * 1000)
+    data = _orderflow_raw_data(now_ms, side="buy", book_imbalance=0.5)
+    data["current_price"] = 100.8
+    data["15m"] = [Candle(100, 102, 99, 101.8, 150) for _ in range(15)]
+    data["orderbook"] = {
+        "bids": [[100.00, 20], [99.99, 20], [99.98, 20]],
+        "asks": [[100.01, 2], [100.02, 2], [100.03, 2]],
+    }
+    data["trade_flow_history"] = []
+    data["data_provenance"] = {
+        "orderbook": "GATEIO_REST",
+        "recent_trades": "GATEIO_REST",
+        "trade_flow_history": "UNAVAILABLE",
+    }
+    data["shared_market_evidence"] = build_shared_market_evidence(data)
+    monkeypatch.setattr(
+        analytics, "footprint_directional_evidence",
+        lambda footprint, direction: {"state": "AVAILABLE", "confirmed": True},
+    )
+
+    # An assigned specialist may disagree, but its decision is evidence only.
+    data["specialist_evidence"] = [{
+        "motor": "institutional",
+        "status": "COMPLETED",
+        "method": "test_fixture",
+        "output": {"decision": "BLOCK", "direction": "SHORT"},
+    }]
+
+    plan = of_module.generate(data)
+
+    assert plan is not None, "native Orderflow rules must not require specialist approval"
+    assert plan["strategy_id"] == "orderflow_momentum"
+    assert plan["direction"] == "LONG"
+    assert plan["specialist_evidence_count"] == 1
+    assert plan["specialist_evidence"][0]["motor"] == "institutional"
