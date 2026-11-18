@@ -315,7 +315,7 @@ def test_setuplar_reads_validated_pool_not_recent_analyses(monkeypatch):
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
     service = TelegramCommandService(SimpleNamespace(), "token", "chat")
     message = service.handle_setuplar()
-    assert "BTC/USDT — LONG" in message
+    assert "BTC/USDT LONG" in message
     assert "TP1: 102" in message
     assert "Durum: VALIDATED" in message
 
@@ -338,5 +338,5 @@ def test_mevcut_includes_validated_pool_setups_not_in_signal_journal(monkeypatch
 
     service = TelegramCommandService(Runtime(), "token", "chat")
     message = service.handle_mevcut()
-    assert "SOL/USDT — SHORT" in message
+    assert "SOL/USDT SHORT" in message
     assert "henüz sinyal sonucu takibine alınmamış" in message
