@@ -264,19 +264,29 @@ def _orderflow_data(side="buy"):
     ask_size = 2.0 if side == "buy" else 20.0
     buy_notional = 200.0 if side == "buy" else 10.0
     sell_notional = 10.0 if side == "buy" else 200.0
+    current_price = 100.4 if side == "buy" else 99.6
+    last_candle = (
+        Candle(now + 14 * 900_000, 99.8, 100.5, 99.7, 100.4, 100.0)
+        if side == "buy" else
+        Candle(now + 14 * 900_000, 100.2, 100.3, 99.5, 99.6, 100.0)
+    )
+    bids = ([[100.39, bid_size], [100.38, bid_size], [100.37, bid_size]]
+            if side == "buy" else
+            [[99.59, bid_size], [99.58, bid_size], [99.57, bid_size]])
+    asks = ([[100.41, ask_size], [100.42, ask_size], [100.43, ask_size]]
+            if side == "buy" else
+            [[99.61, ask_size], [99.62, ask_size], [99.63, ask_size]])
+    trade_base = 100.1 if side == "buy" else 99.7
     return {
         "symbol": "BTC/USDT:USDT",
         "snapshot_timestamp_ms": now,
-        "current_price": 100.4,
+        "current_price": current_price,
         "15m": ([Candle(now + i * 900_000, 100, 101, 99, 100, 100.0) for i in range(14)]
-                + [Candle(now + 14 * 900_000, 99.8, 100.5, 99.7, 100.4, 100.0)]),
-        "orderbook": {
-            "bids": [[100.39, bid_size], [100.38, bid_size], [100.37, bid_size]],
-            "asks": [[100.41, ask_size], [100.42, ask_size], [100.43, ask_size]],
-        },
+                + [last_candle]),
+        "orderbook": {"bids": bids, "asks": asks},
         "orderbook_timestamp_ms": now,
         "recent_trades": [
-            {"amount": 5.0, "price": 100.1 + (i % 2) * 0.1, "side": side} for i in range(40)
+            {"amount": 5.0, "price": trade_base + (i % 2) * 0.1, "side": side} for i in range(40)
         ],
         "recent_trades_timestamp_ms": now,
         "trade_flow_history": [
@@ -313,6 +323,7 @@ def test_orderflow_real_data_sell_side():
         "shared.market_data_services", fromlist=["build_shared_market_evidence"]
     ).build_shared_market_evidence(data)
     plan = orderflow_generate(data)
+    assert plan is not None, "orderflow_momentum must produce a short setup from its positive fixture"
     if plan is not None:
         assert plan["direction"] == "SHORT"
 
