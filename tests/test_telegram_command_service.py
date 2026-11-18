@@ -319,26 +319,21 @@ def test_setuplar_reads_validated_pool_not_recent_analyses(monkeypatch):
     assert "Durum: VALIDATED" in message
 
 
-def test_mevcut_includes_validated_pool_setups_not_in_signal_journal(monkeypatch):
-    from types import SimpleNamespace
+def test_mevcut_shows_signal_outcomes_without_mixing_pool_setups(monkeypatch):
     import telegram_command_service as telegram_module
-
-    candidate = SimpleNamespace(
-        symbol="SOL/USDT:USDT", direction="SHORT", strategy_name="Mean Reversion",
-        entry_price=150.0, stop_loss=153.0, tp1=147.0, tp2=144.0,
-        tp3=141.0, net_rr_after_costs=2.0,
-    )
-    pool = SimpleNamespace(get_best_setups=lambda **kwargs: [candidate])
-    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
 
     class Runtime:
         def signal_outcomes(self, **kwargs):
             return []
 
+    def unexpected_pool_access():
+        raise AssertionError("/mevcut must not read the opportunity pool")
+
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", unexpected_pool_access)
     service = TelegramCommandService(Runtime(), "token", "chat")
     message = service.handle_mevcut()
-    assert "SOL/USDT SHORT" in message
-    assert "henüz sinyal sonucu takibine alınmamış" in message
+    assert "ATLAS | BUGÜNÜN İŞLEM TAKİBİ" in message
+    assert "Doğrulanmış havuz setup'ları" not in message
 
 
 def test_takip_includes_accepted_pool_setups_without_journal_outcome(monkeypatch):
