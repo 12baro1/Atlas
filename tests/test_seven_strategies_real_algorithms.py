@@ -93,12 +93,13 @@ def test_trend_pullback_real_data_produces_long():
     if plan is not None:
         assert plan["strategy_id"] == "trend_pullback"
         assert plan["direction"] in ("LONG", "SHORT")
-        assert plan["entry"] > 0 and plan["stop_loss"] > 0
-        assert all(t > 0 for t in (plan["tp1"], plan["tp2"], plan["tp3"]))
+        # Strategy generators return raw setups; the common filter later
+        # finalizes structural stop and three opposing-liquidity targets.
+        assert plan["entry"] > 0 and plan["initial_stop_loss"] > 0
         if plan["direction"] == "LONG":
-            assert plan["stop_loss"] < plan["entry"] < plan["tp1"]
+            assert plan["initial_stop_loss"] < plan["entry"]
         else:
-            assert plan["stop_loss"] > plan["entry"] > plan["tp1"]
+            assert plan["initial_stop_loss"] > plan["entry"]
 
 
 def test_trend_pullback_real_data_flat_market_returns_none():
