@@ -871,19 +871,15 @@ class TelegramCommandService:
         progress = result.get("progress") or {}
         alive = result.get("workers_still_alive") or []
         lines = [
-            "ATLAS | TARAMA DURDURULDU" if result.get("stopped") else "ATLAS | TARAMA DURDURMA İSTEĞİ",
+            "ATLAS | TARAMA DURDURULDU" if result.get("stopped") else "ATLAS | DURDURMA İSTEĞİ ALINDI",
             "",
-            (
-                "Worker'lar durdu."
-                if result.get("stopped")
-                else "Bazı worker'lar mevcut analizini bitiriyor; yeni worker başlatılmayacak."
-            ),
-            f"Kuyruk korunuyor: {progress.get('pending', 0)} bekleyen, "
-            f"{progress.get('running', 0)} devam eden, {progress.get('done', 0)} tamamlanan.",
+            "Yeni tarama işi başlatılmıyor.",
+            f"Tamamlanan: {progress.get('done', 0)}",
+            f"Aktif: {progress.get('running', 0)}",
+            f"Bekleyen: {progress.get('pending', 0)}",
+            "Kuyruk ve fırsat havuzu korunuyor.",
+            "Devam etmek için: /taramadevam",
         ]
-        if alive:
-            lines.append("Hâlâ çalışan: " + ", ".join(alive))
-        lines.append("Devam için: /taramadevam")
         return "\n".join(lines)
 
     def handle_scan_resume(self) -> str:
@@ -975,7 +971,7 @@ class TelegramCommandService:
         """Start/queue a scan via the runtime scan service and report progress."""
         result = self.runtime.start_scan(limit)
         if not result.get("started"):
-            return str(result.get("message") or "Tarama başlatılamadı.")
+            return "ATLAS | TARAMA BAŞLATILAMADI\nMevcut tarama kuyruğu değiştirilmedi. /taramadurum ile durumu kontrol et."
         return self._format_scan_progress(result)
 
     def _format_scan_progress(self, result: dict, resumed: bool = False) -> str:
@@ -984,7 +980,7 @@ class TelegramCommandService:
         lines = [
             f"ATLAS | {title}",
             "",
-            f"Hedef: {result.get('selected', result.get('universe_size', 'Tüm uygun piyasalar'))}",
+            f"Hedef: {result.get('selected') if result.get('selected') is not None else (result.get('universe_size') or 'Tüm uygun piyasalar')}",
             f"Toplam uygun sözleşme: {result.get('universe_size', '—')}",
             f"Kuyruğa yeni eklenen: {result.get('added', 0)}",
             f"Tamamlanan: {progress.get('done', 0)} | Bekleyen: {progress.get('pending', 0)}",
@@ -1037,60 +1033,45 @@ class TelegramCommandService:
         return "\n".join(lines)
 
     def handle_mevcut(self) -> str:
-        """Show open signal outcomes plus today's resolved results and validated setups."""
-        outcomes = self.runtime.signal_outcomes(limit=5000)
-        report = format_daily_signal_report(outcomes)
-        pool_setups = get_opportunity_pool().get_best_setups(limit=20)
-        if not pool_setups:
-            return report
-        untracked = [
-            candidate for candidate in pool_setups
-            if not any(_same_tracked_setup(candidate, outcome) for outcome in outcomes)
-        ]
-        if not untracked:
-            return report
-        lines = [report, "", "DOĞRULANMIŞ HAVUZ SETUPLARI (henüz sinyal sonucu takibine alınmamış)"]
-        for item in untracked:
-            symbol = str(item.symbol).replace(":USDT", "")
-            lines.extend([
-                f"{symbol} {item.direction} — {item.strategy_name}",
-                f"Giriş: {_format_price(item.entry_price)} | SL: {_format_price(item.stop_loss)}",
-                f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
-                f"Net RR: {_format_rr(item.net_rr_after_costs)}",
-                "",
-            ])
-        return "\n".join(lines).rstrip()
+        """Show today's signal outcomes and still-open signals only."""
+        return format_daily_signal_report(self.runtime.signal_outcomes(limit=5000))
 
     def handle_setuplar(self) -> str:
-        """List real validated and user-accepted setups from the persistent pool."""
+        """List validated pool setups separately from signal-outcome tracking."""
         pool = get_opportunity_pool()
         validated = pool.get_best_setups(limit=20)
         active = pool.get_active_setups()
         if not validated and not active:
             return "ATLAS | SETUPLAR\n\nDoğrulanmış veya kabul edilmiş setup yok."
-
         lines = ["ATLAS | SETUPLAR"]
         if validated:
-            lines.extend(["", f"YENİ / DOĞRULANMIŞ ({len(validated)})"])
+            lines.extend(["", f"DOĞRULANMIŞ SETUPLAR ({len(validated)})"])
             for item in validated:
-                symbol = str(item.symbol).replace(":USDT", "")
+                entry_type = str(getattr(item, "entry_type", "") or getattr(item, "setup_type", "—")).upper()
                 lines.extend([
-                    f"{symbol} {item.direction} — {item.strategy_name}",
-                    f"Giriş: {_format_price(item.entry_price)} | SL: {_format_price(item.stop_loss)}",
-                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
+                    f"Strateji: {item.strategy_name} | Emir: {entry_type}",
+                    f"Giriş: {_format_price(item.entry_price)}",
+                    f"Stop Loss: {_format_price(item.stop_loss)}",
+                    f"TP1: {_format_price(item.tp1)}",
+                    f"TP2: {_format_price(item.tp2)}",
+                    f"TP3: {_format_price(item.tp3)}",
                     f"Net RR: {_format_rr(item.net_rr_after_costs)} | Durum: {item.status}",
                     "",
                 ])
         if active:
-            lines.extend(["", f"KABUL EDİLMİŞ ({len(active)})"])
+            lines.extend(["", f"KABUL EDİLMİŞ / AKTİF ({len(active)})"])
             for item in active:
-                symbol = str(item.symbol).replace(":USDT", "")
-                progress = f"TP{item.current_tp}" if item.current_tp else "Hedef yok"
+                progress = f"TP{item.current_tp} ALINDI" if item.current_tp else "Hedef bekleniyor"
                 lines.extend([
-                    f"{symbol} {item.direction} — {item.strategy_name}",
-                    f"Durum: {item.status} | İlerleme: {progress}",
-                    f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)} | "
-                    f"Koruma stopu: {_format_price(item.trailing_stop or item.stop_loss)}",
+                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
+                    f"Strateji: {item.strategy_name} | Durum: {item.status}",
+                    f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)}",
+                    f"Koruma Stop Loss: {_format_price(item.trailing_stop or item.stop_loss)}",
+                    f"TP1: {_format_price(item.tp1)}",
+                    f"TP2: {_format_price(item.tp2)}",
+                    f"TP3: {_format_price(item.tp3)}",
+                    f"İlerleme: {progress}",
                     "",
                 ])
         return "\n".join(lines).rstrip()
@@ -1268,7 +1249,7 @@ class TelegramCommandService:
             f"Eşleşen setup: {learning.get('matched_setups', 0)}",
             f"Tarihsel edge: {learning.get('historical_edge', '—')}",
             f"Güvenilirlik: {learning.get('reliability', '—')}",
-            f"Skor düzeltmesi: {learning.get('learning_adjustment', 0):+g} puan",
+            f"Skor düzeltmesi: {float(learning.get('learning_adjustment', 0) or 0):+g} puan",
             f"Out-of-sample doğrulaması: {'Gerekli' if meta.get('oos_required') else 'Gerekli değil / belirtilmemiş'}",
             "",
             "Öğrenme çıktısı tek başına işlem sinyali veya kârlılık garantisi değildir.",
