@@ -1193,7 +1193,7 @@ class TelegramCommandService:
         """Show journal-tracked signals only; pool setups belong to /setuplar."""
         outcomes = self.runtime.signal_outcomes(limit=500)
         if not outcomes:
-            return "ATLAS | SİNYAL TAKİBİ\n\nAçık veya sonuçlanmış sinyal kaydı yok.\nHavuz setup'ları: /setuplar"
+            return "ATLAS | SİNYAL TAKİBİ\n\nAçık veya sonuçlanmış sinyal kaydı yok.\nBirleşik görünüm: /islemler"
 
         terminal = {"TP1", "TP2", "TP3", "SL", "EXPIRED"}
         pending = sorted(
