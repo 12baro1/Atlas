@@ -286,9 +286,9 @@ class OpportunityPool:
         Deduplication uses symbol + direction + strategy_id fingerprint.
         """
         with self._lock:
-            # A fresh analysis supersedes every older, unaccepted setup for the
-            # same symbol, even when direction or strategy changed. Accepted
-            # setups are deliberately preserved: they may represent real trades.
+            # A new analysis supersedes only an older unaccepted setup from
+            # the same strategy. Other strategies remain independent and are
+            # removed only when their own generator reports broken structure.
             symbol_ids = list(self._by_symbol.get(candidate.symbol, set()))
             same_id = None
             for existing_id in symbol_ids:
@@ -576,13 +576,10 @@ class OpportunityPool:
           - setup age penalty (older setups carry staler market data)
         rank="net_rr" keeps the simple cost-adjusted RR ordering.
 
-        Freshness checks (each evaluated independently):
-          - Setup expiry (expires_at_ms must be in the future)
-          - Setup age (created_at_ms must be within expiry window)
-          - Last data time (updated_at_ms must be present and recent)
-          - RR validity (net_rr_after_costs must be finite and > 0)
-        Setups with missing or stale timestamps are excluded rather than
-        presented with fabricated freshness.
+        Strategy-native invalidation is handled when a fresh analysis reports
+        NO_SETUP or CONDITION_NOT_MET for that same strategy. Setup age and
+        timestamps are not invalidation criteria. RR must still be finite and
+        strictly positive before a setup is ranked.
         """
         self.cleanup_expired()
         with self._lock:
@@ -772,7 +769,7 @@ class OpportunityPool:
     # ---------------------------------------------------------------------
     
     def cleanup_expired(self) -> Dict[str, int]:
-        """Remove expired setups from all pools."""
+        """Expire raw candidates and active records; validated setups require structural invalidation."""
         now = int(time.time() * 1000)
         expiry_ms = self.expiry_hours * 3600 * 1000
         with self._lock:
