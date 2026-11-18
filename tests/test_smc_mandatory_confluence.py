@@ -10,8 +10,27 @@ def _analysis():
     }
 
 
-def test_smc_requires_all_four_conditions_and_entry_in_shared_zone():
+def test_smc_accepts_ob_and_fvg():
     assert _mandatory_confluence_reason(_analysis(), "LONG", 100.0) is None
+
+
+def test_smc_accepts_ob_without_fvg():
+    analysis = _analysis()
+    analysis["smc_fvg"] = []
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) is None
+
+
+def test_smc_accepts_fvg_without_ob():
+    analysis = _analysis()
+    analysis["smc_orderblocks"] = []
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) is None
+
+
+def test_smc_rejects_when_both_ob_and_fvg_are_missing():
+    analysis = _analysis()
+    analysis["smc_orderblocks"] = []
+    analysis["smc_fvg"] = []
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) == "SMC_REQUIRED_VALID_OB_OR_FVG_MISSING"
 
 
 def test_smc_rejects_missing_choch():
@@ -26,30 +45,40 @@ def test_smc_rejects_wrong_direction_choch():
     assert _mandatory_confluence_reason(analysis, "LONG", 100.0) == "SMC_REQUIRED_CHoCH_DIRECTION_MISMATCH"
 
 
-def test_smc_rejects_missing_ob_even_when_fvg_exists():
-    analysis = _analysis()
-    analysis["smc_orderblocks"] = []
-    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) == "SMC_REQUIRED_VALID_OB_MISSING"
-
-
-def test_smc_rejects_missing_fvg_even_when_ob_exists():
-    analysis = _analysis()
-    analysis["smc_fvg"] = []
-    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) == "SMC_REQUIRED_VALID_FVG_MISSING"
-
-
 def test_smc_rejects_mitigated_ob_and_filled_fvg():
     analysis = _analysis()
     analysis["smc_orderblocks"][0]["mitigated"] = True
-    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) == "SMC_REQUIRED_VALID_OB_MISSING"
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) is None
     analysis = _analysis()
     analysis["smc_fvg"][0]["filled"] = True
-    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) == "SMC_REQUIRED_VALID_FVG_MISSING"
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) is None
 
 
-def test_smc_rejects_non_overlapping_ob_fvg_ote_or_entry_outside_overlap():
+def test_smc_rejects_if_only_available_zone_is_invalid():
     analysis = _analysis()
-    analysis["smc_fvg"][0]["from"] = 102.0
-    analysis["smc_fvg"][0]["to"] = 103.0
-    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) == "SMC_OB_FVG_OTE_CONFLUENCE_OR_ENTRY_MISSING"
-    assert _mandatory_confluence_reason(_analysis(), "LONG", 101.5) == "SMC_OB_FVG_OTE_CONFLUENCE_OR_ENTRY_MISSING"
+    analysis["smc_orderblocks"][0]["mitigated"] = True
+    analysis["smc_fvg"][0]["filled"] = True
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) == "SMC_REQUIRED_VALID_OB_OR_FVG_MISSING"
+
+
+def test_smc_rejects_wrong_direction_zones():
+    analysis = _analysis()
+    analysis["smc_orderblocks"][0]["type"] = "BEARISH"
+    analysis["smc_fvg"][0]["type"] = "BEARISH"
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) == "SMC_REQUIRED_VALID_OB_OR_FVG_MISSING"
+
+
+def test_smc_rejects_entry_outside_all_valid_zones():
+    assert _mandatory_confluence_reason(_analysis(), "LONG", 103.0) == "SMC_ENTRY_OUTSIDE_VALID_OB_FVG"
+
+
+def test_smc_does_not_require_ote():
+    analysis = _analysis()
+    analysis.pop("smc_ote")
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) is None
+
+
+def test_smc_does_not_reject_invalid_ote():
+    analysis = _analysis()
+    analysis["smc_ote"] = {"fib62": "bad", "fib79": None}
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) is None
