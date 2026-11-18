@@ -543,6 +543,8 @@ def test_retired_setup_commands_are_aliases_to_islemler():
         assert command.handler == "handle_islemler"
 
 def test_liquidity_failure_hides_raw_traceback():
+    from types import SimpleNamespace
+
     runtime = SimpleNamespace(
         current_symbol=lambda: "BTC/USDT",
         analyze_symbol=lambda *args, **kwargs: {"ok": False, "error": "Traceback SECRET"},
