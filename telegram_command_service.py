@@ -950,44 +950,35 @@ class TelegramCommandService:
         return self._format_best_setups(10)
 
     def handle_pool_status(self) -> str:
-        """Show pool totals and the seven-strategy funnel, without queue noise."""
+        """Show only persistent opportunity-pool contents."""
         pool = get_opportunity_pool()
         stats = pool.get_stats()
-        scan = self.runtime.scan_status()
-        telemetry = scan.get("strategy_telemetry") or {}
-        per_strategy = telemetry.get("per_strategy") or {}
-        names = (
-            ("smc", "SMC"),
-            ("relative_strength", "RELATIVE STRENGTH"),
-            ("trend_pullback", "TREND PULLBACK"),
-            ("orderflow_momentum", "ORDERFLOW MOMENTUM"),
-            ("mean_reversion", "MEAN REVERSION"),
-            ("liquidation_cascade", "LIQUIDATION CASCADE"),
-            ("volatility_breakout", "VOLATILITY BREAKOUT"),
-        )
+        best = pool.get_best_setups(limit=1)
         lines = [
-            "ATLAS | HAVUZ VE STRATEJİLER",
+            "ATLAS | FIRSAT HAVUZU",
             "",
-            "FIRSAT HAVUZU",
-            f"Aday: {stats.get('candidates', 0)} | Doğrulanmış: {stats.get('validated', 0)}",
-            f"Aktif takip: {stats.get('active', 0)} | Arşiv: {stats.get('history', 0)}",
-            "",
-            "7 STRATEJİ",
+            f"Aday: {stats.get('candidates', 0)}",
+            f"Doğrulanmış: {stats.get('validated', 0)}",
+            f"Aktif takip: {stats.get('active', 0)}",
+            f"Arşiv: {stats.get('history', 0)}",
         ]
-        for key, label in names:
-            row = per_strategy.get(key) or {}
-            lines.append(
-                f"{label}: {row.get('setups', 0)} setup | "
-                f"{row.get('passed', 0)} geçti | {row.get('rejected', 0)} elendi"
-            )
+        if best:
+            item = best[0]
+            entry_type = str(getattr(item, "entry_type", "") or getattr(item, "setup_type", "—")).upper()
+            lines.extend([
+                "",
+                "EN YÜKSEK SIRALAMALI SETUP",
+                f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
+                f"Strateji: {_format_strategy_name(item.strategy_name)} | Emir: {entry_type}",
+                f"Giriş: {_format_price(item.entry_price)} | SL: {_format_price(item.stop_loss)}",
+                f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                f"Net RR: {_format_rr(item.net_rr_after_costs)}",
+            ])
+        else:
+            lines.extend(["", "Doğrulanmış setup bulunmuyor."])
         lines.extend([
             "",
-            "ORTAK FİLTRE",
-            f"Üretilen: {telemetry.get('raw_setups_generated', 0)}",
-            f"Geçen: {telemetry.get('common_filter_passed', 0)}",
-            f"Elenen: {telemetry.get('common_filter_rejected', 0)}",
-            "",
-            "Tarama kuyruğu: /taramadurum",
+            "Setup listesi: /setuplar",
             "En iyi fırsatlar: /eniyi5",
         ])
         return "\n".join(lines)
@@ -1118,11 +1109,10 @@ class TelegramCommandService:
         return "\n".join(lines).rstrip()
 
     def handle_takip(self) -> str:
-        """Show signal outcomes and accepted pool setups without conflating them."""
+        """Show journal-tracked signals only; pool setups belong to /setuplar."""
         outcomes = self.runtime.signal_outcomes(limit=500)
-        pool_active = get_opportunity_pool().get_active_setups()
-        if not outcomes and not pool_active:
-            return "ATLAS | TAKİP\n\nAçık sinyal veya kabul edilmiş setup yok."
+        if not outcomes:
+            return "ATLAS | SİNYAL TAKİBİ\n\nAçık veya sonuçlanmış sinyal kaydı yok.\nHavuz setup'ları: /setuplar"
 
         terminal = {"TP1", "TP2", "TP3", "SL", "EXPIRED"}
         pending = sorted(
@@ -1135,39 +1125,25 @@ class TelegramCommandService:
             key=lambda item: int(item.get("resolved_at") or item.get("opened_at") or 0),
             reverse=True,
         )[:8]
-        active_untracked = [
-            setup for setup in pool_active
-            if not any(
-                str(item.get("status") or "PENDING").upper() == "PENDING"
-                and _same_tracked_setup(setup, item)
-                for item in outcomes
-            )
+        lines = [
+            "ATLAS | SİNYAL TAKİBİ",
+            f"Açık: {len(pending)} | Son kapanan: {len(closed)}",
         ]
-
-        lines = ["ATLAS | TAKİP", f"Açık: {len(pending)} | Son kapanan: {len(closed)} | Havuz setup: {len(active_untracked)}"]
         if pending:
-            lines.extend(["", "SİNYAL SONUÇ TAKİBİ"])
-            for item in pending:
+            lines.extend(["", "AÇIK SİNYALLER"])
+            for item in pending[:10]:
                 lines.extend([_format_outcome_item(item, "TAKİPTE"), ""])
-        if active_untracked:
-            lines.extend(["", "HAVUZDA KABUL EDİLEN SETUPLAR"])
-            for item in active_untracked:
-                progress = f"TP{item.current_tp} ALINDI" if item.current_tp else "Hedef bekleniyor"
-                lines.extend([
-                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
-                    f"Strateji: {item.strategy_name} | Durum: {item.status}",
-                    f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)} | "
-                    f"Stop: {_format_price(item.trailing_stop or item.stop_loss)}",
-                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
-                    f"İlerleme: {progress}",
-                    "Not: Bu kayıt henüz sinyal sonuç günlüğüyle eşleşmedi.",
-                    "",
-                ])
+            if len(pending) > 10:
+                lines.append(f"Diğer açık sinyaller: +{len(pending) - 10}")
         if closed:
-            lines.extend(["", "SONUÇLANAN SİNYALLER"])
+            lines.extend(["", "SON KAPANAN SİNYALLER"])
             for item in closed:
-                lines.extend([_format_outcome_item(item, "KAPANDI"), ""])
-        lines.append("TP/SL sonuçları son işlenen kapalı 15m mumlarına dayanır; borsa fill teyidi değildir.")
+                lines.extend([_format_outcome_item(item, "SONUÇLANDI"), ""])
+        lines.extend([
+            "",
+            "TP/SL sonuçları son işlenen kapalı 15m mumlarına dayanır.",
+            "Giriş seviyesinin görülmesi borsada fill gerçekleştiğini kanıtlamaz.",
+        ])
         return "\n".join(lines).rstrip()
 
     def handle_liquidity(self, symbol: str) -> str:
