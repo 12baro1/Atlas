@@ -523,6 +523,32 @@ def test_best_setups_excludes_stale_updated_at(tmp_path):
     pool.stop()
 
 
+def test_best_setups_archives_validated_setup_older_than_freshness_window(tmp_path):
+    pool = make_pool(tmp_path, freshness_hours=2)
+    stale = make_candidate("stale-six-hours")
+    stale.created_at_ms = int(time.time() * 1000) - 6 * 60 * 60 * 1000
+    pool.add_candidate(stale)
+    assert pool.validate_candidate(stale.setup_id) is True
+
+    assert pool.get_best_setups(limit=10) == []
+    assert stale.setup_id not in pool._validated
+    history = pool.get_recent_history(limit=10)
+    archived = next(item for item in history if item.get("setup_id") == stale.setup_id)
+    assert archived["status"] == SetupStatus.EXPIRED.value
+    assert archived["invalidation_reason"] == "STALE_SETUP"
+    pool.stop()
+
+
+def test_best_setups_keeps_fresh_validated_setup(tmp_path):
+    pool = make_pool(tmp_path, freshness_hours=2)
+    fresh = make_candidate("fresh")
+    pool.add_candidate(fresh)
+    assert pool.validate_candidate(fresh.setup_id) is True
+
+    assert [item.setup_id for item in pool.get_best_setups(limit=10)] == ["fresh"]
+    pool.stop()
+
+
 def test_best_setups_excludes_invalid_rr(tmp_path):
     """net_rr_after_costs 0, negatif veya olmayan setup'lar dışlanmalı."""
     pool = make_pool(tmp_path, expiry_hours=24)
