@@ -783,7 +783,10 @@ class TelegramCommandService:
             return (
                 AtlasTUIApp._format_liquidity(adapter, outcome)
                 if outcome.get("ok")
-                else f"{symbol} likidite analizi yapılamadı: {outcome.get('error')}"
+                else (
+                    f"ATLAS | {symbol.upper()}\n"
+                    "Likidite analizi tamamlanamadı. Sembolü ve piyasa verisini kontrol et."
+                )
             )
 
         if scan_request is not None:
@@ -801,8 +804,8 @@ class TelegramCommandService:
         if not outcome.get("ok"):
             return (
                 f"{normalized.upper()} ANALİZ EDİLEMEDİ\n\n"
-                f"Neden: {outcome.get('error', 'bilinmeyen hata')}\n"
-                "Sembolün USDT perpetual piyasasında bulunduğunu kontrol et."
+                "Piyasa verisi alınamadı veya analiz tamamlanamadı.\n"
+                "Sembolün Gate.io USDT perpetual olduğunu kontrol et; ayrıntı için /durum."
             )
         raw_result = outcome.get("result") or {}
         card = (
@@ -924,6 +927,12 @@ class TelegramCommandService:
     def handle_scan_resume(self) -> str:
         """Handle /taramadevam — resume pending queue work (checkpoint kept)."""
         result = self.runtime.resume_scan()
+        if not result.get("started"):
+            return (
+                "ATLAS | TARAMA SÜRDÜRÜLEMEDİ\n"
+                "Bekleyen iş bulunmuyor veya tarama başlatılamadı.\n"
+                "Mevcut kuyruk: /taramadurum"
+            )
         return self._format_scan_progress(result, resumed=True)
 
     def handle_refresh(self) -> str:
