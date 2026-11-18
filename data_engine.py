@@ -1,6 +1,8 @@
 import time
 import math
 import os
+import threading
+from collections import OrderedDict
 from core.candle import Candle
 from sector_universe import configured_sector_peers
 from trace_context import ensure_trace, record_stage
@@ -28,7 +30,10 @@ TF_CACHE_TTL_SECONDS = {
     "15m": 0,
 }
 
-_cache = {}
+# Keep at most sixteen symbols' worth of reusable higher-timeframe series.
+MAX_CANDLE_CACHE_ENTRIES = 64
+_cache = OrderedDict()
+_cache_lock = threading.Lock()
 
 
 def _fetch(symbol, timeframe, limit):
@@ -81,27 +86,36 @@ def _fetch(symbol, timeframe, limit):
 
 
 def fetch_candles(symbol, timeframe, limit, force_refresh=False):
-    now = time.time()
+    ttl = TF_CACHE_TTL_SECONDS.get(timeframe, 0)
+    if ttl <= 0:
+        return _fetch(symbol, timeframe, limit)
+    now = time.monotonic()
     # limit'i anahtara kat: aynı sembol/ZF farklı limitlerle istenirse
     # birbirinin önbellek kaydını kirletip warmup eksikliği yaratmasın.
     key = (symbol, timeframe, limit)
 
-    if not force_refresh and timeframe != "15m":
-        cached = _cache.get(key)
-        if cached is not None:
-            candles, fetched_at = cached
-            ttl = TF_CACHE_TTL_SECONDS.get(timeframe, 0)
-            if now - fetched_at <= ttl:
-                return candles
+    if not force_refresh:
+        with _cache_lock:
+            cached = _cache.get(key)
+            if cached is not None and now - cached[1] <= ttl:
+                _cache.move_to_end(key)
+                return cached[0]
 
     candles = _fetch(symbol, timeframe, limit)
-    _cache[key] = (candles, now)
+    with _cache_lock:
+        cached = _cache.get(key)
+        if cached is None or now >= cached[1]:
+            _cache[key] = (candles, now)
+            _cache.move_to_end(key)
+            if len(_cache) > MAX_CANDLE_CACHE_ENTRIES:
+                _cache.popitem(last=False)
     return candles
 
 
 def invalidate_all():
     """Zorunlu tazeleme için tüm piyasa veri önbelleklerini boşaltır."""
-    _cache.clear()
+    with _cache_lock:
+        _cache.clear()
     if "_smt_cache" in globals():
         _smt_cache.clear()
 

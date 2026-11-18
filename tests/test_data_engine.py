@@ -152,3 +152,21 @@ def test_get_market_data_tracks_per_feed_provenance_and_snapshot_timestamps(monk
     assert "change_pct" not in data["shared_market_evidence"]["open_interest"]
     assert data["shared_market_evidence"]["funding"]["state"] == "FRESH"
     assert data["microstructure_source"] == "REST_FALLBACK"
+
+
+def test_bounded_candle_cache_preserves_recent_series_and_bypasses_15m(monkeypatch):
+    import data_engine as provider
+    monkeypatch.setattr(provider, "MAX_CANDLE_CACHE_ENTRIES", 2)
+    monkeypatch.setattr(provider, "_fetch", lambda *args: [object()])
+    provider.invalidate_all()
+    try:
+        a = provider.fetch_candles("A", "1h", 1)
+        b = provider.fetch_candles("B", "4h", 1)
+        assert provider.fetch_candles("A", "1h", 1) is a
+        provider.fetch_candles("C", "1w", 1)
+        assert provider.fetch_candles("B", "4h", 1) is not b
+        assert provider.fetch_candles("D", "15m", 1) is not provider.fetch_candles("D", "15m", 1)
+        assert len(provider._cache) == 2
+        assert all(key[1] != "15m" for key in provider._cache)
+    finally:
+        provider.invalidate_all()

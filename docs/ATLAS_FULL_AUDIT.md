@@ -52,6 +52,8 @@ Aynı makinede 300 satırlık 15 SQLite generation oluşturma işleminin medyan�
 
 ### Takip denetimi
 
+300 sembol, beş zaman dilimi ve istek başına 100 sentetik mum ile çevrimdışı bellek ölçümünde veri sağlayıcısı 1.500 seri sakladı. 15m serileri tekrar okunmamasına rağmen bellekte kalıyordu. Yüksek zaman dilimlerinde 64 serilik LRU sınırı ve 15m yazımlarının kaldırılmasıyla aynı deneyde tutulan bellek 19.756.002 bayttan 844.040 bayta düştü (`tracemalloc`, süreç RSS'sinden ayrı). Sıcak serinin yeniden kullanılması, kapasite dolduğunda eski serinin çıkarılması ve 15m için her istekte yeni veri alınması regresyon testiyle doğrulandı.
+
 - Aday, doğrulanmış, aktif ve geçmiş kayıtları artık tek SQLite transaction'ında yazılıyor. Geçmiş serileştirmesini son adımda bozarak eski adayın korunması ve kısmi aktif kaydın görülmemesi test edildi. Bellek içi geçmiş limiti dolduğunda yeni arşiv satırlarının kaybolmasına karşı da regresyon testi var.
 - Manuel kuyruk genişletmesinde yeni işler, yeniden doğrulama, sıra ve sıralama kaynağı birlikte kaydediliyor. Generation açılırken sıralama yazımı hata verirse dönem numarası ve işler de geri alınıyor.
 - BTC public WebSocket gözleminde 30 saniyelik 17 örnek boyunca bağlantı ve yeni işlemler görüldü. Dördüncü örnekten hemen sonra bağlantı test amacıyla kapatıldı; beşinci örnekte ikinci bağlantı ve son 30 saniyede 181 işlem vardı. Kesin yeniden bağlanma süresi bu örnekleme sıklığıyla ölçülemez. EOF sonrası L2 geçersizleştirme, sonsuz fiyat ve gelecekteki işlemlerin CVD'ye girmemesi ayrıca çevrimdışı test edildi.
