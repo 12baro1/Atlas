@@ -339,3 +339,53 @@ def test_mevcut_includes_validated_pool_setups_not_in_signal_journal(monkeypatch
     message = service.handle_mevcut()
     assert "SOL/USDT SHORT" in message
     assert "henüz sinyal sonucu takibine alınmamış" in message
+
+
+def test_takip_includes_accepted_pool_setups_without_journal_outcome(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram_module
+
+    setup = SimpleNamespace(
+        symbol="SOL/USDT:USDT", direction="SHORT", strategy_name="Mean Reversion",
+        status="ACTIVE", current_tp=1, entry_filled_price=150.0, entry_price=151.0,
+        trailing_stop=150.0, stop_loss=153.0, tp1=147.0, tp2=144.0, tp3=141.0,
+    )
+    pool = SimpleNamespace(get_active_setups=lambda: [setup])
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+
+    class Runtime:
+        def signal_outcomes(self, **kwargs):
+            return []
+
+    service = TelegramCommandService(Runtime(), "token", "chat")
+    message = service.handle_takip()
+    assert "Kabul edilmiş setup: 1" in message
+    assert "SOL/USDT | SHORT" in message
+    assert "TP1 ALINDI" in message
+    assert "henüz sinyal sonuç günlüğüyle eşleşmedi" in message
+
+
+def test_mevcut_does_not_hide_distinct_setup_for_same_symbol_and_direction(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram_module
+
+    candidate = SimpleNamespace(
+        symbol="BTC/USDT:USDT", direction="LONG", strategy_name="SMC",
+        entry_price=105.0, stop_loss=103.0, tp1=107.0, tp2=109.0,
+        tp3=111.0, net_rr_after_costs=2.0,
+    )
+    pool = SimpleNamespace(get_validated_setups=lambda **kwargs: [candidate])
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+
+    class Runtime:
+        def signal_outcomes(self, **kwargs):
+            return [{
+                "symbol": "BTC/USDT:USDT", "direction": "LONG",
+                "entry": 100.0, "stop_loss": 98.0,
+                "tp1": 102.0, "tp2": 104.0, "tp3": 106.0,
+            }]
+
+    service = TelegramCommandService(Runtime(), "token", "chat")
+    message = service.handle_mevcut()
+    assert "BTC/USDT LONG — SMC" in message
+    assert "Giriş: 105" in message
