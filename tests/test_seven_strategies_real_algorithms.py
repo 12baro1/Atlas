@@ -69,13 +69,13 @@ def _trend_pullback_bullish_data():
                          price - 0.03, price + 0.08, price - 0.06, price + 0.05, 100.0))
     for i in range(9):
         price -= 0.01
-        h1.append(Candle(now + (80 + i) * 3600_000,
+        h1.append(Candle(now + (260 + i) * 3600_000,
                          price - 0.02, price + 0.04, price - 0.05, price + 0.01, 100.0))
     from strategy_lab import _ema, _atr, _series
     ema = _ema(_series(h1), 20)
     atr = _atr(h1)
     reclaim_close = ema + 0.10 * atr
-    h1.append(Candle(now + 89 * 3600_000, ema - 0.10 * atr,
+    h1.append(Candle(now + 269 * 3600_000, ema - 0.10 * atr,
                      ema + 0.30 * atr, ema - 0.30 * atr, reclaim_close, 120.0))
     return {
         "symbol": "BTC/USDT:USDT",
