@@ -12,6 +12,7 @@ States: pending -> running (leased) -> done | failed -> pending(retry)
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import threading
@@ -378,6 +379,69 @@ class ScanQueue:
                     (FAILED, str(error or "unknown_error"), clean, gen),
                 )
             return True
+
+    def generation_symbols(self, generation: Optional[int] = None) -> List[str]:
+        """Return every symbol recorded in a generation, regardless of state."""
+        gen = int(generation) if generation is not None else self._current_generation
+        rows = self._thread_conn().execute(
+            "SELECT symbol FROM scan_jobs WHERE scan_generation = ? ORDER BY symbol",
+            (gen,),
+        ).fetchall()
+        return [str(row[0]) for row in rows]
+
+    def set_generation_ranking(self, symbols: List[str], source: str,
+                               generation: Optional[int] = None) -> None:
+        """Persist the ranked universe used to build the active generation."""
+        gen = int(generation) if generation is not None else self._current_generation
+        payload = json.dumps([str(symbol) for symbol in symbols], separators=(",", ":"))
+        with self._transaction() as conn:
+            for key, value in (
+                (f"generation_{gen}_ranked_symbols", payload),
+                (f"generation_{gen}_ranking_source", str(source or "unknown")),
+            ):
+                conn.execute(
+                    "INSERT INTO scan_meta(key, value) VALUES(?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (key, value),
+                )
+
+    def generation_ranking(self, generation: Optional[int] = None) -> Dict[str, Any]:
+        """Read the persisted ranked universe metadata for the active generation."""
+        gen = int(generation) if generation is not None else self._current_generation
+        rows = dict(self._thread_conn().execute(
+            "SELECT key, value FROM scan_meta WHERE key IN (?, ?)",
+            (f"generation_{gen}_ranked_symbols", f"generation_{gen}_ranking_source"),
+        ).fetchall())
+        try:
+            symbols = json.loads(rows.get(f"generation_{gen}_ranked_symbols", "[]"))
+        except (TypeError, ValueError):
+            symbols = []
+        return {
+            "symbols": symbols if isinstance(symbols, list) else [],
+            "ranking_source": rows.get(f"generation_{gen}_ranking_source"),
+        }
+
+    def reorder_pending(self, ranked_symbols: List[str]) -> int:
+        """Prioritize pending jobs by turnover rank without changing job states."""
+        rank = {str(symbol): index for index, symbol in enumerate(ranked_symbols)}
+        now_ms = int(time.time() * 1000)
+        gen = self._current_generation
+        with self._transaction() as conn:
+            rows = conn.execute(
+                "SELECT symbol FROM scan_jobs WHERE state = ? AND scan_generation = ?",
+                (PENDING, gen),
+            ).fetchall()
+            ordered = sorted(
+                (str(row[0]) for row in rows),
+                key=lambda symbol: (rank.get(symbol, len(rank)), symbol),
+            )
+            for index, symbol in enumerate(ordered):
+                conn.execute(
+                    "UPDATE scan_jobs SET enqueued_at_ms = ? "
+                    "WHERE symbol = ? AND state = ? AND scan_generation = ?",
+                    (now_ms + index, symbol, PENDING, gen),
+                )
+        return len(ordered)
 
     def progress(self, generation: Optional[int] = None) -> Dict[str, Any]:
         """Cumulative progress for a scan generation.

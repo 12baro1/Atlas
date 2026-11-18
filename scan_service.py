@@ -132,6 +132,10 @@ class ScanService:
         result = self.queue.rebuild(
             symbols, batch_tag=f"top_{DEFAULT_SCAN_UNIVERSE_LIMIT}_{int(time.time())}"
         )
+        ranking_source = self.inventory.status().get("ranking_source", "unknown")
+        self.queue.set_generation_ranking(
+            symbols, ranking_source, generation=result.get("generation")
+        )
         logger.warning(
             "Oversized persisted scan generation replaced by bounded generation | "
             "previous_total=%s new_total=%s ranking=%s",
@@ -139,6 +143,55 @@ class ScanService:
             self.inventory.status().get("ranking_source", "alphabetical_fallback"),
         )
         return result
+
+    def synchronize_ranked_universe(self, limit: Optional[int] = None) -> Dict[str, Any]:
+        """Align the durable active queue with the current Gate.io turnover ranking.
+
+        Existing generations are preserved when their symbols remain within the
+        ranked universe. If an old generation contains symbols outside the new
+        top-N universe, a new generation is opened; historical rows are retained.
+        Pending jobs are reordered by turnover while completed/running states stay intact.
+        """
+        limit = DEFAULT_SCAN_UNIVERSE_LIMIT if limit is None else min(
+            max(0, int(limit)), DEFAULT_SCAN_UNIVERSE_LIMIT
+        )
+        universe = self.inventory.get_symbols()
+        ranker = getattr(self.inventory, "get_ranked_symbols", None)
+        ranked = list(ranker(limit=limit) or []) if universe and callable(ranker) else sorted(universe)[:limit]
+        if not ranked:
+            return {"synchronized": False, "reason": "empty_universe"}
+
+        existing = set(self.queue.generation_symbols())
+        ranked_set = set(ranked)
+        source = self.inventory.status().get("ranking_source", "unknown")
+
+        if not existing or not existing.issubset(ranked_set):
+            result = self.queue.rebuild(
+                ranked, batch_tag=f"ranked_top_{limit}_{int(time.time())}"
+            )
+            generation = result.get("generation")
+            self.queue.set_generation_ranking(ranked, source, generation=generation)
+            return {
+                "synchronized": True,
+                "rebuilt": True,
+                "selected": len(ranked),
+                "ranking_source": source,
+                "scan_generation": generation,
+                "progress": result.get("progress"),
+            }
+
+        added = self.queue.enqueue(ranked, batch_tag=f"ranked_sync_{int(time.time())}")
+        self.queue.reorder_pending(ranked)
+        self.queue.set_generation_ranking(ranked, source)
+        return {
+            "synchronized": True,
+            "rebuilt": False,
+            "selected": len(ranked),
+            "added": added,
+            "ranking_source": source,
+            "scan_generation": self.queue.current_generation(),
+            "progress": self.queue.progress(),
+        }
 
     def start_scan(self, limit: Optional[int] = None) -> Dict[str, Any]:
         """Enqueue the requested scan and make sure workers are running.
@@ -185,9 +238,15 @@ class ScanService:
             added = self.queue.enqueue(
                 ranked_symbols, batch_tag=f"scan_extend_{int(time.time())}"
             ) if ranked_symbols else 0
+            inventory_status = self.inventory.status()
+            if ranked_symbols:
+                self.queue.reorder_pending(ranked_symbols)
+                self.queue.set_generation_ranking(
+                    ranked_symbols,
+                    inventory_status.get("ranking_source", "unknown"),
+                )
             self.ensure_workers()
             progress_after = self.queue.progress()
-            inventory_status = self.inventory.status()
             return {
                 "started": True,
                 "universe_size": len(universe),
@@ -204,9 +263,14 @@ class ScanService:
         queue_result = self.queue.rebuild(
             ranked_symbols, batch_tag=f"scan_{int(time.time())}"
         )
+        inventory_status = self.inventory.status()
+        self.queue.set_generation_ranking(
+            ranked_symbols,
+            inventory_status.get("ranking_source", "unknown"),
+            generation=queue_result.get("generation"),
+        )
         self.ensure_workers()
         progress_after = self.queue.progress()
-        inventory_status = self.inventory.status()
         return {
             "started": True,
             "universe_size": len(universe),
@@ -223,7 +287,12 @@ class ScanService:
     def status(self) -> Dict[str, Any]:
         progress = self.queue.progress()
         progress["workers_running"] = self.is_running()
-        progress["inventory"] = self.inventory.status()
+        inventory_status = self.inventory.status()
+        ranking = self.queue.generation_ranking()
+        if ranking.get("ranking_source"):
+            inventory_status["ranking_source"] = ranking["ranking_source"]
+        inventory_status["active_generation_symbols"] = len(ranking.get("symbols") or [])
+        progress["inventory"] = inventory_status
         return progress
 
     # ------------------------------------------------------------------
