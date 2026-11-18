@@ -483,6 +483,11 @@ class AtlasEngine:
             "analysis": {
                 "entry": execution_state.get("entry") or {},
                 "setup_quality": execution_state.get("setup_quality") or {},
+                # SMC-only mandatory confluence inputs; other strategies do not consume these.
+                "smc_h4_structure": tf_analysis.get("h4", {}).get("structure", []),
+                "smc_orderblocks": structure_state.get("orderblocks", []),
+                "smc_fvg": structure_state.get("fvg", []),
+                "smc_ote": context_state.get("ote", {}),
             },
         }
         invoked_motors = sorted(
