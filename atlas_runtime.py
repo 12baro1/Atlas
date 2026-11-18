@@ -683,9 +683,34 @@ class AtlasRuntime:
                         return {"ok": False, "symbol": symbol, "error": "no_result"}
                     self._inc("success")
                     
-                    # Add the selected setup to the opportunity pool as a validated candidate
+                    # Invalidate an unaccepted setup only when its OWN strategy
+                    # completed a fresh evaluation and explicitly reports that
+                    # its native setup conditions are no longer present.
+                    strategy_lab = result.get("strategy_lab") or {}
+                    diagnostics = strategy_lab.get("diagnostics") or {}
+                    invalidated_setups = []
+                    for strategy_row in diagnostics.get("strategies") or []:
+                        strategy_id = str(strategy_row.get("strategy_id") or "").strip()
+                        status = str(strategy_row.get("status") or "").upper()
+                        if not strategy_id or status not in {"NO_SETUP", "CONDITION_NOT_MET"}:
+                            continue
+                        removed = pool.invalidate_strategy_setup(
+                            symbol, strategy_id, "STRATEGY_STRUCTURE_BROKEN"
+                        )
+                        invalidated_setups.extend({
+                            "setup_id": item.setup_id,
+                            "symbol": item.symbol,
+                            "strategy_id": item.strategy_id,
+                            "strategy_name": item.strategy_name,
+                            "direction": item.direction,
+                        } for item in removed)
+
+                    # Add/refresh the selected setup after invalidating broken
+                    # strategy structures; other strategies remain independent.
                     self._register_result(result)
                     self._accumulate_strategy_telemetry(result)
+                    if invalidated_setups:
+                        result["invalidated_pool_setups"] = invalidated_setups
                     with self._lock:
                         self._latest_analysis_by_symbol[symbol] = result
                         self._latest_analysis_at[symbol] = int(time.time() * 1000)
