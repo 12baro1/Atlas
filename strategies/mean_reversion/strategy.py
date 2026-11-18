@@ -45,7 +45,7 @@ def generate(data, regime):
         if not lower <= entry <= middle or entry >= vwap or not 0.15 <= vwap_distance_atr <= 3.0:
             return None
     else:
-        if not middle <= entry <= upper or entry <= vwap or not 0.25 <= vwap_distance_atr <= 2.5:
+        if not middle <= entry <= upper or entry <= vwap or not 0.15 <= vwap_distance_atr <= 3.0:
             return None
     extremity = max(0.0, 42.0 - rsi) if direction == "LONG" else max(0.0, rsi - 58.0)
     strength = min(88.0, 65.0 + min(extremity * 0.5, 12.0) + min(abs(close - prev_close) / atr * 4.0, 8.0))
