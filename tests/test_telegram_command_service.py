@@ -81,7 +81,7 @@ def test_mevcut_daily_report_uses_turkey_local_day_and_net_r():
     ]
 
     report = format_daily_signal_report(rows, now=now)
-    assert "Verilen setup: 5" in report
+    assert "Bugünkü setup + önceki günlerden açık: 5" in report
     assert "Giriş seviyesi mumda görüldü: 3" in report
     assert "MARKET referansı (fill teyitsiz): 1" in report
     assert "Giriş olmadı (süresi doldu): 1" in report
