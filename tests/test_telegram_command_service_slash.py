@@ -204,7 +204,7 @@ def test_telegram_card_omits_verbose_strategy_evidence():
         "opposing_evidence": ["Yakın destek bölgesi"],
     }
     message = _format_telegram_card(card)
-    assert "Strateji: orderflow_momentum" in message
+    assert "Strateji: ORDERFLOW MOMENTUM" in message
     assert "Net RR: +2.10R" in message
     assert "CVD negatif" not in message
     assert "DİKKAT" not in message
