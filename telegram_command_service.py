@@ -887,12 +887,12 @@ class TelegramCommandService:
         if replaced is not None and previous_pending:
             old_setup = max(previous_pending, key=lambda item: item.updated_at_ms or item.created_at_ms)
             message += (
-                "\\n\\nSETUP DEĞİŞTİ — ESKİ KAYIT YENİLENDİ"
-                f"\\nEski: {old_setup.direction} / {_format_strategy_name(old_setup.strategy_name)}"
-                f"\\nYeni: {replaced.direction} / {_format_strategy_name(replaced.strategy_name)}"
-                f"\\nYeni giriş: {_format_price(replaced.entry_price)}"
+                "\n\nSETUP DEĞİŞTİ — ESKİ KAYIT YENİLENDİ"
+                f"\nEski: {old_setup.direction} / {_format_strategy_name(old_setup.strategy_name)}"
+                f"\nYeni: {replaced.direction} / {_format_strategy_name(replaced.strategy_name)}"
+                f"\nYeni giriş: {_format_price(replaced.entry_price)}"
                 f" | SL: {_format_price(replaced.stop_loss)}"
-                f"\\nHavuzda eski setup arşive alındı; yeni setup aktif listede."
+                f"\nHavuzda eski setup arşive alındı; yeni setup aktif listede."
             )
         return message
 
