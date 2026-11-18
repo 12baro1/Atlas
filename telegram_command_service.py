@@ -488,6 +488,16 @@ class TelegramCommandService:
     def enabled(self) -> bool:
         return bool(self.token and self.chat_id)
 
+    @property
+    def polling_active(self) -> bool:
+        """Return whether the dedicated Telegram long-polling thread is alive."""
+        return bool(
+            self.enabled
+            and not self.stop_flag.is_set()
+            and self._thread is not None
+            and self._thread.is_alive()
+        )
+
     def start(self) -> bool:
         if not self.enabled:
             self.logger.info("Telegram command interface disabled: token or group chat ID missing")
