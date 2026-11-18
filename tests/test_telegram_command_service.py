@@ -432,7 +432,7 @@ def test_scan_status_contains_only_queue_and_market_status():
 
     message = TelegramCommandService(Runtime(), "token", "chat").handle_scan_status()
     assert "77/300" in message
-    assert "GATE.IO" in message
+    assert "Gate.io" in message
     assert "gateio_24h_quote_volume" in message
     assert "SMC" not in message
     assert "/havuzdurum" in message
