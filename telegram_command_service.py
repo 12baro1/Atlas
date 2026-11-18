@@ -1111,7 +1111,7 @@ class TelegramCommandService:
         return "\n".join(lines)
 
     def handle_islemler(self) -> str:
-        """Show pool setups and journal outcomes together without duplicate plans."""
+        """Single source of truth for live signals, pool setups and recent removals."""
         pool = get_opportunity_pool()
         outcomes = self.runtime.signal_outcomes(limit=5000) or []
         pending = sorted(
@@ -1126,45 +1126,74 @@ class TelegramCommandService:
             [item for item in outcomes if str(item.get("status") or "").upper() in terminal],
             key=lambda item: int(item.get("resolved_at") or item.get("opened_at") or 0),
             reverse=True,
-        )[:5]
+        )[:8]
 
         tracked = list(pending) + list(closed)
         validated = [
-            item for item in pool.get_best_setups(limit=20)
+            item for item in pool.get_best_setups(limit=50)
             if not any(_same_tracked_setup(item, outcome) for outcome in tracked)
         ]
         active = [
             item for item in pool.get_active_setups()
             if not any(_same_tracked_setup(item, outcome) for outcome in tracked)
         ]
+        history = pool.get_recent_history(limit=100) if callable(
+            getattr(pool, "get_recent_history", None)
+        ) else []
+        removed_statuses = {"INVALIDATED", "REJECTED", "EXPIRED", "CANCELLED"}
+        removed = sorted(
+            [
+                item for item in history
+                if str(item.get("status") or "").upper() in removed_statuses
+                or bool(item.get("invalidation_reason"))
+            ],
+            key=lambda item: int(item.get("closed_at_ms") or item.get("updated_at_ms") or 0),
+            reverse=True,
+        )[:5]
 
         lines = [
             "ATLAS | İŞLEMLER",
-            f"Takipte: {len(tracking)} | Giriş bekleyen sinyal: {len(waiting_signals)}",
-            f"Havuz setup'ı: {len(validated)} | Aktif havuz: {len(active)} | Sonuç: {len(closed)}",
+            f"Açık işlem: {len(tracking)} | Giriş bekliyor: {len(waiting_signals) + len(validated)}",
+            f"Aktif havuz: {len(active)} | Son kapanan: {len(closed)} | Kaldırılan setup: {len(removed)}",
         ]
 
         if tracking:
-            lines.extend(["", "AKTİF İŞLEM TAKİBİ"])
+            lines.extend(["", "AÇIK İŞLEMLER"])
             for item in tracking[:10]:
-                lines.extend([_format_outcome_item(item, "TAKİPTE"), ""])
+                lines.extend([_format_outcome_item(item, "AÇIK / TAKİPTE"), ""])
             if len(tracking) > 10:
-                lines.append(f"Diğer takipteki işlemler: +{len(tracking) - 10}")
+                lines.append(f"Diğer açık işlemler: +{len(tracking) - 10}")
+
+        if active:
+            lines.extend(["", "KABUL EDİLMİŞ / AKTİF İŞLEMLER"])
+            for item in active[:10]:
+                status = str(getattr(item, "status", "ACTIVE") or "ACTIVE").upper()
+                current_tp = int(getattr(item, "current_tp", 0) or 0)
+                progress = f"TP{current_tp} gerçekleşti" if current_tp else "Hedef bekleniyor"
+                lines.extend([
+                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
+                    f"Strateji: {_format_strategy_name(item.strategy_name)} | Durum: {status}",
+                    f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)}",
+                    f"Koruma SL: {_format_price(item.trailing_stop or item.stop_loss)}",
+                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                    f"İlerleme: {progress}",
+                    "",
+                ])
 
         if waiting_signals:
-            lines.extend(["", "GİRİŞ BEKLEYEN SİNYALLER"])
+            lines.extend(["", "SİNYAL GİRİŞİ BEKLİYOR"])
             for item in waiting_signals[:10]:
                 lines.extend([_format_outcome_item(item, "GİRİŞ BEKLENİYOR"), ""])
             if len(waiting_signals) > 10:
                 lines.append(f"Diğer giriş bekleyen sinyaller: +{len(waiting_signals) - 10}")
 
         if validated:
-            lines.extend(["", "GİRİŞ BEKLEYEN SETUP'LAR"])
+            lines.extend(["", "HAVUZDA GİRİŞ BEKLEYEN SETUP'LAR"])
             for item in validated[:10]:
                 entry_type = str(getattr(item, "entry_type", "") or getattr(item, "setup_type", "—")).upper()
                 lines.extend([
                     f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
-                    f"{_format_strategy_name(item.strategy_name)} | {entry_type}",
+                    f"Strateji: {_format_strategy_name(item.strategy_name)} | Emir: {entry_type}",
                     f"Giriş: {_format_price(item.entry_price)} | SL: {_format_price(item.stop_loss)}",
                     f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
                     f"Net RR: {_format_rr(getattr(item, 'net_rr_after_costs', None))}",
@@ -1173,30 +1202,32 @@ class TelegramCommandService:
             if len(validated) > 10:
                 lines.append(f"Diğer giriş bekleyen setup: +{len(validated) - 10}")
 
-        if active:
-            lines.extend(["", "AKTİF HAVUZ İŞLEMLERİ"])
-            for item in active[:10]:
-                progress = f"TP{item.current_tp} alındı" if item.current_tp else "Hedef bekleniyor"
-                lines.extend([
-                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
-                    f"{_format_strategy_name(item.strategy_name)} | {item.status} | {progress}",
-                    f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)}",
-                    f"SL: {_format_price(item.trailing_stop or item.stop_loss)}",
-                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
-                    "",
-                ])
-
         if closed:
-            lines.extend(["", "SON KAPANAN İŞLEMLER"])
+            lines.extend(["", "SONUÇLANAN İŞLEMLER"])
             for item in closed:
                 lines.extend([_format_outcome_item(item, "SONUÇLANDI"), ""])
 
-        if not (tracking or waiting_signals or validated or active or closed):
-            lines.extend(["", "Açık işlem veya doğrulanmış setup bulunmuyor.", "Fırsat havuzu: /eniyi5"])
+        if removed:
+            lines.extend(["", "YAPISI BOZULDUĞU / İPTAL EDİLDİĞİ İÇİN KALDIRILAN SETUP'LAR"])
+            for item in removed:
+                symbol = str(item.get("symbol") or "?").replace(":USDT", "")
+                direction = str(item.get("direction") or "?").upper()
+                strategy = _format_strategy_name(item.get("strategy_name") or item.get("strategy_id"))
+                reason = str(item.get("invalidation_reason") or item.get("status") or "Kaldırıldı")
+                reason = reason.replace("_", " ").strip()
+                lines.extend([
+                    f"{symbol} | {direction} | {strategy}",
+                    f"Durum: HAVUZDAN KALDIRILDI | Neden: {reason}",
+                    "",
+                ])
+
+        if not (tracking or waiting_signals or validated or active or closed or removed):
+            lines.extend(["", "Açık işlem, giriş bekleyen setup veya son durum kaydı yok."])
 
         lines.extend([
             "",
-            "Sonuçlar Atlas'ın mum bazlı takibidir; borsa fill teyidi değildir.",
+            "TP/SL takibi Atlas'ın mum verisine dayanır; borsa emir/fill teyidi değildir.",
+            "Eski komutlar /mevcut ve /setuplar aynı birleşik ekranı açar.",
         ])
         return "\n".join(lines).rstrip()
 
