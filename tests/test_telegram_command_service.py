@@ -664,3 +664,30 @@ def test_slow_symbol_analysis_does_not_block_telegram_command_worker(monkeypatch
 
     assert "system status" in replies
     assert "BTC analysis result" in replies
+
+
+def test_status_uses_actual_command_polling_thread_not_legacy_config(monkeypatch):
+    import threading
+    from atlas_runtime import AtlasRuntime
+    from config import Config
+
+    service = TelegramCommandService(object(), "token", "-100123")
+    service._thread = threading.current_thread()
+
+    runtime = object.__new__(AtlasRuntime)
+    runtime._telegram_service = service
+    runtime._current_signal = None
+    runtime._error = None
+
+    # The headless VPS intentionally disables the legacy Telegram poller.
+    monkeypatch.setattr(Config, "TELEGRAM_POLLING_ENABLED", False, raising=False)
+    monkeypatch.setattr(Config, "TELEGRAM_BOT_TOKEN", "token", raising=False)
+
+    status = runtime.telegram_status()
+    assert status["polling_enabled"] is True
+    assert status["service_running"] is True
+
+    service.stop_flag.set()
+    status = runtime.telegram_status()
+    assert status["polling_enabled"] is False
+    assert status["service_running"] is False
