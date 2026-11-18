@@ -64,7 +64,7 @@ def generate(data):
             f"4H directional efficiency={efficiency:.2f}",
             f"1H EMA20 pullback reclaim; body={quality['body_ratio']:.2f}; close-location={quality['close_location']:.2f}",
         ]
-        plan["trend_metrics"] = {"adx": round(adx_value, 2), **{key: round(value, 2) for key, value in directional.items()},
+        plan["trend_metrics"] = {"adx": round(adx_value, 2), **{key: round(value, 2) for key, value in directional.items() if isinstance(value, (int, float))},
                                  "efficiency_ratio": round(efficiency, 3), "pullback_distance_atr": round(pullback_distance, 3),
                                  "structure": structure_evidence, "displacement": impulse_evidence}
         plan["reasons"].append(f"Structure motor={structure_evidence['state']} (quality={structure_evidence['quality']:.2f}); displacement={impulse_evidence.get('state')}")
