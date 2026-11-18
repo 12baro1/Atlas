@@ -1,6 +1,5 @@
-import math
-
 """Single integrated SMC candidate adapter; specialist motors remain evidence-only."""
+import math
 
 def _mandatory_confluence_reason(analysis, direction, entry):
     """Require aligned H4 CHoCH plus a live OB/FVG intersection inside that leg's OTE."""
