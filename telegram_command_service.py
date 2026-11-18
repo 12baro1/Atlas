@@ -319,54 +319,65 @@ def format_daily_signal_report(outcomes, now=None):
 
 
 def _format_telegram_card(card, elapsed_ms=0):
-    """Format one selected setup as a compact Telegram trade plan."""
+    """Render one complete, actionable trade plan without exposing debug details."""
     symbol = str(card.get("symbol") or "?").replace(":USDT", "")
     direction = str(card.get("direction") or "").upper()
     action = str(card.get("decision_action") or "").upper()
     entry_type = str(card.get("entry_type") or "").upper()
+    targets = list(card.get("tp_levels") or [])
+    try:
+        numbers = [float(card.get("entry")), float(card.get("stop_loss")), *map(float, targets[:3])]
+        valid_numbers = len(targets) >= 3 and all(math.isfinite(value) and value > 0 for value in numbers)
+    except (TypeError, ValueError, OverflowError):
+        valid_numbers = False
+    geometry_valid = False
+    if valid_numbers and direction == "LONG":
+        geometry_valid = numbers[1] < numbers[0] < numbers[2] < numbers[3] < numbers[4]
+    elif valid_numbers and direction == "SHORT":
+        geometry_valid = numbers[1] > numbers[0] > numbers[2] > numbers[3] > numbers[4]
     executable = (
         direction in {"LONG", "SHORT"}
         and entry_type in {"MARKET", "LIMIT"}
         and action in {"EXECUTE", "EXECUTE_WITH_CAUTION"}
-        and card.get("entry") is not None
-        and card.get("stop_loss") is not None
-        and bool(card.get("tp_levels"))
+        and geometry_valid
     )
     if not executable:
-        reason = str(card.get("reason") or "Ortak karar mekanizması geçerli setup üretmedi.")
+        reason = str(card.get("reason") or "Ortak karar mekanizması geçerli işlem planı üretmedi.")
+        reason = reason.splitlines()[0][:160]
         return "\n".join([
             f"ATLAS | {symbol}",
-            "GEÇERLİ SETUP YOK",
-            f"Neden: {reason.splitlines()[0][:180]}",
+            "GEÇERLİ İŞLEM PLANI YOK",
+            f"Neden: {reason}",
+            "Giriş, SL ve üç TP birlikte doğrulanmadı.",
+            "Karar: İŞLEME GİRME",
         ])
 
-    strategy = card.get("strategy") or card.get("strategy_id") or "Belirtilmedi"
-    targets = card.get("tp_levels") or []
+    strategy = str(card.get("strategy") or card.get("strategy_id") or "Belirtilmedi")
     rr = card.get("net_rr")
     if rr is None:
         rr = card.get("weighted_net_rr")
     if rr is None:
         rr = card.get("rr")
-
     lines = [
-        f"ATLAS | {symbol} — {direction}",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"ATLAS | {symbol}",
+        f"{direction} | {entry_type}",
         f"Strateji: {strategy}",
-        f"Giriş ({entry_type}): {_format_price(card.get('entry'), grouping=False)}",
-        f"SL: {_format_price(card.get('stop_loss'), grouping=False)}",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"Giriş: {_format_price(card.get('entry'), grouping=False)}",
+        f"Stop Loss: {_format_price(card.get('stop_loss'), grouping=False)}",
+        f"TP1: {_format_price(targets[0], grouping=False)}",
+        f"TP2: {_format_price(targets[1], grouping=False)}",
+        f"TP3: {_format_price(targets[2], grouping=False)}",
+        f"Net RR: {_format_rr(rr) if rr is not None else 'Hesaplanmadı'}",
+        "Durum: LIMIT giriş bekleniyor." if entry_type == "LIMIT"
+        else "Durum: MARKET planı hazır; borsaya emir gönderilmedi.",
+        "━━━━━━━━━━━━━━━━━━━━",
     ]
-    lines.extend(
-        f"TP{index}: {_format_price(target, grouping=False)}"
-        for index, target in enumerate(targets[:3], start=1)
-    )
-    if rr is not None:
-        lines.append(f"Net RR: {_format_rr(rr)}")
-    lines.append(
-        "Durum: LIMIT giriş bekleniyor."
-        if entry_type == "LIMIT"
-        else "Durum: MARKET planı hazır; borsaya emir gönderilmedi."
-    )
     return "\n".join(lines)
 
+
+def is_recognized_command
 
 def is_recognized_command(command: str) -> bool:
     """Check if a command is recognized (slash or legacy plain-text).
@@ -775,11 +786,12 @@ class TelegramCommandService:
     def handle_start(self) -> str:
         """Handle Telegram's conventional /start command."""
         return (
-            "ATLAS TELEGRAM AKTİF\n\n"
-            "Piyasa analizi: /btc veya /analiz ETH\n"
-            "Tarama: /20tara, /100tara, /tumtara\n"
-            "Setup: /setuplar, /mevcut, /takip, /eniyi5\n"
-            "Servis: /durum\n\n"
+            "ATLAS | KOMUT MERKEZİ\n\n"
+            "Analiz: /btc, /eth, /sol, /analiz BTC\n"
+            "Tarama: /20tara ... /1000tara, /tumtara\n"
+            "Havuz: /eniyi5, /eniyi10, /havuzdurum\n"
+            "Takip: /mevcut, /setuplar, /takip, /likidite BTC\n"
+            "Sistem: /taramadurum, /durum, /sistem\n\n"
             "Tüm komutlar: /yardim"
         )
 
@@ -799,9 +811,10 @@ class TelegramCommandService:
         )
         if not outcome.get("ok"):
             return (
-                f"{symbol.upper()} ANALİZ EDİLEMEDİ\n\n"
-                f"Neden: {outcome.get('error', 'bilinmeyen hata')}\n"
-                "Sembolün USDT perpetual piyasasında bulunduğunu kontrol et."
+                f"ATLAS | {symbol.upper()}\n"
+                "ANALİZ TAMAMLANAMADI\n"
+                "Piyasa verisi alınamadı veya analiz koşulları tamamlanmadı.\n"
+                "Sembolün Gate.io USDT perpetual olduğunu kontrol et."
             )
         raw_result = outcome.get("result") or {}
         card = (
@@ -824,80 +837,32 @@ class TelegramCommandService:
         return self._queue_scan_report(None)
 
     def handle_scan_status(self) -> str:
-        """Handle /taramadurum — read-only queue progress report."""
+        """Show only scan-queue state; strategy and pool data live in /havuzdurum."""
         status = self.runtime.scan_status()
         inventory = status.get("inventory") or {}
+        total = int(status.get("total", 0) or 0)
+        done = int(status.get("done", 0) or 0)
+        running = int(status.get("running", 0) or 0)
+        pending = int(status.get("pending", 0) or 0)
+        failed = int(status.get("failed", 0) or 0)
+        state = "ÇALIŞIYOR" if status.get("workers_running") else (
+            "BEKLEMEDE" if pending else "TAMAMLANDI"
+        )
         lines = [
             "ATLAS | TARAMA DURUMU",
+            f"Durum: {state}",
             "",
-            f"Kuyruk: {status.get('total', 0)} sembol",
-            f"Tamamlanan: {status.get('done', 0)}",
-            f"Devam eden: {status.get('running', 0)}",
-            f"Bekleyen: {status.get('pending', 0)}",
-            f"Başarısız: {status.get('failed', 0)}",
-            f"İlerleme: %{status.get('percent', 0.0)}",
-            f"Worker'lar: {'çalışıyor' if status.get('workers_running') else 'durduruldu'}",
+            f"İlerleme: {done}/{total} (%{float(status.get('percent', 0.0) or 0.0):.1f})",
+            f"Aktif: {running} | Bekleyen: {pending} | Hatalı: {failed}",
             "",
-            (
-                f"Gate.io envanteri: {inventory.get('symbol_count', 0)} sözleşme"
-                + (
-                    f" (son yenileme {inventory.get('last_refresh_age_seconds', '?')} sn önce)"
-                    if inventory.get("last_refresh_age_seconds") is not None
-                    else ""
-                )
-            ),
+            "PİYASA",
+            f"Borsa: GATE.IO | USDT Perpetual: {inventory.get('symbol_count', 0)}",
+            f"Sıralama: {inventory.get('ranking_source') or 'Bilinmiyor'}",
         ]
-        if inventory.get("last_error"):
-            lines.append(f"Envanter hatası: {inventory['last_error']}")
-        if inventory.get("ranking_source"):
-            lines.append(f"Sembol sıralaması: {inventory['ranking_source']}")
-        telemetry = status.get("strategy_telemetry") or {}
-        pool_stats = status.get("pool") or {}
-        if telemetry:
-            lines.extend([
-                "",
-                "YEDİ STRATEJİ / ORTAK FİLTRE",
-                f"Analiz: {telemetry.get('analyses', 0)}",
-                f"Ham setup: {telemetry.get('raw_setups_generated', 0)}",
-                f"Ortak filtreden geçen: {telemetry.get('common_filter_passed', 0)}",
-                f"Ortak filtrede elenen: {telemetry.get('common_filter_rejected', 0)}",
-                f"Doğrulanmış havuz: {pool_stats.get('validated', 0)}",
-            ])
-            for strategy_id, counts in sorted((telemetry.get("per_strategy") or {}).items()):
-                lines.append(
-                    f"  {strategy_id}: {counts.get('setups', 0)} setup | "
-                    f"{counts.get('passed', 0)} geçti | {counts.get('rejected', 0)} elendi | "
-                    f"{counts.get('selected', 0)} seçildi"
-                )
-                not_generated = sum(
-                    int(counts.get(key, 0) or 0)
-                    for key in (
-                        "no_setup", "condition_not_met", "missing_data",
-                        "insufficient_history", "errors", "other_no_setup",
-                    )
-                )
-                if not_generated:
-                    lines.append(
-                        "    Setup yok: "
-                        f"{not_generated} | koşul: {counts.get('condition_not_met', 0)} | "
-                        f"veri: {counts.get('missing_data', 0)} | "
-                        f"geçmiş: {counts.get('insufficient_history', 0)} | "
-                        f"hata: {counts.get('errors', 0)}"
-                    )
-                    for item in counts.get("top_reasons") or []:
-                        reason = str(item.get("reason") or "").replace("\\n", " ")
-                        if len(reason) > 180:
-                            reason = reason[:177] + "..."
-                        lines.append(f"    Neden ({item.get('count', 0)}): {reason}")
-        failed = self.runtime._scan_queue.failed_symbols() if hasattr(self.runtime, "_scan_queue") else []
-        if failed:
-            lines.append("")
-            lines.append(f"Başarısız semboller ({len(failed)}):")
-            for item in failed[:5]:
-                lines.append(f"  {item['symbol']}: {item['error']}")
-            if len(failed) > 5:
-                lines.append(f"  … +{len(failed) - 5} sembol daha")
-            lines.append("Tekrar denemek için /taramadevam")
+        age = inventory.get("last_refresh_age_seconds")
+        if age is not None:
+            lines.append(f"Envanter güncellemesi: {float(age):.0f} sn önce")
+        lines.extend(["", "Havuz ve strateji raporu: /havuzdurum"])
         return "\n".join(lines)
 
     def handle_scan_stop(self) -> str:
@@ -927,18 +892,18 @@ class TelegramCommandService:
         return self._format_scan_progress(result, resumed=True)
 
     def handle_refresh(self) -> str:
-        """Handle /yenile — refresh the Gate.io market inventory."""
+        """Refresh Gate.io market inventory and report a concise result."""
         status = self.runtime.refresh_market_inventory()
         if status.get("last_error"):
             return (
-                "ATLAS | ENVANTER YENİLENEMEDİ\n\n"
-                f"Hata: {status['last_error']}\n"
-                "Mevcut snapshot korunuyor ve tarama onunla devam ediyor."
+                "ATLAS | ENVANTER YENİLENEMEDİ\n"
+                "Mevcut piyasa snapshot'ı korundu.\n"
+                "Ayrıntı için VPS servis günlüklerini kontrol et."
             )
         return (
-            "ATLAS | ENVANTER YENİLENDİ\n\n"
-            f"Gate.io USDT perpetual: {status.get('symbol_count', 0)} sözleşme\n"
-            "Kaynak: yalnızca Gate.io (fallback yok)"
+            "ATLAS | ENVANTER YENİLENDİ\n"
+            f"Borsa: GATE.IO\nUSDT Perpetual: {status.get('symbol_count', 0)}\n"
+            "Kaynak: Gate.io\nDurum: BAŞARILI"
         )
 
     def handle_best_five(self) -> str:
@@ -950,33 +915,46 @@ class TelegramCommandService:
         return self._format_best_setups(10)
 
     def handle_pool_status(self) -> str:
-        """Handle /havuzdurum — read-only pool and queue summary."""
+        """Show pool totals and the seven-strategy funnel, without queue noise."""
         pool = get_opportunity_pool()
         stats = pool.get_stats()
-        queue = self.runtime.scan_status()
-        best = pool.get_best_setups(limit=1)
+        scan = self.runtime.scan_status()
+        telemetry = scan.get("strategy_telemetry") or {}
+        per_strategy = telemetry.get("per_strategy") or {}
+        names = (
+            ("smc", "SMC"),
+            ("relative_strength", "RELATIVE STRENGTH"),
+            ("trend_pullback", "TREND PULLBACK"),
+            ("orderflow_momentum", "ORDERFLOW MOMENTUM"),
+            ("mean_reversion", "MEAN REVERSION"),
+            ("liquidation_cascade", "LIQUIDATION CASCADE"),
+            ("volatility_breakout", "VOLATILITY BREAKOUT"),
+        )
         lines = [
-            "ATLAS | HAVUZ DURUMU",
+            "ATLAS | HAVUZ VE STRATEJİLER",
             "",
-            f"Adaylar: {stats.get('candidates', 0)}",
-            f"Doğrulanmış: {stats.get('validated', 0)}",
-            f"Aktif takip: {stats.get('active', 0)}",
-            f"Arşiv: {stats.get('history', 0)}",
+            "FIRSAT HAVUZU",
+            f"Aday: {stats.get('candidates', 0)} | Doğrulanmış: {stats.get('validated', 0)}",
+            f"Aktif takip: {stats.get('active', 0)} | Arşiv: {stats.get('history', 0)}",
             "",
-            "Tarama kuyruğu:",
-            f"  Tamamlanan: {queue.get('done', 0)} | Bekleyen: {queue.get('pending', 0)} "
-            f"| Başarısız: {queue.get('failed', 0)}",
+            "7 STRATEJİ",
         ]
-        if best:
-            top = best[0]
-            lines.append("")
+        for key, label in names:
+            row = per_strategy.get(key) or {}
             lines.append(
-                f"En iyi: {top.symbol} {top.direction} | {top.strategy_id} | "
-                f"net RR {top.net_rr_after_costs}"
+                f"{label}: {row.get('setups', 0)} setup | "
+                f"{row.get('passed', 0)} geçti | {row.get('rejected', 0)} elendi"
             )
-        else:
-            lines.append("")
-            lines.append("Doğrulanmış setup yok: /20tara ile tarama başlatın.")
+        lines.extend([
+            "",
+            "ORTAK FİLTRE",
+            f"Üretilen: {telemetry.get('raw_setups_generated', 0)}",
+            f"Geçen: {telemetry.get('common_filter_passed', 0)}",
+            f"Elenen: {telemetry.get('common_filter_rejected', 0)}",
+            "",
+            "Tarama kuyruğu: /taramadurum",
+            "En iyi fırsatlar: /eniyi5",
+        ])
         return "\n".join(lines)
 
     @staticmethod
@@ -1002,77 +980,60 @@ class TelegramCommandService:
 
     def _format_scan_progress(self, result: dict, resumed: bool = False) -> str:
         progress = result.get("progress") or {}
+        title = "TARAMA SÜRDÜRÜLÜYOR" if resumed else "TARAMA BAŞLATILDI"
         lines = [
-            "ATLAS | TARAMA DEVAM EDİYOR" if resumed else "ATLAS | TARAMA BAŞLADI",
+            f"ATLAS | {title}",
             "",
+            f"Hedef: {result.get('selected', result.get('universe_size', 'Tüm uygun piyasalar'))}",
+            f"Toplam uygun sözleşme: {result.get('universe_size', '—')}",
+            f"Kuyruğa yeni eklenen: {result.get('added', 0)}",
+            f"Tamamlanan: {progress.get('done', 0)} | Bekleyen: {progress.get('pending', 0)}",
+            f"İlerleme: %{float(progress.get('percent', 0.0) or 0.0):.1f}",
+            f"Sıralama: {result.get('ranking_source') or 'Mevcut kuyruk sıralaması'}",
+            "",
+            "Ayrıntı: /taramadurum",
+            "Durdur: /taramadurdur",
+            "Fırsatlar: /eniyi5",
         ]
         if resumed:
-            lines.append("Kuyruk kaldığı yerden sürdürülüyor (checkpoint korunur).")
-            lines.append("")
-        if "universe_size" in result:
-            lines.append(f"Toplam uygun sözleşme: {result['universe_size']}")
-        if "selected" in result and result.get("selected") is not None:
-            lines.append(f"Bu taramada taranacak: {result['selected']}")
-        if "added" in result:
-            lines.append(f"Kuyruğa yeni eklenen: {result['added']}")
-        if result.get("ranking_source"):
-            lines.append(f"Sıralama: {result['ranking_source']}")
-        preview = result.get("selected_preview") or []
-        if preview:
-            lines.append("İlk semboller: " + ", ".join(str(symbol) for symbol in preview))
-        lines.extend([
-            f"Tamamlanan: {progress.get('done', 0)} | Bekleyen: {progress.get('pending', 0)}",
-            f"İlerleme: %{progress.get('percent', 0.0)}",
-            f"Worker'lar: {'çalışıyor' if progress.get('workers_running') else 'başlatılıyor'}",
-            "",
-            "Durum: /taramadurum | Durdur: /taramadurdur | Sonuçlar: /eniyi5",
-        ])
+            lines.insert(2, "Kayıtlı kuyruk kaldığı yerden devam ediyor.")
         return "\n".join(lines)
 
     def _format_best_setups(self, count: int) -> str:
-        """Read-only best-N report (requirement G).
-
-        Reads ONLY the validated Setup Pool: no scan is started, the scan
-        queue and its cursor are untouched, no setup is created, deleted or
-        re-statused. If the pool is empty the report says so explicitly.
-        """
-        setup_pool = get_opportunity_pool()
-        best = setup_pool.get_best_setups(limit=count)
+        """Read-only report of complete, validated trade plans from the pool."""
+        best = get_opportunity_pool().get_best_setups(limit=count)
         if not best:
             return (
-                f"ATLAS | EN İYİ {count}\n\n"
-                "Doğrulanmış setup havuzu boş.\n"
-                "Yeni tarama için: /20tara (tarama kalıcı kuyruk üzerinden çalışır)."
+                f"ATLAS | EN İYİ {count} SETUP\n\n"
+                "Doğrulanmış setup bulunmuyor.\n"
+                "Yeni tarama: /20tara"
             )
         now_ms = int(time.time() * 1000)
-        lines = [
-            f"ATLAS | EN İYİ {len(best)} (salt okunur havuz raporu)",
-            "",
-        ]
+        lines = [f"ATLAS | EN İYİ {len(best)} SETUP", "Kaynak: Kalıcı doğrulanmış havuz", ""]
         for index, setup in enumerate(best, start=1):
-            age_hours = (
-                max(0.0, (now_ms - setup.created_at_ms) / 3_600_000.0)
-                if setup.created_at_ms else None
-            )
-            age_text = f"{age_hours:.1f} saat" if age_hours is not None else "bilinmiyor"
-            last_ms = setup.updated_at_ms or setup.created_at_ms
-            last_text = (
-                datetime.fromtimestamp(last_ms / 1000, tz=ZoneInfo("Europe/Istanbul")).strftime("%d.%m %H:%M")
-                if last_ms else "bilinmiyor"
-            )
+            age_hours = max(0.0, (now_ms - setup.created_at_ms) / 3_600_000.0) if setup.created_at_ms else None
+            age = f"{age_hours:.1f} sa" if age_hours is not None else "bilinmiyor"
+            entry_type = str(getattr(setup, "entry_type", "") or getattr(setup, "setup_type", "—")).upper()
             lines.extend([
-                f"{index}. {setup.symbol} | {setup.direction} | {setup.strategy_name}",
-                f"   Tür: {setup.setup_type} | Durum: {setup.status}",
-                f"   Giriş: {setup.entry_price} | SL: {setup.stop_loss}",
-                f"   TP1: {setup.tp1} | TP2: {setup.tp2} | TP3: {setup.tp3}",
-                f"   Net RR (maliyet sonrası): {setup.net_rr_after_costs}",
-                f"   Setup yaşı: {age_text} | Son veri: {last_text} | Skor: {setup.score} (sıralama puanı, kazanma olasılığı değildir)",
+                f"{index}. {str(setup.symbol).replace(':USDT', '')} | {setup.direction}",
+                f"Strateji: {setup.strategy_name} | Emir: {entry_type}",
+                f"Giriş: {_format_price(setup.entry_price)}",
+                f"Stop Loss: {_format_price(setup.stop_loss)}",
+                f"TP1: {_format_price(setup.tp1)}",
+                f"TP2: {_format_price(setup.tp2)}",
+                f"TP3: {_format_price(setup.tp3)}",
+                f"RR (TP1/TP2/TP3): "
+                f"{_format_rr(getattr(setup, 'rr_tp1', None))} / "
+                f"{_format_rr(getattr(setup, 'rr_tp2', None))} / "
+                f"{_format_rr(getattr(setup, 'rr_tp3', None))}",
+                f"Net RR: {_format_rr(getattr(setup, 'net_rr_after_costs', None))}",
+                f"Durum: {setup.status} | Yaş: {age}",
+                "",
             ])
-            if setup.invalidation_reason:
-                lines.append(f"   Not: {setup.invalidation_reason}")
-            lines.append("")
-        lines.append("Sıralama: bileşik puan = net RR (maliyet sonrası) + karar gücü + "
-                     "orta hedef kalitesi + tazelik. Yeni tarama başlatılmadı.")
+        lines.extend([
+            "Yeni tarama başlatılmadı; kuyruk ve havuz değiştirilmedi.",
+            "Skor sıralama ölçüsüdür, kazanma olasılığı değildir.",
+        ])
         return "\n".join(lines)
 
     def handle_mevcut(self) -> str:
@@ -1188,79 +1149,130 @@ class TelegramCommandService:
         return "\n".join(lines).rstrip()
 
     def handle_liquidity(self, symbol: str) -> str:
-        """Handle /likidite BTC"""
+        """Show a compact liquidity map for one Gate.io perpetual symbol."""
         from atlas_tui import _is_symbol_input
-
         if not _is_symbol_input(symbol):
-            return f"Geçersiz sembol: {symbol}\nKULLANIM: /likidite BTC"
-
+            return "ATLAS | LİKİDİTE\nKullanım: /likidite BTC"
         outcome = self.runtime.analyze_symbol(symbol, force_refresh=True, track_signal=False)
         if not outcome.get("ok"):
-            return f"{symbol} likidite analizi yapılamadı: {outcome.get('error')}"
-
-        # Reuse TUI formatting
-        adapter = SimpleNamespace(
-            runtime=self.runtime,
-            _show=lambda _message: None,
-            call_from_thread=lambda callback, *args, **kwargs: callback(*args, **kwargs),
-        )
-        from atlas_tui import AtlasTUIApp
-        return AtlasTUIApp._format_liquidity(adapter, outcome)
+            return (
+                f"ATLAS | {symbol.upper()} LİKİDİTE\n"
+                "Analiz tamamlanamadı. Piyasa verisini ve sembolü kontrol et."
+            )
+        result = outcome.get("result") or {}
+        analysis = result.get("analysis") or {}
+        layers = analysis.get("liquidity_layers") or {}
+        sweep = analysis.get("liquidity_sweep") or {}
+        lines = [
+            f"ATLAS | {str(result.get('symbol') or symbol).replace(':USDT', '')} LİKİDİTE",
+            "",
+        ]
+        for key, label in (("bsl", "ÜST LİKİDİTE / BSL"), ("ssl", "ALT LİKİDİTE / SSL"),
+                           ("eqh", "EŞİT ZİRVELER / EQH"), ("eql", "EŞİT DİPLER / EQL")):
+            levels = layers.get(key) or []
+            prices = []
+            for item in sorted(levels, key=lambda row: float(row.get("touches", 0) or 0), reverse=True)[:3]:
+                prices.append(
+                    f"{_format_price(item.get('price'))} ({item.get('touches', 0)} temas)"
+                )
+            lines.append(f"{label}: " + (", ".join(prices) if prices else "Bulunamadı"))
+        post = sweep.get("post_structure") or {}
+        direction = "BEARISH" if sweep.get("buy_side") else ("BULLISH" if sweep.get("sell_side") else "YOK")
+        lines.extend([
+            "",
+            "SON SÜPÜRME",
+            f"Durum: {'VAR' if sweep.get('is_sweep') else 'YOK'} | Yön: {direction}",
+            f"BSL alındı: {'Evet' if sweep.get('buy_side') else 'Hayır'}",
+            f"SSL alındı: {'Evet' if sweep.get('sell_side') else 'Hayır'}",
+            f"Yapı teyidi: {'Var' if post.get('confirmed') else 'Yok'}",
+            "",
+            "Bu çıktı likidite haritasıdır; tek başına işlem sinyali değildir.",
+        ])
+        return "\n".join(lines)
 
     def handle_performance(self) -> str:
-        """Handle /performans"""
-        adapter = SimpleNamespace(
-            runtime=self.runtime,
-            _show=lambda _message: None,
-            call_from_thread=lambda callback, *args, **kwargs: callback(*args, **kwargs),
-        )
-        from atlas_tui import AtlasTUIApp
-        return AtlasTUIApp._format_performance(adapter, "performans")
-
-    def handle_statistics(self) -> str:
-        """Handle /istatistik"""
+        """Show outcome performance only; learning details belong to /ogrenme."""
         signal = self.runtime.signal_performance()
         manual = self.runtime.manual_performance()
-        learning = self.runtime.learning_panel()
-
         lines = [
-            "ATLAS | İSTATİSTİKLER",
+            "ATLAS | PERFORMANS",
             "",
-            "OTOMATİK SİNYAL SONUÇLARI (teorik)",
-            f"Kapanan: {signal.get('closed', 0)} | WIN: {signal.get('wins', 0)} | LOSS: {signal.get('losses', 0)}",
-            f"Winrate: %{signal.get('winrate', 0)} | Expectancy: {signal.get('expectancy', 0)} R | PF: {signal.get('profit_factor', 0)}",
+            "OTOMATİK SİNYALLER (teorik takip)",
+            f"Kapanan: {signal.get('closed', 0)} | Kazanç: {signal.get('wins', 0)} | Kayıp: {signal.get('losses', 0)}",
+            f"Winrate: %{float(signal.get('winrate', 0) or 0):.1f}",
+            f"Expectancy: {float(signal.get('expectancy', 0) or 0):+.2f}R | PF: {float(signal.get('profit_factor', 0) or 0):.2f}",
+            f"TP1/TP2/TP3: {signal.get('tp1', 0)}/{signal.get('tp2', 0)}/{signal.get('tp3', 0)} | SL: {signal.get('sl', 0)}",
             "",
-            "MANUEL İŞLEMLER (gerçek kullanıcı kayıtları)",
-            f"Kapanan: {manual.get('total', 0)} | WIN: {manual.get('wins', 0)} | LOSS: {manual.get('losses', 0)} | Açık: {manual.get('open', 0)}",
-            f"Winrate: %{manual.get('winrate', 0)} | Expectancy: {manual.get('expectancy', 0)} R | PF: {manual.get('profit_factor', 0)}",
+            "MANUEL İŞLEMLER (kullanıcı kayıtları)",
+            f"Kapanan: {manual.get('total', 0)} | Kazanç: {manual.get('wins', 0)} | Kayıp: {manual.get('losses', 0)} | Açık: {manual.get('open', 0)}",
+            f"Winrate: %{float(manual.get('winrate', 0) or 0):.1f}",
+            f"Expectancy: {float(manual.get('expectancy', 0) or 0):+.2f}R | PF: {float(manual.get('profit_factor', 0) or 0):.2f}",
             "",
-            "ÖĞRENME",
-            f"Kaynak: {learning.get('source') or 'henüz yok'} | Kayıt: {learning.get('records_fed', 0)}",
-            f"Manuel kapanan: {learning.get('closed_manual_trades', 0)} | Eşleşen setup: {learning.get('matched_setups', 0)}",
-            f"Güvenilirlik: {learning.get('reliability', 0)} | Düzeltme: {learning.get('learning_adjustment', 0):+g} puan",
-            "",
-            "Not: Sıralama puanı kazanma olasılığı değildir.",
+            "Not: Otomatik sinyal takibi ve manuel işlemler ayrı hesaplanır.",
         ]
+        if int(signal.get("closed", 0) or 0) < 20:
+            lines.append("Otomatik sinyal örneklemi 20 kapanan işlemin altında.")
+        return "\n".join(lines)
+
+    def handle_statistics(self) -> str:
+        """Show seven-strategy generation and common-filter statistics."""
+        status = self.runtime.scan_status()
+        telemetry = status.get("strategy_telemetry") or {}
+        rows = telemetry.get("per_strategy") or {}
+        names = (
+            ("smc", "SMC"),
+            ("relative_strength", "RELATIVE STRENGTH"),
+            ("trend_pullback", "TREND PULLBACK"),
+            ("orderflow_momentum", "ORDERFLOW MOMENTUM"),
+            ("mean_reversion", "MEAN REVERSION"),
+            ("liquidation_cascade", "LIQUIDATION CASCADE"),
+            ("volatility_breakout", "VOLATILITY BREAKOUT"),
+        )
+        lines = [
+            "ATLAS | STRATEJİ İSTATİSTİĞİ",
+            "",
+            f"Analiz: {telemetry.get('analyses', 0)}",
+            f"Ham setup: {telemetry.get('raw_setups_generated', 0)}",
+            "",
+        ]
+        for key, label in names:
+            item = rows.get(key) or {}
+            no_setup = sum(int(item.get(k, 0) or 0) for k in (
+                "no_setup", "condition_not_met", "missing_data",
+                "insufficient_history", "errors", "other_no_setup",
+            ))
+            lines.append(
+                f"{label}: {item.get('setups', 0)} setup | "
+                f"{item.get('passed', 0)} geçti | {item.get('rejected', 0)} elendi | "
+                f"{no_setup} setup yok"
+            )
+        lines.extend([
+            "",
+            "ORTAK FİLTRE",
+            f"Geçen: {telemetry.get('common_filter_passed', 0)}",
+            f"Elenen: {telemetry.get('common_filter_rejected', 0)}",
+            "Not: Strateji setup üretimi ile nihai seçim ayrı aşamalardır.",
+        ])
         return "\n".join(lines)
 
     def handle_learning(self) -> str:
-        """Handle /ogrenme"""
+        """Show only the learning engine's input and validation state."""
         learning = self.runtime.learning_panel()
-        lines = [
-            "ATLAS | ÖĞRENME DURUMU",
+        meta = learning.get("feed_meta") or {}
+        return "\n".join([
+            "ATLAS | ÖĞRENME MOTORU",
             "",
-            f"Kaynak: {learning.get('source') or 'henüz yok'}",
-            f"Kayıt sayısı: {learning.get('records_fed', 0)}",
-            f"Manuel kapanan işlem: {learning.get('closed_manual_trades', 0)}",
+            f"Kaynak: {learning.get('source') or 'Henüz veri yok'}",
+            f"Öğrenmeye alınan kayıt: {learning.get('records_fed', 0)}",
+            f"Kapanan manuel işlem: {learning.get('closed_manual_trades', 0)}",
             f"Eşleşen setup: {learning.get('matched_setups', 0)}",
-            f"Tarihsel edge: {learning.get('historical_edge', 0)}",
-            f"Güvenilirlik: {learning.get('reliability', 0)}",
-            f"Öğrenme düzeltmesi: {learning.get('learning_adjustment', 0):+g} puan",
-            f"OOS gerekli: {'Evet' if learning.get('feed_meta', {}).get('oos_required') else 'Hayır'}",
+            f"Tarihsel edge: {learning.get('historical_edge', '—')}",
+            f"Güvenilirlik: {learning.get('reliability', '—')}",
+            f"Skor düzeltmesi: {learning.get('learning_adjustment', 0):+g} puan",
+            f"Out-of-sample doğrulaması: {'Gerekli' if meta.get('oos_required') else 'Gerekli değil / belirtilmemiş'}",
             "",
-            "Not: Öğrenme motoru manuel işlemlerden çıkarım yapar; kesin kârlılık kanıtı değildir.",
-        ]
-        return "\n".join(lines)
+            "Öğrenme çıktısı tek başına işlem sinyali veya kârlılık garantisi değildir.",
+        ])
 
     @staticmethod
     def _format_uptime(seconds: float) -> str:
@@ -1277,76 +1289,37 @@ class TelegramCommandService:
         return f"{days:.1f} gün"
 
     def handle_status(self) -> str:
-        """Handle /durum - bot and service status"""
-        import sys
-        import threading
-        try:
-            import psutil
-        except ImportError:
-            psutil = None
-
-        # Telegram bot info
-        bot_info = self._bot_info_cache or {}
-        bot_name = bot_info.get("first_name", "Atlas")
-        bot_username = bot_info.get("username", "?")
-
-        # Runtime status
+        """Show bot connectivity and Atlas service state, not host resource details."""
         snap = self.runtime.snapshot()
         scanner = snap.get("scanner") or {}
-        mode = scanner.get("mode", "UNKNOWN")
-        status = scanner.get("status", "UNKNOWN")
-        cycle = scanner.get("cycle", 0)
-        processed = scanner.get("processed", 0)
-        success = scanner.get("success", 0)
-        failed = scanner.get("failed", 0)
-        skipped = scanner.get("skipped", 0)
-
-        # Telegram status
-        tg_status = self.runtime.telegram_status()
-        polling = "AÇIK" if tg_status.get("polling_enabled") else "KAPALI"
-        webhook = "AÇIK" if tg_status.get("webhook_enabled") else "KAPALI"
-        service_running = "ÇALIŞIYOR" if tg_status.get("service_running") else "DURDU"
-
-        # System info
-        if psutil is not None:
-            process = psutil.Process()
-            mem_mb = process.memory_info().rss / 1024 / 1024
-            cpu_pct = process.cpu_percent(interval=0.1)
-            threads = process.num_threads()
-        else:
-            import resource
-            mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-            cpu_pct = 0.0
-            threads = threading.active_count()
-
-        # Uptime
-        started_at = scanner.get("started_at", 0)
-        uptime_s = int(time.time() * 1000 - started_at) / 1000 if started_at else 0
-        uptime_str = self._format_uptime(uptime_s)
-
-        lines = [
+        tg = self.runtime.telegram_status()
+        status = str(scanner.get("status") or "UNKNOWN").upper()
+        service = "ÇALIŞIYOR" if tg.get("service_running") else "DURDU"
+        polling = "AÇIK" if tg.get("polling_enabled") else "KAPALI"
+        uptime = self._format_uptime(
+            max(0, int(time.time() * 1000 - int(scanner.get("started_at") or 0)) / 1000)
+            if scanner.get("started_at") else 0
+        )
+        bot = self._bot_info_cache or {}
+        return "\n".join([
             "ATLAS | SERVİS DURUMU",
             "",
-            f"Bot: {bot_name} (@{bot_username})",
-            f"Polling: {polling} | Webhook: {webhook} | Servis: {service_running}",
+            f"Bot: {bot.get('first_name', 'Atlas')} (@{bot.get('username', '?')})",
+            f"Servis: {service} | Telegram polling: {polling}",
+            f"Tarama: {status} | Döngü: {scanner.get('cycle', 0)}",
+            f"İşlenen: {scanner.get('processed', 0)} | Başarılı: {scanner.get('success', 0)} | Hatalı: {scanner.get('failed', 0)}",
+            f"Çalışma süresi: {uptime}",
             "",
-            f"Tarama modu: {mode}",
-            f"Durum: {status} | Döngü: {cycle}",
-            f"İşlenen: {processed} | Başarılı: {success} | Hatalı: {failed} | Atlanan: {skipped}",
-            f"Çalışma süresi: {uptime_str}",
-            "",
-            f"Python: {sys.version.split()[0]}",
-            f"Bellek: {mem_mb:.1f} MB | CPU: {cpu_pct:.1f}% | Thread: {threads}",
-        ]
-        return "\n".join(lines)
+            "Kuyruk ayrıntısı: /taramadurum",
+            "Sunucu kaynakları: /sistem",
+        ])
 
     def handle_system(self) -> str:
-        """Handle /sistem - system resources"""
+        """Show host resource usage; service connectivity belongs to /durum."""
         import os
         import shutil
         import resource
         import threading
-
         try:
             import psutil
         except ImportError:
@@ -1356,46 +1329,33 @@ class TelegramCommandService:
             available_pages = os.sysconf("SC_AVPHYS_PAGES")
             available_ram = available_pages * page_size
             disk = shutil.disk_usage("/")
-            usage = resource.getrusage(resource.RUSAGE_SELF)
             load_avg = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
+            usage = resource.getrusage(resource.RUSAGE_SELF)
             return "\n".join([
-                "ATLAS | SİSTEM KAYNAKLARI",
+                "ATLAS | SUNUCU KAYNAKLARI",
                 "",
-                f"CPU: {os.cpu_count() or 0} çekirdek | Load: {load_avg[0]:.2f} {load_avg[1]:.2f} {load_avg[2]:.2f}",
+                f"CPU çekirdeği: {os.cpu_count() or 0} | Load: {load_avg[0]:.2f}/{load_avg[1]:.2f}/{load_avg[2]:.2f}",
                 f"RAM: {total_ram / 1024**3:.1f} GB | Boş: {available_ram / 1024**3:.1f} GB",
                 f"Disk: {disk.total / 1024**3:.1f} GB | Boş: {disk.free / 1024**3:.1f} GB",
-                "",
-                f"Süreç: PID={os.getpid()} | Tepe bellek: {usage.ru_maxrss / 1024:.1f} MB | Thread: {threading.active_count()}",
-                "Not: psutil kurulu olmadığı için anlık CPU/RAM yüzdesi gösterilemiyor.",
+                f"Atlas tepe belleği: {usage.ru_maxrss / 1024:.1f} MB | Thread: {threading.active_count()}",
+                "Anlık kullanım yüzdeleri için psutil gerekli.",
             ])
-
-        # System-wide stats
         cpu_count = psutil.cpu_count()
         cpu_percent = psutil.cpu_percent(interval=0.5)
         mem = psutil.virtual_memory()
         disk = psutil.disk_usage("/")
         load_avg = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
-
-        # Process stats
         process = psutil.Process()
         p_mem = process.memory_info().rss / 1024 / 1024
         p_cpu = process.cpu_percent(interval=0.1)
-        p_threads = process.num_threads()
-        open_files = len(process.open_files())
-        connections = len(process.connections())
-
-        lines = [
-            "ATLAS | SİSTEM KAYNAKLARI",
+        return "\n".join([
+            "ATLAS | SUNUCU KAYNAKLARI",
             "",
-            f"CPU: {cpu_count} çekirdek | Kullanım: {cpu_percent:.1f}% | Load: {load_avg[0]:.2f} {load_avg[1]:.2f} {load_avg[2]:.2f}",
-            f"RAM: {mem.total / 1024**3:.1f} GB | Kullanım: {mem.percent:.1f}% | Boş: {mem.available / 1024**3:.1f} GB",
-            f"Disk: {disk.total / 1024**3:.1f} GB | Kullanım: {disk.percent:.1f}% | Boş: {disk.free / 1024**3:.1f} GB",
-            "",
-            f"Süreç: PID={process.pid} | Bellek: {p_mem:.1f} MB | CPU: {p_cpu:.1f}% | Thread: {p_threads}",
-            f"Açık dosya: {open_files} | Bağlantı: {connections}",
-        ]
-        return "\n".join(lines)
-
+            f"CPU: {cpu_count} çekirdek | Kullanım: %{cpu_percent:.1f} | Load: {load_avg[0]:.2f}/{load_avg[1]:.2f}/{load_avg[2]:.2f}",
+            f"RAM: {mem.total / 1024**3:.1f} GB | Kullanım: %{mem.percent:.1f} | Boş: {mem.available / 1024**3:.1f} GB",
+            f"Disk: {disk.total / 1024**3:.1f} GB | Kullanım: %{disk.percent:.1f} | Boş: {disk.free / 1024**3:.1f} GB",
+            f"Atlas süreci: {p_mem:.1f} MB | CPU: %{p_cpu:.1f} | Thread: {process.num_threads()}",
+        ])
 
 def create_telegram_command_service(runtime, logger=None):
     """Build the opt-in command service from environment configuration."""
