@@ -399,6 +399,7 @@ def test_start_scan_requeues_completed_symbols_that_still_have_live_setups():
     runtime = FakeRuntime()
     runtime.live_setups = [SimpleNamespace(symbol="OLD/USDT:USDT")]
     service = make_service(runtime, ["NEW/USDT:USDT"], workers=1)
+    service.ensure_workers = lambda: False  # keep assertions deterministic
     service.queue.jobs = {
         "OLD/USDT:USDT": {"state": "done", "attempts": 1},
         "PENDING/USDT:USDT": {"state": "pending", "attempts": 0},
