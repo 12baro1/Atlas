@@ -87,7 +87,8 @@ def test_mevcut_daily_report_uses_turkey_local_day_and_net_r():
     assert "Giriş olmadı (süresi doldu): 1" in report
     assert "Net: -0.50R" in report
     assert "OLD/USDT" not in report
-    assert "A4" in report
+    assert "XRP/USDT" in report
+    assert "Giriş seviyesi görülmedi" in report
 
 
 def test_telegram_card_is_compact_and_keeps_trade_levels():
