@@ -22,7 +22,7 @@ def generate(data):
     if not bandwidths or prior_band is None:
         return None
     prior_width = (prior_band[2] - prior_band[0]) / max(prior_band[1], 1e-12)
-    compression_threshold = sorted(bandwidths)[max(0, int((len(bandwidths) - 1) * 0.35))]
+    compression_threshold = sorted(bandwidths)[max(0, int((len(bandwidths) - 1) * 0.50))]
     if prior_width > compression_threshold:
         return None
     previous = candles[-21:-1]
@@ -40,20 +40,20 @@ def generate(data):
     upper_boundary, lower_boundary = max(prior_highs), min(prior_lows)
     direction = None
     if (close > upper_boundary and breakout_evidence.get("state") == "ACCEPTED" and breakout_evidence.get("direction") == "LONG" and entry >= close and entry <= upper_boundary + atr
-            and volume_ratio >= 1.30 and quality["direction"] == "BULLISH"
-            and quality["body_ratio"] >= 0.50 and quality["close_location"] >= 0.75
-            and quality["range"] >= 0.75 * atr):
+            and volume_ratio >= 1.15 and quality["direction"] == "BULLISH"
+            and quality["body_ratio"] >= 0.40 and quality["close_location"] >= 0.65
+            and quality["range"] >= 0.60 * atr):
         direction = "LONG"
     elif (close < lower_boundary and breakout_evidence.get("state") == "ACCEPTED" and breakout_evidence.get("direction") == "SHORT" and entry <= close and entry >= lower_boundary - atr
             and volume_ratio >= 1.30 and quality["direction"] == "BEARISH"
-            and quality["body_ratio"] >= 0.50 and quality["close_location"] <= 0.25
+            and quality["body_ratio"] >= 0.50 and quality["close_location"] <= 0.35
             and quality["range"] >= 0.75 * atr):
         direction = "SHORT"
     else:
         return None
     boundary = upper_boundary if direction == "LONG" else lower_boundary
     breakout_distance = abs(entry - boundary) / atr
-    strength = min(93.0, 61.0 + min(max(0.0, volume_ratio - 1.30) * 10.0, 15.0)
+    strength = min(93.0, 61.0 + min(max(0.0, volume_ratio - 1.15) * 10.0, 15.0)
                    + min(quality["body_ratio"] * 10.0, 8.0)
                    + min(quality["range"] / atr * 5.0, 7.0))
     # _valid_plan in common filter computes structural stop; pass dummy stop (ignored)
