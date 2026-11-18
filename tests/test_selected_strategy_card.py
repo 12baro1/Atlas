@@ -85,6 +85,25 @@ def test_missing_selected_plan_does_not_fall_back_to_smc_execute():
     assert card["decision_action"] == "SKIP"
     assert card["direction"] is None
 
+def test_missing_selection_exposes_all_seven_strategy_diagnostics():
+    result = _result(None)
+    result["strategy_lab"]["diagnostics"] = {
+        "raw_setup_count": 2,
+        "common_filter_passed_count": 0,
+        "strategies": [
+            {"strategy_id": "trend_pullback", "status": "CONDITION_NOT_MET",
+             "reason": "4H trend condition not met"},
+            {"strategy_id": "orderflow_momentum", "status": "BLOCKED_COMMON_FILTER",
+             "rejection_reasons": ["MARKET_ENTRY_TOO_FAR"]},
+        ],
+    }
+    card = build_selected_strategy_card(result)
+    assert card["strategy_pipeline"]["raw_setups"] == 2
+    assert card["strategy_pipeline"]["passed_common_filter"] == 0
+    assert card["strategy_diagnostics"][0]["reason"] == "4H trend condition not met"
+    assert card["strategy_diagnostics"][1]["reason"] == "MARKET_ENTRY_TOO_FAR"
+
+
 def test_selected_short_plan_preserves_directional_price_geometry():
     card = build_selected_strategy_card(_result(_candidate(
         direction="SHORT", entry=100.0, stop_loss=102.0,
