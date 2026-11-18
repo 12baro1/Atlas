@@ -550,15 +550,15 @@ class TelegramCommandService:
         else:
             self.logger.warning("Telegram polling thread still active at shutdown")
 
-        if not analysis_alive:
+        if not analysis_alive and not command_alive:
             self._reply_session.close()
         else:
-            self.logger.warning(
-                "Telegram analyses still finishing at shutdown: %s", analysis_alive
-            )
-
-        if command_alive:
-            self.logger.warning("Telegram command worker still active at shutdown")
+            if analysis_alive:
+                self.logger.warning(
+                    "Telegram analyses still finishing at shutdown: %s", analysis_alive
+                )
+            if command_alive:
+                self.logger.warning("Keeping Telegram reply session open while command worker exits")
         return not polling_alive and not command_alive and not analysis_alive
 
     def _fetch_bot_info(self) -> None:
