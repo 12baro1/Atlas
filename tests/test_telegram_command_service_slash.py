@@ -144,7 +144,7 @@ def test_start_command_is_registered_and_recognized():
     runtime = MagicMock()
     service = TelegramCommandService(runtime, "token", "-100123")
     reply = service.execute_command("/start")
-    assert "ATLAS TELEGRAM AKTİF" in reply
+    assert "ATLAS | KOMUT MERKEZİ" in reply
     assert "/20tara" in reply
 
 
@@ -204,7 +204,7 @@ def test_telegram_card_omits_verbose_strategy_evidence():
         "opposing_evidence": ["Yakın destek bölgesi"],
     }
     message = _format_telegram_card(card)
-    assert "Strateji: orderflow_momentum" in message
+    assert "Strateji: ORDERFLOW MOMENTUM" in message
     assert "Net RR: +2.10R" in message
     assert "CVD negatif" not in message
     assert "DİKKAT" not in message
@@ -240,7 +240,7 @@ def test_mevcut_report_shows_levels_strategy_and_tp_progress():
     assert "AKTİF İŞLEMLER (1)" in report
     assert "Strateji: SMC" in report
     assert "Giriş: 96,250" in report
-    assert "Stop: 95,700" in report
+    assert "Stop Loss: 95,700" in report
     assert "TP1: 96,800" in report
     assert "TP1 ALINDI  |  TP2/TP3 TAKİPTE" in report
     assert "Gerçekleşen kısmi getiri (brüt): +0.50R" in report
@@ -422,7 +422,7 @@ def test_help_command():
     service = TelegramCommandService(runtime, "token", "-100123")
 
     result = service.handle_help()
-    assert "ATLAS TELEGRAM KOMUTLARI" in result
+    assert "ATLAS | KOMUT MERKEZİ" in result
     assert "/btc" in result
     assert "/eniyi5" in result
     assert "/analiz" in result
@@ -474,4 +474,4 @@ def test_system_command_works_without_psutil(monkeypatch):
     assert "CPU:" in message
     assert "RAM:" in message
     assert "Disk:" in message
-    assert "psutil kurulu olmadığı için" in message
+    assert "Anlık CPU/RAM yüzdeleri gösterilemiyor" in message

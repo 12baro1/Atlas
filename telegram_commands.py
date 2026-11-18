@@ -43,23 +43,23 @@ TELEGRAM_COMMANDS = [
     TelegramCommand("yenile", "Gate.io piyasa envanterini yenile", "handle_refresh", "scan"),
     TelegramCommand("eniyi5", "Havuzdan en iyi 5 setup (salt okunur, yeni tarama başlatmaz)", "handle_best_five", "scan"),
     TelegramCommand("eniyi10", "Havuzdan en iyi 10 setup (salt okunur, yeni tarama başlatmaz)", "handle_best_ten", "scan"),
-    TelegramCommand("havuzdurum", "Setup havuzu ve kuyruk durumu", "handle_pool_status", "setup"),
+    TelegramCommand("havuzdurum", "Kalıcı setup havuzu durumu", "handle_pool_status", "setup"),
 
     # Setup ve takip
-    TelegramCommand("mevcut", "Bugünün setup ve işlem takibi", "handle_mevcut", "setup"),
-    TelegramCommand("setuplar", "Aktif setup havuzunu listele", "handle_setuplar", "setup"),
-    TelegramCommand("takip", "Açık sinyal takibi", "handle_takip", "setup"),
+    TelegramCommand("mevcut", "Bugünkü sinyal sonuçları ve açık takipler", "handle_mevcut", "setup"),
+    TelegramCommand("setuplar", "Doğrulanmış ve aktif setup planları", "handle_setuplar", "setup"),
+    TelegramCommand("takip", "Açık sinyaller ve son kapanan sonuçlar", "handle_takip", "setup"),
     TelegramCommand("likidite", "Belirtilen coin için likidite haritası (örn: /likidite BTC)", "handle_liquidity", "setup", True, "symbol"),
 
     # Performans ve öğrenme
-    TelegramCommand("performans", "Tüm geçmiş performans istatistikleri", "handle_performance", "performance"),
-    TelegramCommand("istatistik", "Sinyal ve manuel işlem istatistikleri", "handle_statistics", "performance"),
+    TelegramCommand("performans", "Otomatik sinyal ve manuel işlem performansı", "handle_performance", "performance"),
+    TelegramCommand("istatistik", "Yedi strateji ve ortak filtre istatistikleri", "handle_statistics", "performance"),
     TelegramCommand("ogrenme", "Öğrenme motoru verisi", "handle_learning", "performance"),
 
     # Sistem ve yardım
     TelegramCommand("start", "Atlas komutlarını göster", "handle_start", "system"),
     TelegramCommand("durum", "Bot ve servis durumu (VPS, tarama, bağlantı)", "handle_status", "system"),
-    TelegramCommand("sistem", "Sistem kaynakları ve çalışma durumu", "handle_system", "system"),
+    TelegramCommand("sistem", "Sunucu CPU, RAM ve disk kullanımı", "handle_system", "system"),
     TelegramCommand("yardim", "Komut listesi ve kullanım", "handle_help", "system"),
 ]
 
@@ -102,29 +102,32 @@ def get_all_categories() -> list[str]:
 
 
 CATEGORY_LABELS = {
-    "market": "📊 Piyasa Analizi",
-    "scan": "🔍 Piyasa Tarama",
-    "setup": "📈 Setup ve Takip",
-    "performance": "📊 Performans ve Öğrenme",
-    "system": "⚙️ Sistem ve Yardım",
+    "market": "PİYASA ANALİZİ",
+    "scan": "TARAMA VE FIRSAT HAVUZU",
+    "setup": "SETUP VE TAKİP",
+    "performance": "PERFORMANS VE ÖĞRENME",
+    "system": "SİSTEM",
 }
 
 
 def format_help_text() -> str:
-    """Generate formatted help text grouped by category."""
-    lines = ["ATLAS TELEGRAM KOMUTLARI", ""]
+    """Generate the complete command menu with concise, purpose-specific labels."""
+    lines = ["ATLAS | KOMUT MERKEZİ", ""]
     for category in get_all_categories():
         lines.append(CATEGORY_LABELS.get(category, category.upper()))
         for cmd in get_commands_by_category(category):
+            command = f"/{cmd.name}"
             if cmd.takes_parameter:
-                lines.append(f"  /{cmd.name} <{cmd.parameter_name}> — {cmd.description}")
-            else:
-                lines.append(f"  /{cmd.name} — {cmd.description}")
+                command += f" <{cmd.parameter_name}>"
+            lines.append(f"{command} — {cmd.description}")
         lines.append("")
     lines.extend([
-        "Atlas otomatik emir göndermez.",
-        "Sıralama puanı kazanma olasılığı değildir.",
-        "Komutlar büyük/küçük harf duyarsızdır.",
-        "Bot username eklenmiş biçim de çalışır: /btc@BotAdi",
+        "KULLANIM NOTLARI",
+        "• /eniyi5 ve /eniyi10 mevcut havuzu okur; yeni tarama başlatmaz.",
+        "• /taramadurum yalnızca tarama kuyruğunu gösterir.",
+        "• /havuzdurum havuz sayılarını, /istatistik yedi stratejiyi gösterir.",
+        "• /mevcut günlük sonuçları, /takip sinyal günlüğünü, /setuplar havuz setup'larını gösterir.",
+        "• Atlas otomatik emir göndermez.",
+        "• Sıralama puanı kazanma olasılığı değildir.",
     ])
     return "\n".join(lines)

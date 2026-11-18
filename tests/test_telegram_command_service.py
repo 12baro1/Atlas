@@ -190,7 +190,7 @@ def test_telegram_card_omits_verbose_evidence_details():
         "opposing_evidence": ["Yakın destek bölgesi"],
     }
     message = _format_telegram_card(card)
-    assert "Strateji: orderflow_momentum" in message
+    assert "Strateji: ORDERFLOW MOMENTUM" in message
     assert "Net RR: +2.10R" in message
     assert "CVD negatif" not in message
     assert "DİKKAT" not in message
@@ -226,7 +226,7 @@ def test_mevcut_report_shows_levels_strategy_and_tp_progress():
     assert "AKTİF İŞLEMLER (1)" in report
     assert "Strateji: SMC" in report
     assert "Giriş: 96,250" in report
-    assert "Stop: 95,700" in report
+    assert "Stop Loss: 95,700" in report
     assert "TP1: 96,800" in report
     assert "TP1 ALINDI  |  TP2/TP3 TAKİPTE" in report
     assert "Gerçekleşen kısmi getiri (brüt): +0.50R" in report
@@ -314,78 +314,157 @@ def test_setuplar_reads_validated_pool_not_recent_analyses(monkeypatch):
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
     service = TelegramCommandService(SimpleNamespace(), "token", "chat")
     message = service.handle_setuplar()
-    assert "BTC/USDT LONG" in message
+    assert "BTC/USDT | LONG" in message
     assert "TP1: 102" in message
     assert "Durum: VALIDATED" in message
 
 
-def test_mevcut_includes_validated_pool_setups_not_in_signal_journal(monkeypatch):
-    from types import SimpleNamespace
+def test_mevcut_shows_signal_outcomes_without_mixing_pool_setups(monkeypatch):
     import telegram_command_service as telegram_module
-
-    candidate = SimpleNamespace(
-        symbol="SOL/USDT:USDT", direction="SHORT", strategy_name="Mean Reversion",
-        entry_price=150.0, stop_loss=153.0, tp1=147.0, tp2=144.0,
-        tp3=141.0, net_rr_after_costs=2.0,
-    )
-    pool = SimpleNamespace(get_best_setups=lambda **kwargs: [candidate])
-    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
 
     class Runtime:
         def signal_outcomes(self, **kwargs):
             return []
 
+    def unexpected_pool_access():
+        raise AssertionError("/mevcut must not read the opportunity pool")
+
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", unexpected_pool_access)
     service = TelegramCommandService(Runtime(), "token", "chat")
     message = service.handle_mevcut()
-    assert "SOL/USDT SHORT" in message
-    assert "henüz sinyal sonucu takibine alınmamış" in message
+    assert "ATLAS | BUGÜNÜN İŞLEM TAKİBİ" in message
+    assert "Doğrulanmış havuz setup'ları" not in message
 
 
-def test_takip_includes_accepted_pool_setups_without_journal_outcome(monkeypatch):
-    from types import SimpleNamespace
+def test_takip_does_not_mix_untracked_pool_setups(monkeypatch):
     import telegram_command_service as telegram_module
-
-    setup = SimpleNamespace(
-        symbol="SOL/USDT:USDT", direction="SHORT", strategy_name="Mean Reversion",
-        status="ACTIVE", current_tp=1, entry_filled_price=150.0, entry_price=151.0,
-        trailing_stop=150.0, stop_loss=153.0, tp1=147.0, tp2=144.0, tp3=141.0,
-    )
-    pool = SimpleNamespace(get_active_setups=lambda: [setup])
-    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
 
     class Runtime:
         def signal_outcomes(self, **kwargs):
             return []
 
-    service = TelegramCommandService(Runtime(), "token", "chat")
-    message = service.handle_takip()
-    assert "Havuz setup: 1" in message
-    assert "SOL/USDT | SHORT" in message
-    assert "TP1 ALINDI" in message
-    assert "henüz sinyal sonuç günlüğüyle eşleşmedi" in message
+    def unexpected_pool_access():
+        raise AssertionError("/takip must only read journal-tracked signals")
 
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", unexpected_pool_access)
+    message = TelegramCommandService(Runtime(), "token", "chat").handle_takip()
+    assert "ATLAS | SİNYAL TAKİBİ" in message
+    assert "Açık veya sonuçlanmış sinyal kaydı yok" in message
+    assert "/setuplar" in message
 
-def test_mevcut_does_not_hide_distinct_setup_for_same_symbol_and_direction(monkeypatch):
+def test_setuplar_keeps_distinct_validated_setup_for_same_symbol_and_direction(monkeypatch):
     from types import SimpleNamespace
     import telegram_command_service as telegram_module
 
     candidate = SimpleNamespace(
         symbol="BTC/USDT:USDT", direction="LONG", strategy_name="SMC",
         entry_price=105.0, stop_loss=103.0, tp1=107.0, tp2=109.0,
-        tp3=111.0, net_rr_after_costs=2.0,
+        tp3=111.0, net_rr_after_costs=2.0, status="VALIDATED",
     )
-    pool = SimpleNamespace(get_best_setups=lambda **kwargs: [candidate])
+    pool = SimpleNamespace(
+        get_best_setups=lambda **kwargs: [candidate],
+        get_active_setups=lambda: [],
+    )
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
-
-    class Runtime:
-        def signal_outcomes(self, **kwargs):
-            return [{
-                "symbol": "BTC/USDT:USDT", "direction": "LONG",
-                "entry": 100.0, "stop_loss": 98.0,
-                "tp1": 102.0, "tp2": 104.0, "tp3": 106.0,
-            }]
-
-    service = TelegramCommandService(Runtime(), "token", "chat")
-    message = service.handle_mevcut()
-    assert "BTC/USDT LONG — SMC" in message
+    service = TelegramCommandService(SimpleNamespace(), "token", "chat")
+    message = service.handle_setuplar()
+    assert "BTC/USDT | LONG" in message
     assert "Giriş: 105" in message
+    assert "TP3: 111" in message
+
+
+def test_telegram_card_requires_three_ordered_targets():
+    card = {
+        "symbol": "BTC/USDT", "direction": "LONG",
+        "decision_action": "EXECUTE", "entry_type": "MARKET",
+        "entry": 100.0, "stop_loss": 99.0,
+        "tp_levels": [101.0, 102.0],
+        "net_rr": 2.0, "strategy": "SMC",
+    }
+    message = _format_telegram_card(card)
+    assert "GEÇERLİ İŞLEM PLANI YOK" in message
+    assert "TP1:" not in message
+    assert "Giriş (MARKET)" not in message
+
+
+def test_best_setups_output_contains_entry_sl_three_tps_and_net_rr(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram_module
+
+    setup = SimpleNamespace(
+        symbol="BTC/USDT:USDT", direction="LONG", strategy_name="SMC",
+        setup_type="LIMIT", entry_price=100.0, stop_loss=98.0,
+        tp1=102.0, tp2=104.0, tp3=106.0,
+        rr_tp1=1.0, rr_tp2=2.0, rr_tp3=3.0,
+        net_rr_after_costs=1.8, status="VALIDATED",
+        created_at_ms=0, updated_at_ms=0,
+    )
+    pool = SimpleNamespace(get_best_setups=lambda **kwargs: [setup])
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+    service = TelegramCommandService(object(), "token", "chat")
+    message = service._format_best_setups(5)
+    for expected in (
+        "BTC/USDT | LONG", "Strateji: SMC | Emir: LIMIT",
+        "Giriş: 100", "Stop Loss: 98", "TP1: 102", "TP2: 104",
+        "TP3: 106", "Net RR: +1.80R",
+        "Yeni tarama başlatılmadı",
+    ):
+        assert expected in message
+
+
+def test_scan_status_contains_only_queue_and_market_status():
+    class Runtime:
+        def scan_status(self):
+            return {
+                "total": 300, "done": 77, "running": 1, "pending": 222,
+                "failed": 0, "percent": 25.7, "workers_running": True,
+                "inventory": {"symbol_count": 544, "ranking_source": "gateio_24h_quote_volume"},
+                "strategy_telemetry": {"per_strategy": {"smc": {"setups": 99}}},
+            }
+
+    message = TelegramCommandService(Runtime(), "token", "chat").handle_scan_status()
+    assert "77/300" in message
+    assert "Gate.io" in message
+    assert "24 saatlik USDT işlem hacmi" in message
+    assert "SMC" not in message
+    assert "/havuzdurum" in message
+
+
+def test_pool_status_shows_only_persistent_pool_contents(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram_module
+
+    pool = SimpleNamespace(
+        get_stats=lambda: {"candidates": 3, "validated": 2, "active": 1, "history": 4},
+        get_best_setups=lambda **kwargs: [],
+    )
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+    message = TelegramCommandService(SimpleNamespace(), "token", "chat").handle_pool_status()
+    assert "ATLAS | FIRSAT HAVUZU" in message
+    assert "Aday: 3" in message
+    assert "Doğrulanmış: 2" in message
+    assert "SMC" not in message
+    assert "/setuplar" in message
+
+
+def test_statistics_shows_seven_strategy_funnel():
+    class Runtime:
+        def scan_status(self):
+            return {
+                "strategy_telemetry": {
+                    "analyses": 10,
+                    "raw_setups_generated": 7,
+                    "common_filter_passed": 3,
+                    "common_filter_rejected": 4,
+                    "per_strategy": {"smc": {"setups": 2, "passed": 1, "rejected": 1}},
+                }
+            }
+
+    message = TelegramCommandService(Runtime(), "token", "chat").handle_statistics()
+    for name in (
+        "SMC", "RELATIVE STRENGTH", "TREND PULLBACK",
+        "ORDERFLOW MOMENTUM", "MEAN REVERSION",
+        "LIQUIDATION CASCADE", "VOLATILITY BREAKOUT",
+    ):
+        assert name in message
+    assert "ORTAK FİLTRE" in message
