@@ -68,7 +68,7 @@ def _trend_pullback_bullish_data():
         h1.append(Candle(now + 60 * 4 * 3600_000 + i * 3600_000,
                          price - 0.03, price + 0.08, price - 0.06, price + 0.05, 100.0))
     for i in range(9):
-        price -= 0.01
+        price -= 0.04
         h1.append(Candle(now + (260 + i) * 3600_000,
                          price - 0.02, price + 0.04, price - 0.05, price + 0.01, 100.0))
     from strategy_lab import _ema, _atr, _series
