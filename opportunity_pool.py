@@ -547,22 +547,26 @@ class OpportunityPool:
     def invalidate_strategy_setup(
         self, symbol: str, strategy_id: str, reason: str = "STRATEGY_STRUCTURE_BROKEN"
     ) -> List[SetupCandidate]:
-        """Archive unaccepted setups when their own strategy reports broken structure.
+        """Archive live, not-yet-entered setups when their own strategy breaks.
 
-        Missing market data, insufficient history and generator errors must not
-        invalidate a setup; callers invoke this only for explicit strategy-native
-        NO_SETUP / CONDITION_NOT_MET results.
+        Candidate and validated records are always eligible. User-accepted
+        ACTIVE records are also removed before entry; ENTERED/TP records are
+        deliberately preserved because they represent position management.
+        Missing data, insufficient history and generator errors must never
+        call this method.
         """
         removed: List[SetupCandidate] = []
         with self._lock:
-            for pool in (self._candidates, self._validated):
+            pools = (self._candidates, self._validated, self._active)
+            for pool in pools:
                 for setup_id, candidate in list(pool.items()):
                     if candidate.symbol != symbol or candidate.strategy_id != strategy_id:
                         continue
-                    if pool is self._candidates:
-                        self._remove_candidate(setup_id)
-                    else:
-                        self._remove_validated(setup_id)
+                    if pool is self._active and candidate.status != SetupStatus.ACTIVE.value:
+                        continue
+                    pool.pop(setup_id, None)
+                    self._unindex_candidate(candidate)
+                    candidate.updated_at_ms = int(time.time() * 1000)
                     self._archive_candidate(
                         candidate, SetupStatus.INVALIDATED.value, reason
                     )
