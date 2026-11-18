@@ -268,6 +268,10 @@ def test_smc_raw_setup_is_not_suppressed_by_legacy_decision_filters():
                 "setup_reasoning": {"thesis": "4H CHoCH + OTE + FVG"},
             },
             "setup_quality": {"score": 88},
+            "smc_h4_structure": [{"choch": True, "direction": "BULLISH"}],
+            "smc_orderblocks": [{"type": "BULLISH", "low": 98.0, "high": 102.0, "mitigated": False}],
+            "smc_fvg": [{"type": "BULLISH", "from": 99.0, "to": 101.0, "filled": False}],
+            "smc_ote": {"fib62": 101.0, "fib79": 99.5},
         },
         "risk": {
             "entry": 100.0, "stop_loss": 98.0,
