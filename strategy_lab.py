@@ -521,6 +521,7 @@ def _setup_diagnostic(strategy_id, data, regime):
         close = _value(candle, "close") if candle is not None else None
         opened = _value(candle, "open") if candle is not None else None
         quality = _candle_quality(candle) if candle is not None else None
+        entry = _current_price(data)
         shared = data.get("shared_market_evidence") or {}
         sources = shared.get("sources") or {}
         book_state = (sources.get("orderbook") or {}).get("state")
@@ -550,6 +551,8 @@ def _setup_diagnostic(strategy_id, data, regime):
             checks.append("INVALID_DATA: 15m ATR cannot be calculated.")
         if candle is not None and (close is None or opened is None or quality is None):
             checks.append("INVALID_DATA: latest 15m candle anatomy is unavailable.")
+        if entry is None:
+            checks.append("MISSING_DATA: current entry reference price is unavailable.")
 
         flow = None
         if isinstance(book, dict) and now_ms:
@@ -590,11 +593,11 @@ def _setup_diagnostic(strategy_id, data, regime):
                 )
             if quality is not None and close is not None and opened is not None:
                 long_momentum = (
-                    imbalance >= 0.14 and delta >= 0.08 and close > opened
+                    imbalance >= 0.14 and delta >= 0.08 and close > opened and entry is not None and entry >= opened
                     and quality["body_ratio"] >= 0.25 and quality["close_location"] >= 0.60
                 )
                 short_momentum = (
-                    imbalance <= -0.14 and delta <= -0.08 and close < opened
+                    imbalance <= -0.14 and delta <= -0.08 and close < opened and entry is not None and entry <= opened
                     and quality["body_ratio"] >= 0.25 and quality["close_location"] <= 0.40
                 )
                 absorption = _absorption_proxy(flow, candle, atr) if atr else None
