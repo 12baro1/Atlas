@@ -19,6 +19,13 @@ def test_recognizes_terminal_commands():
     for command in (
         "/BTC",
         "/ETH",
+        "/tara",
+        "/tara 20",
+        "/setup BTC",
+        "/havuz",
+        "/gecmis",
+        "/motorlar",
+        "/veri",
         "/BTC@Oakmontincbot",
         "en iyi 5 işlem",
         "20 tara",
