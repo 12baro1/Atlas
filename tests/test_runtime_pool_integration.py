@@ -60,6 +60,10 @@ def engine_shaped_result(symbol="BTC/USDT:USDT", direction="LONG", entry_type="L
                      "selected": False, "rejection_reasons": ["Another eligible setup ranked higher"]},
                     {"strategy_id": "trend_pullback", "status": "BLOCKED_COMMON_FILTER",
                      "rejection_reasons": ["MARKET_ENTRY_TOO_FAR"]},
+                    {"strategy_id": "mean_reversion", "status": "CONDITION_NOT_MET",
+                     "reason": "REGIME_MISMATCH: mean reversion requires RANGE; current regime is TREND."},
+                    {"strategy_id": "liquidation_cascade", "status": "MISSING_DATA",
+                     "reason": "MISSING_DATA: INSUFFICIENT_OI_HISTORY."},
                 ],
             },
         },
@@ -137,6 +141,10 @@ def test_strategy_telemetry_accumulates_funnel(tmp_path):
     assert per_strategy["orderflow_momentum"]["passed"] == 1
     assert per_strategy["trend_pullback"]["setups"] == 1
     assert per_strategy["trend_pullback"]["rejected"] == 1
+    assert per_strategy["mean_reversion"]["condition_not_met"] == 1
+    assert per_strategy["mean_reversion"]["top_reasons"][0]["count"] == 1
+    assert "REGIME_MISMATCH" in per_strategy["mean_reversion"]["top_reasons"][0]["reason"]
+    assert per_strategy["liquidation_cascade"]["missing_data"] == 1
 
 
 def test_second_analysis_of_same_setup_is_idempotent(tmp_path):
