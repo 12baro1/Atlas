@@ -5,6 +5,8 @@ import math
 
 def generate(data):
     from strategy_lab import _atr, _value, _candle_quality, _relative_volume, _trade_flow, _current_price, _raw_candidate, _entry_reference, liquidation_events, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
+    # Specialist outputs are optional analysis context/provenance. The native
+    # OI, impulse, volume, taker-flow and funding rules below define eligibility.
     specialist_evidence = _strategy_specialist_evidence(data, "liquidation_cascade")
     """Detect a liquidation-like deleveraging impulse; OI is a proxy, not event data."""
     candles = data.get("1h") or []
