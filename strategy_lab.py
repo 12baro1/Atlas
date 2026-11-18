@@ -588,7 +588,7 @@ def _setup_diagnostic(strategy_id, data, regime):
                     f"aligned_notional_share={confirmation.get('aligned_notional_share')}; "
                     "requires >=0.05 directional imbalance, >=2 aligned levels and >=45% aligned notional."
                 )
-            if quality is not None:
+            if quality is not None and close is not None and opened is not None:
                 long_momentum = (
                     imbalance >= 0.14 and delta >= 0.08 and close > opened
                     and quality["body_ratio"] >= 0.25 and quality["close_location"] >= 0.60
