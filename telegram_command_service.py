@@ -915,8 +915,6 @@ class TelegramCommandService:
     def handle_scan(self, cmd_name=None) -> str:
         """Handle /tara [N] and legacy /20tara ... commands."""
         limit = self._parse_scan_limit(cmd_name)
-        if limit is not None and limit > 300:
-            return "Atlas tek tarama isteğinde en fazla 300 sembol tarar. Kullanım: /tara 20"
         return self._queue_scan_report(limit)
 
     def handle_scan_all(self) -> str:
