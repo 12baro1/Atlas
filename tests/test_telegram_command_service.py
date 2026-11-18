@@ -226,7 +226,7 @@ def test_mevcut_report_shows_levels_strategy_and_tp_progress():
     assert "AKTİF İŞLEMLER (1)" in report
     assert "Strateji: SMC" in report
     assert "Giriş: 96,250" in report
-    assert "Stop: 95,700" in report
+    assert "Stop Loss: 95,700" in report
     assert "TP1: 96,800" in report
     assert "TP1 ALINDI  |  TP2/TP3 TAKİPTE" in report
     assert "Gerçekleşen kısmi getiri (brüt): +0.50R" in report
