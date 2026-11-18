@@ -17,8 +17,12 @@ def test_requeue_completed_reopens_only_done_and_failed_jobs(tmp_path):
     queue.enqueue(["DONE/USDT", "FAILED/USDT", "PENDING/USDT", "RUNNING/USDT"])
     assert queue.claim_next()["symbol"] == "DONE/USDT"
     queue.complete("DONE/USDT", ok=True)
-    assert queue.claim_next()["symbol"] == "FAILED/USDT"
-    queue.complete("FAILED/USDT", ok=False, error="temporary")
+    # Put one row directly in FAILED state; complete(ok=False) is retryable
+    # by design and may be claimed again before reaching its retry limit.
+    queue._thread_conn().execute(
+        "UPDATE scan_jobs SET state = ? WHERE symbol = ? AND scan_generation = ?",
+        (FAILED, "FAILED/USDT", queue.current_generation()),
+    )
     assert queue.claim_next()["symbol"] == "PENDING/USDT"
 
     count = queue.requeue_completed([
