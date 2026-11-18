@@ -37,6 +37,38 @@ def test_same_bar_stop_and_target_resolves_to_stop():
     assert outcome["net_r"] == -1.0
 
 
+def test_two_replays_pass_identical_closed_primary_benchmark_and_sector_bars():
+    from timing import TF_PERIOD_MS
+
+    period = TF_PERIOD_MS["15m"]
+    base = [Bar(10, 12, 9, 11, i * period) for i in range(302)]
+    close_ms = base[300].time + period
+
+    def shuffled(tf):
+        width = TF_PERIOD_MS[tf]
+        return [Bar(10, 12, 9, 11, close_ms - width + offset)
+                for offset in (1, 0, -width)]
+
+    frames = {tf: shuffled(tf) for tf in TF_PERIOD_MS}
+    history = {**frames, "15m": base, "symbol": "SOL/USDT:USDT",
+               "smt_universe": {"BTC/USDT:USDT": frames, "ETH/USDT:USDT": frames},
+               "sector_peer_universe": {"ADA/USDT:USDT": {"4h": frames["4h"]}}}
+    calls = []
+    BacktestRunner(analyze_fn=calls.append).run(history, step=2)
+    combined, = calls
+    separate = _snapshot_at(history, 300)
+    for result in (combined, separate):
+        assert result["snapshot_timestamp_ms"] == close_ms
+        assert result["15m"] == base[:301]
+        for tf in ("1h", "4h", "1d", "1w"):
+            assert result[tf] == [frames[tf][2], frames[tf][1]]
+        for symbol in ("BTC", "ETH"):
+            for tf, series in frames.items():
+                assert result["smt_universe"][f"{symbol}/USDT:USDT"][tf] == [series[2], series[1]]
+            assert result["correlation_universe"][symbol] == result["4h"]
+        assert result["sector_peer_universe"]["ADA/USDT:USDT"]["4h"] == result["4h"]
+
+
 def test_market_fill_uses_next_open_and_shifts_plan_geometry():
     outcome = simulate_candidate(
         candidate(),

@@ -1,11 +1,27 @@
 """Independent orderflow_momentum setup generator."""
 
+from shared.analysis_services import (
+    _value,
+    _atr,
+    _candle_quality,
+    _current_price,
+    _entry_reference,
+)
+from shared.market_structure_services import displacement
+from shared.microstructure_services import cumulative_volume_delta
+from strategies.candidate import _raw_candidate
+from strategies.orderflow.analytics import build_orderflow_evidence
+from shared.specialist_evidence import evidence_for_strategy, attach_strategy_evidence
+from orderbook_engine import OrderBookEngine
+
+_ORDERBOOK_ENGINE = OrderBookEngine()
+
+
 def _absorption_proxy(flow, candle, atr):
     """Infer passive absorption from aggressive trade delta plus stalled price.
 
     This is a snapshot proxy, not proof of hidden liquidity or queue replenishment.
     """
-    from strategy_lab import _value
     if not isinstance(flow, dict) or not atr or atr <= 0:
         return None
     try:
@@ -27,17 +43,11 @@ def _absorption_proxy(flow, candle, atr):
 
 
 def generate(data):
-    from strategy_lab import (
-        _atr, _ORDERBOOK_ENGINE, _value, _candle_quality, _current_price,
-        _raw_candidate, _entry_reference, displacement,
-        _strategy_specialist_evidence, _attach_strategy_specialist_evidence,
-        cumulative_volume_delta, build_orderflow_evidence,
-    )
     from strategies.orderflow.analytics import (
         footprint_directional_evidence, opposing_liquidity_wall, liquidation_pressure,
     )
 
-    specialist_evidence = _strategy_specialist_evidence(data, "orderflow_momentum")
+    specialist_evidence = evidence_for_strategy(data, "orderflow_momentum")
     shared_evidence = data.get("shared_market_evidence") or {}
     shared_sources = shared_evidence.get("sources") or {}
     book_source = shared_sources.get("orderbook") or {}
@@ -214,5 +224,5 @@ def generate(data):
             "displacement": displacement(candles, atr),
         }
     if plan:
-        _attach_strategy_specialist_evidence(plan, specialist_evidence)
+        attach_strategy_evidence(plan, specialist_evidence)
     return plan

@@ -610,10 +610,10 @@ def test_each_strategy_reports_its_own_market_input_availability():
 
 
 def test_liquidation_strategy_rejects_stale_shared_oi_evidence(monkeypatch):
-    import strategy_lab
+    from strategies.liquidation import strategy as liquidation
     from strategies.liquidation.strategy import generate
 
-    monkeypatch.setattr(strategy_lab, "_atr", lambda _candles: 1.0)
+    monkeypatch.setattr(liquidation, "_atr", lambda _candles: 1.0)
     now = 1_700_000_000_000
     data = {
         "1h": [Candle(100, 102, 98, 101) for _ in range(21)],

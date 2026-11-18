@@ -9,7 +9,10 @@ from __future__ import annotations
 import math
 from statistics import median
 
-from orderbook_engine import OrderBookEngine
+from strategies.orderflow.strategy import _ORDERBOOK_ENGINE
+from strategies.candidate import STRATEGY_NAMES, _configured_partial_tp_weights, _raw_candidate
+from shared.analysis_services import _current_price, _entry_reference
+from shared.microstructure_services import _trade_flow
 from risk_engine import RiskEngine
 from decision_engine import DecisionEngine
 from config import Config
@@ -27,41 +30,6 @@ from shared.analysis_services import (
     _relative_volume, _directional_movement, _efficiency_ratio, _rsi,
     _vwap, _bollinger,
 )
-
-_ORDERBOOK_ENGINE = OrderBookEngine()
-
-
-def _configured_partial_tp_weights():
-    raw = getattr(Config, "SIGNAL_OUTCOME_PARTIAL_WEIGHTS", "0.5,0.3,0.2")
-    if isinstance(raw, dict):
-        values = [raw.get(f"tp{i}", 1.0) for i in range(1, 4)]
-    elif isinstance(raw, str):
-        values = raw.split(",")
-    elif isinstance(raw, (list, tuple)):
-        values = list(raw)
-    else:
-        values = []
-    weights = {}
-    for index in range(3):
-        value = values[index] if index < len(values) else 1.0
-        try:
-            number = float(value)
-        except (TypeError, ValueError, OverflowError):
-            number = 0.0
-        weights[f"tp{index + 1}"] = number if math.isfinite(number) and number > 0 else 0.0
-    return weights if sum(weights.values()) > 0 else {"tp1": 1.0, "tp2": 1.0, "tp3": 1.0}
-
-
-STRATEGY_NAMES = {
-    "trend_pullback": "Trend Following + Pullback",
-    "volatility_breakout": "Volatility Breakout",
-    "mean_reversion": "Mean Reversion",
-    "liquidation_cascade": "Liquidation Cascade (OI proxy)",
-    "orderflow_momentum": "Order Flow Momentum",
-    "relative_strength": "Relative Strength",
-    "smc": "SMC (bütünleşik uzman motorları)",
-}
-
 
 def _risk_validate_candidate(candidate):
     """Apply the same final RR and execution-friction model used by SMC risk."""
@@ -100,42 +68,6 @@ def _risk_validate_candidate(candidate):
         }
     except Exception as exc:
         return {"eligible": False, "reason": f"risk validation error: {type(exc).__name__}: {exc}", "weighted_net_rr": None, "risk_plan": None}
-
-
-def _raw_candidate(direction, entry, stop, atr, source, strength, entry_type="MARKET", entry_reference="LAST_CLOSED_15M_FALLBACK"):
-    """Create a strategy-native raw setup without applying shared geometry gates.
-
-    Strategy packages own pattern detection and preferred entry/initial invalidation.
-    Confirmed structural stop/targets are finalized later by the one common filter.
-    """
-    try:
-        values = [float(entry), float(stop), float(atr), float(strength)]
-    except (TypeError, ValueError, OverflowError):
-        return None
-    entry_value, initial_stop, atr_value, strength_value = values
-    if direction not in {"LONG", "SHORT"} or not all(
-        math.isfinite(value) and value > 0 for value in (entry_value, initial_stop, atr_value)
-    ) or not math.isfinite(strength_value):
-        return None
-    if (direction == "LONG" and initial_stop >= entry_value) or (
-        direction == "SHORT" and initial_stop <= entry_value
-    ):
-        return None
-    return {
-        "status": "RAW_SETUP",
-        "strategy_id": source,
-        "strategy": STRATEGY_NAMES[source],
-        "direction": direction,
-        "entry_type": str(entry_type or "MARKET").upper(),
-        "entry_reference": entry_reference,
-        "entry": round(entry_value, 10),
-        "initial_stop_loss": round(initial_stop, 10),
-        "atr": round(atr_value, 10),
-        "strength": round(strength_value, 2),
-        "experimental": source != "smc",
-        "reasons": [],
-        "partial_exit_weights": _configured_partial_tp_weights(),
-    }
 
 
 def _finalize_candidate_geometry(candidate, candle_sets):
@@ -287,23 +219,6 @@ def _valid_plan(direction, entry, stop, atr, candles, source, strength, entry_ty
 
 
 @cached_analysis
-def _current_price(data):
-    try:
-        value = float(data.get("current_price"))
-    except (TypeError, ValueError, OverflowError):
-        value = None
-    if value is not None and math.isfinite(value) and value > 0:
-        return value
-    candles = data.get("15m") or []
-    return _value(candles[-1], "close") if candles else None
-
-
-@cached_analysis
-def _entry_reference(data):
-    return str(data.get("current_price_source") or "LAST_CLOSED_15M_FALLBACK")
-
-
-@cached_analysis
 def _structure_candle_sets(data):
     """Return available OHLCV series separately, preserving timeframe identity."""
     return [
@@ -358,31 +273,6 @@ def _volatility_breakout(data):
 def _mean_reversion(data, regime):
     from strategies.mean_reversion import generate
     return generate(data, regime)
-@cached_analysis
-def _trade_flow(data):
-    """Return recent taker buy ratio using notional-weighted exchange trades."""
-    trades = data.get("recent_trades") or []
-    buy = sell = 0.0
-    for trade in trades:
-        if not isinstance(trade, dict):
-            continue
-        try:
-            amount = float(trade.get("amount") or 0)
-            price = float(trade.get("price") or 0)
-        except (TypeError, ValueError, OverflowError):
-            continue
-        if not (math.isfinite(amount) and math.isfinite(price) and amount > 0 and price > 0):
-            continue
-        notional = amount * price
-        side = str(trade.get("side") or "").lower()
-        if side == "buy":
-            buy += notional
-        elif side == "sell":
-            sell += notional
-    total = buy + sell
-    return (buy / total if total > 0 else None), total
-
-
 def _orderflow_momentum(data):
     from strategies.orderflow.strategy import generate
     return generate(data)

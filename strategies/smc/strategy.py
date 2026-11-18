@@ -1,6 +1,20 @@
 """Single integrated SMC candidate adapter; specialist motors remain evidence-only."""
 import math
 
+from shared.analysis_services import _value
+from shared.market_structure_services import trend_structure, displacement
+from strategies.candidate import _configured_partial_tp_weights, STRATEGY_NAMES
+from strategies.smc.submotors import (
+    dealing_range,
+    liquidity_draw,
+    poi_freshness,
+    breaker_validation,
+    reclaim_acceptance,
+    inducement_proxy,
+    narrative as smc_narrative,
+)
+
+
 def _mandatory_confluence_reason(analysis, direction, entry):
     """Require aligned H4 CHoCH and at least one active directional OB or FVG.
 
@@ -71,7 +85,6 @@ def _mandatory_confluence_reason(analysis, direction, entry):
     return None
 
 def generate(result, data=None):
-    from strategy_lab import math, STRATEGY_NAMES, _value, _configured_partial_tp_weights, trend_structure, displacement, dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, smc_narrative
     """Build the single SMC setup from the integrated SMC specialist world.
 
     This adapter reads the pre-selector SMC entry/risk geometry. It deliberately

@@ -15,6 +15,7 @@ Amacı: "Bu sinyal filtresi gerçekten edge (beklenti) üretiyor mu?" sorusunu y
 import logging
 import math
 
+from timing import replay_candle_window
 from config import Config
 from execution_costs import estimate_plan_cost, realized_trade_cost, adverse_funding_cost_r
 
@@ -604,24 +605,9 @@ class BacktestRunner:
         busy_until_index = -1
         for idx in range(warmup, total, max(1, step)):
             # Signal decision is made at the close of the current 15m candle.
-            decision_time_ms = candles[idx].time + 15 * 60 * 1000
-            window = {
-                tf: candles[: idx + 1] if tf == "15m" else _window_up_to(data.get(tf), decision_time_ms, tf)
-                for tf in ("15m", "1h", "4h", "1d", "1w")
-            }
+            window = replay_candle_window(data, idx)
             window["symbol"] = data.get("symbol", "SYMBOL")
-            # Preserve comparison universes and only pre-decision derivatives/L2 data.
-            window["snapshot_timestamp_ms"] = decision_time_ms
-            for key in ("smt_universe", "sector_peer_universe"):
-                window[key] = {
-                    symbol: {tf: _window_up_to(series, decision_time_ms, tf)
-                             for tf, series in frames.items() if tf in ("15m", "1h", "4h", "1d", "1w")}
-                    for symbol, frames in (data.get(key) or {}).items() if isinstance(frames, dict)
-                }
-            window["correlation_universe"] = {
-                symbol.split("/")[0]: frames["4h"]
-                for symbol, frames in window["smt_universe"].items() if "4h" in frames
-            }
+            decision_time_ms = window["snapshot_timestamp_ms"]
             window["funding_records"] = [
                 item for item in (data.get("funding_records") or [])
                 if int(item.get("timestamp") or 0) <= decision_time_ms

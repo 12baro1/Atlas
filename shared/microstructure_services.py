@@ -121,3 +121,28 @@ def relative_volume(current_volume, historical_volumes):
     ratio=current/baseline
     return {"state":"HIGH" if ratio>=1.5 else "LOW" if ratio<=0.7 else "NORMAL",
             "ratio":round(ratio,4)}
+
+
+@cached_analysis
+def _trade_flow(data):
+    """Return recent taker buy ratio using notional-weighted exchange trades."""
+    trades = data.get("recent_trades") or []
+    buy = sell = 0.0
+    for trade in trades:
+        if not isinstance(trade, dict):
+            continue
+        try:
+            amount = float(trade.get("amount") or 0)
+            price = float(trade.get("price") or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not (math.isfinite(amount) and math.isfinite(price) and amount > 0 and price > 0):
+            continue
+        notional = amount * price
+        side = str(trade.get("side") or "").lower()
+        if side == "buy":
+            buy += notional
+        elif side == "sell":
+            sell += notional
+    total = buy + sell
+    return (buy / total if total > 0 else None), total

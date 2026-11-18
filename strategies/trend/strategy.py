@@ -1,9 +1,24 @@
 """Independent trend_pullback setup generator. Strategy logic lives in this package."""
 
+from shared.analysis_services import (
+    _value,
+    _series,
+    _atr,
+    _ema,
+    _adx,
+    _directional_movement,
+    _candle_quality,
+    _efficiency_ratio,
+    _current_price,
+    _entry_reference,
+)
+from shared.market_structure_services import trend_structure, displacement
+from strategies.candidate import _raw_candidate
+from shared.specialist_evidence import evidence_for_strategy, attach_strategy_evidence
+
 
 def generate(data):
-    from strategy_lab import _series, _atr, _ema, _adx, _directional_movement, _value, _candle_quality, _efficiency_ratio, _current_price, trend_structure, displacement, _raw_candidate, _entry_reference, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
-    specialist_evidence = _strategy_specialist_evidence(data, "trend_pullback")
+    specialist_evidence = evidence_for_strategy(data, "trend_pullback")
     h4, h1 = data.get("4h") or [], data.get("1h") or []
     c4, c1 = _series(h4), _series(h1)
     atr = _atr(h1)
@@ -69,6 +84,6 @@ def generate(data):
                                  "structure": structure_evidence, "displacement": impulse_evidence}
         plan["reasons"].append(f"Structure motor={structure_evidence['state']} (quality={structure_evidence['quality']:.2f}); displacement={impulse_evidence.get('state')}")
     if plan:
-        _attach_strategy_specialist_evidence(plan, specialist_evidence)
+        attach_strategy_evidence(plan, specialist_evidence)
     return plan
 

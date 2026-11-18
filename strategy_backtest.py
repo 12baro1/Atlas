@@ -13,6 +13,7 @@ import math
 import time
 from collections import defaultdict
 
+from timing import replay_candle_window
 from backtest import (
     TIMEFRAME_DURATION_MS,
     _disable_backtest_live_features,
@@ -39,50 +40,15 @@ def _closed_at(candle, timeframe):
 
 
 def _snapshot_at(history, index):
-    candles_15m = history.get("15m") or []
-    decision_candle = candles_15m[index]
-    decision_ms = _closed_at(decision_candle, "15m")
-    snapshot = {"symbol": history.get("symbol")}
-    for timeframe, duration in TIMEFRAME_DURATION_MS.items():
-        available = history.get(timeframe) or []
-        if timeframe == "15m":
-            snapshot[timeframe] = available[: index + 1]
-        else:
-            snapshot[timeframe] = [item for item in available if item.time + duration <= decision_ms]
-    universe = {}
-    for full_symbol, frames in (history.get("smt_universe") or {}).items():
-        key = str(full_symbol).split("/", 1)[0].upper()
-        if key in {"BTC", "ETH"}:
-            universe[key] = [
-                item for item in (frames.get("4h") or [])
-                if item.time + TIMEFRAME_DURATION_MS["4h"] <= decision_ms
-            ]
-    snapshot["correlation_universe"] = universe
-    snapshot["smt_universe"] = {
-        full_symbol: {
-            timeframe: [
-                item for item in (frames.get(timeframe) or [])
-                if item.time + TIMEFRAME_DURATION_MS[timeframe] <= decision_ms
-            ]
-            for timeframe in ("15m", "1h", "4h", "1d")
-        }
-        for full_symbol, frames in (history.get("smt_universe") or {}).items()
-    }
-    snapshot["sector_peer_universe"] = {
-        peer_symbol: {
-            "4h": [
-                item for item in (frames.get("4h") or [])
-                if item.time + TIMEFRAME_DURATION_MS["4h"] <= decision_ms
-            ]
-        }
-        for peer_symbol, frames in (history.get("sector_peer_universe") or {}).items()
-    }
+    snapshot = replay_candle_window(history, index)
+    decision_candle = snapshot["15m"][-1]
+    decision_ms = snapshot["snapshot_timestamp_ms"]
+    snapshot["symbol"] = history.get("symbol")
     # The decision sees only the last closed candle. The next 15m open is
     # used by the fill simulator, never by the decision engine.
     snapshot["current_price"] = float(decision_candle.close)
     snapshot["current_price_source"] = "BACKTEST_DECISION_15M_CLOSE"
     snapshot["current_price_timestamp_ms"] = decision_ms
-    snapshot["snapshot_timestamp_ms"] = decision_ms
     # Historical derivatives are timestamp-filtered to prevent look-ahead.
     oi_rows = [
         item for item in (history.get("open_interest_records") or [])

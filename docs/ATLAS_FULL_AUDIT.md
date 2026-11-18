@@ -2,6 +2,14 @@
 
 Referans sürüm `952dad8`. İnceleme önceliği kalıcı iş kaybı, zaman hizalaması ve setup yaşam döngüsüydü. Aşağıdaki tablonun ardından 326 izlenen Python dosyasının statik bağımlılık envanteri yer alır. Envanterdeki çağrılar import edilen isimlere AST üzerinden çözülebilen çağrılardır. MotorProxy, nesne enjeksiyonu, callback ve koşullu importların çalışma sırasını tek başına kanıtlamaz.
 
+## Replay ve strateji paketleri için takip denetimi
+
+Her iki backtest yolu karar anındaki mumları artık `timing.replay_candle_window` üzerinden alıyor. Referans, incelenen 15 dakikalık mumun kapanışıdır. Ana sembolün beş zaman dilimi, BTC/ETH karşılaştırmaları ve sektör verileri aynı kapanış sınırını kullanır. Regresyon testi iki gerçek analiz çağrısının girdilerini karşılaştırır. Sınırda kapanan mum görünür, bir milisaniye sonra kapanan mum görünmez.
+
+Yedi strateji adaylarını `strategies/candidate.py` içindeki ortak sözleşmeyle üretir. Fiyat ve işlem akışı verileri `shared` servislerinden gelir. Paketler bağımsız yüklenebilir ve çalıştırılabilir. `strategy_lab` stratejileri çağırır. Aşağıdaki statik envanter başlangıç sürümüne aittir.
+
+`4766b42` ile aynı deterministik girdiler üzerinde yedi stratejiye yapılan 18 üretici çağrısının tam çıktısı eşleşti. Altı senaryoda 42 rapor satırının yön, emir tipi, işlem seviyeleri, durum ve gerekçeleri eşleşti. Bu karşılaştırma strateji davranışını ölçer. Tarihsel getiri veya gerçek emir gerçekleşme oranını ölçmek için ayrı piyasa verisi gerekir.
+
 ## Bulgular ve karşılaştırma
 
 | Önem | Önce | Değişiklik ve kontrol |
