@@ -582,3 +582,36 @@ def test_liquidity_failure_hides_raw_traceback():
     message = TelegramCommandService(runtime, "token", "chat").handle_liquidity("BTC")
     assert "Analiz tamamlanamadı" in message
     assert "Traceback SECRET" not in message
+
+
+
+def test_islemler_moves_invalidated_waiting_signal_to_removed_section(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram_module
+
+    pool = SimpleNamespace(
+        get_best_setups=lambda **kwargs: [],
+        get_active_setups=lambda: [],
+        get_recent_history=lambda **kwargs: [],
+    )
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+
+    class Runtime:
+        def signal_outcomes(self, **kwargs):
+            return [{
+                "signal_id": "OLD-AVAX",
+                "symbol": "AVAX/USDT:USDT",
+                "direction": "LONG",
+                "status": "INVALIDATED",
+                "entry_reached": False,
+                "opened_at": 1000,
+                "resolved_at": 2000,
+                "invalidation_reason": "STRATEGY_STRUCTURE_BROKEN",
+                "payload": {"strategy_id": "smc", "strategy": "SMC"},
+            }]
+
+    message = TelegramCommandService(Runtime(), "token", "chat").handle_islemler()
+    assert "AVAX/USDT | LONG | SMC" in message
+    assert "HAVUZDAN KALDIRILDI" in message
+    assert "STRATEGY STRUCTURE BROKEN" in message
+    assert "GİRİŞ BEKLEYEN SİNYALLER" not in message

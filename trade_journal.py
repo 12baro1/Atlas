@@ -2381,3 +2381,36 @@ class TradeJournal:
                 continue
             out.append(outcome)
         return out
+
+    def invalidate_pending_signal_outcomes(self, *, symbol, strategy_id, reason):
+        """Mark only unentered pending signals invalid when their own strategy breaks."""
+        normalized_symbol = str(symbol or "").upper().replace(":USDT", "")
+        normalized_strategy = str(strategy_id or "").strip().lower()
+        if not normalized_symbol or not normalized_strategy:
+            return []
+
+        now_ms = int(time.time() * 1000)
+        invalidated = []
+        for outcome in self._signal_outcomes:
+            if str(outcome.get("status") or "").upper() != "PENDING":
+                continue
+            if bool(outcome.get("entry_reached")):
+                # An entered/being-managed trade must remain in trade tracking.
+                continue
+            outcome_symbol = str(outcome.get("symbol") or "").upper().replace(":USDT", "")
+            if outcome_symbol != normalized_symbol:
+                continue
+            payload = outcome.get("payload") or {}
+            recorded_strategy = str(
+                payload.get("strategy_id") or outcome.get("strategy_id") or ""
+            ).strip().lower() if isinstance(payload, dict) else str(outcome.get("strategy_id") or "").strip().lower()
+            if recorded_strategy != normalized_strategy:
+                continue
+
+            outcome["status"] = "INVALIDATED"
+            outcome["resolved_at"] = now_ms
+            outcome["final_result"] = "INVALIDATED"
+            outcome["invalidation_reason"] = str(reason or "STRATEGY_STRUCTURE_BROKEN")
+            self._persist_signal_outcome(outcome)
+            invalidated.append(outcome)
+        return invalidated

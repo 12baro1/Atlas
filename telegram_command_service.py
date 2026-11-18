@@ -1141,15 +1141,27 @@ class TelegramCommandService:
             getattr(pool, "get_recent_history", None)
         ) else []
         removed_statuses = {"INVALIDATED", "REJECTED", "EXPIRED", "CANCELLED"}
+        pool_removed = [
+            item for item in history
+            if str(item.get("status") or "").upper() in removed_statuses
+            or bool(item.get("invalidation_reason"))
+        ]
+        signal_removed = [
+            {
+                **item,
+                "strategy_id": (item.get("payload") or {}).get("strategy_id") or item.get("strategy_id"),
+                "strategy_name": (item.get("payload") or {}).get("strategy") or (item.get("payload") or {}).get("strategy_id") or item.get("strategy_id"),
+            }
+            for item in outcomes
+            if str(item.get("status") or "").upper() == "INVALIDATED"
+        ]
         removed = sorted(
-            [
-                item for item in history
-                if str(item.get("status") or "").upper() in removed_statuses
-                or bool(item.get("invalidation_reason"))
-            ],
-            key=lambda item: int(item.get("closed_at_ms") or item.get("updated_at_ms") or 0),
+            pool_removed + signal_removed,
+            key=lambda item: int(
+                item.get("closed_at_ms") or item.get("resolved_at") or item.get("updated_at_ms") or 0
+            ),
             reverse=True,
-        )[:5]
+        )[:8]
 
         lines = [
             "ATLAS | İŞLEMLER",
