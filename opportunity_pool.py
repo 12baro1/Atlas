@@ -298,6 +298,11 @@ class OpportunityPool:
                 if existing_id == candidate.setup_id:
                     same_id = existing
                     continue
+                # A new setup replaces only the previous setup from the SAME
+                # strategy. Independent strategies keep their own live setup
+                # until their own generator reports that its structure failed.
+                if existing.strategy_id != candidate.strategy_id:
+                    continue
                 self._remove_candidate(existing_id)
                 self._remove_validated(existing_id)
                 self._archive_candidate(
@@ -306,8 +311,8 @@ class OpportunityPool:
                     "REPLACED_BY_NEW_ANALYSIS",
                 )
                 logger.info(
-                    "Setup superseded by fresh analysis | symbol=%s old=%s new=%s",
-                    candidate.symbol, existing_id, candidate.setup_id,
+                    "Strategy setup superseded | symbol=%s strategy=%s old=%s new=%s",
+                    candidate.symbol, candidate.strategy_id, existing_id, candidate.setup_id,
                 )
 
             if same_id is not None:
@@ -500,6 +505,37 @@ class OpportunityPool:
                 return True
         return False
     
+    def invalidate_strategy_setup(
+        self, symbol: str, strategy_id: str, reason: str = "STRATEGY_STRUCTURE_BROKEN"
+    ) -> List[SetupCandidate]:
+        """Archive unaccepted setups when their own strategy reports broken structure.
+
+        Missing market data, insufficient history and generator errors must not
+        invalidate a setup; callers invoke this only for explicit strategy-native
+        NO_SETUP / CONDITION_NOT_MET results.
+        """
+        removed: List[SetupCandidate] = []
+        with self._lock:
+            for pool in (self._candidates, self._validated):
+                for setup_id, candidate in list(pool.items()):
+                    if candidate.symbol != symbol or candidate.strategy_id != strategy_id:
+                        continue
+                    if pool is self._candidates:
+                        self._remove_candidate(setup_id)
+                    else:
+                        self._remove_validated(setup_id)
+                    self._archive_candidate(
+                        candidate, SetupStatus.INVALIDATED.value, reason
+                    )
+                    removed.append(candidate)
+            if removed:
+                self.save_all()
+                logger.info(
+                    "Strategy setup invalidated | symbol=%s strategy=%s count=%s reason=%s",
+                    symbol, strategy_id, len(removed), reason,
+                )
+        return removed
+
     def get_validated_setups(
         self,
         symbol: Optional[str] = None,
@@ -550,24 +586,13 @@ class OpportunityPool:
         """
         self.cleanup_expired()
         with self._lock:
-            now_ms = int(time.time() * 1000)
-            max_age_ms = self.freshness_hours * 3600 * 1000
-            # Expired, invalidated or stale-setup candidates must never be
-            # presented as actionable best setups.
+            # Strategy structure, not elapsed time, determines setup validity.
+            # Historical timestamps remain useful for display/audit only.
             candidates = []
             for c in self._validated.values():
                 if c.status != SetupStatus.VALIDATED.value:
                     continue
-                # 1. Setup expiry
-                if c.expires_at_ms is not None and c.expires_at_ms < now_ms:
-                    continue
-                # 2. Setup age (created_at_ms within expiry window)
-                if c.created_at_ms and (now_ms - c.created_at_ms) > max_age_ms:
-                    continue
-                # 3. Last data time (updated_at_ms present and recent)
-                if not c.updated_at_ms or (now_ms - c.updated_at_ms) > max_age_ms:
-                    continue
-                # 4. RR validity (finite and strictly positive)
+                # RR validity (finite and strictly positive)
                 try:
                     net_rr = float(c.net_rr_after_costs)
                 except (TypeError, ValueError, OverflowError):
@@ -750,8 +775,6 @@ class OpportunityPool:
         """Remove expired setups from all pools."""
         now = int(time.time() * 1000)
         expiry_ms = self.expiry_hours * 3600 * 1000
-        freshness_ms = self.freshness_hours * 3600 * 1000
-        
         with self._lock:
             stats = {"candidates": 0, "validated": 0, "active": 0}
             
@@ -762,18 +785,9 @@ class OpportunityPool:
                     self._archive_candidate(candidate, SetupStatus.EXPIRED.value, "Expired")
                     stats["candidates"] += 1
             
-            # Expire validated
-            for cid, candidate in list(self._validated.items()):
-                created_at = int(candidate.created_at_ms or 0)
-                validated_at = int(candidate.validated_at_ms or 0)
-                stale_by_creation = not created_at or created_at + freshness_ms < now
-                stale_by_validation = not validated_at or validated_at + expiry_ms < now
-                stale_by_expiry = bool(candidate.expires_at_ms and candidate.expires_at_ms < now)
-                if stale_by_creation or stale_by_validation or stale_by_expiry:
-                    self._remove_validated(cid)
-                    reason = "STALE_SETUP" if stale_by_creation else "Expired"
-                    self._archive_candidate(candidate, SetupStatus.EXPIRED.value, reason)
-                    stats["validated"] += 1
+            # Validated setups are NOT removed by age. They remain available
+            # until their strategy-native structure is explicitly invalidated,
+            # replaced by a newer setup from that same strategy, or user action.
             # Check active for SL/TP expiry
             for cid, candidate in list(self._active.items()):
                 if candidate.expires_at_ms and candidate.expires_at_ms < now:
