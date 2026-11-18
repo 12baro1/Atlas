@@ -98,7 +98,7 @@ class AtlasRuntime:
         from scan_queue import ScanQueue
         from scan_service import ScanService
         from daily_refresh import DailyPoolRefresh
-        self._market_inventory = get_market_inventory()
+        self._market_inventory = get_market_inventory(exchange=exchange)
         self._scan_queue = ScanQueue()
         self._scan_service = ScanService(
             runtime=self, queue=self._scan_queue, inventory=self._market_inventory
@@ -125,6 +125,13 @@ class AtlasRuntime:
             # only from a fresh top-300 generation to avoid repeating the old
             # 1,000+ market backlog after deployment.
             self._scan_service.enforce_universe_limit()
+            ranking_sync = self._scan_service.synchronize_ranked_universe(limit=300)
+            self.logger.info(
+                "Active scan universe synchronized | selected=%s ranking=%s rebuilt=%s",
+                ranking_sync.get("selected", 0),
+                ranking_sync.get("ranking_source", "unknown"),
+                ranking_sync.get("rebuilt", False),
+            )
             self._scan_service.ensure_workers()
             self._daily_refresh.start_background()
         except Exception as exc:
