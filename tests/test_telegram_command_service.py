@@ -444,7 +444,7 @@ def test_pool_status_shows_only_persistent_pool_contents(monkeypatch):
     assert "Aday: 3" in message
     assert "Doğrulanmış: 2" in message
     assert "SMC" not in message
-    assert "/setuplar" in message
+    assert "/islemler" in message
 
 
 def test_statistics_shows_seven_strategy_funnel():
@@ -492,3 +492,52 @@ def test_performance_report_shows_cumulative_profit_loss_in_r():
     assert "Toplam kazanç: +3.00R" in message
     assert "Net sonuç: +1.00R" in message
     assert "TL/USDT tutarı değildir" in message
+
+def test_islemler_combines_open_waiting_and_closed_without_pool_duplicates(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram_module
+
+    pool = SimpleNamespace(
+        get_best_setups=lambda **kwargs: [],
+        get_active_setups=lambda: [],
+    )
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+
+    class Runtime:
+        def signal_outcomes(self, **kwargs):
+            return [
+                {
+                    "signal_id": "A1", "symbol": "BTC/USDT:USDT", "direction": "LONG",
+                    "status": "PENDING", "entry_reached": True, "opened_at": 3000,
+                    "entry": 100, "stop_loss": 99, "tp1": 102, "tp2": 103, "tp3": 104,
+                    "payload": {"strategy": "smc"},
+                },
+                {
+                    "signal_id": "A2", "symbol": "ETH/USDT:USDT", "direction": "SHORT",
+                    "status": "PENDING", "entry_reached": False, "opened_at": 2000,
+                    "entry": 100, "stop_loss": 101, "tp1": 98, "tp2": 97, "tp3": 96,
+                    "payload": {"strategy": "orderflow_momentum"},
+                },
+                {
+                    "signal_id": "A3", "symbol": "SOL/USDT:USDT", "direction": "SHORT",
+                    "status": "SL", "entry_reached": True, "opened_at": 1000,
+                    "resolved_at": 1500, "entry": 75, "stop_loss": 76,
+                    "tp1": 74, "tp2": 73, "tp3": 72, "realized_r": -1.0,
+                    "payload": {"strategy": "smc"},
+                },
+            ]
+
+    message = TelegramCommandService(Runtime(), "token", "chat").handle_islemler()
+    assert "AKTİF İŞLEM TAKİBİ" in message
+    assert "GİRİŞ BEKLEYEN SİNYALLER" in message
+    assert "SON KAPANAN İŞLEMLER" in message
+    assert "BTC/USDT" in message and "ETH/USDT" in message and "SOL/USDT" in message
+
+
+def test_retired_setup_commands_are_aliases_to_islemler():
+    from telegram_commands import get_command_by_name
+
+    for name in ("mevcut", "setuplar", "takip"):
+        command = get_command_by_name(name)
+        assert command is not None
+        assert command.handler == "handle_islemler"
