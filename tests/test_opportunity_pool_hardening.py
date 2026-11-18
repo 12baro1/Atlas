@@ -407,21 +407,49 @@ def test_add_candidate_persists_immediately_without_background_thread(tmp_path):
     reloaded.stop()
 
 
-def test_different_strategies_are_never_merged(tmp_path):
+def test_new_strategy_analysis_replaces_previous_pending_symbol_setup(tmp_path):
     pool = make_pool(tmp_path)
-    pool.add_candidate(make_candidate("c1", strat="smc"))
-    assert pool.add_candidate(make_candidate("c2", strat="orderflow_momentum")) is True
-    assert len(pool._candidates) == 2
+    old = make_candidate("c1", strat="smc")
+    pool.add_candidate(old)
+    pool.validate_candidate("c1")
+
+    new = make_candidate("c2", strat="orderflow_momentum")
+    new.direction = "SHORT"
+    assert pool.add_candidate(new) is True
+    assert pool.validate_candidate("c2") is True
+
+    assert list(pool._validated) == ["c2"]
+    history = pool.get_recent_history(limit=10)
+    replaced = next(item for item in history if item.get("setup_id") == "c1")
+    assert replaced["status"] == SetupStatus.INVALIDATED.value
+    assert replaced["invalidation_reason"] == "REPLACED_BY_NEW_ANALYSIS"
     pool.stop()
 
 
-def test_cross_pool_duplicate_never_readded(tmp_path):
+def test_same_setup_identity_refreshes_without_duplicate(tmp_path):
     pool = make_pool(tmp_path)
-    pool.add_candidate(make_candidate("c1"))
-    pool.validate_candidate("c1")
-    assert pool.add_candidate(make_candidate("c1-dup")) is False
-    assert len(pool._validated) == 1
-    assert len(pool._candidates) == 0
+    first = make_candidate("same")
+    pool.add_candidate(first)
+    pool.validate_candidate("same")
+
+    refreshed = make_candidate("same")
+    refreshed.entry_price = 50100.0
+    assert pool.add_candidate(refreshed) is False
+    assert list(pool._validated) == ["same"]
+    assert pool._validated["same"].entry_price == pytest.approx(50100.0)
+    pool.stop()
+
+
+def test_new_analysis_does_not_replace_user_accepted_trade(tmp_path):
+    pool = make_pool(tmp_path)
+    pool.add_candidate(make_candidate("active-old"))
+    pool.validate_candidate("active-old")
+    assert pool.accept_setup("active-old", "user1")
+
+    replacement = make_candidate("pending-new", strat="orderflow_momentum")
+    assert pool.add_candidate(replacement) is True
+    assert pool.get_setup("active-old") is not None
+    assert pool.get_setup("pending-new") is not None
     pool.stop()
 
 
