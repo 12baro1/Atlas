@@ -12,7 +12,7 @@ def generate(data):
     e20, e50, e1 = _ema(c4, 20), _ema(c4, 50), _ema(c1, 20)
     adx_value = _adx(h4)
     e20_previous = _ema(c4[:-5], 20)
-    if None in (e20, e50, e1, adx_value, e20_previous) or adx_value < 18:
+    if None in (e20, e50, e1, adx_value, e20_previous) or adx_value < 16:
         return None
     trend_slope = (e20 - e20_previous) / atr
     directional = _directional_movement(h4)
@@ -31,15 +31,15 @@ def generate(data):
     direction = None
     bullish_dmi = directional["plus_di"] > directional["minus_di"]
     bearish_dmi = directional["minus_di"] > directional["plus_di"]
-    if (e20 > e50 and bullish_dmi and entry > e1 and entry <= e1 + 1.25 * atr
-            and (low <= e1 * 1.003 or prev_low <= e1 * 1.003)
+    if (e20 > e50 and bullish_dmi and entry > e1 and entry <= e1 + 1.50 * atr
+            and (low <= e1 * 1.005 or prev_low <= e1 * 1.003)
             and close > prev_close and quality["direction"] == "BULLISH"
-            and quality["close_location"] >= 0.60 and quality["body_ratio"] >= 0.25):
+            and quality["close_location"] >= 0.55 and quality["body_ratio"] >= 0.20):
         direction = "LONG"
-    elif (e20 < e50 and bearish_dmi and entry < e1 and entry >= e1 - 1.25 * atr
-            and (high >= e1 * 0.997 or prev_high >= e1 * 0.997)
+    elif (e20 < e50 and bearish_dmi and entry < e1 and entry >= e1 - 1.50 * atr
+            and (high >= e1 * 0.995 or prev_high >= e1 * 0.997)
             and close < prev_close and quality["direction"] == "BEARISH"
-            and quality["close_location"] <= 0.40 and quality["body_ratio"] >= 0.25):
+            and quality["close_location"] <= 0.45 and quality["body_ratio"] >= 0.20):
         direction = "SHORT"
     else:
         return None
