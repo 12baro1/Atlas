@@ -174,20 +174,34 @@ def _format_outcome_item(item, state):
     direction = str(item.get("direction") or "?").upper()
     progress, hit_levels = _outcome_progress(item)
     lines = [
-        f"{symbol}  |  {direction}",
+        f"{symbol} | {direction}",
         f"Strateji: {_outcome_strategy(item)}",
         f"Durum: {state or status}",
     ]
+    if item.get("entry_type"):
+        lines.append(f"Emir: {str(item.get('entry_type')).upper()}")
     if item.get("entry") is not None:
         lines.append(f"Giriş: {_format_price(item.get('entry'))}")
     if item.get("stop_loss") is not None:
-        lines.append(f"Stop: {_format_price(item.get('stop_loss'))}")
-    targets = [
-        f"TP{level}: {_format_price(item.get(f'tp{level}'))}"
-        for level in (1, 2, 3) if item.get(f"tp{level}") is not None
-    ]
-    if targets:
-        lines.append("Hedefler: " + "  |  ".join(targets))
+        lines.append(f"Stop Loss: {_format_price(item.get('stop_loss'))}")
+    for level in (1, 2, 3):
+        value = item.get(f"tp{level}")
+        if value is not None:
+            lines.append(f"TP{level}: {_format_price(value)}")
+    rr = item.get("rr")
+    if rr is None:
+        try:
+            entry = float(item.get("entry"))
+            stop = float(item.get("stop_loss"))
+            tp1 = float(item.get("tp1"))
+            risk = abs(entry - stop)
+            if all(math.isfinite(value) and value > 0 for value in (entry, stop, tp1)) and risk > 0:
+                rr = abs(tp1 - entry) / risk
+        except (TypeError, ValueError, OverflowError):
+            rr = None
+    lines.append(f"TP1 RR (brüt): {_format_rr(rr) if rr is not None else 'Hesaplanmadı'}")
+    if item.get("net_rr") is not None:
+        lines.append(f"Net RR: {_format_rr(item.get('net_rr'))}")
     if status == "PENDING":
         if hit_levels:
             lines.append(f"Hedef ilerlemesi: {progress}")
@@ -209,12 +223,8 @@ def _format_outcome_item(item, state):
         lines.append(f"Net sonuç: {_format_rr(item.get('realized_r') or 0)}")
     elif status == "EXPIRED":
         lines.append("Sonuç: Süre doldu")
-        if item.get("entry_reached"):
-            lines.append("Not: Giriş seviyesi görülmüştü")
-        else:
-            lines.append("Not: Giriş seviyesi görülmedi")
+        lines.append("Giriş seviyesi görüldü" if item.get("entry_reached") else "Giriş seviyesi görülmedi")
     return "\n".join(lines)
-
 
 def format_daily_signal_report(outcomes, now=None):
     """Render a readable daily setup and outcome report in Europe/Istanbul time."""
@@ -1056,6 +1066,7 @@ class TelegramCommandService:
                     f"TP1: {_format_price(item.tp1)}",
                     f"TP2: {_format_price(item.tp2)}",
                     f"TP3: {_format_price(item.tp3)}",
+                    f"RR (ağırlıklı): {_format_rr(getattr(item, 'risk_reward', None))}",
                     f"Net RR: {_format_rr(item.net_rr_after_costs)} | Durum: {item.status}",
                     "",
                 ])
@@ -1071,6 +1082,7 @@ class TelegramCommandService:
                     f"TP1: {_format_price(item.tp1)}",
                     f"TP2: {_format_price(item.tp2)}",
                     f"TP3: {_format_price(item.tp3)}",
+                    f"Net RR: {_format_rr(getattr(item, 'net_rr_after_costs', None))}",
                     f"İlerleme: {progress}",
                     "",
                 ])
