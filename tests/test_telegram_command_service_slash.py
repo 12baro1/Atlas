@@ -461,3 +461,17 @@ def test_uptime_formatter_handles_negative_and_long_durations():
     assert TelegramCommandService._format_uptime(-5) == "0 sn"
     assert TelegramCommandService._format_uptime(90) == "1.5 dk"
     assert TelegramCommandService._format_uptime(90_000) == "1.0 gün"
+
+
+def test_system_command_works_without_psutil(monkeypatch):
+    import sys
+    from telegram_command_service import TelegramCommandService
+
+    monkeypatch.setitem(sys.modules, "psutil", None)
+    service = TelegramCommandService(MagicMock(), "token", "-100123")
+    message = service.handle_system()
+    assert "ATLAS | SİSTEM KAYNAKLARI" in message
+    assert "CPU:" in message
+    assert "RAM:" in message
+    assert "Disk:" in message
+    assert "psutil kurulu olmadığı için" in message
