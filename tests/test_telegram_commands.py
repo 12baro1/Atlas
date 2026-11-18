@@ -67,6 +67,8 @@ def test_parameterized_commands():
     # These should take parameters
     assert "analiz" in param_names
     assert "likidite" in param_names
+    assert "tara" in param_names
+    assert "setup" in param_names
     # These should NOT take parameters
     assert "btc" not in param_names
     assert "20tara" not in param_names
@@ -81,16 +83,16 @@ def test_category_grouping():
     assert {c.name for c in market_cmds} == {"btc", "eth", "sol", "analiz"}
 
     scan_cmds = get_commands_by_category("scan")
-    assert len(scan_cmds) == 14  # 20/30/50/100/200/500/1000tara, tumtara, durum/durdur/devam, yenile, eniyi5, eniyi10
+    assert len(scan_cmds) == 15
 
     setup_cmds = get_commands_by_category("setup")
-    assert len(setup_cmds) == 3  # islemler, likidite, havuzdurum
+    assert len(setup_cmds) == 7
 
     performance_cmds = get_commands_by_category("performance")
     assert len(performance_cmds) == 3  # performans, istatistik, ogrenme
 
     system_cmds = get_commands_by_category("system")
-    assert len(system_cmds) == 4  # start, durum, sistem, yardim
+    assert len(system_cmds) == 6
 
 
 def test_all_categories_ordered():
@@ -110,19 +112,19 @@ def test_help_text_contains_all_commands():
 
 def test_command_count():
     """Verify expected total command count."""
-    assert len(TELEGRAM_COMMANDS) == 28
+    assert len(TELEGRAM_COMMANDS) == 35
 
 
 def test_specific_commands_exist():
     """Verify all required commands from spec exist."""
     required = {
         "btc", "eth", "sol", "analiz",
-        "20tara", "30tara", "50tara", "100tara", "200tara", "500tara", "1000tara",
+        "tara", "20tara", "30tara", "50tara", "100tara", "200tara", "500tara", "1000tara",
         "tumtara", "eniyi5", "eniyi10",
         "taramadurum", "taramadurdur", "taramadevam", "yenile",
-        "islemler", "likidite", "havuzdurum",
+        "islemler", "likidite", "havuz", "havuzdurum", "setup", "gecmis",
         "performans", "istatistik", "ogrenme",
-        "start", "durum", "sistem", "yardim",
+        "start", "durum", "motorlar", "veri", "sistem", "yardim",
     }
     actual = {cmd.name for cmd in TELEGRAM_COMMANDS}
     assert required == actual, f"Mismatch: missing={required-actual}, extra={actual-required}"
