@@ -284,17 +284,38 @@ class OpportunityPool:
         Deduplication uses symbol + direction + strategy_id fingerprint.
         """
         with self._lock:
-            # Check for duplicate (same symbol, direction, strategy)
-            existing_id = self._find_duplicate(candidate)
-            if existing_id:
-                # Refresh a still-candidate duplicate with newer data; a setup
-                # that already reached validated/active stays untouched.
-                existing = self._candidates.get(existing_id)
-                if existing is not None and candidate.created_at_ms > existing.created_at_ms:
-                    self._update_candidate(existing, candidate)
-                    logger.debug(f"Updated existing candidate: {existing_id}")
+            # A fresh analysis supersedes every older, unaccepted setup for the
+            # same symbol, even when direction or strategy changed. Accepted
+            # setups are deliberately preserved: they may represent real trades.
+            symbol_ids = list(self._by_symbol.get(candidate.symbol, set()))
+            same_id = None
+            for existing_id in symbol_ids:
+                existing = self._candidates.get(existing_id) or self._validated.get(existing_id)
+                if existing is None:
+                    continue
+                if existing_id == candidate.setup_id:
+                    same_id = existing
+                    continue
+                self._remove_candidate(existing_id)
+                self._remove_validated(existing_id)
+                self._archive_candidate(
+                    existing,
+                    SetupStatus.INVALIDATED.value,
+                    "REPLACED_BY_NEW_ANALYSIS",
+                )
+                logger.info(
+                    "Setup superseded by fresh analysis | symbol=%s old=%s new=%s",
+                    candidate.symbol, existing_id, candidate.setup_id,
+                )
+
+            if same_id is not None:
+                # Same geometry/identity: refresh the existing record instead
+                # of creating a duplicate or resetting its original creation time.
+                self._update_candidate(same_id, candidate)
+                same_id.updated_at_ms = int(time.time() * 1000)
+                self.save_all()
                 return False
-            
+
             # Check capacity - evict expired first, then oldest if needed
             if len(self._candidates) >= self.max_candidates:
                 self._evict_oldest_candidate()
@@ -315,16 +336,9 @@ class OpportunityPool:
             self._candidates[candidate.setup_id] = candidate
             self._index_candidate(candidate)
             
-            # Persist immediately so a crash within persist_interval never
-            # loses a newly added candidate (no 30-second silent window).
-            if self._store is not None:
-                try:
-                    self._store.save_pool(
-                        "candidates",
-                        {k: v.to_dict() for k, v in self._candidates.items()},
-                    )
-                except Exception as e:
-                    logger.error(f"SQLite candidate persist failed: {e}")
+            # Persist the replacement, validated state and superseded history
+            # together; a restart must never resurrect the previous setup.
+            self.save_all()
             
             logger.info(f"New candidate added: {candidate.setup_id} "
                        f"({candidate.symbol} {candidate.direction} "
