@@ -1,6 +1,7 @@
 """Read-only Gate.io USDT perpetual market-data adapter for Atlas."""
 from __future__ import annotations
 
+import os
 import time
 from decimal import Decimal, InvalidOperation
 import requests
@@ -24,9 +25,27 @@ class GateFuturesExchange:
     id = "gateio"
     name = "Gate.io Futures"
 
-    def __init__(self, session=None, timeout=15):
+    def __init__(
+        self,
+        session=None,
+        timeout=15,
+        max_retries=None,
+        retry_backoff_seconds=None,
+    ):
         self.session = session or requests.Session()
         self.timeout = float(timeout)
+        self.max_retries = max(
+            1,
+            int(max_retries if max_retries is not None else os.getenv("ATLAS_GATEIO_MAX_RETRIES", "3")),
+        )
+        self.retry_backoff_seconds = max(
+            0.0,
+            float(
+                retry_backoff_seconds
+                if retry_backoff_seconds is not None
+                else os.getenv("ATLAS_GATEIO_RETRY_BACKOFF_SECONDS", "1.0")
+            ),
+        )
         self.markets = {}
         self.symbols = []
 
@@ -55,12 +74,40 @@ class GateFuturesExchange:
         return f"{parts[0]}/{parts[1]}:{parts[1]}"
 
     def _get(self, path, params=None):
-        response = self.session.get(BASE_URL + path, params=params or {}, timeout=self.timeout)
-        response.raise_for_status()
-        payload = response.json()
-        if isinstance(payload, dict) and payload.get("label") and payload.get("message"):
-            raise RuntimeError(f"Gate.io API error: {payload.get('label')}: {payload.get('message')}")
-        return payload
+        """GET a public Gate.io endpoint, retrying only transient transport/server failures."""
+        retryable_statuses = {429, 500, 502, 503, 504}
+        last_error = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                response = self.session.get(
+                    BASE_URL + path,
+                    params=params or {},
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if isinstance(payload, dict) and payload.get("label") and payload.get("message"):
+                    raise RuntimeError(
+                        f"Gate.io API error: {payload.get('label')}: {payload.get('message')}"
+                    )
+                return payload
+            except requests.HTTPError as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status not in retryable_statuses or attempt >= self.max_retries:
+                    raise
+                last_error = exc
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                if attempt >= self.max_retries:
+                    raise
+                last_error = exc
+
+            delay = self.retry_backoff_seconds * (2 ** (attempt - 1))
+            if delay > 0:
+                time.sleep(delay)
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError(f"Gate.io request failed without a response: {path}")
 
     def load_markets(self, reload=False, params=None):
         if self.markets and not reload:
