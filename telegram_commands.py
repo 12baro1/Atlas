@@ -29,6 +29,7 @@ TELEGRAM_COMMANDS = [
     TelegramCommand("analiz", "Belirtilen coin analizi (örn: /analiz BTC)", "handle_analyze_symbol", "market", True, "symbol"),
 
     # Piyasa tarama (gerçek scan queue üzerinden; kalıcı, devam edebilir)
+    TelegramCommand("tara", "Belirtilen sayıda piyasa tara (örn: /tara 20)", "handle_scan", "scan", True, "limit"),
     TelegramCommand("20tara", "20 piyasa tara", "handle_scan", "scan"),
     TelegramCommand("30tara", "30 piyasa tara", "handle_scan", "scan"),
     TelegramCommand("50tara", "50 piyasa tara", "handle_scan", "scan"),
@@ -43,7 +44,10 @@ TELEGRAM_COMMANDS = [
     TelegramCommand("yenile", "Gate.io piyasa envanterini yenile", "handle_refresh", "scan"),
     TelegramCommand("eniyi5", "Havuzdan en iyi 5 setup (salt okunur, yeni tarama başlatmaz)", "handle_best_five", "scan"),
     TelegramCommand("eniyi10", "Havuzdan en iyi 10 setup (salt okunur, yeni tarama başlatmaz)", "handle_best_ten", "scan"),
+    TelegramCommand("havuz", "Havuzdaki doğrulanmış setup listesini göster", "handle_pool", "setup"),
     TelegramCommand("havuzdurum", "Kalıcı setup havuzu durumu", "handle_pool_status", "setup"),
+    TelegramCommand("setup", "Belirtilen sembolün havuz setup detayları (örn: /setup BTC)", "handle_setup_symbol", "setup", True, "symbol"),
+    TelegramCommand("gecmis", "Son kapanan ve iptal edilen kayıtlar", "handle_history", "setup"),
 
     # İşlem görünümü: sinyal günlüğü ve doğrulanmış setup'lar tek komutta
     TelegramCommand("islemler", "Açık işlemler, giriş bekleyen setuplar ve son sonuçlar", "handle_islemler", "setup"),
@@ -57,6 +61,8 @@ TELEGRAM_COMMANDS = [
     # Sistem ve yardım
     TelegramCommand("start", "Atlas komutlarını göster", "handle_start", "system"),
     TelegramCommand("durum", "Bot ve servis durumu (VPS, tarama, bağlantı)", "handle_status", "system"),
+    TelegramCommand("motorlar", "Yedi stratejinin üretim ve filtre durumları", "handle_motors", "system"),
+    TelegramCommand("veri", "Gate.io piyasa envanteri ve veri bağlantısı", "handle_data_status", "system"),
     TelegramCommand("sistem", "Sunucu CPU, RAM ve disk kullanımı", "handle_system", "system"),
     TelegramCommand("yardim", "Komut listesi ve kullanım", "handle_help", "system"),
 ]
