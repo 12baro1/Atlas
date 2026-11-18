@@ -1322,8 +1322,32 @@ class TelegramCommandService:
 
     def handle_system(self) -> str:
         """Handle /sistem - system resources"""
-        import psutil
         import os
+        import shutil
+        import resource
+        import threading
+
+        try:
+            import psutil
+        except ImportError:
+            total_pages = os.sysconf("SC_PHYS_PAGES")
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            total_ram = total_pages * page_size
+            available_pages = os.sysconf("SC_AVPHYS_PAGES")
+            available_ram = available_pages * page_size
+            disk = shutil.disk_usage("/")
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            load_avg = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
+            return "\n".join([
+                "ATLAS | SİSTEM KAYNAKLARI",
+                "",
+                f"CPU: {os.cpu_count() or 0} çekirdek | Load: {load_avg[0]:.2f} {load_avg[1]:.2f} {load_avg[2]:.2f}",
+                f"RAM: {total_ram / 1024**3:.1f} GB | Boş: {available_ram / 1024**3:.1f} GB",
+                f"Disk: {disk.total / 1024**3:.1f} GB | Boş: {disk.free / 1024**3:.1f} GB",
+                "",
+                f"Süreç: PID={os.getpid()} | Tepe bellek: {usage.ru_maxrss / 1024:.1f} MB | Thread: {threading.active_count()}",
+                "Not: psutil kurulu olmadığı için anlık CPU/RAM yüzdesi gösterilemiyor.",
+            ])
 
         # System-wide stats
         cpu_count = psutil.cpu_count()
