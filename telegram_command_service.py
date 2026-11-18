@@ -1056,7 +1056,7 @@ class TelegramCommandService:
         """Show open signal outcomes plus today's resolved results and validated setups."""
         outcomes = self.runtime.signal_outcomes(limit=5000)
         report = format_daily_signal_report(outcomes)
-        pool_setups = get_opportunity_pool().get_validated_setups(limit=20)
+        pool_setups = get_opportunity_pool().get_best_setups(limit=20)
         if not pool_setups:
             return report
         untracked = [
@@ -1080,7 +1080,7 @@ class TelegramCommandService:
     def handle_setuplar(self) -> str:
         """List real validated and user-accepted setups from the persistent pool."""
         pool = get_opportunity_pool()
-        validated = pool.get_validated_setups(limit=20)
+        validated = pool.get_best_setups(limit=20)
         active = pool.get_active_setups()
         if not validated and not active:
             return "ATLAS | SETUPLAR\n\nDoğrulanmış veya kabul edilmiş setup yok."
@@ -1133,8 +1133,7 @@ class TelegramCommandService:
             setup for setup in pool_active
             if not any(
                 str(item.get("status") or "PENDING").upper() == "PENDING"
-                and str(item.get("symbol") or "").replace(":USDT", "") == str(setup.symbol).replace(":USDT", "")
-                and str(item.get("direction") or "").upper() == str(setup.direction).upper()
+                and _same_tracked_setup(setup, item)
                 for item in outcomes
             )
         ]
