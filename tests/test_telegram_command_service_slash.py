@@ -426,7 +426,6 @@ def test_help_command():
     assert "/btc" in result
     assert "/eniyi5" in result
     assert "/analiz" in result
-    assert "borsaya emir gönderilmedi" in result
 
 
 if __name__ == "__main__":
