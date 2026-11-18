@@ -314,7 +314,7 @@ def test_setuplar_reads_validated_pool_not_recent_analyses(monkeypatch):
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
     service = TelegramCommandService(SimpleNamespace(), "token", "chat")
     message = service.handle_setuplar()
-    assert "BTC/USDT LONG" in message
+    assert "BTC/USDT | LONG" in message
     assert "TP1: 102" in message
     assert "Durum: VALIDATED" in message
 
