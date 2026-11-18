@@ -241,6 +241,10 @@ def test_liquidation_cascade_real_data():
     if plan is not None:
         assert plan["strategy_id"] == "liquidation_cascade"
         assert plan["direction"] in ("LONG", "SHORT")
+        # The positive fixture has no specialist motor outputs. Native OI/flow
+        # evidence is sufficient; specialist motors remain optional context.
+        assert plan["specialist_evidence"] == []
+        assert plan["specialist_evidence_count"] == 0
 
 
 def test_liquidation_cascade_stale_oi_returns_none():
