@@ -108,13 +108,14 @@ def test_mevcut_daily_report_uses_turkey_local_day_and_net_r():
     ]
 
     report = format_daily_signal_report(rows, now=now)
-    assert "Verilen setup: 5" in report
+    assert "Bugünkü setup + önceki günlerden açık: 5" in report
     assert "Giriş seviyesi mumda görüldü: 3" in report
     assert "MARKET referansı (fill teyitsiz): 1" in report
     assert "Giriş olmadı (süresi doldu): 1" in report
     assert "Net: -0.50R" in report
     assert "OLD/USDT" not in report
-    assert "A4" in report
+    assert "XRP/USDT" in report
+    assert "Giriş seviyesi görülmedi" in report
 
 
 def test_telegram_card_is_compact_and_keeps_trade_levels():
@@ -128,13 +129,12 @@ def test_telegram_card_is_compact_and_keeps_trade_levels():
     text = _format_telegram_card(card)
     assert "BTC/USDT — LONG" in text
     assert "Strateji: SMC" in text
-    assert "Emir tipi: LIMIT" in text
-    assert "Giriş: 100" in text
-    assert "Stop Loss: 99" in text
+    assert "Giriş (LIMIT): 100" in text
+    assert "SL: 99" in text
     assert "TP3: 103" in text
-    assert "Risk/Getiri (Net RR): +1.25R" in text
-    assert "DURUM: Giriş fiyatı bekleniyor." in text
-    assert "Atlas otomatik emir göndermez." in text
+    assert "Net RR: +1.25R" in text
+    assert "Risk/Getiri" not in text
+    assert "LIMIT giriş bekleniyor" in text
 
 
 def test_start_command_is_registered_and_recognized():
@@ -144,7 +144,7 @@ def test_start_command_is_registered_and_recognized():
     runtime = MagicMock()
     service = TelegramCommandService(runtime, "token", "-100123")
     reply = service.execute_command("/start")
-    assert "Atlas Telegram komut arayüzü aktif" in reply
+    assert "ATLAS TELEGRAM AKTİF" in reply
     assert "/20tara" in reply
 
 
@@ -192,7 +192,7 @@ def test_runtime_signal_tracking_is_opt_in_by_default():
     assert parameter.default is False
 
 
-def test_telegram_card_includes_strategy_thesis_and_evidence():
+def test_telegram_card_omits_verbose_strategy_evidence():
     card = {
         "symbol": "ETH/USDT:USDT", "direction": "SHORT",
         "decision_action": "EXECUTE_WITH_CAUTION", "entry_type": "MARKET",
@@ -205,11 +205,11 @@ def test_telegram_card_includes_strategy_thesis_and_evidence():
     }
     message = _format_telegram_card(card)
     assert "Strateji: orderflow_momentum" in message
-    assert "SETUP GEREKÇESİ" in message
-    assert "CVD negatif" in message
-    assert "DİKKAT" in message
-    assert "Karşı kanıt: Yakın destek bölgesi" in message
-    assert "Borsa emri veya gerçekleşmiş fill teyidi değildir" in message
+    assert "Net RR: +2.10R" in message
+    assert "CVD negatif" not in message
+    assert "DİKKAT" not in message
+    assert "Karşı kanıt" not in message
+    assert "borsaya emir gönderilmedi" in message
 
 
 def test_mevcut_report_shows_levels_strategy_and_tp_progress():
@@ -302,7 +302,7 @@ def test_service_handles_slash_btc_directly():
     result = service.execute_command("/btc")
     assert "BTC/USDT" in result
     assert "LONG" in result
-    assert "Atlas otomatik emir göndermez" in result
+    assert "borsaya emir gönderilmedi" in result
 
 
 def test_service_handles_analiz_with_parameter():
@@ -426,8 +426,52 @@ def test_help_command():
     assert "/btc" in result
     assert "/eniyi5" in result
     assert "/analiz" in result
-    assert "Atlas otomatik emir göndermez" in result
 
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+def test_status_command_formats_uptime_and_omits_chat_id():
+    from telegram_command_service import TelegramCommandService
+
+    class Runtime:
+        def snapshot(self):
+            return {"scanner": {
+                "mode": "SCAN", "status": "READY", "cycle": 2,
+                "processed": 20, "success": 18, "failed": 1, "skipped": 1,
+                "started_at": int(time.time() * 1000) - 3_600_000,
+            }}
+
+        def telegram_status(self):
+            return {
+                "polling_enabled": True, "webhook_enabled": False,
+                "service_running": True, "connected": True,
+            }
+
+    service = TelegramCommandService(Runtime(), "token", "-100123")
+    message = service.handle_status()
+    assert "Çalışma süresi:" in message
+    assert "1.0 sa" in message
+    assert "Chat ID" not in message
+
+
+def test_uptime_formatter_handles_negative_and_long_durations():
+    from telegram_command_service import TelegramCommandService
+
+    assert TelegramCommandService._format_uptime(-5) == "0 sn"
+    assert TelegramCommandService._format_uptime(90) == "1.5 dk"
+    assert TelegramCommandService._format_uptime(90_000) == "1.0 gün"
+
+
+def test_system_command_works_without_psutil(monkeypatch):
+    import sys
+    from telegram_command_service import TelegramCommandService
+
+    monkeypatch.setitem(sys.modules, "psutil", None)
+    service = TelegramCommandService(MagicMock(), "token", "-100123")
+    message = service.handle_system()
+    assert "ATLAS | SİSTEM KAYNAKLARI" in message
+    assert "CPU:" in message
+    assert "RAM:" in message
+    assert "Disk:" in message
+    assert "psutil kurulu olmadığı için" in message

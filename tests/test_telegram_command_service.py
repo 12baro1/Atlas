@@ -81,13 +81,14 @@ def test_mevcut_daily_report_uses_turkey_local_day_and_net_r():
     ]
 
     report = format_daily_signal_report(rows, now=now)
-    assert "Verilen setup: 5" in report
+    assert "Bugünkü setup + önceki günlerden açık: 5" in report
     assert "Giriş seviyesi mumda görüldü: 3" in report
     assert "MARKET referansı (fill teyitsiz): 1" in report
     assert "Giriş olmadı (süresi doldu): 1" in report
     assert "Net: -0.50R" in report
     assert "OLD/USDT" not in report
-    assert "A4" in report
+    assert "XRP/USDT" in report
+    assert "Giriş seviyesi görülmedi" in report
 
 
 def test_telegram_card_is_compact_and_keeps_trade_levels():
@@ -97,17 +98,20 @@ def test_telegram_card_is_compact_and_keeps_trade_levels():
         "entry": 100.0, "stop_loss": 99.0,
         "tp_levels": [101.0, 102.0, 103.0],
         "net_rr": 1.25, "strategy": "SMC",
+        "setup_thesis": "Uzun teknik açıklama",
+        "supporting_evidence": ["çok fazla kanıt"],
     }
     text = _format_telegram_card(card)
     assert "BTC/USDT — LONG" in text
     assert "Strateji: SMC" in text
-    assert "Emir tipi: LIMIT" in text
-    assert "Giriş: 100" in text
-    assert "Stop Loss: 99" in text
+    assert "Giriş (LIMIT): 100" in text
+    assert "SL: 99" in text
     assert "TP3: 103" in text
-    assert "Risk/Getiri (Net RR): +1.25R" in text
-    assert "DURUM: Giriş fiyatı bekleniyor." in text
-    assert "Atlas otomatik emir göndermez." in text
+    assert "Net RR: +1.25R" in text
+    assert "Risk/Getiri" not in text
+    assert "SETUP GEREKÇESİ" not in text
+    assert "Uzun teknik açıklama" not in text
+    assert "LIMIT giriş bekleniyor" in text
 
 
 def test_recognizes_mevcut_command():
@@ -143,8 +147,7 @@ def test_telegram_service_queues_fresh_commands_without_blocking_poll(monkeypatc
     assert queued_command == "/BTC"
     assert label == "BTC"
     assert called == []
-    assert api_calls[0][0][0] == "sendMessage"
-    assert "İşleniyor..." in api_calls[0][0][1]["text"]
+    assert api_calls == []  # only the final command result is sent
 
 
 def test_telegram_service_ignores_queued_stale_analysis_commands(monkeypatch):
@@ -175,7 +178,7 @@ def test_runtime_signal_tracking_is_opt_in_by_default():
 
 
 
-def test_telegram_card_includes_strategy_thesis_and_evidence():
+def test_telegram_card_omits_verbose_evidence_details():
     card = {
         "symbol": "ETH/USDT:USDT", "direction": "SHORT",
         "decision_action": "EXECUTE_WITH_CAUTION", "entry_type": "MARKET",
@@ -188,11 +191,11 @@ def test_telegram_card_includes_strategy_thesis_and_evidence():
     }
     message = _format_telegram_card(card)
     assert "Strateji: orderflow_momentum" in message
-    assert "SETUP GEREKÇESİ" in message
-    assert "CVD negatif" in message
-    assert "DİKKAT" in message
-    assert "Karşı kanıt: Yakın destek bölgesi" in message
-    assert "Borsa emri veya gerçekleşmiş fill teyidi değildir" in message
+    assert "Net RR: +2.10R" in message
+    assert "CVD negatif" not in message
+    assert "DİKKAT" not in message
+    assert "Karşı kanıt" not in message
+    assert "borsaya emir gönderilmedi" in message
 
 
 def test_mevcut_report_shows_levels_strategy_and_tp_progress():
@@ -233,3 +236,156 @@ def test_mevcut_report_shows_levels_strategy_and_tp_progress():
 def test_price_formatter_preserves_small_coin_precision():
     from telegram_command_service import _format_price
     assert _format_price(0.00001234) == "0.00001234"
+
+
+def test_daily_report_keeps_previous_day_open_setups_visible():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("Europe/Istanbul")
+    now = datetime(2026, 11, 18, 12, 0, tzinfo=tz)
+    opened = int(datetime(2026, 11, 17, 21, 0, tzinfo=tz).timestamp() * 1000)
+    report = format_daily_signal_report([{
+        "signal_id": "OLD-OPEN",
+        "symbol": "BTC/USDT:USDT",
+        "direction": "LONG",
+        "opened_at": opened,
+        "status": "PENDING",
+        "entry_reached": True,
+        "entry": 100.0,
+        "stop_loss": 98.0,
+        "tp1": 102.0,
+        "tp2": 104.0,
+        "tp3": 106.0,
+        "tps_hit": [1],
+        "trailing_stop": 100.0,
+        "realized_r": 0.5,
+    }], now=now)
+    assert "BTC/USDT" in report
+    assert "TP1 ALINDI" in report
+    assert "Koruma stopu: 100" in report
+
+
+def test_takip_shows_tp_progress_and_recent_stop_result():
+    class Runtime:
+        def signal_outcomes(self, **kwargs):
+            return [
+                {
+                    "signal_id": "OPEN-1", "symbol": "BTC/USDT:USDT",
+                    "direction": "LONG", "status": "PENDING",
+                    "opened_at": 1_800_000_000_000, "entry": 100.0,
+                    "stop_loss": 98.0, "tp1": 102.0, "tp2": 104.0,
+                    "tp3": 106.0, "tps_hit": [1], "trailing_stop": 100.0,
+                    "realized_r": 0.5, "payload": {"strategy": "SMC"},
+                },
+                {
+                    "signal_id": "CLOSED-1", "symbol": "ETH/USDT:USDT",
+                    "direction": "SHORT", "status": "SL",
+                    "opened_at": 1_799_000_000_000, "resolved_at": 1_799_100_000_000,
+                    "entry": 200.0, "stop_loss": 202.0, "tp1": 198.0,
+                    "tp2": 196.0, "tp3": 194.0, "tps_hit": [1],
+                    "trailing_stop": 200.0, "realized_r": 0.3,
+                    "payload": {"strategy": "Order Flow"},
+                },
+            ]
+
+    service = TelegramCommandService(Runtime(), "token", "chat")
+    message = service.handle_takip()
+    assert "Açık: 1 | Son kapanan: 1" in message
+    assert "TP1 ALINDI" in message
+    assert "Koruma stopu: 100" in message
+    assert "Sonuç: SL" in message
+    assert "Net sonuç: +0.30R" in message
+
+
+def test_setuplar_reads_validated_pool_not_recent_analyses(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram_module
+
+    candidate = SimpleNamespace(
+        symbol="BTC/USDT:USDT", direction="LONG", strategy_name="SMC",
+        entry_price=100.0, stop_loss=98.0, tp1=102.0, tp2=104.0,
+        tp3=106.0, net_rr_after_costs=2.1, status="VALIDATED",
+    )
+    pool = SimpleNamespace(
+        get_best_setups=lambda **kwargs: [candidate],
+        get_active_setups=lambda: [],
+    )
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+    service = TelegramCommandService(SimpleNamespace(), "token", "chat")
+    message = service.handle_setuplar()
+    assert "BTC/USDT LONG" in message
+    assert "TP1: 102" in message
+    assert "Durum: VALIDATED" in message
+
+
+def test_mevcut_includes_validated_pool_setups_not_in_signal_journal(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram_module
+
+    candidate = SimpleNamespace(
+        symbol="SOL/USDT:USDT", direction="SHORT", strategy_name="Mean Reversion",
+        entry_price=150.0, stop_loss=153.0, tp1=147.0, tp2=144.0,
+        tp3=141.0, net_rr_after_costs=2.0,
+    )
+    pool = SimpleNamespace(get_best_setups=lambda **kwargs: [candidate])
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+
+    class Runtime:
+        def signal_outcomes(self, **kwargs):
+            return []
+
+    service = TelegramCommandService(Runtime(), "token", "chat")
+    message = service.handle_mevcut()
+    assert "SOL/USDT SHORT" in message
+    assert "henüz sinyal sonucu takibine alınmamış" in message
+
+
+def test_takip_includes_accepted_pool_setups_without_journal_outcome(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram_module
+
+    setup = SimpleNamespace(
+        symbol="SOL/USDT:USDT", direction="SHORT", strategy_name="Mean Reversion",
+        status="ACTIVE", current_tp=1, entry_filled_price=150.0, entry_price=151.0,
+        trailing_stop=150.0, stop_loss=153.0, tp1=147.0, tp2=144.0, tp3=141.0,
+    )
+    pool = SimpleNamespace(get_active_setups=lambda: [setup])
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+
+    class Runtime:
+        def signal_outcomes(self, **kwargs):
+            return []
+
+    service = TelegramCommandService(Runtime(), "token", "chat")
+    message = service.handle_takip()
+    assert "Havuz setup: 1" in message
+    assert "SOL/USDT | SHORT" in message
+    assert "TP1 ALINDI" in message
+    assert "henüz sinyal sonuç günlüğüyle eşleşmedi" in message
+
+
+def test_mevcut_does_not_hide_distinct_setup_for_same_symbol_and_direction(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram_module
+
+    candidate = SimpleNamespace(
+        symbol="BTC/USDT:USDT", direction="LONG", strategy_name="SMC",
+        entry_price=105.0, stop_loss=103.0, tp1=107.0, tp2=109.0,
+        tp3=111.0, net_rr_after_costs=2.0,
+    )
+    pool = SimpleNamespace(get_best_setups=lambda **kwargs: [candidate])
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+
+    class Runtime:
+        def signal_outcomes(self, **kwargs):
+            return [{
+                "symbol": "BTC/USDT:USDT", "direction": "LONG",
+                "entry": 100.0, "stop_loss": 98.0,
+                "tp1": 102.0, "tp2": 104.0, "tp3": 106.0,
+            }]
+
+    service = TelegramCommandService(Runtime(), "token", "chat")
+    message = service.handle_mevcut()
+    assert "BTC/USDT LONG — SMC" in message
+    assert "Giriş: 105" in message

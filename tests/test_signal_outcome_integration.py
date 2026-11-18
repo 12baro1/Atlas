@@ -1037,7 +1037,7 @@ def test_daily_report_shows_tp1_as_hit_while_following_later_targets():
     assert "TP1 kısmi hedef olarak kaydedilir" in report
 
 
-def test_telegram_signal_card_uses_clear_sectioned_layout():
+def test_telegram_signal_card_uses_compact_trade_plan_layout():
     card = {
         "symbol": "BTC/USDT:USDT",
         "strategy": "SMC",
@@ -1052,10 +1052,11 @@ def test_telegram_signal_card_uses_clear_sectioned_layout():
 
     message = _format_telegram_card(card)
 
-    assert "ATLAS  |  BTC/USDT:USDT" in message
+    assert "ATLAS | BTC/USDT — LONG" in message
     assert "Strateji: SMC" in message
-    assert "Giriş: 65000.0" in message
+    assert "Giriş (LIMIT): 65000.0" in message
+    assert "SL: 64500.0" in message
     assert "TP1: 66000.0" in message
     assert "TP3: 68000.0" in message
     assert "Net RR: +1.80R" in message
-    assert "LIMIT giriş seviyesi bekleniyor" in message
+    assert "LIMIT giriş bekleniyor" in message

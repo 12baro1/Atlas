@@ -144,6 +144,30 @@ def _outcome_progress(item):
     return progress, hit_levels
 
 
+def _same_tracked_setup(candidate, outcome):
+    """Match a pool setup to its journal outcome by full trade geometry."""
+    if (
+        str(candidate.symbol).replace(":USDT", "") != str(outcome.get("symbol") or "").replace(":USDT", "")
+        or str(candidate.direction).upper() != str(outcome.get("direction") or "").upper()
+    ):
+        return False
+    pairs = (
+        (candidate.entry_price, outcome.get("entry")),
+        (candidate.stop_loss, outcome.get("stop_loss")),
+        (candidate.tp1, outcome.get("tp1")),
+        (candidate.tp2, outcome.get("tp2")),
+        (candidate.tp3, outcome.get("tp3")),
+    )
+    try:
+        return all(
+            left is not None and right is not None
+            and math.isclose(float(left), float(right), rel_tol=1e-9, abs_tol=1e-10)
+            for left, right in pairs
+        )
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def _format_outcome_item(item, state):
     status = str(item.get("status") or "PENDING").upper()
     symbol = str(item.get("symbol") or "?").replace(":USDT", "")
@@ -154,8 +178,6 @@ def _format_outcome_item(item, state):
         f"Strateji: {_outcome_strategy(item)}",
         f"Durum: {state or status}",
     ]
-    if item.get("signal_id"):
-        lines.append(f"Sinyal ID: {item['signal_id']}")
     if item.get("entry") is not None:
         lines.append(f"Giriş: {_format_price(item.get('entry'))}")
     if item.get("stop_loss") is not None:
@@ -172,9 +194,17 @@ def _format_outcome_item(item, state):
             lines.append(f"Gerçekleşen kısmi getiri (brüt): {_format_rr(item.get('realized_r') or 0)}")
         elif item.get("entry_tracking_source") == "market_reference":
             lines.append("Giriş: MARKET referansı (borsa fill teyidi değil)")
-        elif not item.get("entry_reached"):
-            lines.append("Koşul: Giriş fiyatı bekleniyor")
+        elif item.get("entry_reached"):
+            lines.append("Giriş seviyesi görüldü (borsa fill teyidi değildir)")
+        else:
+            lines.append("Giriş bekleniyor")
+        if item.get("trailing_stop") is not None:
+            lines.append(f"Koruma stopu: {_format_price(item.get('trailing_stop'))}")
     elif status in {"TP1", "TP2", "TP3", "SL"}:
+        if hit_levels:
+            lines.append(f"Hedef ilerlemesi: {progress}")
+        if item.get("trailing_stop") is not None:
+            lines.append(f"Son koruma stopu: {_format_price(item.get('trailing_stop'))}")
         lines.append(f"Sonuç: {status}")
         lines.append(f"Net sonuç: {_format_rr(item.get('realized_r') or 0)}")
     elif status == "EXPIRED":
@@ -200,7 +230,10 @@ def format_daily_signal_report(outcomes, now=None):
             opened = datetime.fromtimestamp(stamp / 1000, tz=tz)
         except (TypeError, ValueError, OSError, OverflowError):
             continue
-        if opened.date() == today:
+        status = str(item.get("status") or "PENDING").upper()
+        # Keep every still-open signal visible across day boundaries; closed
+        # history remains in the daily report only for the current Istanbul day.
+        if opened.date() == today or status == "PENDING":
             daily.append(item)
 
     divider = "━━━━━━━━━━━━━━━━━━━━"
@@ -245,10 +278,10 @@ def format_daily_signal_report(outcomes, now=None):
 
     lines = [
         divider,
-        "ATLAS | BUGÜNÜN İŞLEM TAKİBİ",
+        "ATLAS | SETUP VE İŞLEM TAKİBİ",
         f"{today:%d.%m.%Y}",
         divider,
-        f"Verilen setup: {len(daily)}",
+        f"Bugünkü setup + önceki günlerden açık: {len(daily)}",
         f"Aktif takip: {len(tracking)}",
         f"Giriş bekliyor: {len(waiting)}",
         f"Sonuçlanan: {len(completed)}",
@@ -286,7 +319,7 @@ def format_daily_signal_report(outcomes, now=None):
 
 
 def _format_telegram_card(card, elapsed_ms=0):
-    """Format one selected setup as a human-readable Telegram trade plan."""
+    """Format one selected setup as a compact Telegram trade plan."""
     symbol = str(card.get("symbol") or "?").replace(":USDT", "")
     direction = str(card.get("direction") or "").upper()
     action = str(card.get("decision_action") or "").upper()
@@ -299,38 +332,13 @@ def _format_telegram_card(card, elapsed_ms=0):
         and card.get("stop_loss") is not None
         and bool(card.get("tp_levels"))
     )
-    divider = "━━━━━━━━━━━━━━━━━━━━"
     if not executable:
-        reason = str(card.get("reason") or "Ortak karar mekanizması geçerli işlem planı üretmedi.")
-        blockers = card.get("critical_blocks") or []
-        lines = [
-            divider,
+        reason = str(card.get("reason") or "Ortak karar mekanizması geçerli setup üretmedi.")
+        return "\n".join([
             f"ATLAS | {symbol}",
-            divider,
             "GEÇERLİ SETUP YOK",
-            f"Neden: {reason[:240]}",
-        ]
-        if blockers:
-            lines.append("Kontrol edilecekler: " + " | ".join(str(item) for item in blockers[:3]))
-        pipeline = card.get("strategy_pipeline") or {}
-        strategy_rows = card.get("strategy_diagnostics") or []
-        if strategy_rows:
-            lines.extend([
-                "",
-                "YEDİ STRATEJİ DURUMU",
-                f"Ham setup: {pipeline.get('raw_setups', 0)} | Ortak filtreden geçen: {pipeline.get('passed_common_filter', 0)}",
-            ])
-            for item in strategy_rows[:7]:
-                strategy_id = str(item.get("strategy_id") or "unknown")
-                status = str(item.get("status") or "UNKNOWN")
-                detail = str(item.get("reason") or "").strip()
-                suffix = f" — {detail[:150]}" if detail else ""
-                lines.append(f"• {strategy_id}: {status}{suffix}")
-        lines.extend([
-            "",
-            "Bu sembolde şu an işlem açılabilecek doğrulanmış bir plan bulunmadı.",
+            f"Neden: {reason.splitlines()[0][:180]}",
         ])
-        return "\n".join(lines)
 
     strategy = card.get("strategy") or card.get("strategy_id") or "Belirtilmedi"
     targets = card.get("tp_levels") or []
@@ -340,58 +348,23 @@ def _format_telegram_card(card, elapsed_ms=0):
     if rr is None:
         rr = card.get("rr")
 
-    direction_label = "LONG" if direction == "LONG" else "SHORT"
     lines = [
-        f"ATLAS  |  {card.get('symbol') or symbol}",
-        f"{'🟢' if direction == 'LONG' else '🔴'} {symbol} — {direction_label}",
-        divider,
-        "İŞLEM PLANI",
+        f"ATLAS | {symbol} — {direction}",
         f"Strateji: {strategy}",
-        f"Emir tipi: {entry_type}",
-        f"Giriş: {_format_price(card.get('entry'), grouping=False)}",
-        f"Stop Loss: {_format_price(card.get('stop_loss'), grouping=False)}",
+        f"Giriş ({entry_type}): {_format_price(card.get('entry'), grouping=False)}",
+        f"SL: {_format_price(card.get('stop_loss'), grouping=False)}",
     ]
-    if targets:
-        lines.extend(["", "HEDEFLER"])
-        lines.extend(
-            f"TP{index}: {_format_price(target, grouping=False)}"
-            for index, target in enumerate(targets[:3], start=1)
-        )
-    lines.extend([
-        "",
-        f"Net RR: {_format_rr(rr) if rr is not None else 'Hesaplanmadı'}",
-        f"Risk/Getiri (Net RR): {_format_rr(rr) if rr is not None else 'Hesaplanmadı'}",
-    ])
-
-    thesis = str(card.get("setup_thesis") or "").strip()
-    supporting = card.get("supporting_evidence") or []
-    context = card.get("market_context") or []
-    opposing = card.get("opposing_evidence") or []
-    evidence_lines = []
-    if thesis and thesis.lower() != str(strategy).lower():
-        evidence_lines.append(thesis)
-    evidence_lines.extend(str(item).strip() for item in supporting if str(item).strip())
-    evidence_lines.extend(str(item).strip() for item in context if str(item).strip())
-    if evidence_lines:
-        lines.extend(["", "SETUP GEREKÇESİ"])
-        lines.extend(f"• {item[:180]}" for item in evidence_lines[:4])
-    if opposing:
-        lines.extend(["", "DİKKAT"])
-        lines.extend(f"• Karşı kanıt: {str(item)[:160]}" for item in opposing[:2])
-
-    lines.extend(["", divider])
-    if entry_type == "LIMIT":
-        lines.append("DURUM: Giriş fiyatı bekleniyor.")
-        lines.append("LIMIT giriş seviyesi bekleniyor.")
-        lines.append("Fiyat belirlenen LIMIT seviyesine gelmeden giriş varsayılmaz.")
-    else:
-        lines.append("DURUM: MARKET planı hazır.")
-        lines.append("Borsa emri veya gerçekleşmiş fill teyidi değildir.")
-        lines.append("Bu mesaj yalnızca analiz planıdır; borsada emir gönderilmez.")
-    lines.append("Atlas otomatik emir göndermez.")
-    lines.append(divider)
-    if elapsed_ms:
-        lines.append(f"Analiz süresi: {elapsed_ms / 1000:.1f} sn")
+    lines.extend(
+        f"TP{index}: {_format_price(target, grouping=False)}"
+        for index, target in enumerate(targets[:3], start=1)
+    )
+    if rr is not None:
+        lines.append(f"Net RR: {_format_rr(rr)}")
+    lines.append(
+        "Durum: LIMIT giriş bekleniyor."
+        if entry_type == "LIMIT"
+        else "Durum: MARKET planı hazır; borsaya emir gönderilmedi."
+    )
     return "\n".join(lines)
 
 
@@ -628,20 +601,7 @@ class TelegramCommandService:
         self.logger.info("Telegram command queued: %s (chat_id=%s)", command[:80], chat_id)
         try:
             self._command_queue.put_nowait((raw_command, command))
-            # Acknowledge from the polling thread immediately; a previous long
-            # analysis in the command worker must not delay this confirmation.
-            try:
-                self._api(
-                    "sendMessage",
-                    {
-                        "chat_id": self.chat_id,
-                        "text": f"Atlas komutu alındı: {command[:80]}\nİşleniyor...",
-                        "disable_web_page_preview": True,
-                    },
-                    timeout=10,
-                )
-            except Exception:
-                self.logger.exception("Telegram command acknowledgement could not be sent")
+            # Keep the group clean: send only the final command result.
         except queue.Full:
             self.logger.warning("Telegram command queue full; rejecting command: %s", command[:80])
             try:
@@ -815,8 +775,12 @@ class TelegramCommandService:
     def handle_start(self) -> str:
         """Handle Telegram's conventional /start command."""
         return (
-            "Atlas Telegram komut arayüzü aktif.\n\n"
-            + format_help_text()
+            "ATLAS TELEGRAM AKTİF\n\n"
+            "Piyasa analizi: /btc veya /analiz ETH\n"
+            "Tarama: /20tara, /100tara, /tumtara\n"
+            "Setup: /setuplar, /mevcut, /takip, /eniyi5\n"
+            "Servis: /durum\n\n"
+            "Tüm komutlar: /yardim"
         )
 
     def handle_help(self) -> str:
@@ -1072,7 +1036,10 @@ class TelegramCommandService:
             )
             age_text = f"{age_hours:.1f} saat" if age_hours is not None else "bilinmiyor"
             last_ms = setup.updated_at_ms or setup.created_at_ms
-            last_text = time.strftime("%d.%m %H:%M", time.localtime(last_ms / 1000)) if last_ms else "bilinmiyor"
+            last_text = (
+                datetime.fromtimestamp(last_ms / 1000, tz=ZoneInfo("Europe/Istanbul")).strftime("%d.%m %H:%M")
+                if last_ms else "bilinmiyor"
+            )
             lines.extend([
                 f"{index}. {setup.symbol} | {setup.direction} | {setup.strategy_name}",
                 f"   Tür: {setup.setup_type} | Durum: {setup.status}",
@@ -1089,53 +1056,116 @@ class TelegramCommandService:
         return "\n".join(lines)
 
     def handle_mevcut(self) -> str:
-        """Handle /mevcut - today's setup and trade tracking"""
+        """Show open signal outcomes plus today's resolved results and validated setups."""
         outcomes = self.runtime.signal_outcomes(limit=5000)
-        return format_daily_signal_report(outcomes)
+        report = format_daily_signal_report(outcomes)
+        pool_setups = get_opportunity_pool().get_best_setups(limit=20)
+        if not pool_setups:
+            return report
+        untracked = [
+            candidate for candidate in pool_setups
+            if not any(_same_tracked_setup(candidate, outcome) for outcome in outcomes)
+        ]
+        if not untracked:
+            return report
+        lines = [report, "", "DOĞRULANMIŞ HAVUZ SETUPLARI (henüz sinyal sonucu takibine alınmamış)"]
+        for item in untracked:
+            symbol = str(item.symbol).replace(":USDT", "")
+            lines.extend([
+                f"{symbol} {item.direction} — {item.strategy_name}",
+                f"Giriş: {_format_price(item.entry_price)} | SL: {_format_price(item.stop_loss)}",
+                f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                f"Net RR: {_format_rr(item.net_rr_after_costs)}",
+                "",
+            ])
+        return "\n".join(lines).rstrip()
 
     def handle_setuplar(self) -> str:
-        """Handle /setuplar - list active setup pool"""
-        analyses = self.runtime.latest_analyses(max_age_seconds=86400)  # 24h
-        if not analyses:
-            return "ATLAS | SETUP HAVUZU\n\nHenüz tarama yapılmamış veya havuz boş."
+        """List real validated and user-accepted setups from the persistent pool."""
+        pool = get_opportunity_pool()
+        validated = pool.get_best_setups(limit=20)
+        active = pool.get_active_setups()
+        if not validated and not active:
+            return "ATLAS | SETUPLAR\n\nDoğrulanmış veya kabul edilmiş setup yok."
 
-        lines = ["ATLAS | SETUP HAVUZU", f"Toplam: {len(analyses)} analiz (son 24 saat)", ""]
-        for item in sorted(analyses, key=lambda x: x.get("analyzed_at_ms", 0), reverse=True)[:20]:
-            symbol = item.get("symbol", "?")
-            result = item.get("result") or {}
-            signal = result.get("signal") or {}
-            decision = result.get("decision") or {}
-            direction = signal.get("signal", "WAIT")
-            action = decision.get("action", "WAIT")
-            analyzed_at = item.get("analyzed_at_ms", 0)
-            if analyzed_at:
-                dt = datetime.fromtimestamp(analyzed_at / 1000).strftime("%H:%M:%S")
-            else:
-                dt = "?"
-            lines.append(f"  {symbol} | {direction} | {action} | {dt}")
-
-        lines.extend(["", "Not: /eniyi5 ile en iyi 5'i görüntüleyin."])
-        return "\n".join(lines)
+        lines = ["ATLAS | SETUPLAR"]
+        if validated:
+            lines.extend(["", f"YENİ / DOĞRULANMIŞ ({len(validated)})"])
+            for item in validated:
+                symbol = str(item.symbol).replace(":USDT", "")
+                lines.extend([
+                    f"{symbol} {item.direction} — {item.strategy_name}",
+                    f"Giriş: {_format_price(item.entry_price)} | SL: {_format_price(item.stop_loss)}",
+                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                    f"Net RR: {_format_rr(item.net_rr_after_costs)} | Durum: {item.status}",
+                    "",
+                ])
+        if active:
+            lines.extend(["", f"KABUL EDİLMİŞ ({len(active)})"])
+            for item in active:
+                symbol = str(item.symbol).replace(":USDT", "")
+                progress = f"TP{item.current_tp}" if item.current_tp else "Hedef yok"
+                lines.extend([
+                    f"{symbol} {item.direction} — {item.strategy_name}",
+                    f"Durum: {item.status} | İlerleme: {progress}",
+                    f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)} | "
+                    f"Koruma stopu: {_format_price(item.trailing_stop or item.stop_loss)}",
+                    "",
+                ])
+        return "\n".join(lines).rstrip()
 
     def handle_takip(self) -> str:
-        """Handle /takip - track open signals"""
-        outcomes = self.runtime.signal_outcomes(limit=200, status="PENDING")
-        if not outcomes:
-            return "ATLAS | AÇIK SİNYAL TAKİBİ\n\nAçık sinyal yok."
+        """Show signal outcomes and accepted pool setups without conflating them."""
+        outcomes = self.runtime.signal_outcomes(limit=500)
+        pool_active = get_opportunity_pool().get_active_setups()
+        if not outcomes and not pool_active:
+            return "ATLAS | TAKİP\n\nAçık sinyal veya kabul edilmiş setup yok."
 
-        lines = ["ATLAS | AÇIK SİNYAL TAKİBİ", f"Toplam: {len(outcomes)}", ""]
-        for item in outcomes:
-            symbol = str(item.get("symbol") or "?").replace(":USDT", "")
-            direction = str(item.get("direction") or "?").upper()
-            signal_id = item.get("signal_id", "?")
-            entry = _format_price(item.get("entry"))
-            stop = _format_price(item.get("stop_loss"))
-            tp1 = _format_price(item.get("tp1"))
-            lines.append(f"{symbol} {direction} | {signal_id}")
-            lines.append(f"  Giriş: {entry} | SL: {stop} | TP1: {tp1}")
-            lines.append("")
+        terminal = {"TP1", "TP2", "TP3", "SL", "EXPIRED"}
+        pending = sorted(
+            [item for item in outcomes if str(item.get("status") or "PENDING").upper() == "PENDING"],
+            key=lambda item: int(item.get("opened_at") or 0),
+            reverse=True,
+        )
+        closed = sorted(
+            [item for item in outcomes if str(item.get("status") or "").upper() in terminal],
+            key=lambda item: int(item.get("resolved_at") or item.get("opened_at") or 0),
+            reverse=True,
+        )[:8]
+        active_untracked = [
+            setup for setup in pool_active
+            if not any(
+                str(item.get("status") or "PENDING").upper() == "PENDING"
+                and _same_tracked_setup(setup, item)
+                for item in outcomes
+            )
+        ]
 
-        return "\n".join(lines)
+        lines = ["ATLAS | TAKİP", f"Açık: {len(pending)} | Son kapanan: {len(closed)} | Havuz setup: {len(active_untracked)}"]
+        if pending:
+            lines.extend(["", "SİNYAL SONUÇ TAKİBİ"])
+            for item in pending:
+                lines.extend([_format_outcome_item(item, "TAKİPTE"), ""])
+        if active_untracked:
+            lines.extend(["", "HAVUZDA KABUL EDİLEN SETUPLAR"])
+            for item in active_untracked:
+                progress = f"TP{item.current_tp} ALINDI" if item.current_tp else "Hedef bekleniyor"
+                lines.extend([
+                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
+                    f"Strateji: {item.strategy_name} | Durum: {item.status}",
+                    f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)} | "
+                    f"Stop: {_format_price(item.trailing_stop or item.stop_loss)}",
+                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                    f"İlerleme: {progress}",
+                    "Not: Bu kayıt henüz sinyal sonuç günlüğüyle eşleşmedi.",
+                    "",
+                ])
+        if closed:
+            lines.extend(["", "SONUÇLANAN SİNYALLER"])
+            for item in closed:
+                lines.extend([_format_outcome_item(item, "KAPANDI"), ""])
+        lines.append("TP/SL sonuçları son işlenen kapalı 15m mumlarına dayanır; borsa fill teyidi değildir.")
+        return "\n".join(lines).rstrip()
 
     def handle_liquidity(self, symbol: str) -> str:
         """Handle /likidite BTC"""
@@ -1212,10 +1242,28 @@ class TelegramCommandService:
         ]
         return "\n".join(lines)
 
+    @staticmethod
+    def _format_uptime(seconds: float) -> str:
+        seconds = max(0.0, float(seconds or 0.0))
+        if seconds < 60:
+            return f"{seconds:.0f} sn"
+        minutes = seconds / 60
+        if minutes < 60:
+            return f"{minutes:.1f} dk"
+        hours = minutes / 60
+        if hours < 24:
+            return f"{hours:.1f} sa"
+        days = hours / 24
+        return f"{days:.1f} gün"
+
     def handle_status(self) -> str:
         """Handle /durum - bot and service status"""
-        import psutil
         import sys
+        import threading
+        try:
+            import psutil
+        except ImportError:
+            psutil = None
 
         # Telegram bot info
         bot_info = self._bot_info_cache or {}
@@ -1240,10 +1288,16 @@ class TelegramCommandService:
         service_running = "ÇALIŞIYOR" if tg_status.get("service_running") else "DURDU"
 
         # System info
-        process = psutil.Process()
-        mem_mb = process.memory_info().rss / 1024 / 1024
-        cpu_pct = process.cpu_percent(interval=0.1)
-        threads = process.num_threads()
+        if psutil is not None:
+            process = psutil.Process()
+            mem_mb = process.memory_info().rss / 1024 / 1024
+            cpu_pct = process.cpu_percent(interval=0.1)
+            threads = process.num_threads()
+        else:
+            import resource
+            mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+            cpu_pct = 0.0
+            threads = threading.active_count()
 
         # Uptime
         started_at = scanner.get("started_at", 0)
@@ -1254,7 +1308,6 @@ class TelegramCommandService:
             "ATLAS | SERVİS DURUMU",
             "",
             f"Bot: {bot_name} (@{bot_username})",
-            f"Chat ID: {self.chat_id}",
             f"Polling: {polling} | Webhook: {webhook} | Servis: {service_running}",
             "",
             f"Tarama modu: {mode}",
@@ -1269,8 +1322,32 @@ class TelegramCommandService:
 
     def handle_system(self) -> str:
         """Handle /sistem - system resources"""
-        import psutil
         import os
+        import shutil
+        import resource
+        import threading
+
+        try:
+            import psutil
+        except ImportError:
+            total_pages = os.sysconf("SC_PHYS_PAGES")
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            total_ram = total_pages * page_size
+            available_pages = os.sysconf("SC_AVPHYS_PAGES")
+            available_ram = available_pages * page_size
+            disk = shutil.disk_usage("/")
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            load_avg = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
+            return "\n".join([
+                "ATLAS | SİSTEM KAYNAKLARI",
+                "",
+                f"CPU: {os.cpu_count() or 0} çekirdek | Load: {load_avg[0]:.2f} {load_avg[1]:.2f} {load_avg[2]:.2f}",
+                f"RAM: {total_ram / 1024**3:.1f} GB | Boş: {available_ram / 1024**3:.1f} GB",
+                f"Disk: {disk.total / 1024**3:.1f} GB | Boş: {disk.free / 1024**3:.1f} GB",
+                "",
+                f"Süreç: PID={os.getpid()} | Tepe bellek: {usage.ru_maxrss / 1024:.1f} MB | Thread: {threading.active_count()}",
+                "Not: psutil kurulu olmadığı için anlık CPU/RAM yüzdesi gösterilemiyor.",
+            ])
 
         # System-wide stats
         cpu_count = psutil.cpu_count()
@@ -1298,17 +1375,6 @@ class TelegramCommandService:
             f"Açık dosya: {open_files} | Bağlantı: {connections}",
         ]
         return "\n".join(lines)
-
-        if seconds < 60:
-            return f"{seconds:.0f} sn"
-        minutes = seconds / 60
-        if minutes < 60:
-            return f"{minutes:.1f} dk"
-        hours = minutes / 60
-        if hours < 24:
-            return f"{hours:.1f} sa"
-        days = hours / 24
-        return f"{days:.1f} gün"
 
 
 def create_telegram_command_service(runtime, logger=None):
