@@ -775,8 +775,12 @@ class TelegramCommandService:
     def handle_start(self) -> str:
         """Handle Telegram's conventional /start command."""
         return (
-            "Atlas Telegram komut arayüzü aktif.\n\n"
-            + format_help_text()
+            "ATLAS TELEGRAM AKTİF\n\n"
+            "Piyasa analizi: /btc veya /analiz ETH\n"
+            "Tarama: /20tara, /100tara, /tumtara\n"
+            "Setup: /setuplar, /mevcut, /takip, /eniyi5\n"
+            "Servis: /durum\n\n"
+            "Tüm komutlar: /yardim"
         )
 
     def handle_help(self) -> str:
@@ -1236,6 +1240,20 @@ class TelegramCommandService:
         ]
         return "\n".join(lines)
 
+    @staticmethod
+    def _format_uptime(seconds: float) -> str:
+        seconds = max(0.0, float(seconds or 0.0))
+        if seconds < 60:
+            return f"{seconds:.0f} sn"
+        minutes = seconds / 60
+        if minutes < 60:
+            return f"{minutes:.1f} dk"
+        hours = minutes / 60
+        if hours < 24:
+            return f"{hours:.1f} sa"
+        days = hours / 24
+        return f"{days:.1f} gün"
+
     def handle_status(self) -> str:
         """Handle /durum - bot and service status"""
         import psutil
@@ -1278,7 +1296,6 @@ class TelegramCommandService:
             "ATLAS | SERVİS DURUMU",
             "",
             f"Bot: {bot_name} (@{bot_username})",
-            f"Chat ID: {self.chat_id}",
             f"Polling: {polling} | Webhook: {webhook} | Servis: {service_running}",
             "",
             f"Tarama modu: {mode}",
@@ -1322,17 +1339,6 @@ class TelegramCommandService:
             f"Açık dosya: {open_files} | Bağlantı: {connections}",
         ]
         return "\n".join(lines)
-
-        if seconds < 60:
-            return f"{seconds:.0f} sn"
-        minutes = seconds / 60
-        if minutes < 60:
-            return f"{minutes:.1f} dk"
-        hours = minutes / 60
-        if hours < 24:
-            return f"{hours:.1f} sa"
-        days = hours / 24
-        return f"{days:.1f} gün"
 
 
 def create_telegram_command_service(runtime, logger=None):
