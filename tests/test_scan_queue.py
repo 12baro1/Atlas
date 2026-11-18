@@ -11,6 +11,37 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scan_queue import ScanQueue, DONE, FAILED, PENDING, RUNNING
 
 
+def test_requeue_completed_reopens_only_done_and_failed_jobs(tmp_path):
+    queue = make_queue(tmp_path, max_retries=1)
+    queue.start_new_period("revalidate")
+    queue.enqueue(["DONE/USDT", "FAILED/USDT", "PENDING/USDT", "RUNNING/USDT"])
+    assert queue.claim_next()["symbol"] == "DONE/USDT"
+    queue.complete("DONE/USDT", ok=True)
+    # Put one row directly in FAILED state; complete(ok=False) is retryable
+    # by design and may be claimed again before reaching its retry limit.
+    queue._thread_conn().execute(
+        "UPDATE scan_jobs SET state = ? WHERE symbol = ? AND scan_generation = ?",
+        (FAILED, "FAILED/USDT", queue.current_generation()),
+    )
+    assert queue.claim_next()["symbol"] == "PENDING/USDT"
+
+    count = queue.requeue_completed([
+        "DONE/USDT", "FAILED/USDT", "PENDING/USDT", "MISSING/USDT"
+    ], batch_tag="setup_revalidation")
+
+    assert count == 2
+    states = {
+        row[0]: row[1]
+        for row in queue._thread_conn().execute(
+            "SELECT symbol, state FROM scan_jobs WHERE scan_generation = ?",
+            (queue.current_generation(),),
+        ).fetchall()
+    }
+    assert states["DONE/USDT"] == PENDING
+    assert states["FAILED/USDT"] == PENDING
+    assert states["PENDING/USDT"] == RUNNING
+    queue.close()
+
 def make_queue(tmp_path, **kwargs):
     defaults = {"base_path": str(tmp_path / "q"), "lease_seconds": 300, "max_retries": 3}
     defaults.update(kwargs)

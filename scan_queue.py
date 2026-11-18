@@ -306,6 +306,39 @@ class ScanQueue:
                 added += max(cursor.rowcount, 0)
         return added
 
+    def requeue_completed(
+        self, symbols: List[str], batch_tag: Optional[str] = None
+    ) -> int:
+        """Reopen completed/failed jobs for live setup revalidation.
+
+        Pending and running jobs are left untouched. In particular, a worker
+        already analyzing a symbol is never duplicated or interrupted.
+        """
+        clean_symbols = list(dict.fromkeys(
+            str(symbol or "").strip().upper()
+            for symbol in symbols if str(symbol or "").strip()
+        ))
+        if not clean_symbols:
+            return 0
+        now_ms = int(time.time() * 1000)
+        gen = self._current_generation
+        requeued = 0
+        with self._transaction() as conn:
+            for symbol in clean_symbols:
+                cursor = conn.execute(
+                    """
+                    UPDATE scan_jobs
+                    SET state = ?, enqueued_at_ms = ?, claimed_at_ms = NULL,
+                        lease_until_ms = NULL, retries = 0, last_error = NULL,
+                        completed_at_ms = NULL, batch_tag = ?
+                    WHERE symbol = ? AND scan_generation = ?
+                      AND state IN (?, ?)
+                    """,
+                    (PENDING, now_ms, batch_tag, symbol, gen, DONE, FAILED),
+                )
+                requeued += max(cursor.rowcount, 0)
+        return requeued
+
     def claim_next(self, worker_id: str = "worker") -> Optional[Dict[str, Any]]:
         """Atomically claim the oldest pending symbol of the current generation."""
         now_ms = int(time.time() * 1000)

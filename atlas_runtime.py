@@ -697,6 +697,12 @@ class AtlasRuntime:
                         removed = pool.invalidate_strategy_setup(
                             symbol, strategy_id, "STRATEGY_STRUCTURE_BROKEN"
                         )
+                        if removed:
+                            state_engine = getattr(self.engine, "state_engine", None)
+                            if state_engine is not None:
+                                state_engine.clear_active_setup(
+                                    symbol, reason="setup_invalidated:STRATEGY_STRUCTURE_BROKEN"
+                                )
                         invalidated_setups.extend({
                             "setup_id": item.setup_id,
                             "symbol": item.symbol,

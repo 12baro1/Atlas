@@ -2,11 +2,10 @@
 
 - The queue, universe inventory and workers live in the runtime service,
   NOT in the Telegram bot: restarting Telegram never resets a scan.
-- Every scan command (20/30/50/100/200/500/1000/tümünü tara) enqueues the
-  current Gate.io universe into the durable ScanQueue; pending jobs from a
-  previous run resume automatically (checkpoint preserved).
-- Already-scanned symbols keep their result; no needless re-scan happens
-  unless the queue is fully complete and the user explicitly asks again.
+- Every scan command enqueues the ranked Gate.io universe and also rechecks
+  symbols that still own live opportunity-pool setups.
+- Pending work resumes without resetting checkpoints; completed/failed setup
+  symbols are selectively reopened in the same generation for fresh validation.
 - Workers claim atomically, so parallel scans are safe, and the bounded
   analysis gap keeps Gate.io API usage inside rate limits.
 """
@@ -193,6 +192,26 @@ class ScanService:
             "progress": self.queue.progress(),
         }
 
+    def _setup_symbols_for_revalidation(self) -> List[str]:
+        """Return symbols with live setups so every scan cycle rechecks them."""
+        getter = getattr(self.runtime, "_opportunity_pool", None)
+        if not callable(getter):
+            return []
+        try:
+            pools = getter().get_all_setups()
+        except Exception:
+            logger.exception("Could not read opportunity pool for scan revalidation")
+            return []
+        symbols = []
+        seen = set()
+        for pool_name in ("candidates", "validated", "active"):
+            for setup in pools.get(pool_name, []) or []:
+                symbol = str(getattr(setup, "symbol", "") or "").strip().upper()
+                if symbol and symbol not in seen:
+                    seen.add(symbol)
+                    symbols.append(symbol)
+        return symbols
+
     def start_scan(self, limit: Optional[int] = None) -> Dict[str, Any]:
         """Enqueue the requested scan and make sure workers are running.
 
@@ -225,7 +244,9 @@ class ScanService:
             ranked_symbols = sorted(universe)
             if limit is not None:
                 ranked_symbols = ranked_symbols[:max(0, int(limit))]
-        if not universe and not has_unfinished:
+        revalidation_symbols = self._setup_symbols_for_revalidation()
+        scan_symbols = list(dict.fromkeys(ranked_symbols + revalidation_symbols))
+        if not universe and not has_unfinished and not revalidation_symbols:
             return {
                 "started": False,
                 "reason": "empty_universe",
@@ -233,16 +254,21 @@ class ScanService:
                 "progress": progress_before,
             }
         if has_unfinished:
-            # Extend the current generation with the requested top-N symbols.
-            # enqueue() is idempotent: completed and pending jobs keep their state.
-            added = self.queue.enqueue(
-                ranked_symbols, batch_tag=f"scan_extend_{int(time.time())}"
-            ) if ranked_symbols else 0
+            # Resume ordinary work, but reopen completed/failed symbols that
+            # still own live setups so stale pool entries are freshly evaluated.
+            batch_tag = f"scan_extend_{int(time.time())}"
+            added = self.queue.enqueue(scan_symbols, batch_tag=batch_tag) if scan_symbols else 0
+            requeued = self.queue.requeue_completed(
+                revalidation_symbols, batch_tag=batch_tag
+            ) if revalidation_symbols and callable(
+                getattr(self.queue, "requeue_completed", None)
+            ) else 0
             inventory_status = self.inventory.status()
-            if ranked_symbols:
-                self.queue.reorder_pending(ranked_symbols)
+            if scan_symbols:
+                ordered_symbols = ranked_symbols + revalidation_symbols
+                self.queue.reorder_pending(ordered_symbols)
                 self.queue.set_generation_ranking(
-                    ranked_symbols,
+                    ordered_symbols,
                     inventory_status.get("ranking_source", "unknown"),
                 )
             self.ensure_workers()
@@ -253,6 +279,8 @@ class ScanService:
                 "selected": len(ranked_symbols),
                 "selected_preview": ranked_symbols[:5],
                 "added": added,
+                "requeued_setup_symbols": requeued,
+                "revalidation_symbols": len(revalidation_symbols),
                 "resumed": True,
                 "ranking_source": inventory_status.get("ranking_source", "alphabetical_fallback"),
                 "workers": self.worker_count,
@@ -261,11 +289,11 @@ class ScanService:
             }
 
         queue_result = self.queue.rebuild(
-            ranked_symbols, batch_tag=f"scan_{int(time.time())}"
+            scan_symbols, batch_tag=f"scan_{int(time.time())}"
         )
         inventory_status = self.inventory.status()
         self.queue.set_generation_ranking(
-            ranked_symbols,
+            scan_symbols,
             inventory_status.get("ranking_source", "unknown"),
             generation=queue_result.get("generation"),
         )
@@ -277,6 +305,7 @@ class ScanService:
             "selected": len(ranked_symbols),
             "selected_preview": ranked_symbols[:5],
             "added": queue_result["added"],
+            "revalidation_symbols": len(revalidation_symbols),
             "resumed": False,
             "ranking_source": inventory_status.get("ranking_source", "alphabetical_fallback"),
             "workers": self.worker_count,
