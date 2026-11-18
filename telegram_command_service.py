@@ -721,8 +721,9 @@ class TelegramCommandService:
                     if cmd_def.takes_parameter:
                         if param:
                             return handler(param)
-                        else:
-                            return f"KULLANIM: /{cmd_def.name} <{cmd_def.parameter_name}>"
+                        if cmd_name == "tara":
+                            return handler("tara")
+                        return f"KULLANIM: /{cmd_def.name} <{cmd_def.parameter_name}>"
                     else:
                         # For commands like /btc, /eth, /sol that share handle_analyze_symbol
                         # but don't take a parameter in the command, extract symbol from command name
@@ -912,8 +913,10 @@ class TelegramCommandService:
         return message
 
     def handle_scan(self, cmd_name=None) -> str:
-        """Handle /20tara ... /1000tara — real scan queue, resumable."""
+        """Handle /tara [N] and legacy /20tara ... commands."""
         limit = self._parse_scan_limit(cmd_name)
+        if limit is not None and limit > 300:
+            return "Atlas tek tarama isteğinde en fazla 300 sembol tarar. Kullanım: /tara 20"
         return self._queue_scan_report(limit)
 
     def handle_scan_all(self) -> str:
@@ -1004,6 +1007,120 @@ class TelegramCommandService:
     def handle_best_ten(self) -> str:
         """Handle /eniyi10 — strictly read-only from the Setup Pool."""
         return self._format_best_setups(10)
+
+
+    def handle_pool(self) -> str:
+        """Show the current validated opportunity pool without starting a scan."""
+        return self._format_best_setups(20)
+
+    def handle_setup_symbol(self, symbol: str) -> str:
+        """Show every live pool setup for one symbol, grouped by lifecycle."""
+        from atlas_tui import _is_symbol_input
+        if not _is_symbol_input(symbol):
+            return "KULLANIM: /setup BTC"
+        normalized = self.runtime.normalize_symbol(symbol)
+        pools = get_opportunity_pool().get_all_setups()
+        lines = [f"ATLAS | {normalized.replace(':USDT', '')} SETUP'LARI"]
+        found = 0
+        for bucket, label in (
+            ("candidates", "ADAYLAR"),
+            ("validated", "DOĞRULANMIŞ / GİRİŞ BEKLEYEN"),
+            ("active", "KABUL EDİLMİŞ / AKTİF"),
+        ):
+            matches = [
+                item for item in (pools.get(bucket, []) or [])
+                if str(getattr(item, "symbol", "")).upper() == normalized.upper()
+            ]
+            if not matches:
+                continue
+            lines.extend(["", f"{label} ({len(matches)})"])
+            for item in matches:
+                found += 1
+                lines.extend([
+                    f"{item.symbol.replace(':USDT', '')} | {str(item.direction).upper()}",
+                    f"Strateji: {_format_strategy_name(item.strategy_name)} | Durum: {item.status}",
+                    f"Emir: {str(item.entry_type or item.setup_type).upper()}",
+                    f"Giriş: {_format_price(item.entry_price)} | SL: {_format_price(item.stop_loss)}",
+                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                    f"Net RR: {_format_rr(item.net_rr_after_costs)}",
+                    "",
+                ])
+        if not found:
+            lines.append("Bu sembol için canlı havuz setup'ı bulunmuyor.")
+        return "\\n".join(lines).rstrip()
+
+    def handle_history(self) -> str:
+        """Show recent completed and invalidated signal records."""
+        outcomes = self.runtime.signal_outcomes(limit=5000) or []
+        terminal = {"TP1", "TP2", "TP3", "SL", "EXPIRED", "INVALIDATED"}
+        rows = sorted(
+            [item for item in outcomes if str(item.get("status") or "").upper() in terminal],
+            key=lambda item: int(item.get("resolved_at") or item.get("opened_at") or 0),
+            reverse=True,
+        )[:15]
+        if not rows:
+            return "ATLAS | GEÇMİŞ\\n\\nHenüz sonuçlanmış veya iptal edilmiş kayıt yok."
+        lines = ["ATLAS | SONUÇLANAN / İPTAL EDİLEN KAYITLAR"]
+        for item in rows:
+            status = str(item.get("status") or "").upper()
+            if status == "INVALIDATED":
+                payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+                lines.extend([
+                    "",
+                    f"{str(item.get('symbol') or '?').replace(':USDT', '')} | {str(item.get('direction') or '?').upper()}",
+                    f"Strateji: {_outcome_strategy(item)}",
+                    "Durum: HAVUZDAN KALDIRILDI",
+                    f"Neden: {str(item.get('invalidation_reason') or payload.get('invalidation_reason') or 'Yapı geçersiz')}",
+                ])
+            else:
+                lines.extend(["", _format_outcome_item(item, "SONUÇLANDI")])
+        return "\\n".join(lines)
+
+    def handle_motors(self) -> str:
+        """Report all seven independent strategy generation counters."""
+        telemetry = (self.runtime.scan_status().get("strategy_telemetry") or {})
+        rows = telemetry.get("per_strategy") or {}
+        strategies = (
+            ("smc", "SMC"),
+            ("trend_pullback", "TREND PULLBACK"),
+            ("volatility_breakout", "VOLATILITY BREAKOUT"),
+            ("mean_reversion", "MEAN REVERSION"),
+            ("liquidation_cascade", "LIQUIDATION CASCADE"),
+            ("orderflow_momentum", "ORDERFLOW MOMENTUM"),
+            ("relative_strength", "RELATIVE STRENGTH"),
+        )
+        lines = ["ATLAS | 7 BAĞIMSIZ STRATEJİ", f"Toplam analiz: {telemetry.get('analyses', 0)}"]
+        for key, label in strategies:
+            item = rows.get(key) or {}
+            lines.extend([
+                "",
+                label,
+                f"Setup: {item.get('setups', 0)} | Filtreyi geçti: {item.get('passed', 0)} | Elendi: {item.get('rejected', 0)}",
+                f"Setup yok: {item.get('no_setup', 0)} | Veri eksik: {item.get('missing_data', 0)} | Hata: {item.get('errors', 0)}",
+            ])
+        lines.extend(["", "Ayrıntılı ortak filtre istatistiği: /istatistik"])
+        return "\\n".join(lines)
+
+    def handle_data_status(self) -> str:
+        """Report Gate.io market inventory freshness and scan data availability."""
+        status = self.runtime.scan_status()
+        inventory = status.get("inventory") or {}
+        error = inventory.get("last_error")
+        age = inventory.get("last_refresh_age_seconds")
+        age_text = (str(int(float(age))) + " saniye önce") if age is not None else "Bilinmiyor"
+        lines = [
+            "ATLAS | PİYASA VERİSİ",
+            "",
+            "Borsa: Gate.io",
+            f"USDT Perpetual sözleşme: {inventory.get('symbol_count', 0)}",
+            f"Envanter sıralaması: {_format_ranking_source(inventory.get('ranking_source'))}",
+            f"Son yenileme: {age_text}",
+            f"Envanter durumu: {'HATA' if error else 'KULLANILABİLİR'}",
+        ]
+        if error:
+            lines.append("Son hata: " + str(error)[:180])
+        lines.extend(["", "Tarama kuyruğu: /taramadurum"])
+        return "\\n".join(lines)
 
     def handle_pool_status(self) -> str:
         """Show only persistent opportunity-pool contents."""
