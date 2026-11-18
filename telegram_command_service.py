@@ -477,6 +477,9 @@ class TelegramCommandService:
         self._reply_session = requests.Session()
         self._command_queue = queue.Queue(maxsize=MAX_QUEUED_COMMANDS)
         self._command_thread = None
+        self._analysis_lock = threading.Lock()
+        self._analysis_threads = {}
+        self._reply_lock = threading.Lock()
         self._bot_username = None
         self._bot_info_cache = None
         self._bot_info_cache_time = 0
@@ -516,7 +519,8 @@ class TelegramCommandService:
         if self._command_thread and self._command_thread.is_alive():
             self._command_thread.join(timeout=max(0.0, float(timeout)))
         self._session.close()
-        self._reply_session.close()
+        # Background analysis threads may still be finishing after the command
+        # worker stops. Keep their reply session alive until process teardown.
 
     def _fetch_bot_info(self) -> None:
         """Fetch bot username for @BotName command parsing."""
@@ -668,17 +672,89 @@ class TelegramCommandService:
                 self.logger.exception("Telegram queue-full reply could not be sent")
 
     def _send_command_reply(self, message: str) -> None:
-        for part in split_message(message):
+        # requests.Session is not thread-safe. Background analyses may finish
+        # concurrently, so serialize access to the dedicated reply session.
+        with self._reply_lock:
+            for part in split_message(message):
+                try:
+                    self._api(
+                        "sendMessage",
+                        {"chat_id": self.chat_id, "text": part, "disable_web_page_preview": True},
+                        timeout=10,
+                        session=self._reply_session,
+                    )
+                except Exception:
+                    self.logger.exception("Telegram command reply could not be sent")
+                    break
+
+    def _analysis_symbol_for_command(self, raw_command: str):
+        """Return a symbol only for commands routed to the long-running analyzer."""
+        normalized = normalize_command(raw_command)
+        if not str(raw_command or "").strip().startswith("/"):
+            return None
+        parts = normalized.split(maxsplit=1)
+        if not parts:
+            return None
+        command = get_command_by_name(parts[0].lower())
+        if not command or command.handler != "handle_analyze_symbol":
+            return None
+        symbol = parts[1] if command.takes_parameter and len(parts) > 1 else parts[0]
+        return str(symbol or "").strip().upper() or None
+
+    def _run_background_analysis(self, raw_command: str, command_label: str, symbol: str):
+        try:
+            self.logger.info(
+                "Telegram background analysis started: %s | symbol=%s",
+                command_label[:80], symbol,
+            )
             try:
-                self._api(
-                    "sendMessage",
-                    {"chat_id": self.chat_id, "text": part, "disable_web_page_preview": True},
-                    timeout=10,
-                    session=self._reply_session,
-                )
+                result = self.execute_command(raw_command)
             except Exception:
-                self.logger.exception("Telegram command reply could not be sent")
-                break
+                self.logger.exception(
+                    "Telegram background analysis failed: %s", command_label[:80]
+                )
+                result = (
+                    f"ATLAS | {symbol} ANALİZİ TAMAMLANAMADI\\n"
+                    "Beklenmeyen hata oluştu. Diğer Telegram komutları çalışmaya devam ediyor."
+                )
+            self._send_command_reply(result)
+            self.logger.info(
+                "Telegram background analysis completed: %s | symbol=%s",
+                command_label[:80], symbol,
+            )
+        finally:
+            with self._analysis_lock:
+                self._analysis_threads.pop(symbol, None)
+
+    def _dispatch_background_analysis(self, raw_command: str, command_label: str) -> bool:
+        """Run slow single-symbol analyses outside the serial command worker."""
+        symbol = self._analysis_symbol_for_command(raw_command)
+        if not symbol:
+            return False
+        with self._analysis_lock:
+            existing = self._analysis_threads.get(symbol)
+            if existing and existing.is_alive():
+                self._send_command_reply(
+                    f"ATLAS | {symbol}\\nBu sembolün analizi zaten çalışıyor. Sonuç bekleniyor."
+                )
+                return True
+            if len(self._analysis_threads) >= 3:
+                self._send_command_reply(
+                    "ATLAS | ANALİZ KUYRUĞU DOLU\\nEn fazla 3 sembol analizi aynı anda çalışabilir."
+                )
+                return True
+            thread = threading.Thread(
+                target=self._run_background_analysis,
+                args=(raw_command, command_label, symbol),
+                name=f"atlas-telegram-analysis-{symbol.lower()}",
+                daemon=True,
+            )
+            self._analysis_threads[symbol] = thread
+            self._send_command_reply(
+                f"ATLAS | {symbol} ANALİZİ BAŞLADI\\nSonuç hazır olduğunda bu gruba gönderilecek."
+            )
+            thread.start()
+        return True
 
     def _command_worker_loop(self) -> None:
         while not self.stop_flag.is_set() or not self._command_queue.empty():
@@ -688,6 +764,12 @@ class TelegramCommandService:
                 continue
             try:
                 self.logger.info("Telegram command execution started: %s", command_label[:80])
+                if self._dispatch_background_analysis(raw_command, command_label):
+                    self.logger.info(
+                        "Telegram analysis delegated to background worker: %s",
+                        command_label[:80],
+                    )
+                    continue
                 try:
                     result = self.execute_command(raw_command)
                 except Exception:
