@@ -489,6 +489,45 @@ class OpportunityPool:
         if candidate:
             self._unindex_candidate(candidate)
     
+    def invalidate_setup(self, setup_id: str, reason: str) -> bool:
+        """Invalidate a setup in any live pool and archive the removal reason.
+
+        Archived setup IDs are deliberately not treated as symbol/strategy
+        bans: a later analysis may discover and add the same setup again.
+        """
+        reason = str(reason or "STRUCTURE_INVALIDATED").strip()
+        with self._lock:
+            candidate = self._candidates.pop(setup_id, None)
+            if candidate is not None:
+                self._unindex_candidate(candidate)
+            if candidate is None:
+                candidate = self._validated.pop(setup_id, None)
+                if candidate is not None:
+                    self._unindex_candidate(candidate)
+            if candidate is None:
+                candidate = self._active.pop(setup_id, None)
+                if candidate is not None:
+                    self._unindex_candidate(candidate)
+            if candidate is None:
+                return False
+
+            candidate.updated_at_ms = int(time.time() * 1000)
+            self._archive_candidate(
+                candidate, SetupStatus.INVALIDATED.value, reason
+            )
+            # Persist removal and history immediately; the next scan must not
+            # see the invalidated record as a live duplicate after a restart.
+            if self._store is not None:
+                try:
+                    self.save_all()
+                except Exception as exc:
+                    logger.error("Failed to persist invalidated setup %s: %s", setup_id, exc)
+            logger.info(
+                "Setup invalidated and archived | setup_id=%s symbol=%s reason=%s",
+                setup_id, candidate.symbol, reason,
+            )
+            return True
+
     def reject_candidate(self, setup_id: str, reason: str) -> bool:
         """Reject and remove a candidate."""
         with self._lock:

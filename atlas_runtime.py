@@ -822,6 +822,29 @@ class AtlasRuntime:
             )
             return None
 
+    def invalidate_setup(self, setup_id: str, reason: str) -> bool:
+        """Remove an invalid setup from the opportunity pool and symbol state.
+
+        Clearing the persisted active snapshot is essential: otherwise a
+        removed setup could be restored on the next analysis and prevent the
+        newly selected setup from becoming the active snapshot. This does not
+        blacklist the symbol or alter the scan queue.
+        """
+        pool = self._opportunity_pool()
+        candidate = pool.get_setup(setup_id)
+        if candidate is None:
+            return False
+        removed = pool.invalidate_setup(setup_id, reason)
+        if not removed:
+            return False
+
+        state_engine = getattr(self.engine, "state_engine", None)
+        if state_engine is not None:
+            state_engine.clear_active_setup(
+                candidate.symbol, reason=f"setup_invalidated:{reason}"
+            )
+        return True
+
     def _register_result(self, result):
         signal = result.get("signal") or {}
         risk = result.get("risk") or {}
