@@ -144,7 +144,7 @@ def test_start_command_is_registered_and_recognized():
     runtime = MagicMock()
     service = TelegramCommandService(runtime, "token", "-100123")
     reply = service.execute_command("/start")
-    assert "Atlas Telegram komut arayüzü aktif" in reply
+    assert "ATLAS TELEGRAM AKTİF" in reply
     assert "/20tara" in reply
 
 
@@ -431,3 +431,34 @@ def test_help_command():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+def test_status_command_formats_uptime_and_omits_chat_id():
+    from telegram_command_service import TelegramCommandService
+
+    class Runtime:
+        def snapshot(self):
+            return {"scanner": {
+                "mode": "SCAN", "status": "READY", "cycle": 2,
+                "processed": 20, "success": 18, "failed": 1, "skipped": 1,
+                "started_at": int(time.time() * 1000) - 3_600_000,
+            }}
+
+        def telegram_status(self):
+            return {
+                "polling_enabled": True, "webhook_enabled": False,
+                "service_running": True, "connected": True,
+            }
+
+    service = TelegramCommandService(Runtime(), "token", "-100123")
+    message = service.handle_status()
+    assert "Çalışma süresi:" in message
+    assert "1.0 sa" in message
+    assert "Chat ID" not in message
+
+
+def test_uptime_formatter_handles_negative_and_long_durations():
+    from telegram_command_service import TelegramCommandService
+
+    assert TelegramCommandService._format_uptime(-5) == "0 sn"
+    assert TelegramCommandService._format_uptime(90) == "1.5 dk"
+    assert TelegramCommandService._format_uptime(90_000) == "1.0 gün"
