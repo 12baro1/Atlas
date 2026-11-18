@@ -86,6 +86,9 @@ class AtlasRuntime:
             "rejection_reasons": defaultdict(int),
             "per_strategy": defaultdict(lambda: {
                 "setups": 0, "passed": 0, "rejected": 0, "selected": 0,
+                "no_setup": 0, "condition_not_met": 0, "missing_data": 0,
+                "insufficient_history": 0, "errors": 0, "other_no_setup": 0,
+                "reason_counts": defaultdict(int),
             }),
         }
         # Scan infrastructure: Gate.io inventory, durable queue, background
@@ -229,16 +232,27 @@ class AtlasRuntime:
             return self._strategy_telemetry_locked()
 
     def _strategy_telemetry_locked(self):
+        per_strategy = {}
+        for strategy_id, raw_counts in self._strategy_telemetry["per_strategy"].items():
+            counts = {
+                key: value for key, value in raw_counts.items()
+                if key != "reason_counts"
+            }
+            reason_counts = raw_counts.get("reason_counts") or {}
+            counts["top_reasons"] = [
+                {"reason": reason, "count": count}
+                for reason, count in sorted(
+                    reason_counts.items(), key=lambda item: (-item[1], item[0])
+                )[:2]
+            ]
+            per_strategy[strategy_id] = counts
         return {
             "analyses": self._strategy_telemetry["analyses"],
             "raw_setups_generated": self._strategy_telemetry["raw_setups_generated"],
             "common_filter_passed": self._strategy_telemetry["common_filter_passed"],
             "common_filter_rejected": self._strategy_telemetry["common_filter_rejected"],
             "rejection_reasons": dict(self._strategy_telemetry["rejection_reasons"]),
-            "per_strategy": {
-                strategy_id: dict(counts)
-                for strategy_id, counts in self._strategy_telemetry["per_strategy"].items()
-            },
+            "per_strategy": per_strategy,
         }
 
     @property
@@ -985,6 +999,18 @@ class AtlasRuntime:
                     status = str(row.get("status") or "")
                     if status in ("SELECTED", "FILTERED_NOT_SELECTED", "BLOCKED_COMMON_FILTER"):
                         counts["setups"] += 1
+                    else:
+                        status_key = {
+                            "NO_SETUP": "no_setup",
+                            "CONDITION_NOT_MET": "condition_not_met",
+                            "MISSING_DATA": "missing_data",
+                            "INSUFFICIENT_HISTORY": "insufficient_history",
+                            "ERROR": "errors",
+                        }.get(status, "other_no_setup")
+                        counts[status_key] = counts.get(status_key, 0) + 1
+                        reason = str(row.get("reason") or "").strip()
+                        if reason:
+                            counts.setdefault("reason_counts", defaultdict(int))[reason] += 1
                     if row.get("selected"):
                         counts["selected"] += 1
                         counts["passed"] += 1
