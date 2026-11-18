@@ -181,6 +181,28 @@ def test_state_survives_restart(tmp_path):
     restored.close()
 
 
+def test_ranked_generation_metadata_and_pending_reorder_survive_restart(tmp_path):
+    queue = make_queue(tmp_path)
+    queue.enqueue(["AAA/USDT:USDT", "BBB/USDT:USDT", "CCC/USDT:USDT"])
+    first = queue.claim_next("w1")
+    assert first["symbol"] == "AAA/USDT:USDT"
+    queue.complete(first["symbol"], ok=True)
+
+    ranked = ["CCC/USDT:USDT", "BBB/USDT:USDT", "AAA/USDT:USDT"]
+    queue.reorder_pending(ranked)
+    queue.set_generation_ranking(ranked, "gateio_24h_quote_volume")
+    assert queue.claim_next("w1")["symbol"] == "CCC/USDT:USDT"
+    assert queue.progress()["done"] == 1
+    queue.close()
+
+    restored = ScanQueue(base_path=str(tmp_path / "q"))
+    metadata = restored.generation_ranking()
+    assert metadata["symbols"] == ranked
+    assert metadata["ranking_source"] == "gateio_24h_quote_volume"
+    assert restored.progress()["done"] == 1
+    restored.close()
+
+
 def test_malformed_symbols_ignored(tmp_path):
     queue = make_queue(tmp_path)
     assert queue.enqueue(["", None, "  ", "BTC/USDT:USDT"]) == 1
