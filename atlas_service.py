@@ -166,9 +166,9 @@ def main() -> int:
     if interval <= 0:
         raise ValueError("ATLAS_SCAN_INTERVAL_SECONDS must be greater than zero")
 
-    # Reuse the same persistent inventory instance as ScanService. Its refresh
-    # already retries transient Gate.io failures and preserves the last snapshot.
-    # GateFuturesExchange owns endpoint retries; avoid multiplying them with inventory retries.
+    # Reuse the same persistent inventory instance as ScanService. The adapter
+    # owns endpoint retries; avoid multiplying them with inventory-level retries.
+    # The inventory still persists and preserves its last successful snapshot.
     inventory = get_market_inventory(exchange=exchange, max_retries=1)
     logger.info("Loading Gate.io public perpetual market metadata")
     symbols, selection_stats = load_startup_symbols(
