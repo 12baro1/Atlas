@@ -860,8 +860,10 @@ class TelegramCommandService:
             "ATLAS | TARAMA DURUMU",
             f"Durum: {state}",
             "",
-            f"İlerleme: {done}/{total} (%{float(status.get('percent', 0.0) or 0.0):.1f})",
+            f"İlerleme: %{float(status.get('percent', 0.0) or 0.0):.1f}",
+            f"Tamamlanan: {done}/{total}",
             f"Aktif: {running} | Bekleyen: {pending} | Hatalı: {failed}",
+            f"Worker'lar: {'çalışıyor' if status.get('workers_running') else 'durduruldu'}",
             "",
             "PİYASA",
             f"Borsa: GATE.IO | USDT Perpetual: {inventory.get('symbol_count', 0)}",
@@ -879,15 +881,18 @@ class TelegramCommandService:
         progress = result.get("progress") or {}
         alive = result.get("workers_still_alive") or []
         lines = [
-            "ATLAS | TARAMA DURDURULDU" if result.get("stopped") else "ATLAS | DURDURMA İSTEĞİ ALINDI",
+            "ATLAS | TARAMA DURDURULDU" if result.get("stopped") else "ATLAS | TARAMA DURDURMA İSTEĞİ",
             "",
-            "Yeni tarama işi başlatılmıyor.",
+            "Worker'lar durdu." if result.get("stopped") else
+            "Aktif worker mevcut analizini bitiriyor; yeni worker başlatılmayacak.",
             f"Tamamlanan: {progress.get('done', 0)}",
             f"Aktif: {progress.get('running', 0)}",
             f"Bekleyen: {progress.get('pending', 0)}",
             "Kuyruk ve fırsat havuzu korunuyor.",
             "Devam etmek için: /taramadevam",
         ]
+        if alive:
+            lines.append("Çalışan: " + ", ".join(alive))
         return "\n".join(lines)
 
     def handle_scan_resume(self) -> str:
@@ -1009,7 +1014,7 @@ class TelegramCommandService:
         if not best:
             return (
                 f"ATLAS | EN İYİ {count} SETUP\n\n"
-                "Doğrulanmış setup bulunmuyor.\n"
+                "Doğrulanmış setup havuzu boş.\n"
                 "Yeni tarama: /20tara"
             )
         now_ms = int(time.time() * 1000)
