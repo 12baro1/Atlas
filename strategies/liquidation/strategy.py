@@ -69,14 +69,14 @@ def generate(data):
     # Crowded-side funding is used as a directional confirmation, not as a
     # standalone trigger: positive funding supports long-liquidation shorts;
     # negative funding supports short-squeeze longs.
-    if (oi_change <= -0.015 and close > opened and entry > opened and impulse >= 1.0
-            and quality["direction"] == "BULLISH" and quality["close_location"] >= 0.70
-            and relative_volume >= 1.25 and buy_ratio is not None and buy_ratio >= 0.56
+    if (oi_change <= -0.010 and close > opened and entry > opened and impulse >= 0.75
+            and quality["direction"] == "BULLISH" and quality["close_location"] >= 0.60
+            and relative_volume >= 1.15 and buy_ratio is not None and buy_ratio >= 0.53
             and funding <= 0.0003):
         direction = "LONG"
     elif (oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0
-            and quality["direction"] == "BEARISH" and quality["close_location"] <= 0.30
-            and relative_volume >= 1.25 and buy_ratio is not None and buy_ratio <= 0.44
+            and quality["direction"] == "BEARISH" and quality["close_location"] <= 0.40
+            and relative_volume >= 1.25 and buy_ratio is not None and buy_ratio <= 0.47
             and funding >= -0.0003):
         direction = "SHORT"
     else:

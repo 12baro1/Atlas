@@ -63,10 +63,20 @@ def _trend_pullback_bullish_data():
                          price + 0.12, price - 0.05, price + 0.08, 120.0))
     h1 = []
     price = h4[-1].close
-    for i in range(30):
+    for i in range(20):
         price += 0.04
         h1.append(Candle(now + 60 * 4 * 3600_000 + i * 3600_000,
                          price - 0.03, price + 0.08, price - 0.06, price + 0.05, 100.0))
+    for i in range(9):
+        price -= 0.04
+        h1.append(Candle(now + (260 + i) * 3600_000,
+                         price - 0.02, price + 0.04, price - 0.05, price + 0.01, 100.0))
+    from strategy_lab import _ema, _atr, _series
+    ema = _ema(_series(h1), 20)
+    atr = _atr(h1)
+    reclaim_close = ema + 0.10 * atr
+    h1.append(Candle(now + 269 * 3600_000, ema - 0.10 * atr,
+                     ema + 0.30 * atr, ema - 0.30 * atr, reclaim_close, 120.0))
     return {
         "symbol": "BTC/USDT:USDT",
         "4h": h4,
@@ -79,15 +89,17 @@ def _trend_pullback_bullish_data():
 def test_trend_pullback_real_data_produces_long():
     data = _trend_pullback_bullish_data()
     plan = trend_generate(data)
+    assert plan is not None, "trend_pullback must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "trend_pullback"
         assert plan["direction"] in ("LONG", "SHORT")
-        assert plan["entry"] > 0 and plan["stop_loss"] > 0
-        assert all(t > 0 for t in (plan["tp1"], plan["tp2"], plan["tp3"]))
+        # Strategy generators return raw setups; the common filter later
+        # finalizes structural stop and three opposing-liquidity targets.
+        assert plan["entry"] > 0 and plan["initial_stop_loss"] > 0
         if plan["direction"] == "LONG":
-            assert plan["stop_loss"] < plan["entry"] < plan["tp1"]
+            assert plan["initial_stop_loss"] < plan["entry"]
         else:
-            assert plan["stop_loss"] > plan["entry"] > plan["tp1"]
+            assert plan["initial_stop_loss"] > plan["entry"]
 
 
 def test_trend_pullback_real_data_flat_market_returns_none():
@@ -111,16 +123,16 @@ def _volatility_breakout_data():
     """1H: volatility compression then breakout."""
     now = _now_ms()
     candles = []
-    price = 100.0
-    # Compression phase: narrowing range
-    for i in range(40):
-        rng = 1.0 - (i * 0.02)  # narrowing
-        candles.append(Candle(now + i * 3600_000, price,
-                              price + rng, price - rng, price + rng / 2, 100.0))
-        price += 0.03
-    # Breakout candle: strong body outside prior range
-    candles.append(Candle(now + 40 * 3600_000, price, price + 2.0,
-                          price, price + 1.8, 250.0))
+    # Earlier wide regime followed by a genuine narrow 20-bar compression.
+    for i in range(20):
+        close = 100.0 + (0.45 if i % 2 else -0.45)
+        candles.append(Candle(now + i * 3600_000, 100.0, 101.5, 98.5, close, 100.0))
+    for i in range(24):
+        close = 100.0 + (0.01 if i % 2 else -0.01)
+        candles.append(Candle(now + (20 + i) * 3600_000, 100.0, 100.2, 99.8, close, 100.0))
+    # Breakout closes above the compressed range and remains within one ATR.
+    candles.append(Candle(now + 44 * 3600_000, 100.0, 100.45,
+                          99.8, 100.4, 250.0))
     return {
         "symbol": "ETH/USDT:USDT",
         "1h": candles,
@@ -132,6 +144,7 @@ def _volatility_breakout_data():
 def test_volatility_breakout_real_data():
     data = _volatility_breakout_data()
     plan = breakout_generate(data)
+    assert plan is not None, "volatility_breakout must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "volatility_breakout"
         assert plan["direction"] in ("LONG", "SHORT")
@@ -169,7 +182,7 @@ def _mean_reversion_data():
         price += 0.02
     # Force bullish mean-reversion: price dipped below band, now reclaiming
     candles[-2] = Candle(now + 23 * 900_000, 99, 100, 98, 98.2, 100.0)
-    candles[-1] = Candle(now + 24 * 900_000, 98.2, 99.5, 98, 99.0, 100.0)
+    candles[-1] = Candle(now + 24 * 900_000, 98.2, 99.5, 97.8, 99.0, 100.0)
     return {
         "symbol": "SOL/USDT:USDT",
         "15m": candles,
@@ -180,7 +193,8 @@ def _mean_reversion_data():
 
 def test_mean_reversion_real_data_range_regime():
     data = _mean_reversion_data()
-    plan = mean_reversion_generate(data, {"label": "RANGE"})
+    plan = mean_reversion_generate(data, {"label": "RANGE", "adx": 15})
+    assert plan is not None, "mean_reversion must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "mean_reversion"
         assert plan["direction"] in ("LONG", "SHORT")
@@ -208,7 +222,7 @@ def _liquidation_cascade_data():
         "current_price": 100.0,
         "funding_rate": [-0.0002],
         "funding_rate_timestamps_ms": [now - 60_000],
-        "recent_trades": [{"amount": 2.0, "price": 100.0, "side": "sell"} for _ in range(25)],
+        "recent_trades": [{"amount": 2.0, "price": 100.0, "side": "buy"} for _ in range(25)],
         "liquidation_events": [],
         "shared_market_evidence": {
             "open_interest": {"state": "FRESH", "count": 2, "change_pct": -5.0},
@@ -219,6 +233,7 @@ def _liquidation_cascade_data():
 def test_liquidation_cascade_real_data():
     data = _liquidation_cascade_data()
     plan = liquidation_generate(data)
+    assert plan is not None, "liquidation_cascade must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "liquidation_cascade"
         assert plan["direction"] in ("LONG", "SHORT")
@@ -250,18 +265,29 @@ def _orderflow_data(side="buy"):
     ask_size = 2.0 if side == "buy" else 20.0
     buy_notional = 200.0 if side == "buy" else 10.0
     sell_notional = 10.0 if side == "buy" else 200.0
+    current_price = 100.4 if side == "buy" else 99.6
+    last_candle = (
+        Candle(now + 14 * 900_000, 99.8, 100.5, 99.7, 100.4, 100.0)
+        if side == "buy" else
+        Candle(now + 14 * 900_000, 100.2, 100.3, 99.5, 99.6, 100.0)
+    )
+    bids = ([[100.39, bid_size], [100.38, bid_size], [100.37, bid_size]]
+            if side == "buy" else
+            [[99.59, bid_size], [99.58, bid_size], [99.57, bid_size]])
+    asks = ([[100.41, ask_size], [100.42, ask_size], [100.43, ask_size]]
+            if side == "buy" else
+            [[99.61, ask_size], [99.62, ask_size], [99.63, ask_size]])
+    trade_base = 100.1 if side == "buy" else 99.7
     return {
         "symbol": "BTC/USDT:USDT",
         "snapshot_timestamp_ms": now,
-        "current_price": 100.0,
-        "15m": [Candle(now + i * 900_000, 100, 101, 99, 100, 100.0) for i in range(15)],
-        "orderbook": {
-            "bids": [[99.9, bid_size], [99.8, bid_size], [99.7, bid_size]],
-            "asks": [[100.1, ask_size], [100.2, ask_size], [100.3, ask_size]],
-        },
+        "current_price": current_price,
+        "15m": ([Candle(now + i * 900_000, 100, 101, 99, 100, 100.0) for i in range(14)]
+                + [last_candle]),
+        "orderbook": {"bids": bids, "asks": asks},
         "orderbook_timestamp_ms": now,
         "recent_trades": [
-            {"amount": 5.0, "price": 100.1, "side": side} for _ in range(40)
+            {"amount": 5.0, "price": trade_base + (i % 2) * 0.1, "side": side} for i in range(40)
         ],
         "recent_trades_timestamp_ms": now,
         "trade_flow_history": [
@@ -284,6 +310,7 @@ def test_orderflow_real_data_buy_side():
         "shared.market_data_services", fromlist=["build_shared_market_evidence"]
     ).build_shared_market_evidence(data)
     plan = orderflow_generate(data)
+    assert plan is not None, "orderflow_momentum must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "orderflow_momentum"
         assert plan["direction"] == "LONG"
@@ -297,6 +324,7 @@ def test_orderflow_real_data_sell_side():
         "shared.market_data_services", fromlist=["build_shared_market_evidence"]
     ).build_shared_market_evidence(data)
     plan = orderflow_generate(data)
+    assert plan is not None, "orderflow_momentum must produce a short setup from its positive fixture"
     if plan is not None:
         assert plan["direction"] == "SHORT"
 
@@ -361,6 +389,7 @@ def _relative_strength_data():
 def test_relative_strength_real_data():
     data = _relative_strength_data()
     plan = relative_strength_generate(data)
+    assert plan is not None, "relative_strength must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "relative_strength"
         assert plan["direction"] in ("LONG", "SHORT")

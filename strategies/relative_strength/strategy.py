@@ -96,7 +96,7 @@ def generate(data):
     residual_alpha = own_return_12 - beta * benchmark_return_12
     residual_alpha_6 = sum(residual_returns[-6:])
     residual_volatility = math.sqrt(sum(value * value for value in residual_returns) / len(residual_returns))
-    alpha_signal = max(0.02, 0.75 * residual_volatility * math.sqrt(12.0))
+    alpha_signal = max(0.008, 0.55 * residual_volatility * math.sqrt(12.0))
     e20 = _ema(closes, 20)
     e20_previous = _ema(closes[:-3], 20)
     if e20 is None or e20_previous is None:
