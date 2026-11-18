@@ -550,5 +550,5 @@ def test_liquidity_failure_hides_raw_traceback():
         analyze_symbol=lambda *args, **kwargs: {"ok": False, "error": "Traceback SECRET"},
     )
     message = TelegramCommandService(runtime, "token", "chat").handle_liquidity("BTC")
-    assert "Likidite analizi tamamlanamadı" in message
+    assert "Analiz tamamlanamadı" in message
     assert "Traceback SECRET" not in message
