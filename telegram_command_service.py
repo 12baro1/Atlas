@@ -1047,7 +1047,7 @@ class TelegramCommandService:
                 ])
         if not found:
             lines.append("Bu sembol için canlı havuz setup'ı bulunmuyor.")
-        return "\\n".join(lines).rstrip()
+        return "\n".join(lines).rstrip()
 
     def handle_history(self) -> str:
         """Show recent completed and invalidated signal records."""
@@ -1059,7 +1059,7 @@ class TelegramCommandService:
             reverse=True,
         )[:15]
         if not rows:
-            return "ATLAS | GEÇMİŞ\\n\\nHenüz sonuçlanmış veya iptal edilmiş kayıt yok."
+            return "ATLAS | GEÇMİŞ\n\nHenüz sonuçlanmış veya iptal edilmiş kayıt yok."
         lines = ["ATLAS | SONUÇLANAN / İPTAL EDİLEN KAYITLAR"]
         for item in rows:
             status = str(item.get("status") or "").upper()
@@ -1074,7 +1074,7 @@ class TelegramCommandService:
                 ])
             else:
                 lines.extend(["", _format_outcome_item(item, "SONUÇLANDI")])
-        return "\\n".join(lines)
+        return "\n".join(lines)
 
     def handle_motors(self) -> str:
         """Report all seven independent strategy generation counters."""
@@ -1099,7 +1099,7 @@ class TelegramCommandService:
                 f"Setup yok: {item.get('no_setup', 0)} | Veri eksik: {item.get('missing_data', 0)} | Hata: {item.get('errors', 0)}",
             ])
         lines.extend(["", "Ayrıntılı ortak filtre istatistiği: /istatistik"])
-        return "\\n".join(lines)
+        return "\n".join(lines)
 
     def handle_data_status(self) -> str:
         """Report Gate.io market inventory freshness and scan data availability."""
@@ -1120,7 +1120,7 @@ class TelegramCommandService:
         if error:
             lines.append("Son hata: " + str(error)[:180])
         lines.extend(["", "Tarama kuyruğu: /taramadurum"])
-        return "\\n".join(lines)
+        return "\n".join(lines)
 
     def handle_pool_status(self) -> str:
         """Show only persistent opportunity-pool contents."""
