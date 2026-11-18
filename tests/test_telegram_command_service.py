@@ -359,7 +359,7 @@ def test_takip_includes_accepted_pool_setups_without_journal_outcome(monkeypatch
 
     service = TelegramCommandService(Runtime(), "token", "chat")
     message = service.handle_takip()
-    assert "Kabul edilmiş setup: 1" in message
+    assert "Havuz setup: 1" in message
     assert "SOL/USDT | SHORT" in message
     assert "TP1 ALINDI" in message
     assert "henüz sinyal sonuç günlüğüyle eşleşmedi" in message
