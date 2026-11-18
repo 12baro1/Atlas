@@ -772,7 +772,6 @@ class OpportunityPool:
     def cleanup_expired(self) -> Dict[str, int]:
         """Expire raw candidates and active records; validated setups require structural invalidation."""
         now = int(time.time() * 1000)
-        expiry_ms = self.expiry_hours * 3600 * 1000
         with self._lock:
             stats = {"candidates": 0, "validated": 0, "active": 0}
             
