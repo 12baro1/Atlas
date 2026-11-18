@@ -144,6 +144,30 @@ def _outcome_progress(item):
     return progress, hit_levels
 
 
+def _same_tracked_setup(candidate, outcome):
+    """Match a pool setup to its journal outcome by full trade geometry."""
+    if (
+        str(candidate.symbol).replace(":USDT", "") != str(outcome.get("symbol") or "").replace(":USDT", "")
+        or str(candidate.direction).upper() != str(outcome.get("direction") or "").upper()
+    ):
+        return False
+    pairs = (
+        (candidate.entry_price, outcome.get("entry")),
+        (candidate.stop_loss, outcome.get("stop_loss")),
+        (candidate.tp1, outcome.get("tp1")),
+        (candidate.tp2, outcome.get("tp2")),
+        (candidate.tp3, outcome.get("tp3")),
+    )
+    try:
+        return all(
+            left is not None and right is not None
+            and math.isclose(float(left), float(right), rel_tol=1e-9, abs_tol=1e-10)
+            for left, right in pairs
+        )
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def _format_outcome_item(item, state):
     status = str(item.get("status") or "PENDING").upper()
     symbol = str(item.get("symbol") or "?").replace(":USDT", "")
@@ -1031,16 +1055,9 @@ class TelegramCommandService:
         pool_setups = get_opportunity_pool().get_validated_setups(limit=20)
         if not pool_setups:
             return report
-        tracked_keys = {
-            (
-                str(item.get("symbol") or "").replace(":USDT", ""),
-                str(item.get("direction") or "").upper(),
-            )
-            for item in outcomes
-        }
         untracked = [
-            item for item in pool_setups
-            if (str(item.symbol).replace(":USDT", ""), str(item.direction).upper()) not in tracked_keys
+            candidate for candidate in pool_setups
+            if not any(_same_tracked_setup(candidate, outcome) for outcome in outcomes)
         ]
         if not untracked:
             return report
@@ -1091,10 +1108,11 @@ class TelegramCommandService:
         return "\n".join(lines).rstrip()
 
     def handle_takip(self) -> str:
-        """Show live signal progress and the latest resolved outcomes."""
-        outcomes = self.runtime.signal_outcomes(limit=200)
-        if not outcomes:
-            return "ATLAS | TAKİP\n\nSonuç takibinde kayıt yok."
+        """Show signal outcomes and accepted pool setups without conflating them."""
+        outcomes = self.runtime.signal_outcomes(limit=500)
+        pool_active = get_opportunity_pool().get_active_setups()
+        if not outcomes and not pool_active:
+            return "ATLAS | TAKİP\n\nAçık sinyal veya kabul edilmiş setup yok."
 
         terminal = {"TP1", "TP2", "TP3", "SL", "EXPIRED"}
         pending = sorted(
@@ -1107,17 +1125,40 @@ class TelegramCommandService:
             key=lambda item: int(item.get("resolved_at") or item.get("opened_at") or 0),
             reverse=True,
         )[:8]
+        active_untracked = [
+            setup for setup in pool_active
+            if not any(
+                str(item.get("status") or "PENDING").upper() == "PENDING"
+                and str(item.get("symbol") or "").replace(":USDT", "") == str(setup.symbol).replace(":USDT", "")
+                and str(item.get("direction") or "").upper() == str(setup.direction).upper()
+                for item in outcomes
+            )
+        ]
 
-        lines = ["ATLAS | TAKİP", f"Açık: {len(pending)} | Son kapanan: {len(closed)}"]
+        lines = ["ATLAS | TAKİP", f"Açık sinyal: {len(pending)} | Kabul edilmiş setup: {len(active_untracked)} | Son kapanan: {len(closed)}"]
         if pending:
-            lines.extend(["", "AÇIK SETUPLAR"])
+            lines.extend(["", "SİNYAL SONUÇ TAKİBİ"])
             for item in pending:
                 lines.extend([_format_outcome_item(item, "TAKİPTE"), ""])
+        if active_untracked:
+            lines.extend(["", "HAVUZDA KABUL EDİLEN SETUPLAR"])
+            for item in active_untracked:
+                progress = f"TP{item.current_tp} ALINDI" if item.current_tp else "Hedef bekleniyor"
+                lines.extend([
+                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
+                    f"Strateji: {item.strategy_name} | Durum: {item.status}",
+                    f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)} | "
+                    f"Stop: {_format_price(item.trailing_stop or item.stop_loss)}",
+                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                    f"İlerleme: {progress}",
+                    "Not: Bu kayıt henüz sinyal sonuç günlüğüyle eşleşmedi.",
+                    "",
+                ])
         if closed:
-            lines.extend(["", "SONUÇLANANLAR"])
+            lines.extend(["", "SONUÇLANAN SİNYALLER"])
             for item in closed:
                 lines.extend([_format_outcome_item(item, "KAPANDI"), ""])
-        lines.append("TP/SL sonucu, işlenen son mum verisine göre gösterilir.")
+        lines.append("TP/SL sonuçları son işlenen kapalı 15m mumlarına dayanır; borsa fill teyidi değildir.")
         return "\n".join(lines).rstrip()
 
     def handle_liquidity(self, symbol: str) -> str:
