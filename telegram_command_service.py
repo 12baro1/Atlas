@@ -519,7 +519,8 @@ class TelegramCommandService:
         if self._command_thread and self._command_thread.is_alive():
             self._command_thread.join(timeout=max(0.0, float(timeout)))
         self._session.close()
-        self._reply_session.close()
+        # Background analysis threads may still be finishing after the command
+        # worker stops. Keep their reply session alive until process teardown.
 
     def _fetch_bot_info(self) -> None:
         """Fetch bot username for @BotName command parsing."""
