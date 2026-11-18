@@ -824,7 +824,7 @@ class TelegramCommandService:
             "Analiz: /btc, /eth, /sol, /analiz BTC\n"
             "Tarama: /20tara ... /1000tara, /tumtara\n"
             "Havuz: /eniyi5, /eniyi10, /havuzdurum\n"
-            "Takip: /mevcut, /setuplar, /takip, /likidite BTC\n"
+            "İşlemler: /islemler, /likidite BTC\n"
             "Sistem: /taramadurum, /durum, /sistem\n\n"
             "Tüm komutlar: /yardim"
         )
@@ -1061,6 +1061,87 @@ class TelegramCommandService:
             "Skor sıralama ölçüsüdür, kazanma olasılığı değildir.",
         ])
         return "\n".join(lines)
+
+    def handle_islemler(self) -> str:
+        """Show pool setups and journal outcomes together without duplicate plans."""
+        pool = get_opportunity_pool()
+        outcomes = self.runtime.signal_outcomes(limit=5000) or []
+        pending = sorted(
+            [item for item in outcomes if str(item.get("status") or "PENDING").upper() == "PENDING"],
+            key=lambda item: int(item.get("opened_at") or 0),
+            reverse=True,
+        )
+        terminal = {"TP1", "TP2", "TP3", "SL", "EXPIRED"}
+        closed = sorted(
+            [item for item in outcomes if str(item.get("status") or "").upper() in terminal],
+            key=lambda item: int(item.get("resolved_at") or item.get("opened_at") or 0),
+            reverse=True,
+        )[:5]
+
+        tracked = list(pending) + list(closed)
+        validated = [
+            item for item in pool.get_best_setups(limit=20)
+            if not any(_same_tracked_setup(item, outcome) for outcome in tracked)
+        ]
+        active = [
+            item for item in pool.get_active_setups()
+            if not any(_same_tracked_setup(item, outcome) for outcome in tracked)
+        ]
+
+        lines = [
+            "ATLAS | İŞLEMLER",
+            f"Açık sinyal: {len(pending)} | Giriş bekleyen setup: {len(validated)}",
+            f"Aktif havuz işlemi: {len(active)} | Son kapanan: {len(closed)}",
+        ]
+
+        if pending:
+            lines.extend(["", "AÇIK İŞLEMLER"])
+            for item in pending[:10]:
+                lines.extend([_format_outcome_item(item, "TAKİPTE"), ""])
+            if len(pending) > 10:
+                lines.append(f"Diğer açık sinyaller: +{len(pending) - 10}")
+
+        if validated:
+            lines.extend(["", "GİRİŞ BEKLEYEN SETUP'LAR"])
+            for item in validated[:10]:
+                entry_type = str(getattr(item, "entry_type", "") or getattr(item, "setup_type", "—")).upper()
+                lines.extend([
+                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
+                    f"{_format_strategy_name(item.strategy_name)} | {entry_type}",
+                    f"Giriş: {_format_price(item.entry_price)} | SL: {_format_price(item.stop_loss)}",
+                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                    f"Net RR: {_format_rr(getattr(item, 'net_rr_after_costs', None))}",
+                    "",
+                ])
+            if len(validated) > 10:
+                lines.append(f"Diğer giriş bekleyen setup: +{len(validated) - 10}")
+
+        if active:
+            lines.extend(["", "AKTİF HAVUZ İŞLEMLERİ"])
+            for item in active[:10]:
+                progress = f"TP{item.current_tp} alındı" if item.current_tp else "Hedef bekleniyor"
+                lines.extend([
+                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
+                    f"{_format_strategy_name(item.strategy_name)} | {item.status} | {progress}",
+                    f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)}",
+                    f"SL: {_format_price(item.trailing_stop or item.stop_loss)}",
+                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                    "",
+                ])
+
+        if closed:
+            lines.extend(["", "SON KAPANAN İŞLEMLER"])
+            for item in closed:
+                lines.extend([_format_outcome_item(item, "SONUÇLANDI"), ""])
+
+        if not (pending or validated or active or closed):
+            lines.extend(["", "Açık işlem veya doğrulanmış setup bulunmuyor.", "Fırsat havuzu: /eniyi5"])
+
+        lines.extend([
+            "",
+            "Sonuçlar Atlas'ın mum bazlı takibidir; borsa fill teyidi değildir.",
+        ])
+        return "\n".join(lines).rstrip()
 
     def handle_mevcut(self) -> str:
         """Show today's signal outcomes and still-open signals only."""
