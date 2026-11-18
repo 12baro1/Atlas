@@ -420,6 +420,10 @@ def test_smc_real_long_geometry():
         "risk": {"entry": 100.0, "stop_loss": 98.0,
                  "tp1": 102.0, "tp2": 104.0, "tp3": 106.0},
         "entry": {"direction": "LONG", "entry_type": "LIMIT"},
+        "analysis": {
+            "smc_h4_structure": [{"choch": True, "direction": "BULLISH"}],
+            "smc_orderblocks": [{"type": "BULLISH", "low": 99.0, "high": 101.0, "mitigated": False}],
+        },
         "dynamic_tp": {},
     }
     plan = smc_generate(result)
@@ -440,6 +444,10 @@ def test_smc_real_short_geometry():
         "risk": {"entry": 100.0, "stop_loss": 102.0,
                  "tp1": 98.0, "tp2": 96.0, "tp3": 94.0},
         "entry": {"direction": "SHORT", "entry_type": "LIMIT"},
+        "analysis": {
+            "smc_h4_structure": [{"choch": True, "direction": "BEARISH"}],
+            "smc_orderblocks": [{"type": "BEARISH", "low": 99.0, "high": 101.0, "mitigated": False}],
+        },
         "dynamic_tp": {},
     }
     plan = smc_generate(result)
