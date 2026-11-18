@@ -279,6 +279,25 @@ def build_selected_strategy_card(result):
             "net_rr": None,
             "reason": "Yedi strateji içinde seçilebilir, doğrulanmış bir işlem planı yok.",
             "critical_blocks": ["NO_SELECTED_STRATEGY_PLAN"],
+            "strategy_diagnostics": [
+                {
+                    "strategy_id": str(item.get("strategy_id") or "unknown"),
+                    "status": str(item.get("status") or "UNKNOWN"),
+                    "reason": str(
+                        item.get("reason")
+                        or " | ".join(item.get("rejection_reasons") or [])
+                        or item.get("rejection_stage")
+                        or "Açıklama üretilmedi"
+                    ),
+                }
+                for item in (report.get("diagnostics") or {}).get("strategies", [])
+                if isinstance(item, dict)
+            ],
+            "strategy_pipeline": {
+                "raw_setups": int((report.get("diagnostics") or {}).get("raw_setup_count") or 0),
+                "passed_common_filter": int((report.get("diagnostics") or {}).get("common_filter_passed_count") or 0),
+                "selected_strategy_id": (report.get("diagnostics") or {}).get("selected_strategy_id"),
+            },
         })
         card["summary"] = _summarize(card)
         return card
