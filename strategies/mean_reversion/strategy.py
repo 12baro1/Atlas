@@ -3,8 +3,7 @@
 
 def generate(data, regime):
     from strategy_lab import _series, _atr, _bollinger, _rsi, statistical_deviation, rsi_divergence, _value, _candle_quality, _current_price, _vwap, _raw_candidate, _entry_reference, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
-    specialist_evidence = _strategy_specialist_evidence(data, "mean_reversion")
-    candles = data.get("15m") or []
+    # Specialist motors are optional, read-only context. Their absence or\n    # directional disagreement must never gate a setup; native mean-reversion\n    # rules below exclusively determine strategy eligibility.\n    specialist_evidence = _strategy_specialist_evidence(data, "mean_reversion")\n    candles = data.get("15m") or []
     closes = _series(candles)
     atr = _atr(candles)
     bands = _bollinger(closes)
