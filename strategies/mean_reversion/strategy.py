@@ -9,7 +9,7 @@ def generate(data, regime):
     atr = _atr(candles)
     bands = _bollinger(closes)
     rsi = _rsi(closes)
-    if regime["label"] != "RANGE" or len(candles) < 25 or atr is None or bands is None or rsi is None:
+    if regime.get("label") not in {"RANGE", "TRANSITION"} or (regime.get("label") == "TRANSITION" and float(regime.get("adx") or 0.0) > 20.0) or len(candles) < 25 or atr is None or bands is None or rsi is None:
         return None
     previous_bands = _bollinger(closes[:-1])
     previous_rsi = _rsi(closes[:-1])
@@ -25,13 +25,13 @@ def generate(data, regime):
     if None in (prev_close, close) or quality is None:
         return None
     direction = None
-    if (prev_close < prev_lower and close > lower and rsi <= 42
+    if (prev_close < prev_lower and close > lower and rsi <= 45
             and rsi > previous_rsi and quality["direction"] == "BULLISH"
-            and quality["lower_wick_ratio"] >= 0.20 and quality["close_location"] >= 0.60):
+            and quality["lower_wick_ratio"] >= 0.15 and quality["close_location"] >= 0.55):
         direction = "LONG"
-    elif (prev_close > prev_upper and close < upper and rsi >= 58
+    elif (prev_close > prev_upper and close < upper and rsi >= 55
             and rsi < previous_rsi and quality["direction"] == "BEARISH"
-            and quality["upper_wick_ratio"] >= 0.20 and quality["close_location"] <= 0.40):
+            and quality["upper_wick_ratio"] >= 0.15 and quality["close_location"] <= 0.45):
         direction = "SHORT"
     else:
         return None
@@ -42,7 +42,7 @@ def generate(data, regime):
     middle = bands[1]
     vwap_distance_atr = abs(entry - vwap) / atr
     if direction == "LONG":
-        if not lower <= entry <= middle or entry >= vwap or not 0.25 <= vwap_distance_atr <= 2.5:
+        if not lower <= entry <= middle or entry >= vwap or not 0.15 <= vwap_distance_atr <= 3.0:
             return None
     else:
         if not middle <= entry <= upper or entry <= vwap or not 0.25 <= vwap_distance_atr <= 2.5:
