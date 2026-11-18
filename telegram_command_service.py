@@ -387,8 +387,6 @@ def _format_telegram_card(card, elapsed_ms=0):
     return "\n".join(lines)
 
 
-def is_recognized_command
-
 def is_recognized_command(command: str) -> bool:
     """Check if a command is recognized (slash or legacy plain-text).
 
