@@ -583,6 +583,7 @@ class OpportunityPool:
         """
         self.cleanup_expired()
         with self._lock:
+            now_ms = int(time.time() * 1000)  # Used only for ranking preference, never expiry.
             # Strategy structure, not elapsed time, determines setup validity.
             # Historical timestamps remain useful for display/audit only.
             candidates = []
