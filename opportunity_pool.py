@@ -209,6 +209,7 @@ class OpportunityPool:
         max_validated: int = 200,
         max_history: int = 5000,
         expiry_hours: int = 24,
+        freshness_hours: int = 2,
         auto_persist: bool = True,
         persist_interval: int = 30,
     ):
@@ -219,6 +220,7 @@ class OpportunityPool:
         self.max_validated = max_validated
         self.max_history = max_history
         self.expiry_hours = expiry_hours
+        self.freshness_hours = max(1, int(freshness_hours))
         
         self._lock = threading.RLock()
         
@@ -546,9 +548,10 @@ class OpportunityPool:
         Setups with missing or stale timestamps are excluded rather than
         presented with fabricated freshness.
         """
+        self.cleanup_expired()
         with self._lock:
             now_ms = int(time.time() * 1000)
-            max_age_ms = self.expiry_hours * 3600 * 1000
+            max_age_ms = self.freshness_hours * 3600 * 1000
             # Expired, invalidated or stale-setup candidates must never be
             # presented as actionable best setups.
             candidates = []
@@ -747,6 +750,7 @@ class OpportunityPool:
         """Remove expired setups from all pools."""
         now = int(time.time() * 1000)
         expiry_ms = self.expiry_hours * 3600 * 1000
+        freshness_ms = self.freshness_hours * 3600 * 1000
         
         with self._lock:
             stats = {"candidates": 0, "validated": 0, "active": 0}
@@ -760,12 +764,16 @@ class OpportunityPool:
             
             # Expire validated
             for cid, candidate in list(self._validated.items()):
-                if candidate.validated_at_ms and \
-                   candidate.validated_at_ms + expiry_ms < now:
+                created_at = int(candidate.created_at_ms or 0)
+                validated_at = int(candidate.validated_at_ms or 0)
+                stale_by_creation = not created_at or created_at + freshness_ms < now
+                stale_by_validation = not validated_at or validated_at + expiry_ms < now
+                stale_by_expiry = bool(candidate.expires_at_ms and candidate.expires_at_ms < now)
+                if stale_by_creation or stale_by_validation or stale_by_expiry:
                     self._remove_validated(cid)
-                    self._archive_candidate(candidate, SetupStatus.EXPIRED.value, "Expired")
+                    reason = "STALE_SETUP" if stale_by_creation else "Expired"
+                    self._archive_candidate(candidate, SetupStatus.EXPIRED.value, reason)
                     stats["validated"] += 1
-            
             # Check active for SL/TP expiry
             for cid, candidate in list(self._active.items()):
                 if candidate.expires_at_ms and candidate.expires_at_ms < now:
