@@ -1036,7 +1036,10 @@ class TelegramCommandService:
             )
             age_text = f"{age_hours:.1f} saat" if age_hours is not None else "bilinmiyor"
             last_ms = setup.updated_at_ms or setup.created_at_ms
-            last_text = time.strftime("%d.%m %H:%M", time.localtime(last_ms / 1000)) if last_ms else "bilinmiyor"
+            last_text = (
+                datetime.fromtimestamp(last_ms / 1000, tz=ZoneInfo("Europe/Istanbul")).strftime("%d.%m %H:%M")
+                if last_ms else "bilinmiyor"
+            )
             lines.extend([
                 f"{index}. {setup.symbol} | {setup.direction} | {setup.strategy_name}",
                 f"   Tür: {setup.setup_type} | Durum: {setup.status}",
