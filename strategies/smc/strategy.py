@@ -2,66 +2,73 @@
 import math
 
 def _mandatory_confluence_reason(analysis, direction, entry):
-    """Require aligned H4 CHoCH plus a live OB/FVG intersection inside that leg's OTE."""
+    """Require aligned H4 CHoCH and at least one active directional OB or FVG.
+
+    OTE is optional and may guide entry placement, but never blocks a setup.
+    """
     expected = "BULLISH" if direction == "LONG" else "BEARISH"
     structure = analysis.get("smc_h4_structure")
     structure = structure if isinstance(structure, list) else []
-    choch_events = [item for item in structure if isinstance(item, dict) and item.get("choch") is True]
+    choch_events = [
+        item for item in structure
+        if isinstance(item, dict) and item.get("choch") is True
+    ]
     if not choch_events:
         return "SMC_REQUIRED_CHoCH_MISSING"
-    latest_choch = choch_events[-1]
-    if str(latest_choch.get("direction") or "").upper() != expected:
+    if str(choch_events[-1].get("direction") or "").upper() != expected:
         return "SMC_REQUIRED_CHoCH_DIRECTION_MISMATCH"
 
-    ote = analysis.get("smc_ote")
-    if not isinstance(ote, dict):
-        return "SMC_REQUIRED_OTE_MISSING"
     try:
-        ote_low, ote_high = sorted((float(ote.get("fib62")), float(ote.get("fib79"))))
         entry = float(entry)
     except (TypeError, ValueError, OverflowError):
-        return "SMC_REQUIRED_OTE_INVALID"
-    if not (math.isfinite(ote_low) and math.isfinite(ote_high) and 0 < ote_low < ote_high):
-        return "SMC_REQUIRED_OTE_INVALID"
+        return "SMC_INVALID_ENTRY"
+    if not math.isfinite(entry) or entry <= 0:
+        return "SMC_INVALID_ENTRY"
 
+    zones = []
     orderblocks = analysis.get("smc_orderblocks")
-    orderblocks = orderblocks if isinstance(orderblocks, list) else []
-    fvgs = analysis.get("smc_fvg")
-    fvgs = fvgs if isinstance(fvgs, list) else []
-    active_obs = []
-    for item in orderblocks:
-        if not isinstance(item, dict) or str(item.get("type") or "").upper() != expected or item.get("mitigated"):
+    for item in orderblocks if isinstance(orderblocks, list) else []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "").upper() != expected or item.get("mitigated"):
             continue
         try:
             low, high = sorted((float(item.get("low")), float(item.get("high"))))
         except (TypeError, ValueError, OverflowError):
             continue
         if math.isfinite(low) and math.isfinite(high) and 0 < low < high:
-            active_obs.append((low, high))
-    if not active_obs:
-        return "SMC_REQUIRED_VALID_OB_MISSING"
+            zones.append(("OB", low, high))
 
-    active_fvgs = []
-    for item in fvgs:
-        if not isinstance(item, dict) or str(item.get("type") or "").upper() != expected or item.get("filled"):
+    fvgs = analysis.get("smc_fvg")
+    for item in fvgs if isinstance(fvgs, list) else []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "").upper() != expected or item.get("filled"):
             continue
         try:
             low, high = sorted((float(item.get("from")), float(item.get("to"))))
         except (TypeError, ValueError, OverflowError):
             continue
         if math.isfinite(low) and math.isfinite(high) and 0 < low < high:
-            active_fvgs.append((low, high))
-    if not active_fvgs:
-        return "SMC_REQUIRED_VALID_FVG_MISSING"
+            zones.append(("FVG", low, high))
 
-    for ob_low, ob_high in active_obs:
-        for fvg_low, fvg_high in active_fvgs:
-            common_low = max(ote_low, ob_low, fvg_low)
-            common_high = min(ote_high, ob_high, fvg_high)
-            if common_low < common_high and common_low <= entry <= common_high:
-                return None
-    return "SMC_OB_FVG_OTE_CONFLUENCE_OR_ENTRY_MISSING"
+    if not zones:
+        return "SMC_REQUIRED_VALID_OB_OR_FVG_MISSING"
+    if not any(low <= entry <= high for _, low, high in zones):
+        return "SMC_ENTRY_OUTSIDE_VALID_OB_FVG"
 
+    # OTE is advisory only: malformed or absent OTE must not veto the setup.
+    ote = analysis.get("smc_ote")
+    if isinstance(ote, dict):
+        try:
+            ote_low, ote_high = sorted((float(ote.get("fib62")), float(ote.get("fib79"))))
+            if not (math.isfinite(ote_low) and math.isfinite(ote_high) and 0 < ote_low < ote_high):
+                analysis["smc_ote_advisory_invalid"] = True
+            else:
+                analysis.pop("smc_ote_advisory_invalid", None)
+        except (TypeError, ValueError, OverflowError):
+            analysis["smc_ote_advisory_invalid"] = True
+    return None
 
 def generate(result, data=None):
     from strategy_lab import math, STRATEGY_NAMES, _value, _configured_partial_tp_weights, trend_structure, displacement, dealing_range, liquidity_draw, poi_freshness, breaker_validation, reclaim_acceptance, inducement_proxy, smc_narrative
