@@ -541,3 +541,12 @@ def test_retired_setup_commands_are_aliases_to_islemler():
         command = get_command_by_name(name)
         assert command is not None
         assert command.handler == "handle_islemler"
+
+def test_liquidity_failure_hides_raw_traceback():
+    runtime = SimpleNamespace(
+        current_symbol=lambda: "BTC/USDT",
+        analyze_symbol=lambda *args, **kwargs: {"ok": False, "error": "Traceback SECRET"},
+    )
+    message = TelegramCommandService(runtime, "token", "chat").handle_liquidity("BTC")
+    assert "Likidite analizi tamamlanamadı" in message
+    assert "Traceback SECRET" not in message
