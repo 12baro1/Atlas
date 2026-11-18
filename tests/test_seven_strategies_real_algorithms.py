@@ -149,6 +149,10 @@ def test_volatility_breakout_real_data():
         assert plan["strategy_id"] == "volatility_breakout"
         assert plan["direction"] in ("LONG", "SHORT")
         assert plan["entry"] > 0
+        # No specialist_evidence is supplied in this fixture: specialist motors
+        # are optional analysis context, never mandatory breakout approvals.
+        assert plan["specialist_evidence"] == []
+        assert plan["specialist_evidence_count"] == 0
 
 
 def test_volatility_breakout_no_compression_returns_none():
