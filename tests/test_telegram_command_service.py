@@ -360,7 +360,7 @@ def test_takip_includes_accepted_pool_setups_without_journal_outcome(monkeypatch
     assert "henüz sinyal sonuç günlüğüyle eşleşmedi" in message
 
 
-def test_mevcut_does_not_hide_distinct_setup_for_same_symbol_and_direction(monkeypatch):
+def test_setuplar_keeps_distinct_validated_setup_for_same_symbol_and_direction(monkeypatch):
     from types import SimpleNamespace
     import telegram_command_service as telegram_module
 
@@ -369,18 +369,13 @@ def test_mevcut_does_not_hide_distinct_setup_for_same_symbol_and_direction(monke
         entry_price=105.0, stop_loss=103.0, tp1=107.0, tp2=109.0,
         tp3=111.0, net_rr_after_costs=2.0,
     )
-    pool = SimpleNamespace(get_best_setups=lambda **kwargs: [candidate])
+    pool = SimpleNamespace(
+        get_best_setups=lambda **kwargs: [candidate],
+        get_active_setups=lambda: [],
+    )
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
-
-    class Runtime:
-        def signal_outcomes(self, **kwargs):
-            return [{
-                "symbol": "BTC/USDT:USDT", "direction": "LONG",
-                "entry": 100.0, "stop_loss": 98.0,
-                "tp1": 102.0, "tp2": 104.0, "tp3": 106.0,
-            }]
-
-    service = TelegramCommandService(Runtime(), "token", "chat")
-    message = service.handle_mevcut()
-    assert "BTC/USDT LONG — SMC" in message
+    service = TelegramCommandService(SimpleNamespace(), "token", "chat")
+    message = service.handle_setuplar()
+    assert "BTC/USDT | LONG" in message
     assert "Giriş: 105" in message
+    assert "TP3: 111" in message
