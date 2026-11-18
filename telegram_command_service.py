@@ -843,6 +843,18 @@ class TelegramCommandService:
         if not _is_symbol_input(symbol):
             return f"Geçersiz sembol: {symbol}\nÖrnek: /btc, /analiz ETH"
 
+        from opportunity_pool import get_opportunity_pool
+
+        pool = get_opportunity_pool()
+        normalized_symbol = self.runtime.normalize_symbol(symbol)
+        before = pool.get_all_setups()
+        previous_pending = [
+            item
+            for bucket in ("candidates", "validated")
+            for item in before.get(bucket, [])
+            if item.symbol == normalized_symbol
+        ]
+
         outcome = self.runtime.analyze_symbol(
             symbol, force_refresh=True, track_signal=True
         )
@@ -862,7 +874,42 @@ class TelegramCommandService:
         if not card.get("strategy") and not card.get("strategy_id"):
             analysis = raw_result.get("analysis") or {}
             card["strategy"] = analysis.get("strategy") or "SMC"
-        return _format_telegram_card(card, outcome.get("elapsed_ms", 0))
+
+        message = _format_telegram_card(card, outcome.get("elapsed_ms", 0))
+        current = pool.get_validated_setups(symbol=normalized_symbol, limit=50)
+        replaced = next(
+            (
+                item for item in current
+                if previous_pending and all(item.setup_id != old.setup_id for old in previous_pending)
+            ),
+            None,
+        )
+        if replaced is not None and previous_pending:
+            old_setup = max(previous_pending, key=lambda item: item.updated_at_ms or item.created_at_ms)
+            message += (
+                "\n\nSETUP DEĞİŞTİ — ESKİ KAYIT YENİLENDİ"
+                f"\nEski: {old_setup.direction} / {_format_strategy_name(old_setup.strategy_name)}"
+                f"\nYeni: {replaced.direction} / {_format_strategy_name(replaced.strategy_name)}"
+                f"\nYeni giriş: {_format_price(replaced.entry_price)}"
+                f" | SL: {_format_price(replaced.stop_loss)}"
+                f"\nEski setup aktif listeden kaldırıldı ve arşive alındı."
+            )
+        invalidated = (raw_result.get("invalidated_pool_setups") or [])
+        if invalidated:
+            message += "\n\nSTRATEJİ YAPISI BOZULDU — SETUP KALDIRILDI"
+            for item in invalidated:
+                message += (
+                    f"\n{str(item.get('symbol') or symbol).replace(':USDT', '')} | "
+                    f"{str(item.get('direction') or '—')} | "
+                    f"{_format_strategy_name(item.get('strategy_name') or item.get('strategy_id'))}"
+                )
+            message += (
+                "\nNeden: Stratejinin güncel analizi setup koşullarının artık "
+                "geçerli olmadığını gösterdi."
+                "\nDurum: Fırsat havuzundan ve mevcut setup listesinden kaldırıldı; "
+                "geçmiş kaydı arşivde tutuldu."
+            )
+        return message
 
     def handle_scan(self, cmd_name=None) -> str:
         """Handle /20tara ... /1000tara — real scan queue, resumable."""
