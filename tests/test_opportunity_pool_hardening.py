@@ -611,6 +611,30 @@ def test_strategy_structure_failure_removes_only_matching_strategy(tmp_path):
     pool.stop()
 
 
+def test_strategy_structure_failure_removes_unentered_active_but_preserves_entered(tmp_path):
+    pool = make_pool(tmp_path)
+    pool.add_candidate(make_candidate("accepted", strat="smc"))
+    pool.validate_candidate("accepted")
+    assert pool.accept_setup("accepted", "user1")
+
+    pool.add_candidate(make_candidate("entered", sym="ETH/USDT:USDT", strat="smc"))
+    pool.validate_candidate("entered")
+    assert pool.accept_setup("entered", "user1")
+    assert pool.update_active_setup("entered", status=SetupStatus.ENTERED.value)
+
+    removed = pool.invalidate_strategy_setup(
+        "BTC/USDT:USDT", "smc", "STRATEGY_STRUCTURE_BROKEN"
+    )
+
+    assert [item.setup_id for item in removed] == ["accepted"]
+    assert pool.get_setup("accepted") is None
+    assert pool.get_setup("entered") is not None
+    assert pool.get_setup("entered").status == SetupStatus.ENTERED.value
+    archived = pool.get_recent_history(limit=1)[0]
+    assert archived["setup_id"] == "accepted"
+    assert archived["invalidation_reason"] == "STRATEGY_STRUCTURE_BROKEN"
+    pool.stop()
+
 def test_best_setups_only_reads_validated_pool(tmp_path):
     """en iyi 5/10 sadece doğrulanmış havuzu okur; kuyruk/havuzu değiştirmez."""
     pool = make_pool(tmp_path, auto_persist=False)
