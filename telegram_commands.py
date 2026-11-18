@@ -131,7 +131,8 @@ def format_help_text() -> str:
         "• /eniyi5 ve /eniyi10 mevcut havuzu okur; yeni tarama başlatmaz.",
         "• /taramadurum yalnızca tarama kuyruğunu gösterir.",
         "• /havuzdurum havuz sayılarını, /istatistik yedi stratejiyi gösterir.",
-        "• /mevcut günlük sonuçları, /takip sinyal günlüğünü, /setuplar havuz setup'larını gösterir.",
+        "• /islemler açık sinyalleri, giriş bekleyen setup'ları ve son sonuçları tek yerde göster.",
+        "• /performans toplam kazanç, toplam kayıp ve net sonucu R cinsinden raporlar.",
         "• Atlas otomatik emir göndermez.",
         "• Sıralama puanı kazanma olasılığı değildir.",
     ])
