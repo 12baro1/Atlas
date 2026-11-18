@@ -453,7 +453,7 @@ def _attach_strategy_specialist_evidence(candidate, records):
     return attach_strategy_evidence(candidate, records)
 
 
-def _setup_diagnostic(strategy_id, data, regime):
+def _setup_diagnostic(strategy_id, data, regime, smc_result=None):
     """Explain why a native generator returned no setup without changing its rules."""
     def candles(tf):
         return data.get(tf) or []
@@ -658,7 +658,9 @@ def _setup_diagnostic(strategy_id, data, regime):
         if len(candles("4h")) >= 55 and all(len(universe.get(key) or []) >= 55 for key in keys):
             checks.append("CONDITION_NOT_MET: 48 aligned returns, valid beta, >=0.8% or 0.55x volatility-scaled 12-bar residual alpha, same-direction recent 6-bar alpha and rising/falling EMA20 confirmation were not all present.")
     elif strategy_id == "smc":
-        checks.append("NO_SMC_GEOMETRY: integrated SMC specialist world did not provide a valid directional entry/stop/three-target plan.")
+        smc_analysis = smc_result.get("analysis") if isinstance(smc_result, dict) else {}
+        gate_reason = smc_analysis.get("smc_mandatory_gate_reason") if isinstance(smc_analysis, dict) else None
+        checks.append(gate_reason or "NO_SMC_GEOMETRY: integrated SMC specialist world did not provide a valid directional entry/stop/three-target plan.")
     checks = [item for item in checks if item]
     if not checks:
         checks = ["CONDITION_NOT_MET: strategy-native pattern conditions were not satisfied."]
@@ -893,7 +895,7 @@ class SevenStrategyLab:
             try:
                 candidate = evaluator()
                 if candidate is None:
-                    reason = _setup_diagnostic(strategy_id, data, regime)
+                    reason = _setup_diagnostic(strategy_id, data, regime, smc_result=smc_result)
                     status = (
                         "MISSING_DATA" if "MISSING_DATA:" in reason
                         else "INSUFFICIENT_HISTORY" if "INSUFFICIENT_HISTORY:" in reason
