@@ -336,29 +336,21 @@ def test_mevcut_shows_signal_outcomes_without_mixing_pool_setups(monkeypatch):
     assert "Doğrulanmış havuz setup'ları" not in message
 
 
-def test_takip_includes_accepted_pool_setups_without_journal_outcome(monkeypatch):
-    from types import SimpleNamespace
+def test_takip_does_not_mix_untracked_pool_setups(monkeypatch):
     import telegram_command_service as telegram_module
-
-    setup = SimpleNamespace(
-        symbol="SOL/USDT:USDT", direction="SHORT", strategy_name="Mean Reversion",
-        status="ACTIVE", current_tp=1, entry_filled_price=150.0, entry_price=151.0,
-        trailing_stop=150.0, stop_loss=153.0, tp1=147.0, tp2=144.0, tp3=141.0,
-    )
-    pool = SimpleNamespace(get_active_setups=lambda: [setup])
-    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
 
     class Runtime:
         def signal_outcomes(self, **kwargs):
             return []
 
-    service = TelegramCommandService(Runtime(), "token", "chat")
-    message = service.handle_takip()
-    assert "Havuz setup: 1" in message
-    assert "SOL/USDT | SHORT" in message
-    assert "TP1 ALINDI" in message
-    assert "henüz sinyal sonuç günlüğüyle eşleşmedi" in message
+    def unexpected_pool_access():
+        raise AssertionError("/takip must only read journal-tracked signals")
 
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", unexpected_pool_access)
+    message = TelegramCommandService(Runtime(), "token", "chat").handle_takip()
+    assert "ATLAS | SİNYAL TAKİBİ" in message
+    assert "Açık veya sonuçlanmış sinyal kaydı yok" in message
+    assert "/setuplar" in message
 
 def test_setuplar_keeps_distinct_validated_setup_for_same_symbol_and_direction(monkeypatch):
     from types import SimpleNamespace
@@ -438,29 +430,37 @@ def test_scan_status_contains_only_queue_and_market_status():
     assert "/havuzdurum" in message
 
 
-def test_pool_status_shows_seven_strategy_funnel(monkeypatch):
+def test_pool_status_shows_only_persistent_pool_contents(monkeypatch):
     from types import SimpleNamespace
     import telegram_command_service as telegram_module
 
-    pool = SimpleNamespace(get_stats=lambda: {
-        "candidates": 3, "validated": 2, "active": 1, "history": 4,
-    })
+    pool = SimpleNamespace(
+        get_stats=lambda: {"candidates": 3, "validated": 2, "active": 1, "history": 4},
+        get_best_setups=lambda **kwargs: [],
+    )
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+    message = TelegramCommandService(SimpleNamespace(), "token", "chat").handle_pool_status()
+    assert "ATLAS | FIRSAT HAVUZU" in message
+    assert "Aday: 3" in message
+    assert "Doğrulanmış: 2" in message
+    assert "SMC" not in message
+    assert "/setuplar" in message
 
+
+def test_statistics_shows_seven_strategy_funnel():
     class Runtime:
         def scan_status(self):
             return {
                 "strategy_telemetry": {
+                    "analyses": 10,
                     "raw_setups_generated": 7,
                     "common_filter_passed": 3,
                     "common_filter_rejected": 4,
-                    "per_strategy": {
-                        "smc": {"setups": 2, "passed": 1, "rejected": 1},
-                    },
+                    "per_strategy": {"smc": {"setups": 2, "passed": 1, "rejected": 1}},
                 }
             }
 
-    message = TelegramCommandService(Runtime(), "token", "chat").handle_pool_status()
+    message = TelegramCommandService(Runtime(), "token", "chat").handle_statistics()
     for name in (
         "SMC", "RELATIVE STRENGTH", "TREND PULLBACK",
         "ORDERFLOW MOMENTUM", "MEAN REVERSION",
