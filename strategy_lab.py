@@ -894,7 +894,10 @@ class SevenStrategyLab:
                     status = (
                         "MISSING_DATA" if "MISSING_DATA:" in reason
                         else "INSUFFICIENT_HISTORY" if "INSUFFICIENT_HISTORY:" in reason
-                        else "CONDITION_NOT_MET" if "CONDITION_NOT_MET:" in reason or "REGIME_MISMATCH:" in reason
+                        else "CONDITION_NOT_MET" if (
+                            "CONDITION_NOT_MET:" in reason or "REGIME_MISMATCH:" in reason
+                            or strategy_id == "orderflow_momentum"
+                        )
                         else "NO_SETUP"
                     )
                     results.append({
