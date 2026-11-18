@@ -43,7 +43,7 @@ TELEGRAM_COMMANDS = [
     TelegramCommand("yenile", "Gate.io piyasa envanterini yenile", "handle_refresh", "scan"),
     TelegramCommand("eniyi5", "Havuzdan en iyi 5 setup (salt okunur, yeni tarama başlatmaz)", "handle_best_five", "scan"),
     TelegramCommand("eniyi10", "Havuzdan en iyi 10 setup (salt okunur, yeni tarama başlatmaz)", "handle_best_ten", "scan"),
-    TelegramCommand("havuzdurum", "Fırsat havuzu ve yedi strateji özeti", "handle_pool_status", "setup"),
+    TelegramCommand("havuzdurum", "Kalıcı setup havuzu durumu", "handle_pool_status", "setup"),
 
     # Setup ve takip
     TelegramCommand("mevcut", "Bugünkü sinyal sonuçları ve açık takipler", "handle_mevcut", "setup"),
@@ -125,8 +125,8 @@ def format_help_text() -> str:
         "KULLANIM NOTLARI",
         "• /eniyi5 ve /eniyi10 mevcut havuzu okur; yeni tarama başlatmaz.",
         "• /taramadurum yalnızca tarama kuyruğunu gösterir.",
-        "• /havuzdurum havuz ve yedi strateji özetini gösterir.",
-        "• /mevcut günlük sinyal sonuçlarını, /setuplar havuz setup'larını gösterir.",
+        "• /havuzdurum havuz sayılarını, /istatistik yedi stratejiyi gösterir.",
+        "• /mevcut günlük sonuçları, /takip sinyal günlüğünü, /setuplar havuz setup'larını gösterir.",
         "• Atlas otomatik emir göndermez.",
         "• Sıralama puanı kazanma olasılığı değildir.",
     ])
