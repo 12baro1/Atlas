@@ -1,5 +1,7 @@
 import pytest
 
+import atlas_service
+
 from atlas_service import (
     DEFAULT_MAX_SYMBOLS,
     configured_max_symbols,
@@ -150,3 +152,7 @@ def test_startup_inventory_respects_shutdown_signal():
     )
     assert symbols == []
     assert status == {}
+
+
+def test_service_scheduler_clock_is_available():
+    assert callable(atlas_service.time.monotonic)
