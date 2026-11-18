@@ -63,10 +63,20 @@ def _trend_pullback_bullish_data():
                          price + 0.12, price - 0.05, price + 0.08, 120.0))
     h1 = []
     price = h4[-1].close
-    for i in range(30):
+    for i in range(20):
         price += 0.04
         h1.append(Candle(now + 60 * 4 * 3600_000 + i * 3600_000,
                          price - 0.03, price + 0.08, price - 0.06, price + 0.05, 100.0))
+    for i in range(9):
+        price -= 0.01
+        h1.append(Candle(now + (80 + i) * 3600_000,
+                         price - 0.02, price + 0.04, price - 0.05, price + 0.01, 100.0))
+    from strategy_lab import _ema, _atr, _series
+    ema = _ema(_series(h1), 20)
+    atr = _atr(h1)
+    reclaim_close = ema + 0.10 * atr
+    h1.append(Candle(now + 89 * 3600_000, ema - 0.10 * atr,
+                     ema + 0.30 * atr, ema - 0.30 * atr, reclaim_close, 120.0))
     return {
         "symbol": "BTC/USDT:USDT",
         "4h": h4,
@@ -112,16 +122,16 @@ def _volatility_breakout_data():
     """1H: volatility compression then breakout."""
     now = _now_ms()
     candles = []
-    price = 100.0
-    # Compression phase: narrowing range
-    for i in range(40):
-        rng = 1.0 - (i * 0.02)  # narrowing
-        candles.append(Candle(now + i * 3600_000, price,
-                              price + rng, price - rng, price + rng / 2, 100.0))
-        price += 0.03
-    # Breakout candle: strong body outside prior range
-    candles.append(Candle(now + 40 * 3600_000, price, price + 2.0,
-                          price, price + 1.8, 250.0))
+    # Earlier wide regime followed by a genuine narrow 20-bar compression.
+    for i in range(20):
+        close = 100.0 + (0.45 if i % 2 else -0.45)
+        candles.append(Candle(now + i * 3600_000, 100.0, 101.5, 98.5, close, 100.0))
+    for i in range(24):
+        close = 100.0 + (0.01 if i % 2 else -0.01)
+        candles.append(Candle(now + (20 + i) * 3600_000, 100.0, 100.2, 99.8, close, 100.0))
+    # Breakout closes above the compressed range and remains within one ATR.
+    candles.append(Candle(now + 44 * 3600_000, 100.0, 100.45,
+                          99.8, 100.4, 250.0))
     return {
         "symbol": "ETH/USDT:USDT",
         "1h": candles,
@@ -261,8 +271,8 @@ def _orderflow_data(side="buy"):
         "15m": ([Candle(now + i * 900_000, 100, 101, 99, 100, 100.0) for i in range(14)]
                 + [Candle(now + 14 * 900_000, 99.8, 100.5, 99.7, 100.4, 100.0)]),
         "orderbook": {
-            "bids": [[99.9, bid_size], [99.8, bid_size], [99.7, bid_size]],
-            "asks": [[100.1, ask_size], [100.2, ask_size], [100.3, ask_size]],
+            "bids": [[100.39, bid_size], [100.38, bid_size], [100.37, bid_size]],
+            "asks": [[100.41, ask_size], [100.42, ask_size], [100.43, ask_size]],
         },
         "orderbook_timestamp_ms": now,
         "recent_trades": [
