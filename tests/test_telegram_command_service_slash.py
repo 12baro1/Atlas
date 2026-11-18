@@ -144,7 +144,7 @@ def test_start_command_is_registered_and_recognized():
     runtime = MagicMock()
     service = TelegramCommandService(runtime, "token", "-100123")
     reply = service.execute_command("/start")
-    assert "ATLAS TELEGRAM AKTİF" in reply
+    assert "ATLAS | KOMUT MERKEZİ" in reply
     assert "/20tara" in reply
 
 
@@ -422,7 +422,7 @@ def test_help_command():
     service = TelegramCommandService(runtime, "token", "-100123")
 
     result = service.handle_help()
-    assert "ATLAS TELEGRAM KOMUTLARI" in result
+    assert "ATLAS | KOMUT MERKEZİ" in result
     assert "/btc" in result
     assert "/eniyi5" in result
     assert "/analiz" in result
