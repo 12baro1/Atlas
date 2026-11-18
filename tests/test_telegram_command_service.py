@@ -308,7 +308,7 @@ def test_setuplar_reads_validated_pool_not_recent_analyses(monkeypatch):
         tp3=106.0, net_rr_after_costs=2.1, status="VALIDATED",
     )
     pool = SimpleNamespace(
-        get_validated_setups=lambda **kwargs: [candidate],
+        get_best_setups=lambda **kwargs: [candidate],
         get_active_setups=lambda: [],
     )
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
@@ -328,7 +328,7 @@ def test_mevcut_includes_validated_pool_setups_not_in_signal_journal(monkeypatch
         entry_price=150.0, stop_loss=153.0, tp1=147.0, tp2=144.0,
         tp3=141.0, net_rr_after_costs=2.0,
     )
-    pool = SimpleNamespace(get_validated_setups=lambda **kwargs: [candidate])
+    pool = SimpleNamespace(get_best_setups=lambda **kwargs: [candidate])
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
 
     class Runtime:
@@ -374,7 +374,7 @@ def test_mevcut_does_not_hide_distinct_setup_for_same_symbol_and_direction(monke
         entry_price=105.0, stop_loss=103.0, tp1=107.0, tp2=109.0,
         tp3=111.0, net_rr_after_costs=2.0,
     )
-    pool = SimpleNamespace(get_validated_setups=lambda **kwargs: [candidate])
+    pool = SimpleNamespace(get_best_setups=lambda **kwargs: [candidate])
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
 
     class Runtime:
