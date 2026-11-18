@@ -866,7 +866,7 @@ class TelegramCommandService:
             f"Worker'lar: {'çalışıyor' if status.get('workers_running') else 'durduruldu'}",
             "",
             "PİYASA",
-            f"Borsa: GATE.IO | USDT Perpetual: {inventory.get('symbol_count', 0)}",
+            f"Borsa: Gate.io | USDT Perpetual: {inventory.get('symbol_count', 0)}",
             f"Sıralama: {inventory.get('ranking_source') or 'Bilinmiyor'}",
         ]
         age = inventory.get("last_refresh_age_seconds")
@@ -989,7 +989,7 @@ class TelegramCommandService:
 
     def _format_scan_progress(self, result: dict, resumed: bool = False) -> str:
         progress = result.get("progress") or {}
-        title = "TARAMA SÜRDÜRÜLÜYOR" if resumed else "TARAMA BAŞLATILDI"
+        title = "TARAMA DEVAM EDİYOR" if resumed else "TARAMA BAŞLADI"
         lines = [
             f"ATLAS | {title}",
             "",
@@ -1005,7 +1005,7 @@ class TelegramCommandService:
             "Fırsatlar: /eniyi5",
         ]
         if resumed:
-            lines.insert(2, "Kayıtlı kuyruk kaldığı yerden devam ediyor.")
+            lines.insert(2, "Kuyruk kaldığı yerden sürdürülüyor.")
         return "\n".join(lines)
 
     def _format_best_setups(self, count: int) -> str:
