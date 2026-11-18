@@ -685,6 +685,7 @@ class OpportunityPool:
             
             self._active[candidate.setup_id] = candidate
             self._index_candidate(candidate)
+            self.save_all()
             
             logger.info(f"Setup accepted by user {user_id}: {setup_id}")
             return True
@@ -830,6 +831,8 @@ class OpportunityPool:
             # replaced by a newer setup from that same strategy, or user action.
             # Check active for SL/TP expiry
             for cid, candidate in list(self._active.items()):
+                if candidate.entry_filled_price is not None or candidate.status == SetupStatus.ENTERED.value:
+                    continue
                 if candidate.expires_at_ms and candidate.expires_at_ms < now:
                     self._archive_candidate(candidate, SetupStatus.EXPIRED.value, "Expired")
                     self._active.pop(cid, None)
@@ -853,8 +856,8 @@ class OpportunityPool:
         
         self._history.append(candidate.to_dict())
         
-        # Trim history
-        if len(self._history) > self.max_history:
+        # Never discard uncommitted transitions to make room in the display cache.
+        if self._store is None and self.max_history > 0:
             self._history = self._history[-self.max_history:]
     
     # ---------------------------------------------------------------------
@@ -868,26 +871,16 @@ class OpportunityPool:
             
             if self._store is not None:
                 try:
-                    self._store.save_pool(
-                        "candidates",
-                        {k: v.to_dict() for k, v in self._candidates.items()},
-                    )
-                    self._store.save_pool(
-                        "validated",
-                        {k: v.to_dict() for k, v in self._validated.items()},
-                    )
-                    self._store.save_pool(
-                        "active",
-                        {k: v.to_dict() for k, v in self._active.items()},
-                    )
                     new_history = self._history[self._history_flushed:]
-                    if new_history:
-                        inserted = self._store.append_history(new_history)
-                        self._history_flushed += len(new_history)
-                        if inserted < len(new_history):
-                            # Duplicates were already stored; keep the counter
-                            # aligned with what actually exists.
-                            self._history_flushed -= (len(new_history) - inserted)
+                    self._store.save_snapshot(
+                        {k: v.to_dict() for k, v in self._candidates.items()},
+                        {k: v.to_dict() for k, v in self._validated.items()},
+                        {k: v.to_dict() for k, v in self._active.items()},
+                        new_history,
+                    )
+                    if self.max_history > 0:
+                        self._history = self._history[-self.max_history:]
+                    self._history_flushed = len(self._history)
                 except Exception as e:
                     logger.error(f"SQLite pool persistence failed: {e}")
             
@@ -1024,10 +1017,8 @@ class OpportunityPool:
     def archive_and_reset_scan_pools(self, day_tag: str) -> Dict[str, int]:
         """Daily refresh (requirement K): archive the previous day's pools.
 
-        Candidates and validated setups are archived with a DAILY_REFRESH
-        reason (never silently deleted), a consistent SQLite backup is
-        written to the archive directory, then the two live pools are
-        cleared for the new day. Active (user-accepted) setups are kept.
+        Snapshot the durable pool. Calendar rollover alone does not
+        invalidate candidates, validated setups or accepted positions.
 
         If the archive backup fails, the live pools are NOT cleared so that
         a retry can attempt archiving again without data loss.
@@ -1043,15 +1034,6 @@ class OpportunityPool:
                     logger.error(f"Daily archive backup failed: live pools NOT cleared: {e}")
                     raise  # Do not clear live pools; caller will not mark day done
 
-            reason = f"DAILY_REFRESH:{day_tag}"
-            for candidate in list(self._candidates.values()):
-                self._remove_candidate(candidate.setup_id)
-                self._archive_candidate(candidate, SetupStatus.EXPIRED.value, reason)
-            for candidate in list(self._validated.values()):
-                self._remove_validated(candidate.setup_id)
-                self._archive_candidate(candidate, SetupStatus.EXPIRED.value, reason)
-            self._history_flushed = 0  # archive rows are re-appended on save
-            self.save_all()
             return counts
 
     def get_stats(self) -> Dict[str, Any]:

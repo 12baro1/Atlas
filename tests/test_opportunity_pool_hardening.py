@@ -75,6 +75,27 @@ def make_pool(tmp_path, **kwargs):
     return OpportunityPool(**params)
 
 
+def test_daily_archive_preserves_live_candidate(tmp_path):
+    pool = make_pool(tmp_path)
+    pool.add_candidate(make_candidate("keep"))
+    pool.archive_and_reset_scan_pools("2026-11-18")
+    pool.stop()
+    reopened = make_pool(tmp_path)
+    assert [c.setup_id for c in reopened.get_all_setups()["candidates"]] == ["keep"]
+    reopened.stop()
+
+
+def test_history_persists_past_display_limit(tmp_path):
+    pool = make_pool(tmp_path, max_history=1)
+    try:
+        for sid in ("a", "b", "c", "d"):
+            pool.add_candidate(make_candidate(sid))
+        assert [r["setup_id"] for r in pool._store.load_history()] == ["a", "b", "c"]
+        assert [r["setup_id"] for r in pool.get_recent_history()] == ["c"]
+    finally:
+        pool.stop()
+
+
 def make_candidate(sid, sym="BTC/USDT:USDT", strat="smc", entry_type="LIMIT"):
     return SetupCandidate(
         setup_id=sid,
@@ -293,6 +314,9 @@ def test_fill_does_not_mutate_entry_type(tmp_path):
     active = pool.get_setup("c1")
     assert active.entry_type == "LIMIT"
     assert active.entry_filled_price == 50010.0
+    active.expires_at_ms = 1
+    assert pool.cleanup_expired()["active"] == 0
+    assert pool.get_setup("c1") is active
     pool.stop()
 
 

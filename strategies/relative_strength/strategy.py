@@ -3,9 +3,22 @@ import math
 
 """Independent beta-adjusted relative_strength setup generator."""
 
+from shared.analysis_services import (
+    _value,
+    _series,
+    _atr,
+    _ema,
+    _current_price,
+    _entry_reference,
+)
+from shared.market_structure_services import volatility_regime
+from shared.microstructure_services import beta_stability, relative_volume
+from strategies.candidate import _raw_candidate
+from shared.specialist_evidence import evidence_for_strategy, attach_strategy_evidence
+
+
 def generate(data):
-    from strategy_lab import _series, _atr, _value, _ema, _current_price, _raw_candidate, _entry_reference, beta_stability, _strategy_specialist_evidence, _attach_strategy_specialist_evidence, relative_volume, volatility_regime
-    specialist_evidence = _strategy_specialist_evidence(data, "relative_strength")
+    specialist_evidence = evidence_for_strategy(data, "relative_strength")
     """Beta-adjusted relative strength versus market and optional sector peers."""
     candles = data.get("4h") or []
     closes = _series(candles)
@@ -139,5 +152,5 @@ def generate(data):
             "volatility_regime": volatility_regime(candles),
         }
     if plan:
-        _attach_strategy_specialist_evidence(plan, specialist_evidence)
+        attach_strategy_evidence(plan, specialist_evidence)
     return plan

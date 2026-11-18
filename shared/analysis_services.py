@@ -256,3 +256,20 @@ def _bollinger(values, period=20, deviations=2.0):
     variance = sum((item - mean) ** 2 for item in sample) / period
     sigma = math.sqrt(max(0.0, variance))
     return mean - deviations * sigma, mean, mean + deviations * sigma
+
+
+@cached_analysis
+def _current_price(data):
+    try:
+        value = float(data.get("current_price"))
+    except (TypeError, ValueError, OverflowError):
+        value = None
+    if value is not None and math.isfinite(value) and value > 0:
+        return value
+    candles = data.get("15m") or []
+    return _value(candles[-1], "close") if candles else None
+
+
+@cached_analysis
+def _entry_reference(data):
+    return str(data.get("current_price_source") or "LAST_CLOSED_15M_FALLBACK")

@@ -1,11 +1,24 @@
 """Independent volatility_breakout setup generator. Strategy logic lives in this package."""
 
+from shared.analysis_services import (
+    _value,
+    _series,
+    _atr,
+    _bollinger,
+    _candle_quality,
+    _relative_volume,
+    _current_price,
+    _entry_reference,
+)
+from shared.market_structure_services import volatility_regime, breakout_acceptance
+from strategies.candidate import _raw_candidate
+from shared.specialist_evidence import evidence_for_strategy, attach_strategy_evidence
+
 
 def generate(data):
-    from strategy_lab import _series, _atr, _bollinger, volatility_regime, breakout_acceptance, _value, _candle_quality, _relative_volume, _current_price, _raw_candidate, _entry_reference, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
     # Specialist outputs are optional context/provenance; native breakout rules
     # must remain capable of producing a setup when any or all are unavailable.
-    specialist_evidence = _strategy_specialist_evidence(data, "volatility_breakout")
+    specialist_evidence = evidence_for_strategy(data, "volatility_breakout")
     candles = data.get("1h") or []
     closes = _series(candles)
     atr = _atr(candles)
@@ -74,6 +87,6 @@ def generate(data):
                                     "breakout_distance_atr": round(breakout_distance, 3),
                                     "acceptance": breakout_evidence, "volatility_regime": volatility_evidence}
     if plan:
-        _attach_strategy_specialist_evidence(plan, specialist_evidence)
+        attach_strategy_evidence(plan, specialist_evidence)
     return plan
 

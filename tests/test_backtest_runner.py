@@ -75,6 +75,23 @@ def test_runner_counts_and_reports_expectancy():
     assert stats["tp3"] == 1
 
 
+def test_replay_closes_benchmark_and_sector_bars_before_strategy_callback():
+    period = 900_000
+    base = [_candle(i * period, 10, 11, 9, 10) for i in range(302)]
+    decision = 301 * period
+    closed = _candle(decision - 16 * period, 10, 11, 9, 10)
+    forming = _candle(closed.time + 1, 10, 11, 9, 10)
+    frames = {"4h": [forming, closed]}
+    windows = []
+    BacktestRunner(analyze_fn=windows.append).run({
+        "15m": base, "smt_universe": {"BTC/USDT:USDT": frames},
+        "sector_peer_universe": {"ETH/USDT:USDT": frames},
+    })
+    assert windows[0]["snapshot_timestamp_ms"] == decision
+    assert windows[0]["correlation_universe"]["BTC"] == [closed]
+    assert windows[0]["sector_peer_universe"]["ETH/USDT:USDT"]["4h"] == [closed]
+
+
 def test_runner_ignores_skip_and_missing_risk():
     candles = _rising_series(500)
 

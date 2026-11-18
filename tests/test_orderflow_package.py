@@ -114,7 +114,7 @@ def test_liquidation_pressure_requires_material_real_event_imbalance():
 
 
 def test_orderflow_generator_uses_footprint_and_blocks_nearby_wall(monkeypatch):
-    import strategy_lab
+    from strategies.orderflow import strategy as orderflow
     from strategies.orderflow.strategy import generate
 
     class Candle:
@@ -134,23 +134,18 @@ def test_orderflow_generator_uses_footprint_and_blocks_nearby_wall(monkeypatch):
                 "bid_notional": 5000.0, "ask_notional": 3000.0,
             }
 
-    monkeypatch.setattr(strategy_lab, "_ORDERBOOK_ENGINE", FakeOrderbookEngine())
-    monkeypatch.setattr(strategy_lab, "_atr", lambda candles: 2.0)
-    monkeypatch.setattr(strategy_lab, "_candle_quality", lambda candle: {
+    monkeypatch.setattr(orderflow, "_ORDERBOOK_ENGINE", FakeOrderbookEngine())
+    monkeypatch.setattr(orderflow, "_atr", lambda candles: 2.0)
+    monkeypatch.setattr(orderflow, "_candle_quality", lambda candle: {
         "body_ratio": 0.60, "close_location": 0.75,
     })
-    monkeypatch.setattr(strategy_lab, "_current_price", lambda data: data["current_price"])
-    monkeypatch.setattr(strategy_lab, "_valid_plan", lambda *args, **kwargs: {
-        "strategy_id": "orderflow_momentum", "direction": args[0],
-        "entry": args[1], "stop_loss": args[2], "reasons": [],
-    })
-    monkeypatch.setattr(strategy_lab, "_entry_reference", lambda data: {})
-    monkeypatch.setattr(strategy_lab, "_structure_candle_sets", lambda data: [])
-    monkeypatch.setattr(strategy_lab, "displacement", lambda candles, atr: 1.0)
-    monkeypatch.setattr(strategy_lab, "cumulative_volume_delta", lambda batches: {
+    monkeypatch.setattr(orderflow, "_current_price", lambda data: data["current_price"])
+    monkeypatch.setattr(orderflow, "_entry_reference", lambda data: {})
+    monkeypatch.setattr(orderflow, "displacement", lambda candles, atr: 1.0)
+    monkeypatch.setattr(orderflow, "cumulative_volume_delta", lambda batches: {
         "state": "UNAVAILABLE",
     })
-    monkeypatch.setattr(strategy_lab, "build_orderflow_evidence", lambda trades, book, candles, liquidations: {
+    monkeypatch.setattr(orderflow, "build_orderflow_evidence", lambda trades, book, candles, liquidations: {
         "footprint": build_footprint(trades),
         "cvd": {"state": "AVAILABLE"},
         "liquidity_walls": {"state": "AVAILABLE"},

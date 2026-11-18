@@ -13,6 +13,7 @@ States: pending -> running (leased) -> done | failed -> pending(retry)
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 import logging
 import sqlite3
 import threading
@@ -70,7 +71,6 @@ class ScanQueue:
         self._local = threading.local()
         self._conn_lock = threading.Lock()
         self._closed = False
-        self._current_generation = 0
         self._open()
 
     # ------------------------------------------------------------------
@@ -192,17 +192,14 @@ class ScanQueue:
                     "CREATE TABLE IF NOT EXISTS scan_meta ("
                     "key TEXT PRIMARY KEY, value TEXT NOT NULL)"
                 )
-                self._migrate_to_composite_pk(conn)
+                with self._transaction():
+                    self._migrate_to_composite_pk(conn)
             else:
                 # Fresh database: create everything from _SCHEMA.
                 conn.executescript(_SCHEMA)
 
             # Restart-safe: resume the latest generation so a VPS restart
             # never resets scan period state.
-            row = conn.execute(
-                "SELECT value FROM scan_meta WHERE key = 'current_generation'"
-            ).fetchone()
-            self._current_generation = int(row[0]) if row else 0
             # Final integrity check after migration / schema creation.
             check2 = conn.execute("PRAGMA integrity_check").fetchone()
             if not check2 or str(check2[0]).lower() != "ok":
@@ -210,21 +207,10 @@ class ScanQueue:
                     f"post-migration integrity_check failed: {check2}"
                 )
         except sqlite3.DatabaseError:
-            # Corrupt queue file: drop it and start empty; the pool and
-            # inventory are independent systems and stay untouched.
-            logger.warning("Scan queue corrupt; recreating empty queue")
+            # A lock or migration error is not evidence of corruption.
+            # Preserve the database, WAL and history for retry or recovery.
             self._close_all()
-            for suffix in ("", "-wal", "-shm"):
-                source = Path(str(self.db_path) + suffix)
-                if source.exists():
-                    try:
-                        source.unlink()
-                    except OSError:
-                        pass
-            self._closed = False
-            conn = self._thread_conn()
-            conn.executescript(_SCHEMA)
-            self._current_generation = 0
+            raise
 
     def _close_all(self):
         with self._conn_lock:
@@ -252,8 +238,7 @@ class ScanQueue:
         Returns the new generation number.
         """
         with self._transaction() as conn:
-            self._current_generation += 1
-            gen = self._current_generation
+            gen = self.current_generation() + 1
             conn.execute(
                 "INSERT INTO scan_meta(key, value) VALUES(?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -269,6 +254,13 @@ class ScanQueue:
 
     def current_generation(self) -> int:
         return self._current_generation
+
+    @property
+    def _current_generation(self) -> int:
+        row = self._thread_conn().execute(
+            "SELECT value FROM scan_meta WHERE key='current_generation'"
+        ).fetchone()
+        return int(row[0]) if row else 0
 
     def enqueue(self, symbols: List[str], batch_tag: Optional[str] = None,
                 generation: Optional[int] = None) -> int:
@@ -342,9 +334,9 @@ class ScanQueue:
     def claim_next(self, worker_id: str = "worker") -> Optional[Dict[str, Any]]:
         """Atomically claim the oldest pending symbol of the current generation."""
         now_ms = int(time.time() * 1000)
-        gen = self._current_generation
         with self._transaction() as conn:
             # Recover expired leases first so crashed workers release jobs.
+            gen = self.current_generation()
             conn.execute(
                 "UPDATE scan_jobs SET state = ?, lease_until_ms = NULL, "
                 "last_error = COALESCE(last_error, 'lease_expired') "
@@ -373,20 +365,24 @@ class ScanQueue:
                 "attempts": int(attempts) + 1,
                 "retries": int(retries),
                 "worker_id": worker_id,
+                "generation": gen,
                 "claimed_at_ms": now_ms,
             }
 
-    def complete(self, symbol: str, ok: bool, error: Optional[str] = None) -> bool:
+    def complete(self, symbol: str, ok: bool, error: Optional[str] = None,
+                 *, claim: Optional[Dict[str, Any]] = None) -> bool:
         """Mark a claimed symbol done, or requeue it for a bounded retry."""
         clean = str(symbol or "").strip().upper()
         now_ms = int(time.time() * 1000)
-        gen = self._current_generation
+        gen = claim["generation"] if claim is not None else self.current_generation()
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT state, retries FROM scan_jobs WHERE symbol = ? "
+                "SELECT state, retries, attempts FROM scan_jobs WHERE symbol = ? "
                 "AND scan_generation = ?", (clean, gen),
             ).fetchone()
             if row is None or row[0] != RUNNING:
+                return False
+            if claim is not None and (claim["symbol"] != clean or row[2] != claim["attempts"]):
                 return False
             retries = int(row[1])
             if ok:
@@ -520,17 +516,40 @@ class ScanQueue:
             for row in rows
         ]
 
-    def rebuild(self, symbols: List[str], batch_tag: Optional[str] = None) -> Dict[str, int]:
+    def rebuild(self, symbols: List[str], batch_tag: Optional[str] = None,
+                *, preserve_unfinished: bool = False, ranking_source=None) -> Dict[str, Any]:
         """Open a new scan generation and queue the given symbols for it.
 
         Older generations keep their history; completed scans never block a
         new period. New symbols are enqueued as pending; previously scanned
         symbols in the same generation keep their result.
         """
-        gen = self.start_new_period(batch_tag)
-        added = self.enqueue(symbols, batch_tag=batch_tag, generation=gen)
+        ordered = list(dict.fromkeys(str(s).strip().upper() for s in symbols if s and str(s).strip()))
+        with self._transaction() as conn:
+            row = conn.execute("SELECT value FROM scan_meta WHERE key='current_generation'").fetchone()
+            gen = int(row[0]) if row else 0
+            unfinished = conn.execute(
+                "SELECT 1 FROM scan_jobs WHERE scan_generation=? AND state IN ('pending','running') LIMIT 1",
+                (gen,),
+            ).fetchone()
+            rebuilt = bool(ordered) and not (preserve_unfinished and unfinished)
+            added = 0
+            if rebuilt:
+                gen += 1
+                conn.execute("INSERT OR REPLACE INTO scan_meta VALUES ('current_generation', ?)", (str(gen),))
+                if batch_tag is not None:
+                    conn.execute("INSERT OR REPLACE INTO scan_meta VALUES ('last_batch_tag', ?)", (batch_tag,))
+                now = int(time.time() * 1000)
+                conn.executemany(
+                    "INSERT INTO scan_jobs(symbol,state,enqueued_at_ms,batch_tag,scan_generation) "
+                    "VALUES (?, 'pending', ?, ?, ?)",
+                    ((symbol, now + index, batch_tag, gen) for index, symbol in enumerate(ordered)),
+                )
+                added = len(ordered)
+                if ranking_source is not None:
+                    self.set_generation_ranking(ordered, ranking_source, generation=gen)
         snapshot = self.progress(gen)
-        return {"added": added, "progress": snapshot, "generation": gen}
+        return {"added": added, "progress": snapshot, "generation": gen, "rebuilt": rebuilt}
 
     def requeue_failed(self, generation: Optional[int] = None) -> int:
         """Manually requeue failed symbols of a generation for another attempt."""
@@ -551,8 +570,21 @@ class ScanQueue:
         ).fetchall()
         return [row[0] for row in rows]
 
+    def extend_ranked(self, symbols, batch_tag, source, revalidate=()):
+        """Commit new jobs, reopened jobs and the ordering workers will see together."""
+        with self._transaction():
+            added = self.enqueue(symbols, batch_tag=batch_tag)
+            reopened = self.requeue_completed(revalidate, batch_tag=batch_tag)
+            existing = self.generation_ranking()["symbols"] + self.generation_symbols()
+            ordered = list(dict.fromkeys([*symbols, *existing]))
+            self.reorder_pending(ordered)
+            self.set_generation_ranking(ordered, source)
+            return added, reopened
+
     def _transaction(self):
-        return _WriteTransaction(self._thread_conn())
+        conn = self._thread_conn()
+        # All callers propagate exceptions to the owning write transaction.
+        return nullcontext(conn) if conn.in_transaction else _WriteTransaction(conn)
 
 
 class _WriteTransaction:

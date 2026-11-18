@@ -1,12 +1,26 @@
 """Independent mean_reversion setup generator. Strategy logic lives in this package."""
 
+from shared.analysis_services import (
+    _value,
+    _series,
+    _atr,
+    _bollinger,
+    _candle_quality,
+    _rsi,
+    _vwap,
+    _current_price,
+    _entry_reference,
+)
+from shared.market_structure_services import statistical_deviation, rsi_divergence
+from strategies.candidate import _raw_candidate
+from shared.specialist_evidence import evidence_for_strategy, attach_strategy_evidence
+
 
 def generate(data, regime):
-    from strategy_lab import _series, _atr, _bollinger, _rsi, statistical_deviation, rsi_divergence, _value, _candle_quality, _current_price, _vwap, _raw_candidate, _entry_reference, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
     # Specialist motors are optional, read-only context. Their absence or
     # directional disagreement must never gate a setup; native mean-reversion
     # rules below exclusively determine strategy eligibility.
-    specialist_evidence = _strategy_specialist_evidence(data, "mean_reversion")
+    specialist_evidence = evidence_for_strategy(data, "mean_reversion")
     candles = data.get("15m") or []
     closes = _series(candles)
     atr = _atr(candles)
@@ -68,6 +82,6 @@ def generate(data, regime):
                                           "rejection_wick_ratio": round(rejection_wick, 3),
                                           "statistical_deviation": deviation_evidence, "rsi_divergence": divergence_evidence}
     if plan:
-        _attach_strategy_specialist_evidence(plan, specialist_evidence)
+        attach_strategy_evidence(plan, specialist_evidence)
     return plan
 

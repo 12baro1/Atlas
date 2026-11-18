@@ -17,6 +17,7 @@ Design (PR #173, requirement E):
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 import logging
 import shutil
 import sqlite3
@@ -121,7 +122,10 @@ class PoolStore:
                 raise sqlite3.DatabaseError(f"integrity_check failed: {check}")
             conn.executescript(_SCHEMA)
             self.set_meta("schema_version", str(SCHEMA_VERSION))
-        except (sqlite3.DatabaseError, OSError) as exc:
+        except (sqlite3.OperationalError, OSError):
+            self._close_all()
+            raise
+        except sqlite3.DatabaseError as exc:
             logger.error(f"Pool store damaged, recovering: {exc}")
             self._close_all()
             self._recover_corrupt_file()
@@ -142,10 +146,7 @@ class PoolStore:
                     logger.warning(f"Quarantined corrupt store file: {quarantine}")
                 except OSError as move_exc:
                     logger.error(f"Could not quarantine {source}: {move_exc}")
-                    try:
-                        source.unlink()
-                    except OSError:
-                        pass
+                    raise
 
     # ------------------------------------------------------------------
     # Meta
@@ -176,7 +177,14 @@ class PoolStore:
     # Live pools
     # ------------------------------------------------------------------
 
-    def save_pool(self, pool: str, records: Dict[str, Dict[str, Any]]) -> int:
+    def save_snapshot(self, candidates, validated, active, history):
+        """Commit a lifecycle transition and its history as one durable unit."""
+        with self._transaction() as conn:
+            for name, records in (("candidates", candidates), ("validated", validated), ("active", active)):
+                self.save_pool(name, records, connection=conn)
+            self.append_history(history, connection=conn)
+
+    def save_pool(self, pool: str, records: Dict[str, Dict[str, Any]], *, connection=None) -> int:
         """Replace the stored contents of one live pool in a single transaction.
 
         Records present in `records` are upserted; stored ids that are absent
@@ -184,7 +192,7 @@ class PoolStore:
         the current in-memory pool exactly.
         """
         now_ms = int(time.time() * 1000)
-        with self._transaction() as conn:
+        with (nullcontext(connection) if connection is not None else self._transaction()) as conn:
             stored_ids = {
                 row[0]
                 for row in conn.execute(
@@ -241,12 +249,12 @@ class PoolStore:
     # History
     # ------------------------------------------------------------------
 
-    def append_history(self, records: List[Dict[str, Any]]) -> int:
+    def append_history(self, records: List[Dict[str, Any]], *, connection=None) -> int:
         """Append archived setups. Idempotent via the natural unique key."""
         if not records:
             return 0
         inserted = 0
-        with self._transaction() as conn:
+        with (nullcontext(connection) if connection is not None else self._transaction()) as conn:
             for payload in records:
                 cursor = conn.execute(
                     "INSERT OR IGNORE INTO history(setup_id, status, "

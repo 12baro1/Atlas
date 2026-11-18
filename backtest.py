@@ -877,24 +877,6 @@ def _configured_partial_tp_weights():
     return weights
 
 
-def _effective_now_ms(data):
-    """Backtest referans zamanı: veri bize verdiği son kapanmış mumun kapanışı.
-
-    Backtest "gerçek şu an" yerine exchange'in sunduğu son kapanış anı üzerinden
-    replay yapar. Böylece Gate.io'in henüz kapanmamış mumundan kaynaklanan
-    freshness hatası alınmaz ve tarihsel veri tutarlı kalır.
-    """
-    last_closes = []
-    for tf in ("15m", "1h", "4h", "1d", "1w"):
-        candles = data.get(tf) or []
-        if candles:
-            duration = TIMEFRAME_DURATION_MS.get(tf, 0)
-            last_closes.append(max(c.time + duration for c in candles))
-    if not last_closes:
-        return time.time() * 1000
-    return float(min(last_closes))
-
-
 def _checkpoint_path(checkpoint_dir, symbol, days):
     safe = symbol.replace("/", "_").replace(":", "_")
     return os.path.join(checkpoint_dir, f"backtest_chunk_{safe}_{int(days)}d.json")
@@ -1062,9 +1044,8 @@ def run_segmented_backtest(engine, symbols, days, chunk_days, checkpoint_dir,
                     })
                 attach_historical_smt_universe(data, chunk_days, chunk_now_ms)
                 _validate_backtest_history(data, symbol)
-                effective_now_ms = _effective_now_ms(data)
                 _validate_backtest_coverage(
-                    data, symbol, chunk_days, effective_now_ms,
+                    data, symbol, chunk_days, chunk_now_ms,
                     listing_time_ms=listing_time_ms,
                 )
                 runner = BacktestRunner(
@@ -1296,9 +1277,8 @@ def main():
             })
         attach_historical_smt_universe(data, args.days, backtest_now_ms)
         _validate_backtest_history(data, symbol)
-        effective_now_ms = _effective_now_ms(data)
         _validate_backtest_coverage(
-            data, symbol, args.days, effective_now_ms,
+            data, symbol, args.days, backtest_now_ms,
             listing_time_ms=listing_time_ms,
         )
         runner = BacktestRunner(

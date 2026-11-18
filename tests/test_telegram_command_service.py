@@ -15,6 +15,18 @@ def test_normalize_plain_and_addressed_commands():
     assert normalize_command("/help@Oakmontincbot") == "help"
 
 
+def test_reply_http_failure_keeps_token_and_private_text_out_of_logs(monkeypatch, caplog):
+    import requests
+    service = TelegramCommandService(None, "private-test-token", "123")
+    def fail(url, **kwargs):
+        raise requests.ConnectionError(f"could not send {kwargs['json']['text']} to {url}")
+    monkeypatch.setattr(service._reply_session, "post", fail)
+    service._send_command_reply("private-test-message")
+    assert "sendMessage failed" in caplog.text
+    assert "private-test-token" not in caplog.text
+    assert "private-test-message" not in caplog.text
+
+
 def test_recognizes_terminal_commands():
     for command in (
         "/BTC",

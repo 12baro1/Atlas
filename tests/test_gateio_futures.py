@@ -47,6 +47,14 @@ def test_gate_orderbook_and_trades_normalization():
     assert trades[0]["amount"] == 0.0002
 
 
+def test_gate_history_range_does_not_mix_limit_or_repeat_previous_bar():
+    exchange = FakeGate()
+    rows = exchange.fetch_ohlcv("BTC/USDT:USDT", "15m", since=1700000000001, limit=2)
+    assert rows == []
+    assert exchange.calls[0][1] == {"contract": "BTC_USDT", "interval": "15m",
+                                     "from": 1700000001, "to": 1700001800}
+
+
 def test_gate_rest_trade_timestamps_normalize_seconds_and_preserve_milliseconds():
     class SecondsGate(FakeGate):
         def _get(self, path, params=None):
@@ -187,3 +195,13 @@ def test_gate_get_does_not_retry_non_transient_http_errors(monkeypatch):
     with pytest.raises(requests.HTTPError):
         exchange._get("/futures/usdt/contracts")
     assert session.calls == 1
+
+
+def test_funding_snapshot_uses_exchange_time_and_preserves_unknown(monkeypatch):
+    ex = GateFuturesExchange()
+    for row in ({}, {"t": 1700000000, "r": "nan"}, {"r": "0"}):
+        monkeypatch.setattr(ex, "_get", lambda *args: [row])
+        assert ex.fetch_funding_rate("BTC/USDT:USDT")["fundingRate"] is None
+    monkeypatch.setattr(ex, "_get", lambda *args: [{"t": 1700000000, "r": "0"}])
+    snapshot = ex.fetch_funding_rate("BTC/USDT:USDT")
+    assert snapshot["timestamp"] == 1700000000000 and snapshot["fundingRate"] == 0

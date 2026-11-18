@@ -21,6 +21,8 @@ Her strateji için:
 - Geometri (entry < tp1 < tp2 < tp3 for LONG, etc.) geçerli olmalı
 """
 import math
+import subprocess
+import sys
 import time
 
 import pytest
@@ -32,6 +34,20 @@ from strategies.orderflow.strategy import generate as orderflow_generate
 from strategies.relative_strength.strategy import generate as relative_strength_generate
 from strategies.smc.strategy import generate as smc_generate
 from strategies.trend.strategy import generate as trend_generate
+
+
+def test_generators_run_without_loading_strategy_lab():
+    script = """
+import sys
+from importlib import import_module
+
+for name in ('trend', 'breakout', 'mean_reversion', 'liquidation',
+             'orderflow', 'relative_strength', 'smc'):
+    generate = import_module(f'strategies.{name}.strategy').generate
+    generate({}, {}) if name == 'mean_reversion' else generate({})
+    assert 'strategy_lab' not in sys.modules, name
+"""
+    subprocess.run([sys.executable, "-c", script], check=True)
 
 
 class Candle:

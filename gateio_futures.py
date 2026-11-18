@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import math
 import time
 from decimal import Decimal, InvalidOperation
 import requests
@@ -158,12 +159,17 @@ class GateFuturesExchange:
         count = min(max(int(limit or 500), 1), 2000)
         query = {"contract": self.market_id(symbol), "interval": interval, "limit": count}
         if since is not None:
-            query["from"] = int(since) // 1000
-            query["to"] = min(now_s, query["from"] + self.parse_timeframe(timeframe) * count)
+            del query["limit"]
+            query["from"] = (int(since) + 999) // 1000
+            if query["from"] > now_s:
+                return []
+            query["to"] = min(now_s, query["from"] + self.parse_timeframe(timeframe) * count - 1)
         rows = self._get("/futures/usdt/candlesticks", query) or []
         result = []
         for row in rows:
             try:
+                if since is not None and int(row["t"]) * 1000 < since:
+                    continue
                 result.append([int(row["t"]) * 1000, float(row["o"]), float(row["h"]),
                                float(row["l"]), float(row["c"]), _scaled_contract_amount(abs(float(row["v"])), self.contract_size(symbol))])
             except (KeyError, TypeError, ValueError, OverflowError):
@@ -281,11 +287,9 @@ class GateFuturesExchange:
         return sorted(out, key=lambda row: row["timestamp"])
 
     def fetch_funding_rate(self, symbol, params=None):
-        row = self._get("/futures/usdt/funding_rate", {"contract": self.market_id(symbol)}) or {}
-        if isinstance(row, list):
-            row = row[0] if row else {}
-        return {"symbol": symbol, "fundingRate": float(row.get("r", row.get("funding_rate", 0))),
-                "timestamp": int(row.get("t") or self.milliseconds()), "info": dict(row)}
+        rows = self.fetch_funding_rate_history(symbol, limit=1, params=params)
+        return rows[-1] if rows else {"symbol": symbol, "fundingRate": None,
+                                     "timestamp": None, "info": {}}
 
     def fetch_funding_rate_history(self, symbol, since=None, limit=100, params=None):
         rows = self._get("/futures/usdt/funding_rate", {
@@ -299,8 +303,10 @@ class GateFuturesExchange:
                     stamp *= 1000
                 if since is not None and stamp < int(since):
                     continue
-                out.append({"symbol": symbol, "timestamp": stamp,
-                            "fundingRate": float(row.get("r", row.get("funding_rate"))), "info": dict(row)})
+                rate = float(row.get("r", row.get("funding_rate")))
+                if stamp > 0 and math.isfinite(rate):
+                    out.append({"symbol": symbol, "timestamp": stamp,
+                                "fundingRate": rate, "info": dict(row)})
             except (TypeError, ValueError, OverflowError):
                 continue
         return sorted(out, key=lambda x: x["timestamp"])[-int(limit or 100):]

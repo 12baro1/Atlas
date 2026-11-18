@@ -3,11 +3,23 @@ import math
 
 """Independent liquidation_cascade setup generator."""
 
+from shared.analysis_services import (
+    _value,
+    _atr,
+    _candle_quality,
+    _relative_volume,
+    _current_price,
+    _entry_reference,
+)
+from shared.microstructure_services import _trade_flow, liquidation_events
+from strategies.candidate import _raw_candidate
+from shared.specialist_evidence import evidence_for_strategy, attach_strategy_evidence
+
+
 def generate(data):
-    from strategy_lab import _atr, _value, _candle_quality, _relative_volume, _trade_flow, _current_price, _raw_candidate, _entry_reference, liquidation_events, _strategy_specialist_evidence, _attach_strategy_specialist_evidence
     # Specialist outputs are optional analysis context/provenance. The native
     # OI, impulse, volume, taker-flow and funding rules below define eligibility.
-    specialist_evidence = _strategy_specialist_evidence(data, "liquidation_cascade")
+    specialist_evidence = evidence_for_strategy(data, "liquidation_cascade")
     """Detect a liquidation-like deleveraging impulse; OI is a proxy, not event data."""
     candles = data.get("1h") or []
     oi = data.get("open_interest") or []
@@ -123,5 +135,5 @@ def generate(data):
                                       "taker_buy_notional_ratio": round(buy_ratio, 3),
                                       "funding_rate": funding}
     if plan:
-        _attach_strategy_specialist_evidence(plan, specialist_evidence)
+        attach_strategy_evidence(plan, specialist_evidence)
     return plan

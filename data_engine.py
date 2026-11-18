@@ -1,6 +1,8 @@
 import time
 import math
 import os
+import threading
+from collections import OrderedDict
 from core.candle import Candle
 from sector_universe import configured_sector_peers
 from trace_context import ensure_trace, record_stage
@@ -28,7 +30,10 @@ TF_CACHE_TTL_SECONDS = {
     "15m": 0,
 }
 
-_cache = {}
+# Keep at most sixteen symbols' worth of reusable higher-timeframe series.
+MAX_CANDLE_CACHE_ENTRIES = 64
+_cache = OrderedDict()
+_cache_lock = threading.Lock()
 
 
 def _fetch(symbol, timeframe, limit):
@@ -43,9 +48,10 @@ def _fetch(symbol, timeframe, limit):
     try:
         timeframe_ms = int(exchange.parse_timeframe(timeframe) * 1000)
         now_ms = int(exchange.milliseconds())
-    except (AttributeError, TypeError, ValueError, OverflowError):
-        timeframe_ms = 0
-        now_ms = 0
+    except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+        return []
+    if min(timeframe_ms, now_ms) <= 0:
+        return []
 
     candles = []
     previous_time = None
@@ -67,7 +73,7 @@ def _fetch(symbol, timeframe, limit):
         if previous_time is not None and timestamp <= previous_time:
             continue
         previous_time = timestamp
-        if timeframe_ms > 0 and now_ms > 0 and timestamp + timeframe_ms > now_ms:
+        if timestamp + timeframe_ms > now_ms:
             continue
         candles.append(Candle(
             time=timestamp,
@@ -81,27 +87,36 @@ def _fetch(symbol, timeframe, limit):
 
 
 def fetch_candles(symbol, timeframe, limit, force_refresh=False):
-    now = time.time()
+    ttl = TF_CACHE_TTL_SECONDS.get(timeframe, 0)
+    if ttl <= 0:
+        return _fetch(symbol, timeframe, limit)
+    now = time.monotonic()
     # limit'i anahtara kat: aynı sembol/ZF farklı limitlerle istenirse
     # birbirinin önbellek kaydını kirletip warmup eksikliği yaratmasın.
     key = (symbol, timeframe, limit)
 
-    if not force_refresh and timeframe != "15m":
-        cached = _cache.get(key)
-        if cached is not None:
-            candles, fetched_at = cached
-            ttl = TF_CACHE_TTL_SECONDS.get(timeframe, 0)
-            if now - fetched_at <= ttl:
-                return candles
+    if not force_refresh:
+        with _cache_lock:
+            cached = _cache.get(key)
+            if cached is not None and now - cached[1] <= ttl:
+                _cache.move_to_end(key)
+                return cached[0]
 
     candles = _fetch(symbol, timeframe, limit)
-    _cache[key] = (candles, now)
+    with _cache_lock:
+        cached = _cache.get(key)
+        if cached is None or now >= cached[1]:
+            _cache[key] = (candles, now)
+            _cache.move_to_end(key)
+            if len(_cache) > MAX_CANDLE_CACHE_ENTRIES:
+                _cache.popitem(last=False)
     return candles
 
 
 def invalidate_all():
     """Zorunlu tazeleme için tüm piyasa veri önbelleklerini boşaltır."""
-    _cache.clear()
+    with _cache_lock:
+        _cache.clear()
     if "_smt_cache" in globals():
         _smt_cache.clear()
 
@@ -548,12 +563,12 @@ _smt_cache = {}
 
 def get_smt_universe(force_refresh=False):
     """Return cached BTC/ETH OHLCV comparison data for SMT on all supported TFs."""
-    now = time.time()
     universe = {}
     for symbol in _SMT_SYMBOLS:
         frames = {}
         for timeframe in _SMT_TIMEFRAMES:
             key = (symbol, timeframe)
+            now = time.monotonic()
             cached = _smt_cache.get(key)
             ttl = _SMT_CACHE_TTL_SECONDS[timeframe]
             if (
@@ -568,8 +583,7 @@ def get_smt_universe(force_refresh=False):
                 _smt_cache[key] = (candles, now)
                 frames[timeframe] = candles
             except Exception:
-                # A temporary exchange failure should not erase a previously
-                # fetched comparison series; the SMT engine can still use it.
-                frames[timeframe] = cached[0] if cached is not None else []
+                # Recheck age after a failed request, which can consume the remaining TTL.
+                frames[timeframe] = cached[0] if cached and time.monotonic() - cached[1] <= ttl else []
         universe[symbol] = frames
     return universe
