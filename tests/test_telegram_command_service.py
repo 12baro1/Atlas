@@ -493,6 +493,36 @@ def test_performance_report_shows_cumulative_profit_loss_in_r():
     assert "Net sonuç: +1.00R" in message
     assert "TL/USDT tutarı değildir" in message
 
+def test_islemler_includes_recently_removed_setups(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram_module
+
+    removed_setup = {
+        "symbol": "AVAX/USDT:USDT",
+        "direction": "LONG",
+        "strategy_name": "smc",
+        "status": "INVALIDATED",
+        "invalidation_reason": "STRATEGY_STRUCTURE_BROKEN",
+        "closed_at_ms": 3000,
+    }
+    pool = SimpleNamespace(
+        get_best_setups=lambda **kwargs: [],
+        get_active_setups=lambda: [],
+        get_recent_history=lambda **kwargs: [removed_setup],
+    )
+    monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
+
+    class Runtime:
+        def signal_outcomes(self, **kwargs):
+            return []
+
+    message = TelegramCommandService(Runtime(), "token", "chat").handle_islemler()
+    assert "YAPISI BOZULDUĞU / İPTAL EDİLDİĞİ İÇİN KALDIRILAN SETUP'LAR" in message
+    assert "AVAX/USDT" in message
+    assert "HAVUZDAN KALDIRILDI" in message
+    assert "STRATEGY STRUCTURE BROKEN" in message
+
+
 def test_islemler_combines_open_waiting_and_closed_without_pool_duplicates(monkeypatch):
     from types import SimpleNamespace
     import telegram_command_service as telegram_module
