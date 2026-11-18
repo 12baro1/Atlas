@@ -64,7 +64,7 @@ def build_footprint(trades, price_step=0.0):
     return {"state": "AVAILABLE", "levels": dict(levels)} if levels else {"state": "UNAVAILABLE"}
 
 
-def footprint_directional_evidence(footprint, direction, min_imbalance=0.08):
+def footprint_directional_evidence(footprint, direction, min_imbalance=0.05):
     """Return whether executed footprint notional confirms the proposed direction."""
     if not isinstance(footprint, dict) or footprint.get("state") != "AVAILABLE":
         return {"state": "UNAVAILABLE", "confirmed": False}
@@ -92,7 +92,7 @@ def footprint_directional_evidence(footprint, direction, min_imbalance=0.08):
             aligned_levels += 1
             aligned_notional += level_total
     aligned_share = aligned_notional / total
-    confirmed = bool(aligned and aligned_levels >= 2 and aligned_share >= 0.55)
+    confirmed = bool(aligned and aligned_levels >= 2 and aligned_share >= 0.45)
     return {"state": "AVAILABLE", "confirmed": confirmed, "imbalance": round(imbalance, 4),
             "buy_notional": buy, "sell_notional": sell, "price_levels": len(levels),
             "aligned_levels": aligned_levels, "aligned_notional_share": round(aligned_share, 4)}
