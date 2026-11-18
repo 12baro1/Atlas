@@ -239,9 +239,15 @@ class ScanService:
             added = self.queue.enqueue(
                 ranked_symbols, batch_tag=f"scan_extend_{int(time.time())}"
             ) if ranked_symbols else 0
+            inventory_status = self.inventory.status()
+            if ranked_symbols:
+                self.queue.reorder_pending(ranked_symbols)
+                self.queue.set_generation_ranking(
+                    ranked_symbols,
+                    inventory_status.get("ranking_source", "unknown"),
+                )
             self.ensure_workers()
             progress_after = self.queue.progress()
-            inventory_status = self.inventory.status()
             return {
                 "started": True,
                 "universe_size": len(universe),
@@ -258,9 +264,14 @@ class ScanService:
         queue_result = self.queue.rebuild(
             ranked_symbols, batch_tag=f"scan_{int(time.time())}"
         )
+        inventory_status = self.inventory.status()
+        self.queue.set_generation_ranking(
+            ranked_symbols,
+            inventory_status.get("ranking_source", "unknown"),
+            generation=queue_result.get("generation"),
+        )
         self.ensure_workers()
         progress_after = self.queue.progress()
-        inventory_status = self.inventory.status()
         return {
             "started": True,
             "universe_size": len(universe),
