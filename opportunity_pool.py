@@ -782,6 +782,8 @@ class OpportunityPool:
                     self._unindex_candidate(candidate)
                     stats["active"] += 1
             
+            if any(stats.values()):
+                self.save_all()
             return stats
     
     def _archive_candidate(
