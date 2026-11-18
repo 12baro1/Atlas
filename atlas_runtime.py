@@ -415,11 +415,21 @@ class AtlasRuntime:
 
     def telegram_status(self):
         token = str(getattr(Config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
+        service = self._telegram_service
+        if service is not None:
+            # The VPS command interface owns its own polling thread. The legacy
+            # Config flag is intentionally disabled there, so it cannot be
+            # used to report the command service's live state.
+            polling_active = bool(service.enabled and service.polling_active)
+            service_running = polling_active
+        else:
+            polling_active = bool(getattr(Config, "TELEGRAM_POLLING_ENABLED", True))
+            service_running = False
         return {
             "connected": bool(token),
-            "polling_enabled": bool(getattr(Config, "TELEGRAM_POLLING_ENABLED", True)),
+            "polling_enabled": polling_active,
             "webhook_enabled": bool(getattr(Config, "TELEGRAM_WEBHOOK_ENABLED", False)),
-            "service_running": self._telegram_service is not None and not self._telegram_service.stop_flag.is_set(),
+            "service_running": service_running,
             "last_signal": (self._current_signal or {}).get("signal_id") if isinstance(self._current_signal, dict) else None,
             "last_message": (self._current_signal or {}).get("symbol") if isinstance(self._current_signal, dict) else None,
             "last_error": self._error,
