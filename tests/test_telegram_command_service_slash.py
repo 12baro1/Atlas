@@ -474,4 +474,4 @@ def test_system_command_works_without_psutil(monkeypatch):
     assert "CPU:" in message
     assert "RAM:" in message
     assert "Disk:" in message
-    assert "psutil kurulu olmadığı için" in message
+    assert "Anlık CPU/RAM yüzdeleri gösterilemiyor" in message
