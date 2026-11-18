@@ -367,7 +367,7 @@ def test_setuplar_keeps_distinct_validated_setup_for_same_symbol_and_direction(m
     candidate = SimpleNamespace(
         symbol="BTC/USDT:USDT", direction="LONG", strategy_name="SMC",
         entry_price=105.0, stop_loss=103.0, tp1=107.0, tp2=109.0,
-        tp3=111.0, net_rr_after_costs=2.0,
+        tp3=111.0, net_rr_after_costs=2.0, status="VALIDATED",
     )
     pool = SimpleNamespace(
         get_best_setups=lambda **kwargs: [candidate],
