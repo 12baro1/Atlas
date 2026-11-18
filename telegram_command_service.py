@@ -154,8 +154,6 @@ def _format_outcome_item(item, state):
         f"Strateji: {_outcome_strategy(item)}",
         f"Durum: {state or status}",
     ]
-    if item.get("signal_id"):
-        lines.append(f"Sinyal ID: {item['signal_id']}")
     if item.get("entry") is not None:
         lines.append(f"Giriş: {_format_price(item.get('entry'))}")
     if item.get("stop_loss") is not None:
@@ -179,6 +177,10 @@ def _format_outcome_item(item, state):
         if item.get("trailing_stop") is not None:
             lines.append(f"Koruma stopu: {_format_price(item.get('trailing_stop'))}")
     elif status in {"TP1", "TP2", "TP3", "SL"}:
+        if hit_levels:
+            lines.append(f"Hedef ilerlemesi: {progress}")
+        if item.get("trailing_stop") is not None:
+            lines.append(f"Son koruma stopu: {_format_price(item.get('trailing_stop'))}")
         lines.append(f"Sonuç: {status}")
         lines.append(f"Net sonuç: {_format_rr(item.get('realized_r') or 0)}")
     elif status == "EXPIRED":
