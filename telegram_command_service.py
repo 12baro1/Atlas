@@ -1141,7 +1141,7 @@ class TelegramCommandService:
             )
         ]
 
-        lines = ["ATLAS | TAKİP", f"Açık sinyal: {len(pending)} | Kabul edilmiş setup: {len(active_untracked)} | Son kapanan: {len(closed)}"]
+        lines = ["ATLAS | TAKİP", f"Açık: {len(pending)} | Son kapanan: {len(closed)} | Havuz setup: {len(active_untracked)}"]
         if pending:
             lines.extend(["", "SİNYAL SONUÇ TAKİBİ"])
             for item in pending:
@@ -1258,8 +1258,12 @@ class TelegramCommandService:
 
     def handle_status(self) -> str:
         """Handle /durum - bot and service status"""
-        import psutil
         import sys
+        import threading
+        try:
+            import psutil
+        except ImportError:
+            psutil = None
 
         # Telegram bot info
         bot_info = self._bot_info_cache or {}
@@ -1284,10 +1288,16 @@ class TelegramCommandService:
         service_running = "ÇALIŞIYOR" if tg_status.get("service_running") else "DURDU"
 
         # System info
-        process = psutil.Process()
-        mem_mb = process.memory_info().rss / 1024 / 1024
-        cpu_pct = process.cpu_percent(interval=0.1)
-        threads = process.num_threads()
+        if psutil is not None:
+            process = psutil.Process()
+            mem_mb = process.memory_info().rss / 1024 / 1024
+            cpu_pct = process.cpu_percent(interval=0.1)
+            threads = process.num_threads()
+        else:
+            import resource
+            mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+            cpu_pct = 0.0
+            threads = threading.active_count()
 
         # Uptime
         started_at = scanner.get("started_at", 0)
