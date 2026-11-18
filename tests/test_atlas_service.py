@@ -4,6 +4,7 @@ from atlas_service import (
     DEFAULT_MAX_SYMBOLS,
     configured_max_symbols,
     select_live_symbols,
+    load_startup_symbols,
 )
 
 
@@ -76,3 +77,76 @@ def test_live_symbols_are_ranked_by_gateio_quote_volume_before_cap():
     assert symbols == ["ETH/USDT:USDT", "SOL/USDT:USDT"]
     assert stats["ranking_source"] == "gateio_24h_quote_volume"
     assert stats["limited"] == 1
+
+
+
+def test_startup_inventory_retries_until_gateio_recovers():
+    class FakeStopEvent:
+        def is_set(self):
+            return False
+
+        def wait(self, _seconds):
+            return False
+
+    class FakeInventory:
+        def __init__(self):
+            self.refresh_calls = 0
+
+        def refresh(self, force=True):
+            assert force is True
+            self.refresh_calls += 1
+            if self.refresh_calls == 1:
+                return {"symbol_count": 0, "last_error": "temporary timeout"}
+            return {"symbol_count": 2, "last_error": None}
+
+        def get_ranked_symbols(self, limit=None):
+            assert limit == 2
+            return ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+
+        def status(self):
+            return {
+                "symbol_count": 2,
+                "last_error": None,
+                "ranking_source": "gateio_24h_quote_volume",
+            }
+
+    class FakeLogger:
+        def __init__(self):
+            self.warnings = []
+
+        def warning(self, message, *args):
+            self.warnings.append((message, args))
+
+    inventory = FakeInventory()
+    logger = FakeLogger()
+    symbols, status = load_startup_symbols(
+        inventory,
+        max_symbols=2,
+        stop_event=FakeStopEvent(),
+        logger=logger,
+        retry_interval_seconds=1,
+    )
+
+    assert symbols == ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+    assert status["ranking_source"] == "gateio_24h_quote_volume"
+    assert inventory.refresh_calls == 2
+    assert logger.warnings
+
+
+def test_startup_inventory_respects_shutdown_signal():
+    class StoppedEvent:
+        def is_set(self):
+            return True
+
+    class UnusedInventory:
+        def refresh(self, force=True):
+            raise AssertionError("must not make a network request after shutdown")
+
+    symbols, status = load_startup_symbols(
+        UnusedInventory(),
+        max_symbols=10,
+        stop_event=StoppedEvent(),
+        logger=None,
+    )
+    assert symbols == []
+    assert status == {}
