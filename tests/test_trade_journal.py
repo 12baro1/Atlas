@@ -84,3 +84,39 @@ def test_repeated_close_event_is_ignored_without_double_counting(tmp_path):
     assert journal.summary()["total_trades"] == 1
     assert journal.summary()["wins"] == 1
     assert journal.summary()["losses"] == 0
+
+
+
+def test_invalidating_strategy_removes_only_unentered_pending_signal_outcomes(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "journal.sqlite")
+    waiting = journal.register_signal_outcome(
+        symbol="AVAX/USDT:USDT", direction="LONG", entry=20.0, stop_loss=19.0,
+        tp1=21.0, tp2=22.0, tp3=23.0, signal_id="WAITING-1",
+        payload={"strategy_id": "smc", "strategy": "SMC", "execution_costs": {"entry_type": "LIMIT"}},
+    )
+    entered = journal.register_signal_outcome(
+        symbol="AVAX/USDT:USDT", direction="LONG", entry=20.0, stop_loss=19.0,
+        tp1=21.0, tp2=22.0, tp3=23.0, signal_id="ENTERED-1",
+        payload={"strategy_id": "smc", "strategy": "SMC", "execution_costs": {"entry_type": "MARKET"}},
+    )
+    other_strategy = journal.register_signal_outcome(
+        symbol="AVAX/USDT:USDT", direction="LONG", entry=20.0, stop_loss=19.0,
+        tp1=21.0, tp2=22.0, tp3=23.0, signal_id="OTHER-1",
+        payload={"strategy_id": "mean_reversion", "execution_costs": {"entry_type": "LIMIT"}},
+    )
+
+    removed = journal.invalidate_pending_signal_outcomes(
+        symbol="AVAX/USDT:USDT", strategy_id="smc", reason="STRATEGY_STRUCTURE_BROKEN"
+    )
+
+    assert [item["signal_id"] for item in removed] == ["WAITING-1"]
+    assert waiting["status"] == "INVALIDATED"
+    assert waiting["invalidation_reason"] == "STRATEGY_STRUCTURE_BROKEN"
+    assert entered["status"] == "PENDING"
+    assert other_strategy["status"] == "PENDING"
+
+    restored = TradeJournal(db_path=tmp_path / "journal.sqlite")
+    statuses = {item["signal_id"]: item["status"] for item in restored.signal_outcomes()}
+    assert statuses["WAITING-1"] == "INVALIDATED"
+    assert statuses["ENTERED-1"] == "PENDING"
+    assert statuses["OTHER-1"] == "PENDING"
