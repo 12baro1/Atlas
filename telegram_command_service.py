@@ -1345,7 +1345,7 @@ class TelegramCommandService:
         p_mem = process.memory_info().rss / 1024 / 1024
         p_cpu = process.cpu_percent(interval=0.1)
         return "\n".join([
-            "ATLAS | SUNUCU KAYNAKLARI",
+            "ATLAS | SİSTEM KAYNAKLARI",
             "",
             f"CPU: {cpu_count} çekirdek | Kullanım: %{cpu_percent:.1f} | Load: {load_avg[0]:.2f}/{load_avg[1]:.2f}/{load_avg[2]:.2f}",
             f"RAM: {mem.total / 1024**3:.1f} GB | Kullanım: %{mem.percent:.1f} | Boş: {mem.available / 1024**3:.1f} GB",
