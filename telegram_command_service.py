@@ -892,7 +892,22 @@ class TelegramCommandService:
                 f"\nYeni: {replaced.direction} / {_format_strategy_name(replaced.strategy_name)}"
                 f"\nYeni giriş: {_format_price(replaced.entry_price)}"
                 f" | SL: {_format_price(replaced.stop_loss)}"
-                f"\nHavuzda eski setup arşive alındı; yeni setup aktif listede."
+                f"\nEski setup aktif listeden kaldırıldı ve arşive alındı."
+            )
+        invalidated = (raw_result.get("invalidated_pool_setups") or [])
+        if invalidated:
+            message += "\n\nSTRATEJİ YAPISI BOZULDU — SETUP KALDIRILDI"
+            for item in invalidated:
+                message += (
+                    f"\n{str(item.get('symbol') or symbol).replace(':USDT', '')} | "
+                    f"{str(item.get('direction') or '—')} | "
+                    f"{_format_strategy_name(item.get('strategy_name') or item.get('strategy_id'))}"
+                )
+            message += (
+                "\nNeden: Stratejinin güncel analizi setup koşullarının artık "
+                "geçerli olmadığını gösterdi."
+                "\nDurum: Fırsat havuzundan ve mevcut setup listesinden kaldırıldı; "
+                "geçmiş kaydı arşivde tutuldu."
             )
         return message
 
