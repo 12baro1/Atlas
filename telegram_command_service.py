@@ -370,12 +370,12 @@ def _format_telegram_card(card, elapsed_ms=0):
         rr = card.get("rr")
     lines = [
         "━━━━━━━━━━━━━━━━━━━━",
-        f"ATLAS | {symbol}",
-        f"{direction} | {entry_type}",
+        f"ATLAS | {symbol} — {direction}",
         f"Strateji: {strategy}",
+        f"Emir: {entry_type}",
         "━━━━━━━━━━━━━━━━━━━━",
-        f"Giriş: {_format_price(card.get('entry'), grouping=False)}",
-        f"Stop Loss: {_format_price(card.get('stop_loss'), grouping=False)}",
+        f"Giriş ({entry_type}): {_format_price(card.get('entry'), grouping=False)}",
+        f"SL: {_format_price(card.get('stop_loss'), grouping=False)}",
         f"TP1: {_format_price(targets[0], grouping=False)}",
         f"TP2: {_format_price(targets[1], grouping=False)}",
         f"TP3: {_format_price(targets[2], grouping=False)}",
@@ -1328,13 +1328,13 @@ class TelegramCommandService:
             load_avg = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
             usage = resource.getrusage(resource.RUSAGE_SELF)
             return "\n".join([
-                "ATLAS | SUNUCU KAYNAKLARI",
+                "ATLAS | SİSTEM KAYNAKLARI",
                 "",
-                f"CPU çekirdeği: {os.cpu_count() or 0} | Load: {load_avg[0]:.2f}/{load_avg[1]:.2f}/{load_avg[2]:.2f}",
+                f"CPU: {os.cpu_count() or 0} çekirdek | Load: {load_avg[0]:.2f}/{load_avg[1]:.2f}/{load_avg[2]:.2f}",
                 f"RAM: {total_ram / 1024**3:.1f} GB | Boş: {available_ram / 1024**3:.1f} GB",
                 f"Disk: {disk.total / 1024**3:.1f} GB | Boş: {disk.free / 1024**3:.1f} GB",
                 f"Atlas tepe belleği: {usage.ru_maxrss / 1024:.1f} MB | Thread: {threading.active_count()}",
-                "Anlık kullanım yüzdeleri için psutil gerekli.",
+                "Anlık CPU/RAM yüzdeleri gösterilemiyor (psutil kurulu değil).",
             ])
         cpu_count = psutil.cpu_count()
         cpu_percent = psutil.cpu_percent(interval=0.5)
