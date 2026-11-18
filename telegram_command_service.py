@@ -312,6 +312,20 @@ def _format_telegram_card(card, elapsed_ms=0):
         ]
         if blockers:
             lines.append("Kontrol edilecekler: " + " | ".join(str(item) for item in blockers[:3]))
+        pipeline = card.get("strategy_pipeline") or {}
+        strategy_rows = card.get("strategy_diagnostics") or []
+        if strategy_rows:
+            lines.extend([
+                "",
+                "YEDİ STRATEJİ DURUMU",
+                f"Ham setup: {pipeline.get('raw_setups', 0)} | Ortak filtreden geçen: {pipeline.get('passed_common_filter', 0)}",
+            ])
+            for item in strategy_rows[:7]:
+                strategy_id = str(item.get("strategy_id") or "unknown")
+                status = str(item.get("status") or "UNKNOWN")
+                detail = str(item.get("reason") or "").strip()
+                suffix = f" — {detail[:150]}" if detail else ""
+                lines.append(f"• {strategy_id}: {status}{suffix}")
         lines.extend([
             "",
             "Bu sembolde şu an işlem açılabilecek doğrulanmış bir plan bulunmadı.",
