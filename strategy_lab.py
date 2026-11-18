@@ -502,14 +502,151 @@ def _setup_diagnostic(strategy_id, data, regime):
         elif len(oi) >= 2 and len(oi_times) >= 2 and data.get("snapshot_timestamp_ms"):
             checks.append("CONDITION_NOT_MET: timestamped OI contraction <=-1.0%, >=0.75 ATR impulse, >=1.15x relative volume, directional candle close, taker-flow and funding context did not align.")
     elif strategy_id == "orderflow_momentum":
-        if not isinstance(data.get("orderbook"), dict):
-            checks.append("MISSING_DATA: live orderbook snapshot is unavailable.")
-        if not data.get("recent_trades"):
+        # Report the exact native generator gates. This is diagnostic only:
+        # it does not relax thresholds or create synthetic market evidence.
+        from strategies.orderflow.analytics import (
+            footprint_directional_evidence, liquidation_pressure,
+            opposing_liquidity_wall,
+        )
+        from strategies.orderflow.strategy import _absorption_proxy
+
+        book = data.get("orderbook")
+        trades = data.get("recent_trades") or []
+        now_ms = int(data.get("snapshot_timestamp_ms") or 0)
+        book_ms = int(data.get("orderbook_timestamp_ms") or 0)
+        trades_ms = int(data.get("recent_trades_timestamp_ms") or 0)
+        candles_15m = candles("15m")
+        atr = _atr(candles_15m)
+        candle = candles_15m[-1] if candles_15m else None
+        close = _value(candle, "close") if candle is not None else None
+        opened = _value(candle, "open") if candle is not None else None
+        quality = _candle_quality(candle) if candle is not None else None
+        entry = _current_price(data)
+        shared = data.get("shared_market_evidence") or {}
+        sources = shared.get("sources") or {}
+        book_state = (sources.get("orderbook") or {}).get("state")
+        trade_state = (sources.get("trades") or {}).get("state")
+
+        if not isinstance(book, dict):
+            checks.append("MISSING_DATA: orderbook snapshot is unavailable.")
+        elif book_state and book_state != "FRESH":
+            checks.append(f"ORDERBOOK_NOT_FRESH: shared orderbook state={book_state}.")
+        if not trades:
             checks.append("MISSING_DATA: recent executed trades are unavailable.")
-        if not data.get("snapshot_timestamp_ms"):
-            checks.append("MISSING_DATA: snapshot timestamp is unavailable.")
-        if data.get("orderbook") and data.get("recent_trades") and data.get("snapshot_timestamp_ms"):
-            checks.append("CONDITION_NOT_MET: fresh book/trades, at least 20 valid trades, spread ceiling, depth-weighted imbalance, >=0.05 footprint imbalance across at least two aligned price levels with >=45% aligned notional, taker delta and momentum-candle or absorption confirmation did not align.")
+        elif trade_state and trade_state != "FRESH":
+            checks.append(f"TRADES_NOT_FRESH: shared trades state={trade_state}.")
+        if not now_ms:
+            checks.append("MISSING_DATA: snapshot_timestamp_ms is unavailable.")
+        if not book_ms:
+            checks.append("MISSING_DATA: orderbook_timestamp_ms is unavailable.")
+        elif now_ms and not 0 <= now_ms - book_ms <= 15000:
+            checks.append(f"ORDERBOOK_STALE: age_ms={now_ms - book_ms}; maximum=15000.")
+        if not trades_ms:
+            checks.append("MISSING_DATA: recent_trades_timestamp_ms is unavailable.")
+        elif now_ms and not 0 <= now_ms - trades_ms <= 30000:
+            checks.append(f"TRADES_STALE: age_ms={now_ms - trades_ms}; maximum=30000.")
+        if len(candles_15m) < 15:
+            checks.append(f"INSUFFICIENT_HISTORY: 15m has {len(candles_15m)} candles; needs 15.")
+        elif atr is None:
+            checks.append("INVALID_DATA: 15m ATR cannot be calculated.")
+        if candle is not None and (close is None or opened is None or quality is None):
+            checks.append("INVALID_DATA: latest 15m candle anatomy is unavailable.")
+        if entry is None:
+            checks.append("MISSING_DATA: current entry reference price is unavailable.")
+
+        flow = None
+        if isinstance(book, dict) and now_ms:
+            flow = _ORDERBOOK_ENGINE.analyze(
+                book, direction="NONE", now_ms=now_ms, trades=trades,
+            )
+            if not flow.get("active"):
+                checks.append(f"ORDERBOOK_ANALYSIS_INACTIVE: {flow.get('reason') or 'valid two-sided depth unavailable'}.")
+            if not flow.get("trade_flow_active"):
+                checks.append("NO_VALID_TRADE_FLOW: no timestamp-valid BUY/SELL trades were usable by OrderBookEngine.")
+            trade_count = int(flow.get("trade_count") or 0)
+            if trade_count < 20:
+                checks.append(f"INSUFFICIENT_VALID_TRADES: usable_trade_count={trade_count}; minimum=20.")
+            spread = flow.get("spread_pct")
+            if spread is not None and spread > _ORDERBOOK_ENGINE.MARKET_MAX_SPREAD_PCT:
+                checks.append(
+                    f"SPREAD_LIMIT_EXCEEDED: spread_pct={spread}; maximum={_ORDERBOOK_ENGINE.MARKET_MAX_SPREAD_PCT}."
+                )
+            imbalance = float(flow.get("imbalance") or 0.0)
+            delta = float(flow.get("trade_delta") or 0.0)
+            if abs(imbalance) < 0.14:
+                checks.append(f"BOOK_IMBALANCE_TOO_WEAK: imbalance={imbalance:+.4f}; needs >=0.14 absolute.")
+            if abs(delta) < 0.08:
+                checks.append(f"TAKER_DELTA_TOO_WEAK: trade_delta={delta:+.4f}; needs >=0.08 absolute.")
+            aggressor = "LONG" if delta > 0 else "SHORT" if delta < 0 else None
+            footprint = build_footprint(trades)
+            confirmation = (
+                footprint_directional_evidence(footprint, aggressor)
+                if aggressor else {"state": "UNAVAILABLE", "confirmed": False}
+            )
+            if not confirmation.get("confirmed"):
+                checks.append(
+                    "FOOTPRINT_NOT_CONFIRMED: "
+                    f"imbalance={confirmation.get('imbalance')}; "
+                    f"aligned_levels={confirmation.get('aligned_levels', 0)}; "
+                    f"aligned_notional_share={confirmation.get('aligned_notional_share')}; "
+                    "requires >=0.05 directional imbalance, >=2 aligned levels and >=45% aligned notional."
+                )
+            if quality is not None and close is not None and opened is not None:
+                long_momentum = (
+                    imbalance >= 0.14 and delta >= 0.08 and close > opened and entry is not None and entry >= opened
+                    and quality["body_ratio"] >= 0.25 and quality["close_location"] >= 0.60
+                )
+                short_momentum = (
+                    imbalance <= -0.14 and delta <= -0.08 and close < opened and entry is not None and entry <= opened
+                    and quality["body_ratio"] >= 0.25 and quality["close_location"] <= 0.40
+                )
+                absorption = _absorption_proxy(flow, candle, atr) if atr else None
+                liquidation = liquidation_pressure(data.get("liquidation_events") or [], trades)
+                long_liquidation = (
+                    liquidation.get("confirmed") and liquidation.get("direction") == "LONG"
+                    and close > opened and imbalance >= 0.10 and delta >= 0.05
+                    and quality["close_location"] >= 0.55
+                )
+                short_liquidation = (
+                    liquidation.get("confirmed") and liquidation.get("direction") == "SHORT"
+                    and close < opened and imbalance <= -0.10 and delta <= -0.05
+                    and quality["close_location"] <= 0.45
+                )
+                branch_available = bool(
+                    long_momentum or short_momentum or absorption
+                    or long_liquidation or short_liquidation
+                )
+                if not branch_available:
+                    checks.append(
+                        "NO_DIRECTIONAL_SETUP_BRANCH: "
+                        f"book_imbalance={imbalance:+.4f}, taker_delta={delta:+.4f}, "
+                        f"body_ratio={quality['body_ratio']:.3f}, "
+                        f"close_location={quality['close_location']:.3f}, "
+                        f"absorption={absorption or 'NONE'}, "
+                        f"liquidation_direction={liquidation.get('direction') or 'NONE'}; "
+                        "continuation, absorption and liquidation conditions did not align."
+                    )
+                cvd = shared.get("cvd") or {}
+                cvd_direction = cvd.get("direction") if cvd.get("state") in {"AVAILABLE", "FRESH"} else None
+                if cvd_direction:
+                    if long_momentum and cvd_direction == "SELL_DOMINANT":
+                        checks.append("CVD_OPPOSES_LONG: fresh CVD is SELL_DOMINANT.")
+                    if short_momentum and cvd_direction == "BUY_DOMINANT":
+                        checks.append("CVD_OPPOSES_SHORT: fresh CVD is BUY_DOMINANT.")
+                else:
+                    checks.append("CVD_UNAVAILABLE_OPTIONAL: no fresh timestamped WS trade-flow history; CVD veto is not applied.")
+                direction = "LONG" if long_momentum or long_liquidation or absorption == "SELLER_FLOW_ABSORBED" else (
+                    "SHORT" if short_momentum or short_liquidation or absorption == "BUYER_FLOW_ABSORBED" else None
+                )
+                if direction and atr:
+                    wall = opposing_liquidity_wall(book, direction, data.get("current_price") or close, atr)
+                    if wall.get("blocking"):
+                        checks.append(
+                            f"OPPOSING_LIQUIDITY_WALL: {wall.get('side')} wall at {wall.get('price')} "
+                            f"is {wall.get('distance_atr')} ATR away and {wall.get('size_multiple')}x median."
+                        )
+        if not checks:
+            checks.append("CONDITION_NOT_MET: no specific failed orderflow gate was identified.")
     elif strategy_id == "relative_strength":
         checks.append(history("4h", 55))
         symbol = str(data.get("symbol") or "").upper()
@@ -760,7 +897,10 @@ class SevenStrategyLab:
                     status = (
                         "MISSING_DATA" if "MISSING_DATA:" in reason
                         else "INSUFFICIENT_HISTORY" if "INSUFFICIENT_HISTORY:" in reason
-                        else "CONDITION_NOT_MET" if "CONDITION_NOT_MET:" in reason or "REGIME_MISMATCH:" in reason
+                        else "CONDITION_NOT_MET" if (
+                            "CONDITION_NOT_MET:" in reason or "REGIME_MISMATCH:" in reason
+                            or strategy_id == "orderflow_momentum"
+                        )
                         else "NO_SETUP"
                     )
                     results.append({

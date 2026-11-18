@@ -231,3 +231,40 @@ def test_orderflow_strategy_uses_fresh_rest_book_and_trades_without_ws_cvd(monke
     plan = of_module.generate(data)
     assert plan is not None
     assert plan["direction"] == "LONG"
+
+
+
+def test_orderflow_diagnostic_reports_exact_failed_gates_and_optional_cvd():
+    """No-setup output names measurable failures instead of one generic message."""
+    now_ms = int(time.time() * 1000)
+    data = _orderflow_raw_data(now_ms, side="buy", book_imbalance=0.5)
+    data["recent_trades"] = data["recent_trades"][:5]
+    data["trade_flow_history"] = []
+    data["shared_market_evidence"] = build_shared_market_evidence(data)
+
+    reason = strategy_lab._setup_diagnostic(
+        "orderflow_momentum", data, {"label": "TREND", "adx": 25},
+    )
+
+    assert "INSUFFICIENT_VALID_TRADES" in reason
+    assert "FOOTPRINT_NOT_CONFIRMED" in reason
+    assert "CVD_UNAVAILABLE_OPTIONAL" in reason
+    assert "CONDITION_NOT_MET: fresh book/trades" not in reason
+
+
+def test_orderflow_diagnostic_reports_spread_limit():
+    """Spread failure is reported with the measured value and configured ceiling."""
+    now_ms = int(time.time() * 1000)
+    data = _orderflow_raw_data(now_ms)
+    data["orderbook"] = {
+        "bids": [[99.90, 20], [99.89, 20], [99.88, 20]],
+        "asks": [[100.10, 20], [100.11, 20], [100.12, 20]],
+    }
+    data["shared_market_evidence"] = {}
+
+    reason = strategy_lab._setup_diagnostic(
+        "orderflow_momentum", data, {"label": "TREND", "adx": 25},
+    )
+
+    assert "SPREAD_LIMIT_EXCEEDED" in reason
+    assert "maximum=0.08" in reason
