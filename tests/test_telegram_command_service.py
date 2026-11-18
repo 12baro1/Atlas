@@ -266,8 +266,6 @@ def test_daily_report_keeps_previous_day_open_setups_visible():
 
 
 def test_takip_shows_tp_progress_and_recent_stop_result():
-    from types import SimpleNamespace
-
     class Runtime:
         def signal_outcomes(self, **kwargs):
             return [
