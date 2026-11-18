@@ -161,7 +161,6 @@ class ScanService:
         if not ranked:
             return {"synchronized": False, "reason": "empty_universe"}
 
-        progress = self.queue.progress()
         existing = set(self.queue.generation_symbols())
         ranked_set = set(ranked)
         source = self.inventory.status().get("ranking_source", "unknown")
