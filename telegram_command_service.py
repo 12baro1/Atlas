@@ -526,6 +526,11 @@ class TelegramCommandService:
             self._bot_info_cache = result
             self._bot_info_cache_time = time.time()
             self.logger.info("Telegram bot info: @%s", self._bot_username)
+            try:
+                self._api("setMyCommands", {"commands": get_botfather_commands()})
+                self.logger.info("Telegram command menu synchronized | commands=%s", len(get_botfather_commands()))
+            except Exception:
+                self.logger.exception("Telegram command menu synchronization failed")
         except Exception:
             self.logger.exception("Failed to fetch bot info")
 
@@ -826,10 +831,10 @@ class TelegramCommandService:
         return (
             "ATLAS | KOMUT MERKEZİ\n\n"
             "Analiz: /btc, /eth, /sol, /analiz BTC\n"
-            "Tarama: /20tara ... /1000tara, /tumtara\n"
-            "Havuz: /eniyi5, /eniyi10, /havuzdurum\n"
-            "İşlemler: /islemler, /likidite BTC\n"
-            "Sistem: /taramadurum, /durum, /sistem\n\n"
+            "Tarama: /tara 20, /tara 30, /20tara, /tumtara\n"
+            "Havuz: /havuz, /eniyi5, /eniyi10, /setup BTC\n"
+            "İşlemler: /islemler, /gecmis, /likidite BTC\n"
+            "Sistem: /motorlar, /veri, /taramadurum, /durum, /sistem\n\n"
             "Tüm komutlar: /yardim"
         )
 
