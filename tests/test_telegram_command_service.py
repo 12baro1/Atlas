@@ -622,3 +622,45 @@ def test_islemler_moves_invalidated_waiting_signal_to_removed_section(monkeypatc
     assert "HAVUZDAN KALDIRILDI" in message
     assert "STRATEGY STRUCTURE BROKEN" in message
     assert "GİRİŞ BEKLEYEN SİNYALLER" not in message
+
+
+def test_slow_symbol_analysis_does_not_block_telegram_command_worker(monkeypatch):
+    import threading
+
+    service = TelegramCommandService(object(), "token", "-100123")
+    analysis_started = threading.Event()
+    release_analysis = threading.Event()
+    status_completed = threading.Event()
+    replies = []
+
+    def execute(command):
+        if command.upper().startswith("/BTC"):
+            analysis_started.set()
+            assert release_analysis.wait(timeout=3)
+            return "BTC analysis result"
+        if command.lower().startswith("/durum"):
+            status_completed.set()
+            return "system status"
+        raise AssertionError(command)
+
+    monkeypatch.setattr(service, "execute_command", execute)
+    monkeypatch.setattr(service, "_send_command_reply", replies.append)
+    service._command_queue.put_nowait(("/BTC", "BTC"))
+    service._command_queue.put_nowait(("/durum", "durum"))
+
+    worker = threading.Thread(target=service._command_worker_loop, daemon=True)
+    worker.start()
+    try:
+        assert analysis_started.wait(timeout=2)
+        assert status_completed.wait(timeout=2), "status command was blocked by BTC analysis"
+    finally:
+        release_analysis.set()
+        service.stop_flag.set()
+        worker.join(timeout=2)
+        with service._analysis_lock:
+            analysis_threads = list(service._analysis_threads.values())
+        for thread in analysis_threads:
+            thread.join(timeout=2)
+
+    assert "system status" in replies
+    assert "BTC analysis result" in replies
