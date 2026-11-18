@@ -246,8 +246,9 @@ def test_plain_text_best_five_does_not_start_scan(pool):
 
 def test_scan_resume_failure_is_not_reported_as_running():
     runtime = MagicMock()
-    runtime.resume_scan.return_value = {"started": False}
-    message = make_service(runtime).handle_scan_resume()
+    service = make_service(runtime)
+    service.runtime.resume_scan.return_value = {"started": False}
+    message = service.handle_scan_resume()
     assert "TARAMA SÜRDÜRÜLEMEDİ" in message
     assert "TARAMA DEVAM EDİYOR" not in message
     assert "/taramadurum" in message
