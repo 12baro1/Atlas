@@ -105,7 +105,7 @@ def load_startup_symbols(
             if not last_status.get("last_error") and int(last_status.get("symbol_count") or 0) > 0:
                 symbols = inventory.get_ranked_symbols(limit=max_symbols)
                 if symbols:
-                    return symbols, last_status
+                    return symbols, inventory.status()
                 logger.warning("Gate.io inventory returned no ranked USDT perpetuals; retrying")
             else:
                 logger.warning(
@@ -181,6 +181,9 @@ def main() -> int:
         return 0
     if not symbols:
         raise RuntimeError("No active USDT perpetual swap symbols were found on Gate.io")
+
+    # Preserve the BotFather command menu registration from the previous startup.
+    auto_register_on_startup()
 
     # The durable ScanService is the only background analysis pipeline.
     # The legacy full_scan loop would analyze the same 300 symbols a second time.
