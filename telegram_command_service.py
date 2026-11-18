@@ -741,8 +741,8 @@ class TelegramCommandService:
         if lowered in {"yardım", "yardim", "help", "?"}:
             return self.handle_help()
 
-        if lowered == "mevcut":
-            return self.handle_mevcut()
+        if lowered in {"mevcut", "setuplar", "takip", "islemler"}:
+            return self.handle_islemler()
 
         # Best-N legacy text ("en iyi 5", "en iyi 10"): strictly read-only
         # pool reads, never a new scan and never the old scan path.
@@ -978,7 +978,7 @@ class TelegramCommandService:
             lines.extend(["", "Doğrulanmış setup bulunmuyor."])
         lines.extend([
             "",
-            "Setup listesi: /setuplar",
+            "İşlem ve setup listesi: /islemler",
             "En iyi fırsatlar: /eniyi5",
         ])
         return "\n".join(lines)
@@ -1071,6 +1071,8 @@ class TelegramCommandService:
             key=lambda item: int(item.get("opened_at") or 0),
             reverse=True,
         )
+        tracking = [item for item in pending if bool(item.get("entry_reached"))]
+        waiting_signals = [item for item in pending if not bool(item.get("entry_reached"))]
         terminal = {"TP1", "TP2", "TP3", "SL", "EXPIRED"}
         closed = sorted(
             [item for item in outcomes if str(item.get("status") or "").upper() in terminal],
@@ -1090,16 +1092,23 @@ class TelegramCommandService:
 
         lines = [
             "ATLAS | İŞLEMLER",
-            f"Açık sinyal: {len(pending)} | Giriş bekleyen setup: {len(validated)}",
-            f"Aktif havuz işlemi: {len(active)} | Son kapanan: {len(closed)}",
+            f"Takipte: {len(tracking)} | Giriş bekleyen sinyal: {len(waiting_signals)}",
+            f"Havuz setup'ı: {len(validated)} | Aktif havuz: {len(active)} | Sonuç: {len(closed)}",
         ]
 
-        if pending:
-            lines.extend(["", "AÇIK İŞLEMLER"])
-            for item in pending[:10]:
+        if tracking:
+            lines.extend(["", "AKTİF İŞLEM TAKİBİ"])
+            for item in tracking[:10]:
                 lines.extend([_format_outcome_item(item, "TAKİPTE"), ""])
-            if len(pending) > 10:
-                lines.append(f"Diğer açık sinyaller: +{len(pending) - 10}")
+            if len(tracking) > 10:
+                lines.append(f"Diğer takipteki işlemler: +{len(tracking) - 10}")
+
+        if waiting_signals:
+            lines.extend(["", "GİRİŞ BEKLEYEN SİNYALLER"])
+            for item in waiting_signals[:10]:
+                lines.extend([_format_outcome_item(item, "GİRİŞ BEKLENİYOR"), ""])
+            if len(waiting_signals) > 10:
+                lines.append(f"Diğer giriş bekleyen sinyaller: +{len(waiting_signals) - 10}")
 
         if validated:
             lines.extend(["", "GİRİŞ BEKLEYEN SETUP'LAR"])
@@ -1134,7 +1143,7 @@ class TelegramCommandService:
             for item in closed:
                 lines.extend([_format_outcome_item(item, "SONUÇLANDI"), ""])
 
-        if not (pending or validated or active or closed):
+        if not (tracking or waiting_signals or validated or active or closed):
             lines.extend(["", "Açık işlem veya doğrulanmış setup bulunmuyor.", "Fırsat havuzu: /eniyi5"])
 
         lines.extend([
@@ -1270,25 +1279,34 @@ class TelegramCommandService:
         return "\n".join(lines)
 
     def handle_performance(self) -> str:
-        """Show outcome performance only; learning details belong to /ogrenme."""
+        """Show cumulative profit/loss in R for automated and manual records."""
         signal = self.runtime.signal_performance()
         manual = self.runtime.manual_performance()
         lines = [
             "ATLAS | PERFORMANS",
             "",
-            "OTOMATİK SİNYALLER (teorik takip)",
-            f"Kapanan: {signal.get('closed', 0)} | Kazanç: {signal.get('wins', 0)} | Kayıp: {signal.get('losses', 0)}",
-            f"Winrate: %{float(signal.get('winrate', 0) or 0):.1f}",
-            f"Expectancy: {float(signal.get('expectancy', 0) or 0):+.2f}R | PF: {float(signal.get('profit_factor', 0) or 0):.2f}",
+            "OTOMATİK SİNYALLER",
+            f"Kapanan: {signal.get('closed', 0)} | Kazançlı: {signal.get('wins', 0)} | Kayıplı: {signal.get('losses', 0)}",
+            f"Toplam kazanç: {_format_rr(signal.get('positive_r', 0))}R",
+            f"Toplam kayıp: {_format_rr(signal.get('negative_r', 0))}R",
+            f"Net sonuç: {_format_rr(signal.get('net_r', 0))}R",
+            f"Başarı: %{float(signal.get('winrate', 0) or 0):.1f} | PF: {float(signal.get('profit_factor', 0) or 0):.2f}",
             f"TP1/TP2/TP3: {signal.get('tp1', 0)}/{signal.get('tp2', 0)}/{signal.get('tp3', 0)} | SL: {signal.get('sl', 0)}",
             "",
-            "MANUEL İŞLEMLER (kullanıcı kayıtları)",
-            f"Kapanan: {manual.get('total', 0)} | Kazanç: {manual.get('wins', 0)} | Kayıp: {manual.get('losses', 0)} | Açık: {manual.get('open', 0)}",
-            f"Winrate: %{float(manual.get('winrate', 0) or 0):.1f}",
-            f"Expectancy: {float(manual.get('expectancy', 0) or 0):+.2f}R | PF: {float(manual.get('profit_factor', 0) or 0):.2f}",
+            "MANUEL İŞLEMLER",
+            f"Kapanan: {manual.get('total', 0)} | Kazançlı: {manual.get('wins', 0)} | Kayıplı: {manual.get('losses', 0)} | Açık: {manual.get('open', 0)}",
+            f"Toplam kazanç: {_format_rr(manual.get('positive_r', 0))}R",
+            f"Toplam kayıp: {_format_rr(manual.get('negative_r', 0))}R",
+            f"Net sonuç: {_format_rr(manual.get('net_r', 0))}R",
+            f"Başarı: %{float(manual.get('winrate', 0) or 0):.1f} | PF: {float(manual.get('profit_factor', 0) or 0):.2f}",
             "",
-            "Not: Otomatik sinyal takibi ve manuel işlemler ayrı hesaplanır.",
+            "R toplamlarıdır; TL/USDT tutarı değildir. Otomatik sinyal ve manuel kayıtlar ayrı hesaplanır.",
         ]
+        basis = manual.get("performance_basis")
+        if basis == "mixed":
+            lines.append("Manuel kayıtların bir kısmında gerçek komisyon/slippage, bir kısmında yalnızca fiyat farkı kullanılmış.")
+        elif basis == "gross_price_only":
+            lines.append("Manuel sonuçlar komisyon ve slippage düşülmeden hesaplanmış.")
         if int(signal.get("closed", 0) or 0) < 20:
             lines.append("Otomatik sinyal örneklemi 20 kapanan işlemin altında.")
         return "\n".join(lines)
