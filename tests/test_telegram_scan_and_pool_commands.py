@@ -134,11 +134,11 @@ def test_best_five_read_only_from_pool(pool):
     runtime.start_scan.assert_not_called()
     runtime.analyze_symbol.assert_not_called()
     assert "EN İYİ 2" in result
-    assert "BTC/USDT:USDT" in result
+    assert "BTC/USDT" in result
     assert "LIMIT" in result
-    assert "Giriş: 50000.0" in result
-    assert "SL: 49500.0" in result
-    assert "Net RR (maliyet sonrası): 3.0" in result
+    assert "Giriş: 50,000.0" in result
+    assert "Stop Loss: 49,500.0" in result
+    assert "Net RR: +3.00R" in result
     assert "kazanma olasılığı değildir" in result
     # Strictly read-only: pool state unchanged
     stats = pool.get_stats()
@@ -179,7 +179,7 @@ def test_composite_ranking_prefers_net_rr_and_freshness(pool):
     # Composite balances net RR against staleness: the fresh 2.0-RR setup
     # outranks the 10-day-old 4.0-RR setup.
     ranked = [line for line in result.splitlines() if line.startswith(("1. ", "2. "))]
-    assert "FRESH/USDT:USDT" in ranked[0]
+    assert "FRESH/USDT" in ranked[0]
 
 def test_scan_stop_reports_worker_still_running(pool):
     runtime = MagicMock()
@@ -195,7 +195,7 @@ def test_scan_stop_reports_worker_still_running(pool):
     assert "AtlasScanWorker-0" in result
 
 
-def test_scan_status_includes_strategy_funnel(pool):
+def test_scan_status_keeps_strategy_funnel_in_pool_command(pool):
     runtime = MagicMock()
     service = make_service(runtime)
     runtime.scan_status.return_value = {
@@ -213,8 +213,8 @@ def test_scan_status_includes_strategy_funnel(pool):
     }
     result = service.handle_scan_status()
     assert "gateio_24h_quote_volume" in result
-    assert "YEDİ STRATEJİ / ORTAK FİLTRE" in result
-    assert "smc: 1 setup | 1 geçti | 0 elendi | 1 seçildi" in result
+    assert "SMC" not in result
+    assert "/havuzdurum" in result
 
 @pytest.mark.parametrize(("message", "limit"), [
     ("20 tara", 20),
