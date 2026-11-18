@@ -869,6 +869,26 @@ class TelegramCommandService:
                     f"{counts.get('passed', 0)} geçti | {counts.get('rejected', 0)} elendi | "
                     f"{counts.get('selected', 0)} seçildi"
                 )
+                not_generated = sum(
+                    int(counts.get(key, 0) or 0)
+                    for key in (
+                        "no_setup", "condition_not_met", "missing_data",
+                        "insufficient_history", "errors", "other_no_setup",
+                    )
+                )
+                if not_generated:
+                    lines.append(
+                        "    Setup yok: "
+                        f"{not_generated} | koşul: {counts.get('condition_not_met', 0)} | "
+                        f"veri: {counts.get('missing_data', 0)} | "
+                        f"geçmiş: {counts.get('insufficient_history', 0)} | "
+                        f"hata: {counts.get('errors', 0)}"
+                    )
+                    for item in counts.get("top_reasons") or []:
+                        reason = str(item.get("reason") or "").replace("\\n", " ")
+                        if len(reason) > 180:
+                            reason = reason[:177] + "..."
+                        lines.append(f"    Neden ({item.get('count', 0)}): {reason}")
         failed = self.runtime._scan_queue.failed_symbols() if hasattr(self.runtime, "_scan_queue") else []
         if failed:
             lines.append("")
