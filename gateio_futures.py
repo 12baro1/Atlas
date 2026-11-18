@@ -152,6 +152,11 @@ class GateFuturesExchange:
         for row in rows:
             try:
                 stamp = int(row["create_time_ms"])
+                # Gate.io's create_time_ms is normally milliseconds, but some
+                # responses/fixtures provide Unix seconds despite the field name.
+                # Normalize before both since filtering and freshness consumers.
+                if stamp < 10_000_000_000:
+                    stamp *= 1000
                 if since is not None and stamp < int(since):
                     continue
                 size = _scaled_contract_amount(abs(float(row["size"])), self.contract_size(symbol))
