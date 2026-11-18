@@ -413,7 +413,7 @@ def test_new_strategy_analysis_replaces_previous_pending_symbol_setup(tmp_path):
     pool.add_candidate(old)
     pool.validate_candidate("c1")
 
-    new = make_candidate("c2", strat="orderflow_momentum")
+    new = make_candidate("c2", strat="smc")
     new.direction = "SHORT"
     assert pool.add_candidate(new) is True
     assert pool.validate_candidate("c2") is True
@@ -493,49 +493,45 @@ def _make_validated_candidate(pool, sid, sym="BTC/USDT:USDT", strat="smc",
     return c
 
 
-def test_best_setups_excludes_expired_setups(tmp_path):
-    """Süresi geçmiş setup'lar en iyi 5/10 listesinde olmamalı."""
+def test_best_setups_keeps_setup_past_expiry_timestamp_until_structure_breaks(tmp_path):
+    """Setup yaşı/expiry zamanı tek başına strateji yapısını geçersiz kılmaz."""
     pool = make_pool(tmp_path, expiry_hours=24)
     now_ms = int(time.time() * 1000)
     _make_validated_candidate(pool, "good", net_rr=3.2, now_ms=now_ms)
-    _make_validated_candidate(pool, "expired", net_rr=5.0, now_ms=now_ms, expired=True)
+    _make_validated_candidate(pool, "old", net_rr=5.0, now_ms=now_ms, expired=True)
 
     best = pool.get_best_setups(limit=5)
     symbols = {c.setup_id for c in best}
     assert "good" in symbols
-    assert "expired" not in symbols
+    assert "old" in symbols
+    assert "old" in pool._validated
     pool.stop()
 
 
-def test_best_setups_excludes_stale_updated_at(tmp_path):
-    """updated_at_ms çok eski (bayat veri) setup'lar dışlanmalı."""
+def test_best_setups_keeps_old_updated_at_when_rr_and_structure_are_valid(tmp_path):
     pool = make_pool(tmp_path, expiry_hours=24)
     now_ms = int(time.time() * 1000)
     _make_validated_candidate(pool, "fresh", net_rr=3.2, now_ms=now_ms,
                               updated_age_hours=1)
-    _make_validated_candidate(pool, "stale", net_rr=5.0, now_ms=now_ms,
-                              updated_age_hours=100)  # 100 hours old
+    _make_validated_candidate(pool, "old", net_rr=5.0, now_ms=now_ms,
+                              updated_age_hours=100)
 
-    best = pool.get_best_setups(limit=5)
-    symbols = {c.setup_id for c in best}
+    symbols = {c.setup_id for c in pool.get_best_setups(limit=5)}
     assert "fresh" in symbols
-    assert "stale" not in symbols
+    assert "old" in symbols
     pool.stop()
 
 
-def test_best_setups_archives_validated_setup_older_than_freshness_window(tmp_path):
+def test_best_setups_keeps_six_hour_setup_until_strategy_reports_break(tmp_path):
     pool = make_pool(tmp_path, freshness_hours=2)
-    stale = make_candidate("stale-six-hours")
-    stale.created_at_ms = int(time.time() * 1000) - 6 * 60 * 60 * 1000
-    pool.add_candidate(stale)
-    assert pool.validate_candidate(stale.setup_id) is True
+    old = make_candidate("six-hours-old")
+    old.created_at_ms = int(time.time() * 1000) - 6 * 60 * 60 * 1000
+    old.updated_at_ms = old.created_at_ms
+    pool.add_candidate(old)
+    assert pool.validate_candidate(old.setup_id) is True
 
-    assert pool.get_best_setups(limit=10) == []
-    assert stale.setup_id not in pool._validated
-    history = pool.get_recent_history(limit=10)
-    archived = next(item for item in history if item.get("setup_id") == stale.setup_id)
-    assert archived["status"] == SetupStatus.EXPIRED.value
-    assert archived["invalidation_reason"] == "STALE_SETUP"
+    assert [item.setup_id for item in pool.get_best_setups(limit=10)] == [old.setup_id]
+    assert old.setup_id in pool._validated
     pool.stop()
 
 
@@ -565,8 +561,8 @@ def test_best_setups_excludes_invalid_rr(tmp_path):
     pool.stop()
 
 
-def test_best_setups_excludes_missing_timestamps(tmp_path):
-    """created_at_ms veya updated_at_ms eksik setup'lar dışlanmalı."""
+def test_best_setups_keeps_missing_timestamps_when_setup_geometry_is_valid(tmp_path):
+    """Timestamps are audit metadata, not strategy-structure validity."""
     pool = make_pool(tmp_path, expiry_hours=24)
     now_ms = int(time.time() * 1000)
 
@@ -589,7 +585,29 @@ def test_best_setups_excludes_missing_timestamps(tmp_path):
     best = pool.get_best_setups(limit=5)
     symbols = {c.setup_id for c in best}
     assert "valid" in symbols
-    assert "no_created" not in symbols
+    assert "no_created" in symbols
+    pool.stop()
+
+
+def test_strategy_structure_failure_removes_only_matching_strategy(tmp_path):
+    pool = make_pool(tmp_path)
+    smc = make_candidate("smc-live", "BTC/USDT:USDT", "smc")
+    orderflow = make_candidate("of-live", "BTC/USDT:USDT", "orderflow_momentum")
+    pool.add_candidate(smc)
+    pool.validate_candidate(smc.setup_id)
+    pool.add_candidate(orderflow)
+    pool.validate_candidate(orderflow.setup_id)
+
+    removed = pool.invalidate_strategy_setup(
+        "BTC/USDT:USDT", "smc", "STRATEGY_STRUCTURE_BROKEN"
+    )
+    assert [item.setup_id for item in removed] == ["smc-live"]
+    assert "smc-live" not in pool._validated
+    assert "of-live" in pool._validated
+    history = pool.get_recent_history(limit=10)
+    archived = next(item for item in history if item["setup_id"] == "smc-live")
+    assert archived["status"] == SetupStatus.INVALIDATED.value
+    assert archived["invalidation_reason"] == "STRATEGY_STRUCTURE_BROKEN"
     pool.stop()
 
 
