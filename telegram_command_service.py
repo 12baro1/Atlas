@@ -1158,7 +1158,7 @@ class TelegramCommandService:
         ]
 
         if tracking:
-            lines.extend(["", "AÇIK İŞLEMLER"])
+            lines.extend(["", "AKTİF İŞLEM TAKİBİ"])
             for item in tracking[:10]:
                 lines.extend([_format_outcome_item(item, "AÇIK / TAKİPTE"), ""])
             if len(tracking) > 10:
@@ -1181,7 +1181,7 @@ class TelegramCommandService:
                 ])
 
         if waiting_signals:
-            lines.extend(["", "SİNYAL GİRİŞİ BEKLİYOR"])
+            lines.extend(["", "GİRİŞ BEKLEYEN SİNYALLER"])
             for item in waiting_signals[:10]:
                 lines.extend([_format_outcome_item(item, "GİRİŞ BEKLENİYOR"), ""])
             if len(waiting_signals) > 10:
@@ -1203,7 +1203,7 @@ class TelegramCommandService:
                 lines.append(f"Diğer giriş bekleyen setup: +{len(validated) - 10}")
 
         if closed:
-            lines.extend(["", "SONUÇLANAN İŞLEMLER"])
+            lines.extend(["", "SON KAPANAN İŞLEMLER"])
             for item in closed:
                 lines.extend([_format_outcome_item(item, "SONUÇLANDI"), ""])
 
