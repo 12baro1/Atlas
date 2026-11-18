@@ -171,7 +171,7 @@ def _mean_reversion_data():
         price += 0.02
     # Force bullish mean-reversion: price dipped below band, now reclaiming
     candles[-2] = Candle(now + 23 * 900_000, 99, 100, 98, 98.2, 100.0)
-    candles[-1] = Candle(now + 24 * 900_000, 98.2, 99.5, 98, 99.0, 100.0)
+    candles[-1] = Candle(now + 24 * 900_000, 98.2, 99.5, 97.8, 99.0, 100.0)
     return {
         "symbol": "SOL/USDT:USDT",
         "15m": candles,
@@ -211,7 +211,7 @@ def _liquidation_cascade_data():
         "current_price": 100.0,
         "funding_rate": [-0.0002],
         "funding_rate_timestamps_ms": [now - 60_000],
-        "recent_trades": [{"amount": 2.0, "price": 100.0, "side": "sell"} for _ in range(25)],
+        "recent_trades": [{"amount": 2.0, "price": 100.0, "side": "buy"} for _ in range(25)],
         "liquidation_events": [],
         "shared_market_evidence": {
             "open_interest": {"state": "FRESH", "count": 2, "change_pct": -5.0},
@@ -265,7 +265,7 @@ def _orderflow_data(side="buy"):
         },
         "orderbook_timestamp_ms": now,
         "recent_trades": [
-            {"amount": 5.0, "price": 100.1, "side": side} for _ in range(40)
+            {"amount": 5.0, "price": 100.1 + (i % 2) * 0.1, "side": side} for i in range(40)
         ],
         "recent_trades_timestamp_ms": now,
         "trade_flow_history": [
