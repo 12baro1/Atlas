@@ -486,9 +486,9 @@ def test_performance_report_shows_cumulative_profit_loss_in_r():
             }
 
     message = TelegramCommandService(Runtime(), "token", "chat").handle_performance()
-    assert "Toplam kazanç: +8.2500R" in message
-    assert "Toplam kayıp: -4.5000R" in message
-    assert "Net sonuç: +3.7500R" in message
-    assert "Toplam kazanç: +3.0000R" in message
-    assert "Net sonuç: +1.0000R" in message
+    assert "Toplam kazanç: +8.25R" in message
+    assert "Toplam kayıp: -4.50R" in message
+    assert "Net sonuç: +3.75R" in message
+    assert "Toplam kazanç: +3.00R" in message
+    assert "Net sonuç: +1.00R" in message
     assert "TL/USDT tutarı değildir" in message
