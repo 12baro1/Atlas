@@ -694,14 +694,20 @@ class AtlasRuntime:
                         status = str(strategy_row.get("status") or "").upper()
                         if not strategy_id or status not in {"NO_SETUP", "CONDITION_NOT_MET"}:
                             continue
-                        removed = pool.invalidate_strategy_setup(
-                            symbol, strategy_id, "STRATEGY_STRUCTURE_BROKEN"
+                        reason = "STRATEGY_STRUCTURE_BROKEN"
+                        removed = pool.invalidate_strategy_setup(symbol, strategy_id, reason)
+                        invalidate_signals = getattr(
+                            self.engine.trade_journal, "invalidate_pending_signal_outcomes", None
+                        )
+                        removed_signals = (
+                            invalidate_signals(symbol=symbol, strategy_id=strategy_id, reason=reason)
+                            if callable(invalidate_signals) else []
                         )
                         if removed:
                             state_engine = getattr(self.engine, "state_engine", None)
                             if state_engine is not None:
                                 state_engine.clear_active_setup(
-                                    symbol, reason="setup_invalidated:STRATEGY_STRUCTURE_BROKEN"
+                                    symbol, reason=f"setup_invalidated:{reason}"
                                 )
                         invalidated_setups.extend({
                             "setup_id": item.setup_id,
@@ -710,6 +716,13 @@ class AtlasRuntime:
                             "strategy_name": item.strategy_name,
                             "direction": item.direction,
                         } for item in removed)
+                        invalidated_setups.extend({
+                            "signal_id": item.get("signal_id"),
+                            "symbol": item.get("symbol"),
+                            "strategy_id": strategy_id,
+                            "strategy_name": (item.get("payload") or {}).get("strategy") or strategy_id,
+                            "direction": item.get("direction"),
+                        } for item in removed_signals)
 
                     # Add/refresh the selected setup after invalidating broken
                     # strategy structures; other strategies remain independent.
