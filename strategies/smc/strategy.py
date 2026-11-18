@@ -1,3 +1,5 @@
+import math
+
 """Single integrated SMC candidate adapter; specialist motors remain evidence-only."""
 
 def _mandatory_confluence_reason(analysis, direction, entry):
@@ -99,8 +101,11 @@ def generate(result, data=None):
         math.isfinite(value) and value > 0 for value in (entry, stop, *target_values)
     ):
         return None
-    if _mandatory_confluence_reason(analysis, direction, entry) is not None:
+    mandatory_reason = _mandatory_confluence_reason(analysis, direction, entry)
+    if mandatory_reason:
+        analysis["smc_mandatory_gate_reason"] = mandatory_reason
         return None
+    analysis.pop("smc_mandatory_gate_reason", None)
     if direction == "LONG" and not (stop < entry < target_values[0] <= target_values[1] <= target_values[2]):
         return None
     if direction == "SHORT" and not (target_values[0] >= target_values[1] >= target_values[2] and target_values[0] < entry < stop):
