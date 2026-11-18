@@ -257,8 +257,9 @@ def _orderflow_data(side="buy"):
     return {
         "symbol": "BTC/USDT:USDT",
         "snapshot_timestamp_ms": now,
-        "current_price": 100.0,
-        "15m": [Candle(now + i * 900_000, 100, 101, 99, 100, 100.0) for i in range(15)],
+        "current_price": 100.4,
+        "15m": ([Candle(now + i * 900_000, 100, 101, 99, 100, 100.0) for i in range(14)]
+                + [Candle(now + 14 * 900_000, 99.8, 100.5, 99.7, 100.4, 100.0)]),
         "orderbook": {
             "bids": [[99.9, bid_size], [99.8, bid_size], [99.7, bid_size]],
             "asks": [[100.1, ask_size], [100.2, ask_size], [100.3, ask_size]],
