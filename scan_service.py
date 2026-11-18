@@ -2,11 +2,10 @@
 
 - The queue, universe inventory and workers live in the runtime service,
   NOT in the Telegram bot: restarting Telegram never resets a scan.
-- Every scan command (20/30/50/100/200/500/1000/tümünü tara) enqueues the
-  current Gate.io universe into the durable ScanQueue; pending jobs from a
-  previous run resume automatically (checkpoint preserved).
-- Already-scanned symbols keep their result; no needless re-scan happens
-  unless the queue is fully complete and the user explicitly asks again.
+- Every scan command enqueues the ranked Gate.io universe and also rechecks
+  symbols that still own live opportunity-pool setups.
+- Pending work resumes without resetting checkpoints; completed/failed setup
+  symbols are selectively reopened in the same generation for fresh validation.
 - Workers claim atomically, so parallel scans are safe, and the bounded
   analysis gap keeps Gate.io API usage inside rate limits.
 """
@@ -212,6 +211,7 @@ class ScanService:
                     seen.add(symbol)
                     symbols.append(symbol)
         return symbols
+
     def start_scan(self, limit: Optional[int] = None) -> Dict[str, Any]:
         """Enqueue the requested scan and make sure workers are running.
 
