@@ -79,6 +79,7 @@ def _trend_pullback_bullish_data():
 def test_trend_pullback_real_data_produces_long():
     data = _trend_pullback_bullish_data()
     plan = trend_generate(data)
+    assert plan is not None, "trend_pullback must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "trend_pullback"
         assert plan["direction"] in ("LONG", "SHORT")
@@ -132,6 +133,7 @@ def _volatility_breakout_data():
 def test_volatility_breakout_real_data():
     data = _volatility_breakout_data()
     plan = breakout_generate(data)
+    assert plan is not None, "volatility_breakout must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "volatility_breakout"
         assert plan["direction"] in ("LONG", "SHORT")
@@ -180,7 +182,8 @@ def _mean_reversion_data():
 
 def test_mean_reversion_real_data_range_regime():
     data = _mean_reversion_data()
-    plan = mean_reversion_generate(data, {"label": "RANGE"})
+    plan = mean_reversion_generate(data, {"label": "RANGE", "adx": 15})
+    assert plan is not None, "mean_reversion must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "mean_reversion"
         assert plan["direction"] in ("LONG", "SHORT")
@@ -219,6 +222,7 @@ def _liquidation_cascade_data():
 def test_liquidation_cascade_real_data():
     data = _liquidation_cascade_data()
     plan = liquidation_generate(data)
+    assert plan is not None, "liquidation_cascade must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "liquidation_cascade"
         assert plan["direction"] in ("LONG", "SHORT")
@@ -284,6 +288,7 @@ def test_orderflow_real_data_buy_side():
         "shared.market_data_services", fromlist=["build_shared_market_evidence"]
     ).build_shared_market_evidence(data)
     plan = orderflow_generate(data)
+    assert plan is not None, "orderflow_momentum must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "orderflow_momentum"
         assert plan["direction"] == "LONG"
@@ -361,6 +366,7 @@ def _relative_strength_data():
 def test_relative_strength_real_data():
     data = _relative_strength_data()
     plan = relative_strength_generate(data)
+    assert plan is not None, "relative_strength must produce a setup from its positive fixture"
     if plan is not None:
         assert plan["strategy_id"] == "relative_strength"
         assert plan["direction"] in ("LONG", "SHORT")
