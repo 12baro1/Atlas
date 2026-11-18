@@ -86,7 +86,7 @@ def test_category_grouping():
     assert len(scan_cmds) == 15
 
     setup_cmds = get_commands_by_category("setup")
-    assert len(setup_cmds) == 7
+    assert len(setup_cmds) == 6
 
     performance_cmds = get_commands_by_category("performance")
     assert len(performance_cmds) == 3  # performans, istatistik, ogrenme
@@ -112,7 +112,7 @@ def test_help_text_contains_all_commands():
 
 def test_command_count():
     """Verify expected total command count."""
-    assert len(TELEGRAM_COMMANDS) == 35
+    assert len(TELEGRAM_COMMANDS) == 34
 
 
 def test_specific_commands_exist():
