@@ -103,6 +103,32 @@ def _format_price(value, *, grouping=True):
     return rendered or "0"
 
 
+def _format_strategy_name(value):
+    """Translate internal strategy IDs into readable Telegram labels."""
+    raw = str(value or "Belirtilmedi").strip()
+    key = raw.lower().replace("-", "_").replace(" ", "_")
+    labels = {
+        "liquidation_cascade": "LIQUIDATION CASCADE",
+        "mean_reversion": "MEAN REVERSION",
+        "orderflow_momentum": "ORDERFLOW MOMENTUM",
+        "relative_strength": "RELATIVE STRENGTH",
+        "smc": "SMC",
+        "trend_pullback": "TREND PULLBACK",
+        "volatility_breakout": "VOLATILITY BREAKOUT",
+    }
+    return labels.get(key, raw.upper() if "_" in raw else raw)
+
+
+def _format_ranking_source(value):
+    """Hide internal ranking identifiers from Telegram users."""
+    labels = {
+        "gateio_24h_quote_volume": "24 saatlik USDT işlem hacmi",
+        "alphabetical_fallback": "Alfabetik yedek sıralama",
+    }
+    raw = str(value or "").strip()
+    return labels.get(raw, raw or "Bilinmiyor")
+
+
 def _outcome_strategy(item):
     payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
     strategy = (
@@ -123,7 +149,7 @@ def _outcome_strategy(item):
         selected = lab.get("selected") if isinstance(lab, dict) else None
         if isinstance(selected, dict):
             strategy = selected.get("strategy") or selected.get("strategy_id")
-    return str(strategy) if strategy else "Belirtilmedi"
+    return _format_strategy_name(strategy)
 
 
 def _outcome_progress(item):
@@ -362,7 +388,7 @@ def _format_telegram_card(card, elapsed_ms=0):
             "Karar: İŞLEME GİRME",
         ])
 
-    strategy = str(card.get("strategy") or card.get("strategy_id") or "Belirtilmedi")
+    strategy = _format_strategy_name(card.get("strategy") or card.get("strategy_id"))
     rr = card.get("net_rr")
     if rr is None:
         rr = card.get("weighted_net_rr")
@@ -867,7 +893,7 @@ class TelegramCommandService:
             "",
             "PİYASA",
             f"Borsa: Gate.io | USDT Perpetual: {inventory.get('symbol_count', 0)}",
-            f"Sıralama: {inventory.get('ranking_source') or 'Bilinmiyor'}",
+            f"Sıralama: {_format_ranking_source(inventory.get('ranking_source'))}",
         ]
         age = inventory.get("last_refresh_age_seconds")
         if age is not None:
@@ -998,7 +1024,7 @@ class TelegramCommandService:
             f"Kuyruğa yeni eklenen: {result.get('added', 0)}",
             f"Tamamlanan: {progress.get('done', 0)} | Bekleyen: {progress.get('pending', 0)}",
             f"İlerleme: %{float(progress.get('percent', 0.0) or 0.0):.1f}",
-            f"Sıralama: {result.get('ranking_source') or 'Mevcut kuyruk sıralaması'}",
+            f"Sıralama: {_format_ranking_source(result.get('ranking_source'))}",
             "",
             "Ayrıntı: /taramadurum",
             "Durdur: /taramadurdur",
@@ -1025,7 +1051,7 @@ class TelegramCommandService:
             entry_type = str(getattr(setup, "entry_type", "") or getattr(setup, "setup_type", "—")).upper()
             lines.extend([
                 f"{index}. {str(setup.symbol).replace(':USDT', '')} | {setup.direction}",
-                f"Strateji: {setup.strategy_name} | Emir: {entry_type}",
+                f"Strateji: {_format_strategy_name(setup.strategy_name)} | Emir: {entry_type}",
                 f"Giriş: {_format_price(setup.entry_price)}",
                 f"Stop Loss: {_format_price(setup.stop_loss)}",
                 f"TP1: {_format_price(setup.tp1)}",
@@ -1063,7 +1089,7 @@ class TelegramCommandService:
                 entry_type = str(getattr(item, "entry_type", "") or getattr(item, "setup_type", "—")).upper()
                 lines.extend([
                     f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
-                    f"Strateji: {item.strategy_name} | Emir: {entry_type}",
+                    f"Strateji: {_format_strategy_name(item.strategy_name)} | Emir: {entry_type}",
                     f"Giriş: {_format_price(item.entry_price)}",
                     f"Stop Loss: {_format_price(item.stop_loss)}",
                     f"TP1: {_format_price(item.tp1)}",
@@ -1079,7 +1105,7 @@ class TelegramCommandService:
                 progress = f"TP{item.current_tp} ALINDI" if item.current_tp else "Hedef bekleniyor"
                 lines.extend([
                     f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
-                    f"Strateji: {item.strategy_name} | Durum: {item.status}",
+                    f"Strateji: {_format_strategy_name(item.strategy_name)} | Durum: {item.status}",
                     f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)}",
                     f"Koruma Stop Loss: {_format_price(item.trailing_stop or item.stop_loss)}",
                     f"TP1: {_format_price(item.tp1)}",
