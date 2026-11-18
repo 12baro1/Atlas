@@ -247,6 +247,8 @@ class FakeQ:
 
     def __init__(self):
         self.jobs = {}
+        self.generation = 0
+        self.ranking = {}
         self._lock = threading.Lock()
 
     def enqueue(self, symbols, batch_tag=None):
@@ -259,11 +261,38 @@ class FakeQ:
         return added
 
     def current_generation(self):
-        return 0
+        return self.generation
+
+    def generation_symbols(self, generation=None):
+        return list(self.jobs)
+
+    def set_generation_ranking(self, symbols, source, generation=None):
+        self.ranking = {"symbols": list(symbols), "ranking_source": source}
+
+    def generation_ranking(self, generation=None):
+        return dict(self.ranking)
+
+    def reorder_pending(self, ranked_symbols):
+        rank = {symbol: index for index, symbol in enumerate(ranked_symbols)}
+        pending = sorted(
+            (symbol for symbol, job in self.jobs.items() if job["state"] == "pending"),
+            key=lambda symbol: (rank.get(symbol, len(rank)), symbol),
+        )
+        ordered = {}
+        for symbol in pending:
+            ordered[symbol] = self.jobs[symbol]
+        for symbol, job in self.jobs.items():
+            if job["state"] != "pending":
+                ordered[symbol] = job
+        self.jobs = ordered
+        return len(pending)
 
     def rebuild(self, symbols, batch_tag=None):
+        self.generation += 1
+        self.jobs = {}
+        added = self.enqueue(symbols, batch_tag)
         return {
-            "added": self.enqueue(symbols, batch_tag),
+            "added": added,
             "progress": self.progress(),
             "generation": self.current_generation(),
         }
@@ -419,6 +448,36 @@ def test_scan_uses_ranked_symbols_and_extends_active_generation(tmp_path):
     assert queue.jobs[ranked[0]]["state"] == "done"
     assert queue.jobs[ranked[1]]["state"] == "pending"
     assert queue.jobs[ranked[2]]["state"] == "pending"
+
+
+def test_startup_sync_rebuilds_legacy_queue_to_ranked_top_universe(tmp_path):
+    runtime = FakeRuntime()
+    symbols = ["AAA/USDT:USDT", "BBB/USDT:USDT", "CCC/USDT:USDT"]
+    ranked = ["CCC/USDT:USDT", "BBB/USDT:USDT"]
+    queue = FakeQ()
+    queue.enqueue(symbols[:2])  # legacy alphabetical generation
+    service = ScanService(runtime, queue, FakeInv(symbols, ranked_symbols=ranked),
+                          worker_count=1, analysis_gap_seconds=0.0)
+
+    result = service.synchronize_ranked_universe(limit=2)
+    assert result["rebuilt"] is True
+    assert queue.generation_symbols() == ranked
+    assert queue.generation_ranking()["ranking_source"] == "fake_24h_quote_volume"
+
+
+def test_startup_sync_reorders_pending_without_resetting_completed_jobs(tmp_path):
+    runtime = FakeRuntime()
+    symbols = ["AAA/USDT:USDT", "BBB/USDT:USDT", "CCC/USDT:USDT"]
+    queue = FakeQ()
+    queue.enqueue(symbols)
+    queue.jobs["AAA/USDT:USDT"]["state"] = "done"
+    service = ScanService(runtime, queue, FakeInv(symbols, ranked_symbols=list(reversed(symbols))),
+                          worker_count=1, analysis_gap_seconds=0.0)
+
+    result = service.synchronize_ranked_universe(limit=3)
+    assert result["rebuilt"] is False
+    assert queue.jobs["AAA/USDT:USDT"]["state"] == "done"
+    assert queue.generation_ranking()["symbols"] == list(reversed(symbols))
 
 
 def test_stop_scan_does_not_orphan_or_revive_inflight_worker(tmp_path):
