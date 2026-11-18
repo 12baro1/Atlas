@@ -12,7 +12,7 @@ from scan_queue import ScanQueue, DONE, FAILED, PENDING, RUNNING
 
 
 def test_requeue_completed_reopens_only_done_and_failed_jobs(tmp_path):
-    queue = make_queue(tmp_path)
+    queue = make_queue(tmp_path, max_retries=1)
     queue.start_new_period("revalidate")
     queue.enqueue(["DONE/USDT", "FAILED/USDT", "PENDING/USDT", "RUNNING/USDT"])
     assert queue.claim_next()["symbol"] == "DONE/USDT"
