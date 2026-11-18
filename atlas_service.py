@@ -168,7 +168,8 @@ def main() -> int:
 
     # Reuse the same persistent inventory instance as ScanService. Its refresh
     # already retries transient Gate.io failures and preserves the last snapshot.
-    inventory = get_market_inventory(exchange=exchange)
+    # GateFuturesExchange owns endpoint retries; avoid multiplying them with inventory retries.
+    inventory = get_market_inventory(exchange=exchange, max_retries=1)
     logger.info("Loading Gate.io public perpetual market metadata")
     symbols, selection_stats = load_startup_symbols(
         inventory,
