@@ -1041,19 +1041,10 @@ class TelegramCommandService:
             age = f"{age_hours:.1f} sa" if age_hours is not None else "bilinmiyor"
             entry_type = str(getattr(setup, "entry_type", "") or getattr(setup, "setup_type", "—")).upper()
             lines.extend([
-                f"{index}. {str(setup.symbol).replace(':USDT', '')} | {setup.direction}",
-                f"Strateji: {_format_strategy_name(setup.strategy_name)} | Emir: {entry_type}",
-                f"Giriş: {_format_price(setup.entry_price)}",
-                f"Stop Loss: {_format_price(setup.stop_loss)}",
-                f"TP1: {_format_price(setup.tp1)}",
-                f"TP2: {_format_price(setup.tp2)}",
-                f"TP3: {_format_price(setup.tp3)}",
-                f"RR (TP1/TP2/TP3): "
-                f"{_format_rr(getattr(setup, 'rr_tp1', None))} / "
-                f"{_format_rr(getattr(setup, 'rr_tp2', None))} / "
-                f"{_format_rr(getattr(setup, 'rr_tp3', None))}",
-                f"Net RR: {_format_rr(getattr(setup, 'net_rr_after_costs', None))}",
-                f"Durum: {setup.status} | Yaş: {age}",
+                f"{index}. {str(setup.symbol).replace(':USDT', '')} | {setup.direction} | {_format_strategy_name(setup.strategy_name)}",
+                f"Emir: {entry_type} | Giriş: {_format_price(setup.entry_price)} | SL: {_format_price(setup.stop_loss)}",
+                f"TP1: {_format_price(setup.tp1)} | TP2: {_format_price(setup.tp2)} | TP3: {_format_price(setup.tp3)}",
+                f"Net RR: {_format_rr(getattr(setup, 'net_rr_after_costs', None))} | {setup.status} | Yaş: {age}",
                 "",
             ])
         lines.extend([
