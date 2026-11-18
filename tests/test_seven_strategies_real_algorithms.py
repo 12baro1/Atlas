@@ -202,6 +202,26 @@ def test_mean_reversion_real_data_range_regime():
     if plan is not None:
         assert plan["strategy_id"] == "mean_reversion"
         assert plan["direction"] in ("LONG", "SHORT")
+        # No specialist outputs are supplied: native strategy rules suffice.
+        assert plan["specialist_evidence"] == []
+        assert plan["specialist_evidence_count"] == 0
+
+
+def test_mean_reversion_specialist_disagreement_does_not_block_setup():
+    data = _mean_reversion_data()
+    data["specialist_evidence"] = [
+        {"motor": "market_phase", "status": "COMPLETED",
+         "output": {"decision": "BLOCK", "direction": "SHORT"}},
+        {"motor": "market_regime", "status": "COMPLETED",
+         "output": {"decision": "REJECT", "direction": "SHORT"}},
+    ]
+    plan = mean_reversion_generate(data, {"label": "RANGE", "adx": 15})
+    assert plan is not None, "specialist disagreement must not veto a valid native setup"
+    assert plan["strategy_id"] == "mean_reversion"
+    assert plan["specialist_evidence_count"] == 2
+    assert {row["motor"] for row in plan["specialist_evidence"]} == {
+        "market_phase", "market_regime",
+    }
 
 
 def test_mean_reversion_non_range_returns_none():
