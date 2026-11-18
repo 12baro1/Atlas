@@ -202,9 +202,7 @@ def test_mean_reversion_real_data_range_regime():
     if plan is not None:
         assert plan["strategy_id"] == "mean_reversion"
         assert plan["direction"] in ("LONG", "SHORT")
-
-
-def test_mean_reversion_non_range_returns_none():
+        # No specialist outputs are supplied: native strategy rules suffice.\n        assert plan["specialist_evidence"] == []\n        assert plan["specialist_evidence_count"] == 0\n\n\ndef test_mean_reversion_specialist_disagreement_does_not_block_setup():\n    data = _mean_reversion_data()\n    data["specialist_evidence"] = [\n        {"motor": "market_phase", "status": "COMPLETED",\n         "output": {"decision": "BLOCK", "direction": "SHORT"}},\n        {"motor": "market_regime", "status": "COMPLETED",\n         "output": {"decision": "REJECT", "direction": "SHORT"}},\n    ]\n    plan = mean_reversion_generate(data, {"label": "RANGE", "adx": 15})\n    assert plan is not None, "specialist disagreement must not veto a valid native setup"\n    assert plan["strategy_id"] == "mean_reversion"\n    assert plan["specialist_evidence_count"] == 2\n    assert {row["motor"] for row in plan["specialist_evidence"]} == {\n        "market_phase", "market_regime",\n    }\n\n\ndef test_mean_reversion_non_range_returns_none():
     data = _mean_reversion_data()
     assert mean_reversion_generate(data, {"label": "TREND"}) is None
 
