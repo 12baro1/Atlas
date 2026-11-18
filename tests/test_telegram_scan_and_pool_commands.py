@@ -212,7 +212,7 @@ def test_scan_status_keeps_strategy_funnel_in_pool_command(pool):
         "pool": {"validated": 2},
     }
     result = service.handle_scan_status()
-    assert "gateio_24h_quote_volume" in result
+    assert "24 saatlik USDT işlem hacmi" in result
     assert "SMC" not in result
     assert "/havuzdurum" in result
 
