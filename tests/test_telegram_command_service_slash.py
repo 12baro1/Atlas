@@ -108,7 +108,7 @@ def test_mevcut_daily_report_uses_turkey_local_day_and_net_r():
     ]
 
     report = format_daily_signal_report(rows, now=now)
-    assert "Verilen setup: 5" in report
+    assert "Bugünkü setup + önceki günlerden açık: 5" in report
     assert "Giriş seviyesi mumda görüldü: 3" in report
     assert "MARKET referansı (fill teyitsiz): 1" in report
     assert "Giriş olmadı (süresi doldu): 1" in report
@@ -128,13 +128,12 @@ def test_telegram_card_is_compact_and_keeps_trade_levels():
     text = _format_telegram_card(card)
     assert "BTC/USDT — LONG" in text
     assert "Strateji: SMC" in text
-    assert "Emir tipi: LIMIT" in text
-    assert "Giriş: 100" in text
-    assert "Stop Loss: 99" in text
+    assert "Giriş (LIMIT): 100" in text
+    assert "SL: 99" in text
     assert "TP3: 103" in text
-    assert "Risk/Getiri (Net RR): +1.25R" in text
-    assert "DURUM: Giriş fiyatı bekleniyor." in text
-    assert "Atlas otomatik emir göndermez." in text
+    assert "Net RR: +1.25R" in text
+    assert "Risk/Getiri" not in text
+    assert "LIMIT giriş bekleniyor" in text
 
 
 def test_start_command_is_registered_and_recognized():
@@ -192,7 +191,7 @@ def test_runtime_signal_tracking_is_opt_in_by_default():
     assert parameter.default is False
 
 
-def test_telegram_card_includes_strategy_thesis_and_evidence():
+def test_telegram_card_omits_verbose_strategy_evidence():
     card = {
         "symbol": "ETH/USDT:USDT", "direction": "SHORT",
         "decision_action": "EXECUTE_WITH_CAUTION", "entry_type": "MARKET",
@@ -205,11 +204,11 @@ def test_telegram_card_includes_strategy_thesis_and_evidence():
     }
     message = _format_telegram_card(card)
     assert "Strateji: orderflow_momentum" in message
-    assert "SETUP GEREKÇESİ" in message
-    assert "CVD negatif" in message
-    assert "DİKKAT" in message
-    assert "Karşı kanıt: Yakın destek bölgesi" in message
-    assert "Borsa emri veya gerçekleşmiş fill teyidi değildir" in message
+    assert "Net RR: +2.10R" in message
+    assert "CVD negatif" not in message
+    assert "DİKKAT" not in message
+    assert "Karşı kanıt" not in message
+    assert "borsaya emir gönderilmedi" in message
 
 
 def test_mevcut_report_shows_levels_strategy_and_tp_progress():
@@ -302,7 +301,7 @@ def test_service_handles_slash_btc_directly():
     result = service.execute_command("/btc")
     assert "BTC/USDT" in result
     assert "LONG" in result
-    assert "Atlas otomatik emir göndermez" in result
+    assert "borsaya emir gönderilmedi" in result
 
 
 def test_service_handles_analiz_with_parameter():
@@ -426,7 +425,7 @@ def test_help_command():
     assert "/btc" in result
     assert "/eniyi5" in result
     assert "/analiz" in result
-    assert "Atlas otomatik emir göndermez" in result
+    assert "borsaya emir gönderilmedi" in result
 
 
 if __name__ == "__main__":
