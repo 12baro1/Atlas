@@ -13,7 +13,7 @@ on:
           - "60"
           - "90"
       symbols:
-        description: "Comma-separated Bybit USDT perpetual symbols"
+        description: "Comma-separated Gate.io USDT perpetual symbols"
         required: true
         default: "BTC/USDT:USDT,ETH/USDT:USDT,SOL/USDT:USDT"
         type: string
@@ -49,6 +49,9 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Run historical backtest
         env:
+          BACKTEST_SYMBOLS: ${{ inputs.symbols }}
+          BACKTEST_DAYS: ${{ inputs.days }}
+          BACKTEST_MODE: ${{ inputs.mode }}
           ATLAS_AUTO_TRADING_ENABLED: "0"
           ATLAS_TELEGRAM_ENABLED: "0"
           ATLAS_STATE_ENGINE_ENABLED: "0"
@@ -60,14 +63,14 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          args=(--symbols "${{ inputs.symbols }}" --days "${{ inputs.days }}")
-          if [ "${{ inputs.mode }}" = "both" ]; then
+          args=(--symbols "$BACKTEST_SYMBOLS" --days "$BACKTEST_DAYS")
+          if [ "$BACKTEST_MODE" = "both" ]; then
             echo "===== STRICT MODE =====" | tee historical-backtest.txt
             python backtest.py "${args[@]}" 2>&1 | tee -a historical-backtest.txt
             echo "===== LENIENT RAW-SIGNAL MODE =====" | tee -a historical-backtest.txt
             python backtest.py "${args[@]}" --lenient 2>&1 | tee -a historical-backtest.txt
           else
-            if [ "${{ inputs.mode }}" = "lenient" ]; then
+            if [ "$BACKTEST_MODE" = "lenient" ]; then
               args+=(--lenient)
             fi
             python backtest.py "${args[@]}" 2>&1 | tee historical-backtest.txt

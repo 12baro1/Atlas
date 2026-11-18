@@ -238,3 +238,65 @@ def test_malformed_symbols_ignored(tmp_path):
     queue = make_queue(tmp_path)
     assert queue.enqueue(["", None, "  ", "BTC/USDT:USDT"]) == 1
     assert queue.progress()["total"] == 1
+
+
+def test_guarded_refresh_after_restart_preserves_lease_and_pending(tmp_path):
+    queue = make_queue(tmp_path)
+    first = queue.rebuild(["BTC", "ETH"])
+    job = queue.claim_next()
+    queue.close()
+    queue = make_queue(tmp_path)
+    refresh = queue.rebuild(["SOL", "ETH"], preserve_unfinished=True)
+    assert refresh["generation"] == first["generation"]
+    assert not refresh["rebuilt"]
+    assert refresh["progress"]["pending"] == refresh["progress"]["running"] == 1
+    assert queue.complete(job["symbol"], ok=True)
+    assert queue.complete(queue.claim_next()["symbol"], ok=True)
+    assert queue.rebuild(["SOL", "ETH"], preserve_unfinished=True)["rebuilt"]
+    queue.close()
+
+
+def test_old_claim_cannot_complete_recovered_lease(tmp_path):
+    queue = make_queue(tmp_path)
+    queue.enqueue(["BTC"])
+    old = queue.claim_next()
+    queue._thread_conn().execute("UPDATE scan_jobs SET lease_until_ms = 0")
+    recovered = queue.claim_next()
+    assert not queue.complete("BTC", ok=True, claim=old)
+    assert queue.complete("BTC", ok=True, claim=recovered)
+    queue.close()
+
+
+def test_two_connections_cannot_roll_over_the_same_queue_twice(tmp_path):
+    first = make_queue(tmp_path)
+    second = make_queue(tmp_path)
+    from concurrent.futures import ThreadPoolExecutor
+    barrier = threading.Barrier(2)
+
+    def refresh(queue):
+        barrier.wait(timeout=5)
+        return queue.rebuild(["BTC", "ETH"], preserve_unfinished=True)
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(workers.map(refresh, (first, second)))
+    assert sorted(result["rebuilt"] for result in results) == [False, True]
+    assert first.current_generation() == second.current_generation() == 1
+    assert first.progress()["pending"] == 2
+    first.close()
+    second.close()
+
+
+def test_failed_open_preserves_existing_history(tmp_path, monkeypatch):
+    import sqlite3
+    queue = make_queue(tmp_path)
+    queue.rebuild(["BTC"])
+    queue.close()
+    with monkeypatch.context() as patch:
+        def locked(self, conn):
+            raise sqlite3.OperationalError("database is locked")
+        patch.setattr(ScanQueue, "_migrate_to_composite_pk", locked)
+        with pytest.raises(sqlite3.OperationalError):
+            make_queue(tmp_path)
+    reopened = make_queue(tmp_path)
+    assert reopened.generation_symbols() == ["BTC"]
+    reopened.close()

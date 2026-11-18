@@ -129,8 +129,11 @@ class ScanService:
         if not symbols:
             return None
         result = self.queue.rebuild(
-            symbols, batch_tag=f"top_{DEFAULT_SCAN_UNIVERSE_LIMIT}_{int(time.time())}"
+            symbols, batch_tag=f"top_{DEFAULT_SCAN_UNIVERSE_LIMIT}_{int(time.time())}",
+            preserve_unfinished=True,
         )
+        if not result["rebuilt"]:
+            return result
         ranking_source = self.inventory.status().get("ranking_source", "unknown")
         self.queue.set_generation_ranking(
             symbols, ranking_source, generation=result.get("generation")
@@ -146,9 +149,7 @@ class ScanService:
     def synchronize_ranked_universe(self, limit: Optional[int] = None) -> Dict[str, Any]:
         """Align the durable active queue with the current Gate.io turnover ranking.
 
-        Existing generations are preserved when their symbols remain within the
-        ranked universe. If an old generation contains symbols outside the new
-        top-N universe, a new generation is opened; historical rows are retained.
+        A changed membership takes effect after unfinished work drains.
         Pending jobs are reordered by turnover while completed/running states stay intact.
         """
         limit = DEFAULT_SCAN_UNIVERSE_LIMIT if limit is None else min(
@@ -166,9 +167,13 @@ class ScanService:
 
         if not existing or not existing.issubset(ranked_set):
             result = self.queue.rebuild(
-                ranked, batch_tag=f"ranked_top_{limit}_{int(time.time())}"
+                ranked, batch_tag=f"ranked_top_{limit}_{int(time.time())}",
+                preserve_unfinished=True,
             )
             generation = result.get("generation")
+            if not result["rebuilt"]:
+                return {"synchronized": False, "rebuilt": False, "reason": "unfinished_generation",
+                        "scan_generation": generation, "progress": result["progress"]}
             self.queue.set_generation_ranking(ranked, source, generation=generation)
             return {
                 "synchronized": True,
@@ -289,14 +294,14 @@ class ScanService:
             }
 
         queue_result = self.queue.rebuild(
-            scan_symbols, batch_tag=f"scan_{int(time.time())}"
+            scan_symbols, batch_tag=f"scan_{int(time.time())}", preserve_unfinished=True
         )
         inventory_status = self.inventory.status()
-        self.queue.set_generation_ranking(
-            scan_symbols,
-            inventory_status.get("ranking_source", "unknown"),
-            generation=queue_result.get("generation"),
-        )
+        if queue_result["rebuilt"]:
+            self.queue.set_generation_ranking(
+                scan_symbols, inventory_status.get("ranking_source", "unknown"),
+                generation=queue_result.get("generation"),
+            )
         self.ensure_workers()
         progress_after = self.queue.progress()
         return {
@@ -306,7 +311,7 @@ class ScanService:
             "selected_preview": ranked_symbols[:5],
             "added": queue_result["added"],
             "revalidation_symbols": len(revalidation_symbols),
-            "resumed": False,
+            "resumed": not queue_result["rebuilt"],
             "ranking_source": inventory_status.get("ranking_source", "alphabetical_fallback"),
             "workers": self.worker_count,
             "scan_generation": queue_result.get("generation"),
@@ -350,7 +355,8 @@ class ScanService:
                     symbol, force_refresh=True, track_signal=False, use_websocket=False
                 )
                 ok = bool(outcome.get("ok"))
-                self.queue.complete(symbol, ok=ok, error=None if ok else str(outcome.get("error") or "analysis_failed"))
+                self.queue.complete(symbol, ok=ok, claim=job,
+                                    error=None if ok else str(outcome.get("error") or "analysis_failed"))
                 if ok:
                     logger.debug(f"Scan {symbol}: ok")
                 else:
@@ -359,7 +365,7 @@ class ScanService:
                     )
             except Exception as exc:
                 logger.error(f"Scan worker error on {symbol}: {exc}")
-                self.queue.complete(symbol, ok=False, error=str(exc)[:180])
+                self.queue.complete(symbol, ok=False, error=str(exc)[:180], claim=job)
             # Bounded gap between analyses keeps Gate.io usage rate-limit safe.
             if self._stop_event.wait(self.analysis_gap_seconds):
                 break

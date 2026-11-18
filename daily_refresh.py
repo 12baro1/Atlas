@@ -1,12 +1,8 @@
 """Daily pool refresh at 00:00 Europe/Istanbul (requirement K).
 
 One idempotent operation per calendar day (Istanbul time):
-1. The previous day's pool state is archived (SQLite backup + DAILY_REFRESH
-   history rows); old records are preserved, never deleted.
-2. A new daily pool period opens: candidates and validated pools are
-   cleared for the new day; user-accepted active setups are kept.
-3. The scan queue is prepared for the new period: the current Gate.io
-   universe is re-enqueued (existing job states are preserved by design).
+1. Archive the pool with a SQLite backup. Keep live setups for revalidation.
+2. Resume existing scan work or enqueue the ranked Gate.io universe when drained.
 
 State (last_refresh_day) lives in the pool's SQLite meta table, so a VPS
 restart cannot double-refresh the same day. UTC timestamps are stored;
@@ -94,11 +90,13 @@ class DailyPoolRefresh:
                     universe = list(ranker(limit=300) or [])
                 else:
                     universe = sorted(self.market_inventory.get_symbols())[:300]
+                if not universe:
+                    return None
                 counts = self.pool.archive_and_reset_scan_pools(today)
-                # New period: open a fresh scan generation so completed jobs
-                # from the previous day never block today's scan. rebuild()
-                # starts the generation and queues the whole universe into it.
-                queue_result = self.scan_queue.rebuild(universe, batch_tag=f"refresh_{today}")
+                # The queue decides under the SQLite write lock whether to roll over.
+                queue_result = self.scan_queue.rebuild(
+                    universe, batch_tag=f"refresh_{today}", preserve_unfinished=True
+                )
                 store = getattr(self.pool, "_store", None)
                 if store is not None:
                     store.set_meta("last_refresh_day", today)

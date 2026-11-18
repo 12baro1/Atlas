@@ -611,8 +611,17 @@ class BacktestRunner:
             }
             window["symbol"] = data.get("symbol", "SYMBOL")
             # Preserve comparison universes and only pre-decision derivatives/L2 data.
-            if data.get("smt_universe"):
-                window["smt_universe"] = data["smt_universe"]
+            window["snapshot_timestamp_ms"] = decision_time_ms
+            for key in ("smt_universe", "sector_peer_universe"):
+                window[key] = {
+                    symbol: {tf: _window_up_to(series, decision_time_ms, tf)
+                             for tf, series in frames.items() if tf in ("15m", "1h", "4h", "1d", "1w")}
+                    for symbol, frames in (data.get(key) or {}).items() if isinstance(frames, dict)
+                }
+            window["correlation_universe"] = {
+                symbol.split("/")[0]: frames["4h"]
+                for symbol, frames in window["smt_universe"].items() if "4h" in frames
+            }
             window["funding_records"] = [
                 item for item in (data.get("funding_records") or [])
                 if int(item.get("timestamp") or 0) <= decision_time_ms

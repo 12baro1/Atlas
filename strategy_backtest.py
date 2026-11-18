@@ -19,7 +19,6 @@ from backtest import (
     _market_listing_time_ms,
     attach_historical_smt_universe,
     load_historical,
-    _effective_now_ms,
     _validate_backtest_coverage,
     _validate_backtest_history,
     _configured_partial_tp_weights,
@@ -430,11 +429,10 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
         symbol, days=days, now_ms=now_ms, listing_time_ms=listing_time_ms
     )
     _validate_backtest_history(history, symbol)
-    effective_now = _effective_now_ms(history)
     _validate_backtest_coverage(
-        history, symbol, days, effective_now, listing_time_ms=listing_time_ms
+        history, symbol, days, now_ms, listing_time_ms=listing_time_ms
     )
-    attach_historical_smt_universe(history, days, effective_now)
+    attach_historical_smt_universe(history, days, now_ms)
     candles = history.get("15m") or []
     if len(candles) < 320:
         raise RuntimeError(f"{symbol}: yetersiz 15m warmup ({len(candles)} mum).")

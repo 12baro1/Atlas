@@ -121,9 +121,7 @@ class AtlasRuntime:
         # Scan infrastructure resumes regardless of who started the runtime:
         # pending queue work continues and the daily refresh stays scheduled.
         try:
-            # Preserve oversized historical queue generations, but resume work
-            # only from a fresh top-300 generation to avoid repeating the old
-            # 1,000+ market backlog after deployment.
+            # Finish persisted work before applying a new bounded universe.
             self._scan_service.enforce_universe_limit()
             ranking_sync = self._scan_service.synchronize_ranked_universe(limit=300)
             self.logger.info(

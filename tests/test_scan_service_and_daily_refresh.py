@@ -63,7 +63,7 @@ class FakeQueue:
     def __init__(self):
         self.rebuilt = []
 
-    def rebuild(self, symbols, batch_tag=None):
+    def rebuild(self, symbols, batch_tag=None, *, preserve_unfinished=False):
         self.rebuilt.append((tuple(symbols), batch_tag))
         return {"added": len(symbols), "progress": {}, "generation": 1}
 
@@ -307,12 +307,16 @@ class FakeQ:
         self.jobs = ordered
         return len(pending)
 
-    def rebuild(self, symbols, batch_tag=None):
+    def rebuild(self, symbols, batch_tag=None, *, preserve_unfinished=False):
+        progress = self.progress()
+        if preserve_unfinished and (progress["running"] or progress["pending"]):
+            return {"rebuilt": False, "generation": self.generation, "added": 0, "progress": progress}
         self.generation += 1
         self.jobs = {}
         added = self.enqueue(symbols, batch_tag)
         return {
             "added": added,
+            "rebuilt": True,
             "progress": self.progress(),
             "generation": self.current_generation(),
         }
@@ -326,7 +330,7 @@ class FakeQ:
                     return {"symbol": symbol, "attempts": job["attempts"]}
             return None
 
-    def complete(self, symbol, ok, error=None):
+    def complete(self, symbol, ok, error=None, *, claim=None):
         with self._lock:
             job = self.jobs.get(symbol)
             if not job or job["state"] != "running":
@@ -489,12 +493,14 @@ def test_scan_uses_ranked_symbols_and_extends_active_generation(tmp_path):
     assert queue.jobs[ranked[2]]["state"] == "pending"
 
 
-def test_startup_sync_rebuilds_legacy_queue_to_ranked_top_universe(tmp_path):
+def test_startup_sync_rebuilds_drained_legacy_queue_to_ranked_top_universe(tmp_path):
     runtime = FakeRuntime()
     symbols = ["AAA/USDT:USDT", "BBB/USDT:USDT", "CCC/USDT:USDT"]
     ranked = ["CCC/USDT:USDT", "BBB/USDT:USDT"]
     queue = FakeQ()
     queue.enqueue(symbols[:2])  # legacy alphabetical generation
+    for job in queue.jobs.values():
+        job["state"] = "done"
     service = ScanService(runtime, queue, FakeInv(symbols, ranked_symbols=ranked),
                           worker_count=1, analysis_gap_seconds=0.0)
 
