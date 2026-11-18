@@ -200,6 +200,9 @@ def test_manual_trade_open_close_and_reflection(tmp_path):
     perf = journal.manual_trade_performance()
     assert perf["wins"] == 1
     assert perf["winrate"] == 100
+    assert perf["positive_r"] == 1.5
+    assert perf["negative_r"] == 0
+    assert perf["net_r"] == 1.5
 
 
 def test_refresh_learning_maps_records(tmp_path):
@@ -1060,3 +1063,16 @@ def test_telegram_signal_card_uses_compact_trade_plan_layout():
     assert "TP3: 68000.0" in message
     assert "Net RR: +1.80R" in message
     assert "LIMIT giriş bekleniyor" in message
+
+def test_signal_performance_reports_cumulative_profit_loss_r(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "signals.sqlite")
+    journal._signal_outcomes = [
+        {"status": "TP2", "final_result": "WIN", "realized_r": 1.25},
+        {"status": "SL", "final_result": "LOSS", "realized_r": -1.0},
+        {"status": "TP1", "final_result": "PARTIAL", "realized_r": 0.5},
+    ]
+
+    performance = journal.signal_performance()
+    assert performance["positive_r"] == 1.75
+    assert performance["negative_r"] == -1.0
+    assert performance["net_r"] == 0.75
