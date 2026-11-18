@@ -45,6 +45,23 @@ def test_gate_orderbook_and_trades_normalization():
     assert trades[0]["amount"] == 0.0002
 
 
+def test_gate_rest_trade_timestamps_normalize_seconds_and_preserve_milliseconds():
+    class SecondsGate(FakeGate):
+        def _get(self, path, params=None):
+            if path == "/futures/usdt/trades":
+                return [
+                    {"id": 1, "create_time_ms": 1700000000, "price": "100", "size": 2},
+                    {"id": 2, "create_time_ms": 1700000001000, "price": "101", "size": -1},
+                ]
+            return super()._get(path, params)
+
+    ex = SecondsGate()
+    ex.load_markets()
+    trades = ex.fetch_trades("BTC/USDT:USDT", since=1700000000000)
+    assert [trade["timestamp"] for trade in trades] == [1700000000000, 1700000001000]
+    assert [trade["side"] for trade in trades] == ["buy", "sell"]
+
+
 def test_gate_ticker_open_interest_and_funding():
     ex = FakeGate()
     ex.load_markets()
