@@ -350,7 +350,7 @@ def test_takip_does_not_mix_untracked_pool_setups(monkeypatch):
     message = TelegramCommandService(Runtime(), "token", "chat").handle_takip()
     assert "ATLAS | SİNYAL TAKİBİ" in message
     assert "Açık veya sonuçlanmış sinyal kaydı yok" in message
-    assert "/setuplar" in message
+    assert "/islemler" in message
 
 def test_setuplar_keeps_distinct_validated_setup_for_same_symbol_and_direction(monkeypatch):
     from types import SimpleNamespace
@@ -468,3 +468,27 @@ def test_statistics_shows_seven_strategy_funnel():
     ):
         assert name in message
     assert "ORTAK FİLTRE" in message
+
+def test_performance_report_shows_cumulative_profit_loss_in_r():
+    class Runtime:
+        def signal_performance(self):
+            return {
+                "closed": 12, "wins": 7, "losses": 5, "winrate": 58.3,
+                "positive_r": 8.25, "negative_r": -4.5, "net_r": 3.75,
+                "profit_factor": 1.83, "tp1": 8, "tp2": 3, "tp3": 1, "sl": 5,
+            }
+
+        def manual_performance(self):
+            return {
+                "total": 4, "wins": 2, "losses": 2, "open": 1, "winrate": 50.0,
+                "positive_r": 3.0, "negative_r": -2.0, "net_r": 1.0,
+                "profit_factor": 1.5, "performance_basis": "mixed",
+            }
+
+    message = TelegramCommandService(Runtime(), "token", "chat").handle_performance()
+    assert "Toplam kazanç: +8.2500R" in message
+    assert "Toplam kayıp: -4.5000R" in message
+    assert "Net sonuç: +3.7500R" in message
+    assert "Toplam kazanç: +3.0000R" in message
+    assert "Net sonuç: +1.0000R" in message
+    assert "TL/USDT tutarı değildir" in message
