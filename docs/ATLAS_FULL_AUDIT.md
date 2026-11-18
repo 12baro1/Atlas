@@ -52,6 +52,8 @@ Aynı makinede 300 satırlık 15 SQLite generation oluşturma işleminin medyan�
 
 ### Takip denetimi
 
+Sağlayıcı saati veya zaman dilimi doğrulanamazsa mum listesi boş dönüyor. SMT karşılaştırma verisi çekilemediğinde eski serinin yaşı hata anında yeniden kontrol ediliyor. Zaman aşımı sonrasında süresi dolan BTC/ETH serilerinin stratejiye yeniden verilmesini engelleyen çevrimdışı test eklendi.
+
 300 sembol, beş zaman dilimi ve istek başına 100 sentetik mum ile çevrimdışı bellek ölçümünde veri sağlayıcısı 1.500 seri sakladı. 15m serileri tekrar okunmamasına rağmen bellekte kalıyordu. Yüksek zaman dilimlerinde 64 serilik LRU sınırı ve 15m yazımlarının kaldırılmasıyla aynı deneyde tutulan bellek 19.756.002 bayttan 844.040 bayta düştü (`tracemalloc`, süreç RSS'sinden ayrı). Sıcak serinin yeniden kullanılması, kapasite dolduğunda eski serinin çıkarılması ve 15m için her istekte yeni veri alınması regresyon testiyle doğrulandı.
 
 - Aday, doğrulanmış, aktif ve geçmiş kayıtları artık tek SQLite transaction'ında yazılıyor. Geçmiş serileştirmesini son adımda bozarak eski adayın korunması ve kısmi aktif kaydın görülmemesi test edildi. Bellek içi geçmiş limiti dolduğunda yeni arşiv satırlarının kaybolmasına karşı da regresyon testi var.

@@ -32,6 +32,14 @@ def test_fetch_discards_current_incomplete_candle(monkeypatch):
     assert [c.time for c in candles] == [now - 1_800_000]
 
 
+def test_unverifiable_close_returns_no_candles(monkeypatch):
+    exchange = FakeExchange([[10_000, 100, 104, 98, 102, 1]], 0)
+    monkeypatch.setattr(data_engine, "exchange", exchange)
+    assert data_engine._fetch("BTC/USDT:USDT", "15m", 100) == []
+    exchange.now_ms = 10_000_000
+    assert data_engine._fetch("BTC/USDT:USDT", "unknown", 100) == []
+
+
 def test_fetch_discards_invalid_duplicate_and_out_of_order_rows(monkeypatch):
     now = 10_000_000
     rows = [

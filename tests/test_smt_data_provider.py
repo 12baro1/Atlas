@@ -18,3 +18,20 @@ def test_smt_universe_fetches_btc_eth_timeframes_once_and_reuses_cache(monkeypat
     second = data_engine.get_smt_universe()
     assert len(calls) == 8
     assert second["ETH/USDT:USDT"]["4h"] == first["ETH/USDT:USDT"]["4h"]
+
+
+def test_failed_refresh_can_only_reuse_unexpired_benchmark(monkeypatch):
+    monkeypatch.setattr(data_engine, "_smt_cache", {})
+    now = [1000]
+    monkeypatch.setattr(data_engine.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(data_engine, "fetch_candles", lambda *a, **kw: ["cached"])
+    data_engine.get_smt_universe()
+
+    def unavailable(*args, **kwargs):
+        raise TimeoutError()
+
+    monkeypatch.setattr(data_engine, "fetch_candles", unavailable)
+    now[0] += 46
+    universe = data_engine.get_smt_universe(force_refresh=True)
+    assert universe["BTC/USDT:USDT"]["15m"] == []
+    assert universe["BTC/USDT:USDT"]["4h"] == ["cached"]
