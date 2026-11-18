@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -231,7 +232,16 @@ class FakeRuntime:
         self.analyzed = []
         self._fail_symbols = set()
         self.websocket_flags = []
+        self.live_setups = []
         self._lock = threading.Lock()
+
+    def _opportunity_pool(self):
+        setups = list(self.live_setups)
+        return SimpleNamespace(get_all_setups=lambda: {
+            "candidates": [],
+            "validated": setups,
+            "active": [],
+        })
 
     def analyze_symbol(self, symbol, force_refresh=False, track_signal=False, use_websocket=True):
         with self._lock:
@@ -259,6 +269,16 @@ class FakeQ:
                     self.jobs[symbol] = {"state": "pending", "attempts": 0}
                     added += 1
         return added
+
+    def requeue_completed(self, symbols, batch_tag=None):
+        requeued = 0
+        with self._lock:
+            for symbol in symbols:
+                job = self.jobs.get(symbol)
+                if job and job["state"] in {"done", "failed"}:
+                    job["state"] = "pending"
+                    requeued += 1
+        return requeued
 
     def current_generation(self):
         return self.generation
@@ -374,6 +394,24 @@ def test_start_scan_enqueues_and_processes(tmp_path):
     assert runtime.websocket_flags == [False] * 5
     service.stop_scan()
 
+
+def test_start_scan_requeues_completed_symbols_that_still_have_live_setups():
+    runtime = FakeRuntime()
+    runtime.live_setups = [SimpleNamespace(symbol="OLD/USDT:USDT")]
+    service = make_service(runtime, ["NEW/USDT:USDT"], workers=1)
+    service.queue.jobs = {
+        "OLD/USDT:USDT": {"state": "done", "attempts": 1},
+        "PENDING/USDT:USDT": {"state": "pending", "attempts": 0},
+    }
+
+    result = service.start_scan(limit=1)
+
+    assert result["resumed"] is True
+    assert result["revalidation_symbols"] == 1
+    assert result["requeued_setup_symbols"] == 1
+    assert service.queue.jobs["OLD/USDT:USDT"]["state"] == "pending"
+    assert "NEW/USDT:USDT" in service.queue.jobs
+    service.stop_scan()
 
 def test_failed_symbols_requeued_then_failed(tmp_path):
     runtime = FakeRuntime()
