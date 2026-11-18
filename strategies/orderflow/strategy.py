@@ -132,12 +132,12 @@ def generate(data):
         direction, setup_type = "SHORT", "ABSORPTION_REVERSAL"
     elif absorption == "SELLER_FLOW_ABSORBED":
         direction, setup_type = "LONG", "ABSORPTION_REVERSAL"
-    elif (imbalance >= 0.18 and trade_delta >= 0.12 and close > opened and entry >= opened
-          and quality["body_ratio"] >= 0.30 and quality["close_location"] >= 0.65
+    elif (imbalance >= 0.14 and trade_delta >= 0.08 and close > opened and entry >= opened
+          and quality["body_ratio"] >= 0.25 and quality["close_location"] >= 0.60
           and cvd_direction != "SELL_DOMINANT"):
         direction, setup_type = "LONG", "ORDERFLOW_CONTINUATION"
-    elif (imbalance <= -0.18 and trade_delta <= -0.12 and close < opened and entry <= opened
-          and quality["body_ratio"] >= 0.30 and quality["close_location"] <= 0.35
+    elif (imbalance <= -0.14 and trade_delta <= -0.08 and close < opened and entry <= opened
+          and quality["body_ratio"] >= 0.25 and quality["close_location"] <= 0.40
           and cvd_direction != "BUY_DOMINANT"):
         direction, setup_type = "SHORT", "ORDERFLOW_CONTINUATION"
     else:
