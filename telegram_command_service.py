@@ -741,8 +741,8 @@ class TelegramCommandService:
         if lowered in {"yardım", "yardim", "help", "?"}:
             return self.handle_help()
 
-        if lowered == "mevcut":
-            return self.handle_mevcut()
+        if lowered in {"mevcut", "setuplar", "takip", "islemler"}:
+            return self.handle_islemler()
 
         # Best-N legacy text ("en iyi 5", "en iyi 10"): strictly read-only
         # pool reads, never a new scan and never the old scan path.
@@ -783,7 +783,10 @@ class TelegramCommandService:
             return (
                 AtlasTUIApp._format_liquidity(adapter, outcome)
                 if outcome.get("ok")
-                else f"{symbol} likidite analizi yapılamadı: {outcome.get('error')}"
+                else (
+                    f"ATLAS | {symbol.upper()}\n"
+                    "Likidite analizi tamamlanamadı. Sembolü ve piyasa verisini kontrol et."
+                )
             )
 
         if scan_request is not None:
@@ -801,8 +804,8 @@ class TelegramCommandService:
         if not outcome.get("ok"):
             return (
                 f"{normalized.upper()} ANALİZ EDİLEMEDİ\n\n"
-                f"Neden: {outcome.get('error', 'bilinmeyen hata')}\n"
-                "Sembolün USDT perpetual piyasasında bulunduğunu kontrol et."
+                "Piyasa verisi alınamadı veya analiz tamamlanamadı.\n"
+                "Sembolün Gate.io USDT perpetual olduğunu kontrol et; ayrıntı için /durum."
             )
         raw_result = outcome.get("result") or {}
         card = (
@@ -824,7 +827,7 @@ class TelegramCommandService:
             "Analiz: /btc, /eth, /sol, /analiz BTC\n"
             "Tarama: /20tara ... /1000tara, /tumtara\n"
             "Havuz: /eniyi5, /eniyi10, /havuzdurum\n"
-            "Takip: /mevcut, /setuplar, /takip, /likidite BTC\n"
+            "İşlemler: /islemler, /likidite BTC\n"
             "Sistem: /taramadurum, /durum, /sistem\n\n"
             "Tüm komutlar: /yardim"
         )
@@ -924,6 +927,12 @@ class TelegramCommandService:
     def handle_scan_resume(self) -> str:
         """Handle /taramadevam — resume pending queue work (checkpoint kept)."""
         result = self.runtime.resume_scan()
+        if not result.get("started"):
+            return (
+                "ATLAS | TARAMA SÜRDÜRÜLEMEDİ\n"
+                "Bekleyen iş bulunmuyor veya tarama başlatılamadı.\n"
+                "Mevcut kuyruk: /taramadurum"
+            )
         return self._format_scan_progress(result, resumed=True)
 
     def handle_refresh(self) -> str:
@@ -978,7 +987,7 @@ class TelegramCommandService:
             lines.extend(["", "Doğrulanmış setup bulunmuyor."])
         lines.extend([
             "",
-            "Setup listesi: /setuplar",
+            "İşlem ve setup listesi: /islemler",
             "En iyi fırsatlar: /eniyi5",
         ])
         return "\n".join(lines)
@@ -1043,17 +1052,9 @@ class TelegramCommandService:
             lines.extend([
                 f"{index}. {str(setup.symbol).replace(':USDT', '')} | {setup.direction}",
                 f"Strateji: {_format_strategy_name(setup.strategy_name)} | Emir: {entry_type}",
-                f"Giriş: {_format_price(setup.entry_price)}",
-                f"Stop Loss: {_format_price(setup.stop_loss)}",
-                f"TP1: {_format_price(setup.tp1)}",
-                f"TP2: {_format_price(setup.tp2)}",
-                f"TP3: {_format_price(setup.tp3)}",
-                f"RR (TP1/TP2/TP3): "
-                f"{_format_rr(getattr(setup, 'rr_tp1', None))} / "
-                f"{_format_rr(getattr(setup, 'rr_tp2', None))} / "
-                f"{_format_rr(getattr(setup, 'rr_tp3', None))}",
-                f"Net RR: {_format_rr(getattr(setup, 'net_rr_after_costs', None))}",
-                f"Durum: {setup.status} | Yaş: {age}",
+                f"Giriş: {_format_price(setup.entry_price)} | Stop Loss: {_format_price(setup.stop_loss)}",
+                f"TP1: {_format_price(setup.tp1)} | TP2: {_format_price(setup.tp2)} | TP3: {_format_price(setup.tp3)}",
+                f"Net RR: {_format_rr(getattr(setup, 'net_rr_after_costs', None))} | {setup.status} | Yaş: {age}",
                 "",
             ])
         lines.extend([
@@ -1061,6 +1062,96 @@ class TelegramCommandService:
             "Skor sıralama ölçüsüdür, kazanma olasılığı değildir.",
         ])
         return "\n".join(lines)
+
+    def handle_islemler(self) -> str:
+        """Show pool setups and journal outcomes together without duplicate plans."""
+        pool = get_opportunity_pool()
+        outcomes = self.runtime.signal_outcomes(limit=5000) or []
+        pending = sorted(
+            [item for item in outcomes if str(item.get("status") or "PENDING").upper() == "PENDING"],
+            key=lambda item: int(item.get("opened_at") or 0),
+            reverse=True,
+        )
+        tracking = [item for item in pending if bool(item.get("entry_reached"))]
+        waiting_signals = [item for item in pending if not bool(item.get("entry_reached"))]
+        terminal = {"TP1", "TP2", "TP3", "SL", "EXPIRED"}
+        closed = sorted(
+            [item for item in outcomes if str(item.get("status") or "").upper() in terminal],
+            key=lambda item: int(item.get("resolved_at") or item.get("opened_at") or 0),
+            reverse=True,
+        )[:5]
+
+        tracked = list(pending) + list(closed)
+        validated = [
+            item for item in pool.get_best_setups(limit=20)
+            if not any(_same_tracked_setup(item, outcome) for outcome in tracked)
+        ]
+        active = [
+            item for item in pool.get_active_setups()
+            if not any(_same_tracked_setup(item, outcome) for outcome in tracked)
+        ]
+
+        lines = [
+            "ATLAS | İŞLEMLER",
+            f"Takipte: {len(tracking)} | Giriş bekleyen sinyal: {len(waiting_signals)}",
+            f"Havuz setup'ı: {len(validated)} | Aktif havuz: {len(active)} | Sonuç: {len(closed)}",
+        ]
+
+        if tracking:
+            lines.extend(["", "AKTİF İŞLEM TAKİBİ"])
+            for item in tracking[:10]:
+                lines.extend([_format_outcome_item(item, "TAKİPTE"), ""])
+            if len(tracking) > 10:
+                lines.append(f"Diğer takipteki işlemler: +{len(tracking) - 10}")
+
+        if waiting_signals:
+            lines.extend(["", "GİRİŞ BEKLEYEN SİNYALLER"])
+            for item in waiting_signals[:10]:
+                lines.extend([_format_outcome_item(item, "GİRİŞ BEKLENİYOR"), ""])
+            if len(waiting_signals) > 10:
+                lines.append(f"Diğer giriş bekleyen sinyaller: +{len(waiting_signals) - 10}")
+
+        if validated:
+            lines.extend(["", "GİRİŞ BEKLEYEN SETUP'LAR"])
+            for item in validated[:10]:
+                entry_type = str(getattr(item, "entry_type", "") or getattr(item, "setup_type", "—")).upper()
+                lines.extend([
+                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
+                    f"{_format_strategy_name(item.strategy_name)} | {entry_type}",
+                    f"Giriş: {_format_price(item.entry_price)} | SL: {_format_price(item.stop_loss)}",
+                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                    f"Net RR: {_format_rr(getattr(item, 'net_rr_after_costs', None))}",
+                    "",
+                ])
+            if len(validated) > 10:
+                lines.append(f"Diğer giriş bekleyen setup: +{len(validated) - 10}")
+
+        if active:
+            lines.extend(["", "AKTİF HAVUZ İŞLEMLERİ"])
+            for item in active[:10]:
+                progress = f"TP{item.current_tp} alındı" if item.current_tp else "Hedef bekleniyor"
+                lines.extend([
+                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
+                    f"{_format_strategy_name(item.strategy_name)} | {item.status} | {progress}",
+                    f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)}",
+                    f"SL: {_format_price(item.trailing_stop or item.stop_loss)}",
+                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
+                    "",
+                ])
+
+        if closed:
+            lines.extend(["", "SON KAPANAN İŞLEMLER"])
+            for item in closed:
+                lines.extend([_format_outcome_item(item, "SONUÇLANDI"), ""])
+
+        if not (tracking or waiting_signals or validated or active or closed):
+            lines.extend(["", "Açık işlem veya doğrulanmış setup bulunmuyor.", "Fırsat havuzu: /eniyi5"])
+
+        lines.extend([
+            "",
+            "Sonuçlar Atlas'ın mum bazlı takibidir; borsa fill teyidi değildir.",
+        ])
+        return "\n".join(lines).rstrip()
 
     def handle_mevcut(self) -> str:
         """Show today's signal outcomes and still-open signals only."""
@@ -1112,7 +1203,7 @@ class TelegramCommandService:
         """Show journal-tracked signals only; pool setups belong to /setuplar."""
         outcomes = self.runtime.signal_outcomes(limit=500)
         if not outcomes:
-            return "ATLAS | SİNYAL TAKİBİ\n\nAçık veya sonuçlanmış sinyal kaydı yok.\nHavuz setup'ları: /setuplar"
+            return "ATLAS | SİNYAL TAKİBİ\n\nAçık veya sonuçlanmış sinyal kaydı yok.\nBirleşik görünüm: /islemler"
 
         terminal = {"TP1", "TP2", "TP3", "SL", "EXPIRED"}
         pending = sorted(
@@ -1189,25 +1280,34 @@ class TelegramCommandService:
         return "\n".join(lines)
 
     def handle_performance(self) -> str:
-        """Show outcome performance only; learning details belong to /ogrenme."""
+        """Show cumulative profit/loss in R for automated and manual records."""
         signal = self.runtime.signal_performance()
         manual = self.runtime.manual_performance()
         lines = [
             "ATLAS | PERFORMANS",
             "",
-            "OTOMATİK SİNYALLER (teorik takip)",
-            f"Kapanan: {signal.get('closed', 0)} | Kazanç: {signal.get('wins', 0)} | Kayıp: {signal.get('losses', 0)}",
-            f"Winrate: %{float(signal.get('winrate', 0) or 0):.1f}",
-            f"Expectancy: {float(signal.get('expectancy', 0) or 0):+.2f}R | PF: {float(signal.get('profit_factor', 0) or 0):.2f}",
+            "OTOMATİK SİNYALLER",
+            f"Kapanan: {signal.get('closed', 0)} | Kazançlı: {signal.get('wins', 0)} | Kayıplı: {signal.get('losses', 0)}",
+            f"Toplam kazanç: {_format_rr(signal.get('positive_r', 0))}",
+            f"Toplam kayıp: {_format_rr(signal.get('negative_r', 0))}",
+            f"Net sonuç: {_format_rr(signal.get('net_r', 0))}",
+            f"Başarı: %{float(signal.get('winrate', 0) or 0):.1f} | PF: {float(signal.get('profit_factor', 0) or 0):.2f}",
             f"TP1/TP2/TP3: {signal.get('tp1', 0)}/{signal.get('tp2', 0)}/{signal.get('tp3', 0)} | SL: {signal.get('sl', 0)}",
             "",
-            "MANUEL İŞLEMLER (kullanıcı kayıtları)",
-            f"Kapanan: {manual.get('total', 0)} | Kazanç: {manual.get('wins', 0)} | Kayıp: {manual.get('losses', 0)} | Açık: {manual.get('open', 0)}",
-            f"Winrate: %{float(manual.get('winrate', 0) or 0):.1f}",
-            f"Expectancy: {float(manual.get('expectancy', 0) or 0):+.2f}R | PF: {float(manual.get('profit_factor', 0) or 0):.2f}",
+            "MANUEL İŞLEMLER",
+            f"Kapanan: {manual.get('total', 0)} | Kazançlı: {manual.get('wins', 0)} | Kayıplı: {manual.get('losses', 0)} | Açık: {manual.get('open', 0)}",
+            f"Toplam kazanç: {_format_rr(manual.get('positive_r', 0))}",
+            f"Toplam kayıp: {_format_rr(manual.get('negative_r', 0))}",
+            f"Net sonuç: {_format_rr(manual.get('net_r', 0))}",
+            f"Başarı: %{float(manual.get('winrate', 0) or 0):.1f} | PF: {float(manual.get('profit_factor', 0) or 0):.2f}",
             "",
-            "Not: Otomatik sinyal takibi ve manuel işlemler ayrı hesaplanır.",
+            "R toplamlarıdır; TL/USDT tutarı değildir. Otomatik sinyal ve manuel kayıtlar ayrı hesaplanır.",
         ]
+        basis = manual.get("performance_basis")
+        if basis == "mixed":
+            lines.append("Manuel kayıtların bir kısmında gerçek komisyon/slippage, bir kısmında yalnızca fiyat farkı kullanılmış.")
+        elif basis == "gross_price_only":
+            lines.append("Manuel sonuçlar komisyon ve slippage düşülmeden hesaplanmış.")
         if int(signal.get("closed", 0) or 0) < 20:
             lines.append("Otomatik sinyal örneklemi 20 kapanan işlemin altında.")
         return "\n".join(lines)

@@ -1800,6 +1800,9 @@ class TradeJournal:
         losses = [o for o in terminal if o.get("final_result") == "LOSS"]
         partials = [o for o in terminal if o.get("final_result") == "PARTIAL"]
         r_values = [self._num(o.get("realized_r"), 0.0) for o in terminal]
+        positive_r = sum(max(0.0, value) for value in r_values)
+        negative_r = sum(min(0.0, value) for value in r_values)
+        net_r = sum(r_values)
         winrate = (len(wins) / len(terminal) * 100) if terminal else 0.0
         return {
             "total": len(resolved),
@@ -1814,6 +1817,9 @@ class TradeJournal:
             "expectancy": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
             "profit_factor": self._profit_factor(r_values),
             "average_r": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
+            "positive_r": round(positive_r, 4),
+            "negative_r": round(negative_r, 4),
+            "net_r": round(net_r, 4),
             "long": len([o for o in terminal if o.get("direction") == "LONG"]),
             "short": len([o for o in terminal if o.get("direction") == "SHORT"]),
             "tp1": len([o for o in terminal if o.get("hit_tp1")]),
@@ -1837,6 +1843,9 @@ class TradeJournal:
         breakeven = [m for m in closed if (m.get("net_result") or m.get("result")) == "BREAKEVEN"]
         early_exit = [m for m in closed if (m.get("net_result") or m.get("result")) == "EARLY_EXIT"]
         r_values = [self._num(m.get("pnl_rr"), 0.0) for m in closed]
+        positive_r = sum(max(0.0, value) for value in r_values)
+        negative_r = sum(min(0.0, value) for value in r_values)
+        net_r = sum(r_values)
         actual_cost_trades = [m for m in closed if m.get("pnl_rr_basis") == "net_actual_costs"]
         price_only_trades = [m for m in closed if m.get("pnl_rr_basis") != "net_actual_costs"]
         actual_cost_r = [self._num(m.get("pnl_rr"), 0.0) for m in actual_cost_trades]
@@ -1854,6 +1863,9 @@ class TradeJournal:
             "expectancy": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
             "profit_factor": self._profit_factor(r_values),
             "average_r": round(sum(r_values) / len(r_values), 4) if r_values else 0.0,
+            "positive_r": round(positive_r, 4),
+            "negative_r": round(negative_r, 4),
+            "net_r": round(net_r, 4),
             "actual_cost_accounting": {
                 "net_actual_costs_count": len(actual_cost_trades),
                 "gross_price_only_count": len(price_only_trades),
@@ -2210,7 +2222,8 @@ class TradeJournal:
         return {
             "total": 0, "pending": 0, "closed": 0, "wins": 0, "losses": 0, "partials": 0,
             "expired": 0, "cancelled": 0, "winrate": 0, "expectancy": 0, "profit_factor": 0,
-            "average_r": 0, "long": 0, "short": 0, "tp1": 0, "tp2": 0, "tp3": 0, "sl": 0,
+            "average_r": 0, "positive_r": 0, "negative_r": 0, "net_r": 0,
+            "long": 0, "short": 0, "tp1": 0, "tp2": 0, "tp3": 0, "sl": 0,
         }
 
     def _empty_manual_performance(self):
@@ -2224,6 +2237,7 @@ class TradeJournal:
             "open": 0,
             "not_traded": 0,
             "winrate": 0, "expectancy": 0, "profit_factor": 0, "average_r": 0,
+            "positive_r": 0, "negative_r": 0, "net_r": 0,
             "actual_cost_accounting": {
                 "net_actual_costs_count": 0,
                 "gross_price_only_count": 0,

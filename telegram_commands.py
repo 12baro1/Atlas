@@ -45,10 +45,8 @@ TELEGRAM_COMMANDS = [
     TelegramCommand("eniyi10", "Havuzdan en iyi 10 setup (salt okunur, yeni tarama başlatmaz)", "handle_best_ten", "scan"),
     TelegramCommand("havuzdurum", "Kalıcı setup havuzu durumu", "handle_pool_status", "setup"),
 
-    # Setup ve takip
-    TelegramCommand("mevcut", "Bugünkü sinyal sonuçları ve açık takipler", "handle_mevcut", "setup"),
-    TelegramCommand("setuplar", "Doğrulanmış ve aktif setup planları", "handle_setuplar", "setup"),
-    TelegramCommand("takip", "Açık sinyaller ve son kapanan sonuçlar", "handle_takip", "setup"),
+    # İşlem görünümü: sinyal günlüğü ve doğrulanmış setup'lar tek komutta
+    TelegramCommand("islemler", "Açık işlemler, giriş bekleyen setuplar ve son sonuçlar", "handle_islemler", "setup"),
     TelegramCommand("likidite", "Belirtilen coin için likidite haritası (örn: /likidite BTC)", "handle_liquidity", "setup", True, "symbol"),
 
     # Performans ve öğrenme
@@ -77,11 +75,18 @@ def get_botfather_commands() -> list[dict]:
 
 
 def get_command_by_name(name: str) -> Optional[TelegramCommand]:
-    """Look up command definition by name (without '/')."""
+    """Look up public commands and preserve retired setup commands as aliases."""
     name_lower = name.lower()
     for cmd in TELEGRAM_COMMANDS:
         if cmd.name.lower() == name_lower:
             return cmd
+    if name_lower in {"mevcut", "setuplar", "takip"}:
+        return TelegramCommand(
+            name=name_lower,
+            description="Eski komut; /islemler kullanın",
+            handler="handle_islemler",
+            category="setup",
+        )
     return None
 
 
@@ -126,7 +131,8 @@ def format_help_text() -> str:
         "• /eniyi5 ve /eniyi10 mevcut havuzu okur; yeni tarama başlatmaz.",
         "• /taramadurum yalnızca tarama kuyruğunu gösterir.",
         "• /havuzdurum havuz sayılarını, /istatistik yedi stratejiyi gösterir.",
-        "• /mevcut günlük sonuçları, /takip sinyal günlüğünü, /setuplar havuz setup'larını gösterir.",
+        "• /islemler açık sinyalleri, giriş bekleyen setup'ları ve son sonuçları tek yerde göster.",
+        "• /performans toplam kazanç, toplam kayıp ve net sonucu R cinsinden raporlar.",
         "• Atlas otomatik emir göndermez.",
         "• Sıralama puanı kazanma olasılığı değildir.",
     ])
