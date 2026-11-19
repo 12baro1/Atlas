@@ -406,7 +406,7 @@ def test_telegram_card_requires_three_ordered_targets():
     assert "Giriş (MARKET)" not in message
 
 
-def test_best_setups_output_is_one_line_per_displayed_plan(monkeypatch):
+def test_best_setups_output_includes_levels_per_displayed_plan(monkeypatch):
     from types import SimpleNamespace
     import telegram_command_service as telegram_module
 
@@ -422,7 +422,8 @@ def test_best_setups_output_is_one_line_per_displayed_plan(monkeypatch):
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
     service = TelegramCommandService(object(), "token", "chat")
     message = service._format_best_setups(5)
-    assert message.splitlines() == ["EN İYİ 5 SETUP", "1. BTC/USDT | LONG | SMC | +1.80R"]
+    assert message.splitlines() == ["EN İYİ 5 SETUP", "1. BTC/USDT | LONG | SMC | +1.80R",
+                                    "Giriş: 100.0 | Stop: 98.0", "TP1: 102.0 | TP2: 104.0 | TP3: 106.0"]
 
 
 def test_scan_status_contains_only_queue_and_market_status():

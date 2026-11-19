@@ -112,6 +112,10 @@ def test_chat_lifecycle_cleanup_outbox_and_restart(pool):
     chat._deliver_notifications()
     chat._deliver_notifications()
     assert chat._api.call_count == 2
+    for call in chat._api.call_args_list:
+        assert "Stop: 49500.0" in call.args[1]["text"]
+        assert "TP1: 51000.0 | TP2: 52000.0 | TP3: 53000.0" in call.args[1]["text"]
+    assert "TP3: 53000.0" in chat.execute_command("/islemler")
     assert "KALDIRILDI" in chat._api.call_args_list[0].args[1]["text"]
     assert "YENİ SETUP" in chat._api.call_args_list[1].args[1]["text"]
     again = OpportunityPool(base_path=pool.base_path, auto_persist=False)

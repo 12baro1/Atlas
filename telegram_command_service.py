@@ -30,6 +30,8 @@ from types import SimpleNamespace
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from telegram_prices import format_price as _format_price, format_plan_levels, tracked_levels
+
 import requests
 
 from opportunity_pool import get_opportunity_pool
@@ -84,23 +86,6 @@ def _format_rr(value):
     if not math.isfinite(number):
         return "Hesaplanmadı"
     return f"{number:+.2f}R"
-
-
-def _format_price(value, *, grouping=True):
-    """Format prices without hiding small-coin precision."""
-    if value is None:
-        return "—"
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return str(value)
-    if not math.isfinite(number):
-        return "—"
-    rendered = f"{number:,.8f}" if grouping else f"{number:.8f}"
-    rendered = rendered.rstrip("0").rstrip(".")
-    if "." not in rendered:
-        rendered += ".0"
-    return rendered or "0"
 
 
 def _format_strategy_name(value):
@@ -1197,6 +1182,7 @@ class TelegramCommandService:
         for symbol, revision, state, plan in history[:15]:
             label = "Geçersizleşti" if state == "INVALIDATED" else f"{plan['status']} | {plan['realized_r']:+.2f}R"
             lines.append(f"{symbol.split('/')[0]} | {plan['direction']} | {plan['strategy']} | {label} (v{revision})")
+            lines.append(tracked_levels(plan))
         if not history:
             lines.append("Henüz kapanan veya geçersizleşen takip kaydı yok.")
         return "\n".join(lines)
@@ -1340,6 +1326,7 @@ class TelegramCommandService:
         for index, item in enumerate(best, 1):
             lines.append(f"{index}. {item.symbol.replace(':USDT','')} | {item.direction} | "
                          f"{_format_strategy_name(item.strategy_name)} | {_format_rr(item.net_rr_after_costs)}")
+            lines.append(format_plan_levels(item.entry_price, item.stop_loss, item.tp1, item.tp2, item.tp3))
         return "\n".join(lines)
 
     def handle_islemler(self) -> str:
@@ -1356,9 +1343,11 @@ class TelegramCommandService:
             if state == "AMBIGUOUS":
                 status = "Mum sırası veya veri belirsiz"
             lines.append(f"{index}. {symbol.split('/')[0]} | {plan['direction']} | {status}")
+            lines.append(tracked_levels(plan))
         for index,(symbol,state,plan) in enumerate(recent, len(live)+1):
             label = "Setup geçersizleşti" if state == "INVALIDATED" else f"{plan['status']} | Kapandı"
             lines.append(f"{index}. {symbol.split('/')[0]} | {plan['direction']} | {label}")
+            lines.append(tracked_levels(plan))
         if not live and not recent:
             lines.append("Takipte güncel setup yok.")
         closed = [plan for _,_,state,plan in rows if state == "CLOSED"]
