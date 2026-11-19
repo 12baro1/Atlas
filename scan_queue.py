@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS scan_jobs (
     PRIMARY KEY (symbol, scan_generation)
 );
 
+CREATE TABLE IF NOT EXISTS cycle_results(generation INTEGER, symbol TEXT, payload TEXT NOT NULL, PRIMARY KEY(generation,symbol));
 CREATE INDEX IF NOT EXISTS idx_scan_jobs_state ON scan_jobs(state, enqueued_at_ms);
 CREATE INDEX IF NOT EXISTS idx_scan_jobs_generation ON scan_jobs(scan_generation, state);
 """
@@ -194,9 +195,7 @@ class ScanQueue:
                 )
                 with self._transaction():
                     self._migrate_to_composite_pk(conn)
-            else:
-                # Fresh database: create everything from _SCHEMA.
-                conn.executescript(_SCHEMA)
+            conn.executescript(_SCHEMA)
 
             # Restart-safe: resume the latest generation so a VPS restart
             # never resets scan period state.
@@ -370,7 +369,7 @@ class ScanQueue:
             }
 
     def complete(self, symbol: str, ok: bool, error: Optional[str] = None,
-                 *, claim: Optional[Dict[str, Any]] = None) -> bool:
+                 *, claim: Optional[Dict[str, Any]] = None, result=None) -> bool:
         """Mark a claimed symbol done, or requeue it for a bounded retry."""
         clean = str(symbol or "").strip().upper()
         now_ms = int(time.time() * 1000)
@@ -386,6 +385,9 @@ class ScanQueue:
                 return False
             retries = int(row[1])
             if ok:
+                if result is not None:
+                    conn.execute("INSERT OR REPLACE INTO cycle_results VALUES(?,?,?)",
+                                 (gen, clean, json.dumps(result, allow_nan=False)))
                 conn.execute(
                     "UPDATE scan_jobs SET state = ?, completed_at_ms = ?, "
                     "last_error = NULL, lease_until_ms = NULL "
@@ -408,6 +410,14 @@ class ScanQueue:
                     (FAILED, str(error or "unknown_error"), clean, gen),
                 )
             return True
+
+    def cycle_results(self, generation):
+        rows = self._thread_conn().execute("SELECT payload FROM cycle_results WHERE generation=? ORDER BY symbol", (generation,))
+        return [json.loads(row[0]) for row in rows]
+
+    def discard_applied_results(self, generation):
+        with self._transaction() as conn:
+            conn.execute("DELETE FROM cycle_results WHERE generation<=?", (generation,))
 
     def generation_symbols(self, generation: Optional[int] = None) -> List[str]:
         """Return every symbol recorded in a generation, regardless of state."""

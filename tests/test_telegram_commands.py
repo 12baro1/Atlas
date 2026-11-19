@@ -79,8 +79,8 @@ def test_parameterized_commands():
 def test_category_grouping():
     """get_commands_by_category should return correct commands."""
     market_cmds = get_commands_by_category("market")
-    assert len(market_cmds) == 4  # btc, eth, sol, analiz
-    assert {c.name for c in market_cmds} == {"btc", "eth", "sol", "analiz"}
+    assert len(market_cmds) == 5  # btc, eth, sol, analiz
+    assert {c.name for c in market_cmds} == {"btc", "eth", "avax", "sol", "analiz"}
 
     scan_cmds = get_commands_by_category("scan")
     assert len(scan_cmds) == 15
@@ -112,13 +112,13 @@ def test_help_text_contains_all_commands():
 
 def test_command_count():
     """Verify expected total command count."""
-    assert len(TELEGRAM_COMMANDS) == 34
+    assert len(TELEGRAM_COMMANDS) == 35
 
 
 def test_specific_commands_exist():
     """Verify all required commands from spec exist."""
     required = {
-        "btc", "eth", "sol", "analiz",
+        "btc", "eth", "avax", "sol", "analiz",
         "tara", "20tara", "30tara", "50tara", "100tara", "200tara", "500tara", "1000tara",
         "tumtara", "eniyi5", "eniyi10",
         "taramadurum", "taramadurdur", "taramadevam", "yenile",

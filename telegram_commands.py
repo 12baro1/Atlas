@@ -25,6 +25,7 @@ TELEGRAM_COMMANDS = [
     # Piyasa analizi
     TelegramCommand("btc", "BTC analizi yap", "handle_analyze_symbol", "market"),
     TelegramCommand("eth", "ETH analizi yap", "handle_analyze_symbol", "market"),
+    TelegramCommand("avax", "AVAX analizi yap", "handle_analyze_symbol", "market"),
     TelegramCommand("sol", "SOL analizi yap", "handle_analyze_symbol", "market"),
     TelegramCommand("analiz", "Belirtilen coin analizi (örn: /analiz BTC)", "handle_analyze_symbol", "market", True, "symbol"),
 
@@ -50,7 +51,7 @@ TELEGRAM_COMMANDS = [
     TelegramCommand("gecmis", "Son kapanan ve iptal edilen kayıtlar", "handle_history", "setup"),
 
     # İşlem görünümü: sinyal günlüğü ve doğrulanmış setup'lar tek komutta
-    TelegramCommand("islemler", "Açık işlemler, giriş bekleyen setuplar ve son sonuçlar", "handle_islemler", "setup"),
+    TelegramCommand("islemler", "Bu sohbetin çağırdığı sinyaller ve sonuçları", "handle_islemler", "setup"),
     TelegramCommand("likidite", "Belirtilen coin için likidite haritası (örn: /likidite BTC)", "handle_liquidity", "setup", True, "symbol"),
 
     # Performans ve öğrenme
@@ -137,7 +138,7 @@ def format_help_text() -> str:
         "• /eniyi5 ve /eniyi10 mevcut havuzu okur; yeni tarama başlatmaz.",
         "• /taramadurum yalnızca tarama kuyruğunu gösterir.",
         "• /havuzdurum havuz sayılarını, /istatistik yedi stratejiyi gösterir.",
-        "• /islemler açık sinyalleri, giriş bekleyen setup'ları ve son sonuçları tek yerde göster.",
+        "• /islemler bu sohbetin çağırdığı setupları ve sinyal sonuçlarını gösterir.",
         "• /performans toplam kazanç, toplam kayıp ve net sonucu R cinsinden raporlar.",
         "• Atlas otomatik emir göndermez.",
         "• Sıralama puanı kazanma olasılığı değildir.",

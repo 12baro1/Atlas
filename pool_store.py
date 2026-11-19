@@ -28,6 +28,8 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("atlas.pool_store")
 
+import telegram_tracking
+
 SCHEMA_VERSION = 1
 
 _SCHEMA = """
@@ -120,7 +122,7 @@ class PoolStore:
             check = conn.execute("PRAGMA integrity_check").fetchone()
             if not check or str(check[0]).lower() != "ok":
                 raise sqlite3.DatabaseError(f"integrity_check failed: {check}")
-            conn.executescript(_SCHEMA)
+            conn.executescript(_SCHEMA + telegram_tracking.SCHEMA)
             self.set_meta("schema_version", str(SCHEMA_VERSION))
         except (sqlite3.OperationalError, OSError):
             self._close_all()
@@ -131,7 +133,7 @@ class PoolStore:
             self._recover_corrupt_file()
             self._closed = False  # reopen after quarantine
             conn = self._thread_conn()
-            conn.executescript(_SCHEMA)
+            conn.executescript(_SCHEMA + telegram_tracking.SCHEMA)
             self.set_meta("schema_version", str(SCHEMA_VERSION))
 
     def _recover_corrupt_file(self):
@@ -177,12 +179,96 @@ class PoolStore:
     # Live pools
     # ------------------------------------------------------------------
 
-    def save_snapshot(self, candidates, validated, active, history):
+    def save_snapshot(self, candidates, validated, active, history, *, publication=None):
         """Commit a lifecycle transition and its history as one durable unit."""
         with self._transaction() as conn:
+            if publication:
+                key, incoming, _ = publication
+                previous = conn.execute("SELECT value FROM pool_meta WHERE key=?", (key,)).fetchone()
+                if previous:
+                    elapsed = incoming - int(previous[0])
+                    if elapsed <= 0 or (key == "pool_cleanup_ms" and elapsed < 86400000):
+                        raise RuntimeError("Pool publication overtaken by another writer")
             for name, records in (("candidates", candidates), ("validated", validated), ("active", active)):
                 self.save_pool(name, records, connection=conn)
             self.append_history(history, connection=conn)
+            if publication:
+                marker, value, decisions = publication
+                conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", (marker,str(value)))
+                for row in decisions:
+                    symbol = row["symbol"]
+                    if row.get("version"):
+                        conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", ("version:"+symbol,str(row["version"])))
+                    conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)",
+                                 ("cycle:"+symbol,json.dumps([row["cutoff"],row["observed"]])))
+                    followers = conn.execute("SELECT chat,revision FROM chat_follows WHERE symbol=?", (symbol,)).fetchall()
+                    for chat,revision in followers:
+                        self._apply_observation(conn, chat, revision, row, announce=True)
+
+    def _apply_observation(self, conn, chat, revision, row, *, announce):
+        symbol = row["symbol"]
+        stamp = (row["cutoff"], row["observed"])
+        key = f"watch:{chat}:{symbol}"
+        old = conn.execute("SELECT value FROM pool_meta WHERE key=?", (key,)).fetchone()
+        if old and stamp < tuple(json.loads(old[0])):
+            return
+        conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", (key,json.dumps(stamp)))
+        setup = row.get("setup")
+        if not setup:
+            plan = conn.execute("SELECT payload FROM chat_plans WHERE chat=? AND symbol=? AND revision=?",
+                                (chat,symbol,revision)).fetchone()
+            if not plan or json.loads(plan[0]).get("strategy_id") not in row["broken"]:
+                return
+        telegram_tracking.transition(conn, chat, symbol, revision, setup, announce=announce)
+
+    def follow_analysis(self, chat, row):
+        with self._transaction() as conn:
+            if row.get("setup"):
+                conn.execute("INSERT OR IGNORE INTO chat_follows(chat,symbol) VALUES(?,?)", (chat,row["symbol"]))
+            member = conn.execute("SELECT revision FROM chat_follows WHERE chat=? AND symbol=?",
+                                  (chat,row["symbol"])).fetchone()
+            if member:
+                self._apply_observation(conn, chat, member[0], row, announce=member[0]>0)
+
+    def follow(self, chat, setups):
+        with self._transaction() as conn:
+            for setup in setups:
+                symbol = setup.symbol
+                row = conn.execute("SELECT payload FROM setups WHERE pool='validated' AND setup_id=?",
+                                   (setup.setup_id,)).fetchone()
+                if not row:
+                    continue
+                conn.execute("INSERT OR IGNORE INTO chat_follows(chat,symbol) VALUES(?,?)", (chat, symbol))
+                revision, = conn.execute("SELECT revision FROM chat_follows WHERE chat=? AND symbol=?",
+                                         (chat, symbol)).fetchone()
+                clock = conn.execute("SELECT value FROM pool_meta WHERE key=?", ("cycle:"+symbol,)).fetchone()
+                cutoff, observed = json.loads(clock[0]) if clock else (0,0)
+                self._apply_observation(conn, chat, revision, dict(symbol=symbol, setup=json.loads(row[0]),
+                                        cutoff=cutoff, observed=observed, broken=[]), announce=revision>0)
+
+    def tracked(self, chat):
+        return [(symbol, revision, state, json.loads(payload))
+                for symbol, revision, state, payload in self._thread_conn().execute(
+                    "SELECT symbol,revision,state,payload FROM chat_plans WHERE chat=? ORDER BY symbol,revision DESC",
+                    (chat,))]
+
+    def open_symbols(self):
+        return [row[0] for row in self._thread_conn().execute(
+            "SELECT DISTINCT symbol FROM chat_plans WHERE state IN ('WAITING','ACTIVE')")]
+
+    def advance_tracking(self, symbol, candles):
+        with self._transaction() as conn:
+            telegram_tracking.advance(conn, symbol, candles)
+
+    def pending_notifications(self, chat):
+        return self._thread_conn().execute(
+            "SELECT id,message FROM chat_events WHERE chat=? AND delivered=0 ORDER BY id LIMIT 50", (chat,)
+        ).fetchall()
+
+    def acknowledge_notification(self, chat, event_id):
+        with self._transaction() as conn:
+            conn.execute("UPDATE chat_events SET delivered=1 WHERE chat=? AND id=?", (chat,event_id))
+
 
     def save_pool(self, pool: str, records: Dict[str, Dict[str, Any]], *, connection=None) -> int:
         """Replace the stored contents of one live pool in a single transaction.
