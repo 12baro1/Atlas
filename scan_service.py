@@ -33,7 +33,11 @@ class ScanService:
         inventory,
         worker_count: int = 1,
         analysis_gap_seconds: float = 0.5,
+        continuous=False,
     ):
+        self.continuous = continuous
+        self._cycle_lock = threading.Lock()
+        self._last_rank_attempt = float("-inf")
         self.runtime = runtime
         self.queue = queue
         self.inventory = inventory
@@ -225,6 +229,15 @@ class ScanService:
         """
         # "Scan all" means all of the configured liquid universe. Preserve
         # smaller requests and clamp unbounded/larger requests to top 300.
+        if self.continuous:
+            self.roll_cycle()
+            ranking = self.queue.generation_ranking()
+            ranked = ranking.get("symbols") or []
+            selected = ranked[:limit]
+            self.queue.reorder_pending(selected + ranked[len(selected):])
+            self.ensure_workers()
+            return {"started": bool(ranked), "selected": len(selected), "universe_size": len(ranked),
+                    "continuous": True, "ranking_source": ranking.get("ranking_source"), "progress": self.queue.progress()}
         if limit is None:
             limit = DEFAULT_SCAN_UNIVERSE_LIMIT
         else:
@@ -313,6 +326,30 @@ class ScanService:
     # Worker loop
     # ------------------------------------------------------------------
 
+    def roll_cycle(self):
+        """Publish the drained generation before opening its successor, including after restart."""
+        with self._cycle_lock:
+            pool = self.runtime._opportunity_pool()
+            pool.clean_published_if_due()
+            status = self.queue.progress()
+            if status["pending"] or status["running"]:
+                return
+            if status["complete"]:
+                gen = status["generation"]
+                published = int(pool.tracking.get_meta("published_generation", "0"))
+                if status["total"] == DEFAULT_SCAN_UNIVERSE_LIMIT and gen > published:
+                    if self.queue.restore_unstaged_jobs(gen):
+                        return
+                    pool.publish_cycle(gen, self.queue.cycle_results(gen), self.queue.generation_symbols(gen))
+                self.queue.discard_applied_results(gen)
+            if time.monotonic() - self._last_rank_attempt < 30:
+                return
+            self._last_rank_attempt = time.monotonic()
+            ranked = self.inventory.get_ranked_symbols(limit=DEFAULT_SCAN_UNIVERSE_LIMIT, require_volume=True)
+            if len(set(ranked)) == DEFAULT_SCAN_UNIVERSE_LIMIT:
+                self.queue.rebuild(ranked, batch_tag="continuous_300", preserve_unfinished=True,
+                                   ranking_source="gateio_24h_quote_volume")
+
     def _worker_loop(self):
         while not self._stop_event.is_set():
             job = self.queue.claim_next(worker_id=threading.current_thread().name)
@@ -321,6 +358,12 @@ class ScanService:
                 # command may enqueue more work later).
                 if self._stop_event.wait(2.0):
                     break
+                if self.continuous:
+                    try:
+                        self.roll_cycle()
+                    except Exception:
+                        logger.exception("Scan publication or ranking unavailable")
+                    continue
                 progress = self.queue.progress()
                 if progress["complete"]:
                     # Nothing left to do; keep the thread alive but cheap so
@@ -331,11 +374,15 @@ class ScanService:
                 continue
             symbol = job["symbol"]
             try:
-                outcome = self.runtime.analyze_symbol(
-                    symbol, force_refresh=True, track_signal=False, use_websocket=False
-                )
-                ok = bool(outcome.get("ok"))
-                self.queue.complete(symbol, ok=ok, claim=job,
+                if self.continuous:
+                    outcome = self.runtime.analyze_for_cycle(symbol)
+                    result = outcome.get("cycle_result")
+                else:
+                    outcome = self.runtime.analyze_symbol(symbol, force_refresh=True,
+                                                          track_signal=False, use_websocket=False)
+                    result = None
+                ok = bool(outcome.get("ok")) and (not self.continuous or result is not None)
+                self.queue.complete(symbol, ok=ok, claim=job, **({"result": result} if self.continuous else {}),
                                     error=None if ok else str(outcome.get("error") or "analysis_failed"))
                 if ok:
                     logger.debug(f"Scan {symbol}: ok")

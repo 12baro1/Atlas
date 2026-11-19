@@ -101,12 +101,12 @@ class AtlasRuntime:
         self._market_inventory = get_market_inventory(exchange=exchange)
         self._scan_queue = ScanQueue()
         self._scan_service = ScanService(
-            runtime=self, queue=self._scan_queue, inventory=self._market_inventory
+            runtime=self, queue=self._scan_queue, inventory=self._market_inventory, continuous=True
         )
         self._daily_refresh = DailyPoolRefresh(
             pool=self._opportunity_pool(),
             scan_queue=self._scan_queue,
-            market_inventory=self._market_inventory,
+            market_inventory=self._market_inventory, continuous=True,
         )
 
         with self._journal_lock:
@@ -122,24 +122,10 @@ class AtlasRuntime:
         # pending queue work continues and the daily refresh stays scheduled.
         try:
             # Finish persisted work before applying a new bounded universe.
-            self._scan_service.enforce_universe_limit()
-            ranking_sync = self._scan_service.synchronize_ranked_universe(limit=300)
-            self.logger.info(
-                "Active scan universe synchronized | selected=%s ranking=%s rebuilt=%s",
-                ranking_sync.get("selected", 0),
-                ranking_sync.get("ranking_source", "unknown"),
-                ranking_sync.get("rebuilt", False),
-            )
             self._scan_service.ensure_workers()
             self._daily_refresh.start_background()
         except Exception as exc:
             self.logger.error(f"Scan infrastructure startup failed: {exc}")
-        if self.full_scan and self.symbols:
-            if self._thread and self._thread.is_alive():
-                return
-            self._thread = threading.Thread(target=self._loop, daemon=daemon)
-            self._thread.start()
-            return
         self._set_status("READY")
 
     def stop(self, timeout=5.0):
@@ -429,6 +415,7 @@ class AtlasRuntime:
             self._set_status("READY")
 
     def snapshot(self):
+        queue_status = self._scan_service.status() if getattr(self, "_scan_service", None) else None
         with self._lock:
             return {
                 "scanner": dict(self._scanner_stats),
@@ -437,7 +424,7 @@ class AtlasRuntime:
                 "current_signal": self._current_signal,
                 "recent": list(self._last_results),
                 "error": self._error,
-                "scan_queue": self._scan_service.status() if getattr(self, "_scan_service", None) else None,
+                "scan_queue": queue_status,
                 "strategy_telemetry": self._strategy_telemetry_locked() if hasattr(self, "_strategy_telemetry") else None,
             }
 
@@ -644,6 +631,10 @@ class AtlasRuntime:
         with self._journal_lock:
             self.engine.trade_journal.expire_stale_signal_outcomes()
 
+    def analyze_for_cycle(self, symbol):
+        return self._analyze_symbol(symbol, force_refresh=True, from_scan=True, track_signal=False,
+                                    use_websocket=False)
+
     def _analyze_symbol(self, raw_symbol, force_refresh=False, from_scan=False, scan_index=None, scan_total=None, track_signal=None, use_websocket=True):
         symbol = self.normalize_symbol(raw_symbol)
         if not symbol:
@@ -719,102 +710,45 @@ class AtlasRuntime:
                     if result is None:
                         self._inc("skipped")
                         return {"ok": False, "symbol": symbol, "error": "no_result"}
-                    self._inc("success")
                     
                     # Invalidate an unaccepted setup only when its OWN strategy
                     # completed a fresh evaluation and explicitly reports that
                     # its native setup conditions are no longer present.
                     strategy_lab = result.get("strategy_lab") or {}
                     diagnostics = strategy_lab.get("diagnostics") or {}
-                    invalidated_setups = []
-                    for strategy_row in diagnostics.get("strategies") or []:
-                        strategy_id = str(strategy_row.get("strategy_id") or "").strip()
-                        status = str(strategy_row.get("status") or "").upper()
-                        if not strategy_id or status not in {"NO_SETUP", "CONDITION_NOT_MET"}:
-                            continue
-                        reason = "STRATEGY_STRUCTURE_BROKEN"
-                        removed = pool.invalidate_strategy_setup(symbol, strategy_id, reason)
-                        invalidate_signals = getattr(
-                            self.engine.trade_journal, "invalidate_pending_signal_outcomes", None
-                        )
-                        removed_signals = (
-                            invalidate_signals(symbol=symbol, strategy_id=strategy_id, reason=reason)
-                            if callable(invalidate_signals) else []
-                        )
-                        if removed:
-                            state_engine = getattr(self.engine, "state_engine", None)
-                            if state_engine is not None:
-                                state_engine.clear_active_setup(
-                                    symbol, reason=f"setup_invalidated:{reason}"
-                                )
-                        invalidated_setups.extend({
-                            "setup_id": item.setup_id,
-                            "symbol": item.symbol,
-                            "strategy_id": item.strategy_id,
-                            "strategy_name": item.strategy_name,
-                            "direction": item.direction,
-                        } for item in removed)
-                        invalidated_setups.extend({
-                            "signal_id": item.get("signal_id"),
-                            "symbol": item.get("symbol"),
-                            "strategy_id": strategy_id,
-                            "strategy_name": (item.get("payload") or {}).get("strategy") or strategy_id,
-                            "direction": item.get("direction"),
-                        } for item in removed_signals)
-
-                    # Add/refresh the selected setup after invalidating broken
-                    # strategy structures; other strategies remain independent.
-                    self._register_result(result)
+                    selected = strategy_lab.get("selected")
+                    if not diagnostics.get("strategies"):
+                        return {"ok": False, "error": "missing_strategy_evaluations"}
+                    if selected:
+                        from utils.signal_card import build_selected_strategy_card
+                        if build_selected_strategy_card(result).get("decision_action") != "EXECUTE":
+                            return {"ok": False, "error": "invalid_selected_plan"}
+                    candidate = self._setup_to_candidate(selected, symbol, trace_id=result.get("trace_id"),
+                                                         regime=strategy_lab.get("regime")) if selected else None
+                    if selected and not candidate:
+                        return {"ok": False, "error": "invalid_selected_plan"}
+                    evidence = {"symbol": symbol, "cutoff": int(closed_15m[-1].time),
+                                "observed": started, "setup": candidate.to_dict() if candidate else None,
+                                "broken": [row["strategy_id"] for row in diagnostics.get("strategies", [])
+                                           if row.get("strategy_id") and row.get("status") in
+                                           {"NO_SETUP", "CONDITION_NOT_MET"}]}
+                    pool.tracking.advance_tracking(symbol, closed_15m)
                     self._accumulate_strategy_telemetry(result)
-                    if invalidated_setups:
-                        result["invalidated_pool_setups"] = invalidated_setups
+                    self._register_result(result)
                     with self._lock:
                         self._latest_analysis_by_symbol[symbol] = result
-                        self._latest_analysis_at[symbol] = int(time.time() * 1000)
+                        self._latest_analysis_at[symbol] = started
                     self._prune_latest_analyses()
-
-                    # The selected setup lives in strategy_lab; there is no
-                    # top-level "selected" key on the engine result payload.
-                    strategy_lab = result.get("strategy_lab") or {}
-                    selected = strategy_lab.get("selected")
-                    if isinstance(selected, dict):
-                        try:
-                            analysis = result.get("analysis") or {}
-                            candidate = self._setup_to_candidate(
-                                selected,
-                                symbol,
-                                trace_id=result.get("trace_id"),
-                                regime=strategy_lab.get("regime"),
-                                market_phase=(analysis.get("market_phase") or {}).get("phase"),
-                            )
-                            if candidate:
-                                pool.add_candidate(candidate)
-                                # Validate to move from candidates to validated pool
-                                pool.validate_candidate(candidate.setup_id)
-                                self.logger.debug(
-                                    "Added and validated candidate from %s: %s",
-                                    symbol, candidate.setup_id,
-                                )
-                            else:
-                                self.logger.debug(
-                                    "Selected setup for %s rejected by candidate validation",
-                                    symbol,
-                                )
-                        except Exception as e:
-                            self.logger.warning(
-                                "Failed to add candidate from %s to pool: %s", symbol, e
-                            )
-
                     if Config.SIGNAL_TRACKING_ENABLED:
-                        candles_15m = data.get("15m") or data.get("15M") or []
-                        resolved_outcomes = self.engine.trade_journal.resolve_signal_outcomes(
-                            {symbol: candles_15m}
-                        )
-                        # Kapanan sinyal sonuçları aynı tarama döngüsünde öğrenme
-                        # indeksine aktarılır; bir sonraki analiz eski istatistikle kalmaz.
-                        if resolved_outcomes:
+                        resolved = self.engine.trade_journal.resolve_signal_outcomes({symbol: closed_15m})
+                        if resolved:
                             self.engine.refresh_learning()
+                    invalidate = getattr(self.engine.trade_journal, "invalidate_pending_signal_outcomes", None)
+                    if invalidate:
+                        for strategy in evidence["broken"]:
+                            invalidate(symbol=symbol, strategy_id=strategy, reason="STRATEGY_STRUCTURE_BROKEN")
 
+            self._inc("success")
             if from_scan:
                 self._log(f"[{scan_index}/{scan_total}] analyzed {symbol}")
             else:
@@ -824,6 +758,7 @@ class AtlasRuntime:
                 "ok": True,
                 "symbol": symbol,
                 "result": result,
+                "cycle_result": evidence,
                 "elapsed_ms": int(time.time() * 1000) - started,
             }
         except Exception as exc:
@@ -1018,8 +953,7 @@ class AtlasRuntime:
         strategy_name = str(selected.get("strategy") or strategy_id)
 
         # Net RR: cost-adjusted value comes from the shared risk engine via the
-        # strategy lab. Fall back to the raw partial-exit weighted RR only when
-        # the cost-adjusted figure is missing; never invent a number.
+        # strategy lab. Gross reward cannot substitute for an unknown net reward.
         weights = selected.get("partial_exit_weights") or {}
         try:
             w_total = sum(float(weights.get(key, 0.0)) for key in ("tp1", "tp2", "tp3"))
@@ -1035,11 +969,12 @@ class AtlasRuntime:
         except (TypeError, ValueError, OverflowError):
             weighted_rr = rr_tp2
         try:
-            net_rr_after_costs = float(selected.get("estimated_net_rr"))
+            planned_rr = (selected.get("risk_plan") or {}).get("weighted_net_rr")
+            net_rr_after_costs = float(planned_rr if planned_rr is not None else selected.get("estimated_net_rr"))
         except (TypeError, ValueError, OverflowError):
             net_rr_after_costs = None
         if net_rr_after_costs is None or not math.isfinite(net_rr_after_costs):
-            net_rr_after_costs = weighted_rr
+            return None
         net_rr = net_rr_after_costs
 
         confidence = selected.get("strength")
@@ -1052,8 +987,8 @@ class AtlasRuntime:
 
         # Deterministic id: re-scans of an unchanged setup produce the same id,
         # so the pool stays idempotent and dedup can never merge two strategies.
-        setup_id = "setup:{}:{}:{}:{:.8g}:{:.8g}:{:.8g}".format(
-            symbol, strategy_id, direction, entry, stop, tp1
+        setup_id = "setup:{}:{}:{}:{}:{}:{}:{}:{}:{}".format(
+            symbol, strategy_id, direction, entry_type, entry, stop, tp1, tp2, tp3
         )
 
         reasons = [str(r) for r in (selected.get("reasons") or []) if r]
@@ -1078,6 +1013,13 @@ class AtlasRuntime:
             grade="SELECTED",
             score=confidence,
             net_rr_after_costs=round(net_rr_after_costs, 4),
+            execution_costs={
+                **{key: selected["risk_plan"][key] for key in
+                   ("maker_fee_rate", "taker_fee_rate", "spread_rate", "slippage_rate")
+                   if (selected.get("risk_plan") or {}).get(key) is not None},
+                "model": (selected.get("risk_plan") or {}).get("cost_model"),
+                "partial_exit_weights": (selected.get("risk_plan") or {}).get("partial_exit_weights") or weights,
+            },
             status=SetupStatus.DISCOVERED.value,
             setup_type=SetupType.LIMIT.value if entry_type == "LIMIT" else SetupType.MARKET.value,
             regime=str(regime or selected.get("market_regime") or "UNKNOWN"),
@@ -1116,6 +1058,7 @@ class AtlasRuntime:
                             "NO_SETUP": "no_setup",
                             "CONDITION_NOT_MET": "condition_not_met",
                             "MISSING_DATA": "missing_data",
+                            "INVALID_DATA": "missing_data",
                             "INSUFFICIENT_HISTORY": "insufficient_history",
                             "ERROR": "errors",
                         }.get(status, "other_no_setup")

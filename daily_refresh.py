@@ -48,7 +48,8 @@ def istanbul_hour(now_utc_ms: Optional[int] = None) -> int:
 class DailyPoolRefresh:
     """Runs at most one pool refresh per Istanbul calendar day."""
 
-    def __init__(self, pool, scan_queue, market_inventory, refresh_hour: int = REFRESH_HOUR_IST):
+    def __init__(self, pool, scan_queue, market_inventory, refresh_hour: int = REFRESH_HOUR_IST, *, continuous=False):
+        self.continuous = continuous
         self.pool = pool
         self.scan_queue = scan_queue
         self.market_inventory = market_inventory
@@ -78,6 +79,8 @@ class DailyPoolRefresh:
         """
         now_ms = int(now_utc_ms if now_utc_ms is not None else time.time() * 1000)
         with self._lock:
+            if self.continuous:
+                return {"cleaned": True} if self.pool.clean_published_if_due(now_ms) else None
             if istanbul_hour(now_ms) < self.refresh_hour:
                 return None
             today = istanbul_day(now_ms)
@@ -120,6 +123,20 @@ class DailyPoolRefresh:
     # Scheduling thread (independent of Telegram lifecycle)
     # ------------------------------------------------------------------
 
+    def refresh_virtual_positions(self):
+        from data_engine import fetch_candles
+        from timing import closed_htf_candles
+        for symbol in self.pool.tracking.open_symbols():
+            if self._stop_event.is_set():
+                return
+            try:
+                candles = fetch_candles(symbol, "15m", 200)
+                closed = closed_htf_candles(candles, int(time.time()*1000), "15m")
+                if closed:
+                    self.pool.tracking.advance_tracking(symbol, closed)
+            except Exception as exc:
+                logger.warning("Virtual position data unavailable for %s (%s)", symbol, type(exc).__name__)
+
     def start_background(self, check_interval_seconds: int = 60):
         """Start a daemon thread that runs the refresh when it comes due.
 
@@ -130,6 +147,8 @@ class DailyPoolRefresh:
             while not self._stop_event.is_set():
                 try:
                     self.run_if_due()
+                    if self.continuous:
+                        self.refresh_virtual_positions()
                 except Exception as exc:  # pragma: no cover
                     logger.error(f"Daily refresh loop error: {exc}")
                 if self._stop_event.wait(max(10, int(check_interval_seconds))):

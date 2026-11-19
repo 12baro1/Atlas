@@ -1,7 +1,6 @@
 """On-demand Telegram command interface for the headless Atlas service.
 
-Only messages from the configured group are considered. The bot never pushes
-signals or scan results on its own; it replies only to recognized commands.
+Only the configured chat receives replies and durable virtual-position events.
 
 Slash command support:
 - /btc, /eth, /sol — quick symbol analysis
@@ -23,6 +22,7 @@ import logging
 import math
 import os
 import queue
+import re
 import threading
 import time
 from datetime import datetime
@@ -56,7 +56,7 @@ def normalize_command(value: str) -> str:
     """
     command = " ".join(str(value or "").strip().split())
     if command.startswith("/"):
-        command = command[1:].split("@", 1)[0]
+        command = re.sub(r"@[A-Za-z0-9_]+(?=\s|$)", "", command[1:], count=1)
     return command.strip()
 
 
@@ -435,7 +435,7 @@ def is_recognized_command(command: str) -> bool:
 
     # Direct slash command match
     if raw.startswith("/"):
-        cmd_name = normalized.split()[0]
+        cmd_name = normalized.partition(" ")[0]
         if get_command_by_name(cmd_name):
             return True
         # Parameterized commands like "/analiz BTC"
@@ -462,6 +462,13 @@ def is_recognized_command(command: str) -> bool:
     )
 
 
+class TelegramDeliveryError(requests.RequestException):
+    def __init__(self, state, retry_after=0):
+        super().__init__("Telegram sendMessage failed")
+        self.state = state
+        self.retry_after = retry_after
+
+
 class TelegramCommandService:
     """Long-poll Telegram and execute recognized commands against one runtime."""
 
@@ -480,6 +487,7 @@ class TelegramCommandService:
         self._analysis_lock = threading.Lock()
         self._analysis_threads = {}
         self._reply_lock = threading.Lock()
+        self._delivery = threading.local()
         self._bot_username = None
         self._bot_info_cache = None
         self._bot_info_cache_time = 0
@@ -550,7 +558,7 @@ class TelegramCommandService:
         else:
             self.logger.warning("Telegram polling thread still active at shutdown")
 
-        if not analysis_alive and not command_alive:
+        if not analysis_alive and not command_alive and not polling_alive:
             self._reply_session.close()
         else:
             if analysis_alive:
@@ -589,6 +597,22 @@ class TelegramCommandService:
                 timeout=(5, timeout),
             )
             elapsed = time.perf_counter() - start
+            if method == "sendMessage":
+                try:
+                    body = response.json()
+                except ValueError:
+                    body = None
+                rejected = isinstance(body, dict) and body.get("ok") is False
+                code = body.get("error_code", response.status_code) if rejected else response.status_code
+                if code == 429:
+                    params = body.get("parameters") if isinstance(body, dict) else None
+                    try:
+                        delay = int((params or {}).get("retry_after", 0))
+                    except (AttributeError, ValueError, TypeError):
+                        delay = 0
+                    raise TelegramDeliveryError("retry", max(1, delay))
+                if rejected:
+                    raise TelegramDeliveryError("retry" if isinstance(code,int) and code >= 500 else "failed")
             response.raise_for_status()
             result = response.json()
             if not result.get("ok"):
@@ -597,11 +621,19 @@ class TelegramCommandService:
             if method == "sendMessage":
                 self.logger.info("Telegram reply sent | characters=%s", len(str(payload.get("text") or "")))
             return result.get("result")
+        except TelegramDeliveryError:
+            raise
         except requests.RequestException as exc:
             elapsed = time.perf_counter() - start
             status = getattr(exc.response, "status_code", None)
             self.logger.error("Telegram %s failed | type=%s status=%s (%.3fs)",
                               method, type(exc).__name__, status, elapsed)
+            if method == "sendMessage":
+                if isinstance(exc, requests.ConnectTimeout):
+                    raise TelegramDeliveryError("retry") from None
+                if status and 400 <= status < 500:
+                    raise TelegramDeliveryError("failed") from None
+                raise TelegramDeliveryError("uncertain") from None
             # requests exceptions can contain the entire bot-token URL.
             raise requests.RequestException(f"Telegram {method} failed (HTTP {status})") from None
 
@@ -625,6 +657,10 @@ class TelegramCommandService:
             self.logger.exception("Could not synchronize Telegram update offset; continuing polling")
         while not self.stop_flag.is_set():
             try:
+                try:
+                    self._deliver_notifications()
+                except Exception as exc:
+                    self.logger.warning("Notification delivery deferred | type=%s", type(exc).__name__)
                 payload = {
                     "timeout": 15,
                     "allowed_updates": ["message", "edited_message"],
@@ -644,6 +680,31 @@ class TelegramCommandService:
                 self.logger.exception("Telegram polling error")
                 self.stop_flag.wait(3)
         self.logger.info("Telegram command polling stopped")
+
+    def _deliver_notifications(self):
+        tracking = get_opportunity_pool().tracking
+        for _ in range(5):
+            claim = tracking.claim_notification(self.chat_id)
+            if not claim:
+                return
+            event_id, message, attempt = claim
+            try:
+                with self._reply_lock:
+                    receipt = self._api("sendMessage", {"chat_id": self.chat_id, "text": message},
+                                        timeout=10, session=self._reply_session)
+                if (not isinstance(receipt, dict) or type(receipt.get("message_id")) is not int
+                        or receipt["message_id"] <= 0
+                        or str((receipt.get("chat") or {}).get("id")) != self.chat_id):
+                    raise TelegramDeliveryError("uncertain")
+            except TelegramDeliveryError as exc:
+                state = "failed" if exc.state == "retry" and attempt >= 8 else exc.state
+                delay = max(exc.retry_after, min(600, 2 ** attempt)) if state == "retry" else 0
+                tracking.finish_notification(self.chat_id,event_id,attempt,state,retry_after=delay)
+                return
+            except Exception:
+                tracking.finish_notification(self.chat_id,event_id,attempt,"uncertain")
+                return
+            tracking.finish_notification(self.chat_id,event_id,attempt,"sent",message_id=receipt["message_id"])
 
     def _handle_update(self, update: dict) -> None:
         """Process a single Telegram update with full diagnostics."""
@@ -688,6 +749,10 @@ class TelegramCommandService:
         if not raw_command:
             return
 
+        head = raw_command.split()[0]
+        if head.startswith("/") and "@" in head and self._bot_username:
+            if head.partition("@")[2].lower() != self._bot_username:
+                return
         command = normalize_command(raw_command)
         if not command or not is_recognized_command(raw_command):
             self.logger.debug("Telegram text ignored: unrecognized command")
@@ -712,7 +777,7 @@ class TelegramCommandService:
             except Exception:
                 self.logger.exception("Telegram queue-full reply could not be sent")
 
-    def _send_command_reply(self, message: str) -> None:
+    def _send_command_reply(self, message: str) -> bool:
         # requests.Session is not thread-safe. Background analyses may finish
         # concurrently, so serialize access to the dedicated reply session.
         with self._reply_lock:
@@ -726,7 +791,20 @@ class TelegramCommandService:
                     )
                 except Exception:
                     self.logger.exception("Telegram command reply could not be sent")
-                    break
+                    return False
+        return True
+
+    def _command_and_reply(self, command):
+        self._delivery.actions = []
+        try:
+            message = self.execute_command(command)
+            if self._send_command_reply(message):
+                for callback in self._delivery.actions:
+                    callback()
+        except Exception as exc:
+            self.logger.warning("Telegram delivery or subscription failed | type=%s",type(exc).__name__)
+        finally:
+            del self._delivery.actions
 
     def _analysis_symbol_for_command(self, raw_command: str):
         """Return a symbol only for commands routed to the long-running analyzer."""
@@ -737,6 +815,9 @@ class TelegramCommandService:
         if not parts:
             return None
         command = get_command_by_name(parts[0].lower())
+        if command is None and len(parts) == 1:
+            from atlas_tui import _is_symbol_input
+            return parts[0].upper() if _is_symbol_input(parts[0]) else None
         if not command or command.handler != "handle_analyze_symbol":
             return None
         symbol = parts[1] if command.takes_parameter and len(parts) > 1 else parts[0]
@@ -748,17 +829,7 @@ class TelegramCommandService:
                 "Telegram background analysis started: %s | symbol=%s",
                 command_label[:80], symbol,
             )
-            try:
-                result = self.execute_command(raw_command)
-            except Exception:
-                self.logger.exception(
-                    "Telegram background analysis failed: %s", command_label[:80]
-                )
-                result = (
-                    f"ATLAS | {symbol} ANALİZİ TAMAMLANAMADI\\n"
-                    "Beklenmeyen hata oluştu. Diğer Telegram komutları çalışmaya devam ediyor."
-                )
-            self._send_command_reply(result)
+            self._command_and_reply(raw_command)
             self.logger.info(
                 "Telegram background analysis completed: %s | symbol=%s",
                 command_label[:80], symbol,
@@ -776,12 +847,12 @@ class TelegramCommandService:
             existing = self._analysis_threads.get(symbol)
             if existing and existing.is_alive():
                 self._send_command_reply(
-                    f"ATLAS | {symbol}\\nBu sembolün analizi zaten çalışıyor. Sonuç bekleniyor."
+                    f"ATLAS | {symbol}\nBu sembolün analizi zaten çalışıyor. Sonuç bekleniyor."
                 )
                 return True
             if len(self._analysis_threads) >= 3:
                 self._send_command_reply(
-                    "ATLAS | ANALİZ KUYRUĞU DOLU\\nEn fazla 3 sembol analizi aynı anda çalışabilir."
+                    "ATLAS | ANALİZ KUYRUĞU DOLU\nEn fazla 3 sembol analizi aynı anda çalışabilir."
                 )
                 return True
             thread = threading.Thread(
@@ -792,7 +863,7 @@ class TelegramCommandService:
             )
             self._analysis_threads[symbol] = thread
             self._send_command_reply(
-                f"ATLAS | {symbol} ANALİZİ BAŞLADI\\nSonuç hazır olduğunda bu gruba gönderilecek."
+                f"ATLAS | {symbol} ANALİZİ BAŞLADI\nSonuç hazır olduğunda bu gruba gönderilecek."
             )
             thread.start()
         return True
@@ -811,21 +882,24 @@ class TelegramCommandService:
                         command_label[:80],
                     )
                     continue
-                try:
-                    result = self.execute_command(raw_command)
-                except Exception:
-                    self.logger.exception("Telegram command failed: %s", command_label[:80])
-                    result = "Komut işlenirken hata oluştu. VPS günlüklerini kontrol et."
-                self._send_command_reply(result)
+                self._command_and_reply(raw_command)
                 self.logger.info("Telegram command execution completed: %s", command_label[:80])
             finally:
                 self._command_queue.task_done()
 
     def execute_command(self, command: str) -> str:
+        try:
+            return self._execute_command(command)
+        except Exception as exc:
+            self.logger.warning("Telegram command unavailable | type=%s", type(exc).__name__)
+            return "Komut tamamlanamadı. Biraz sonra tekrar deneyin."
+
+    def _execute_command(self, command: str) -> str:
         """Execute a recognized command and return formatted response."""
         from atlas_tui import (
             AtlasTUIApp,
             _is_report_command,
+            _is_symbol_input,
             _parse_liquidity_command,
             _parse_scan_command,
             _best_symbols,
@@ -839,7 +913,9 @@ class TelegramCommandService:
         # Handle slash commands with parameters (e.g., "/analiz BTC")
         if raw.startswith("/"):
             parts = normalized.split(maxsplit=1)
-            cmd_name = parts[0]
+            if not parts:
+                return self.handle_help()
+            cmd_name = parts[0].lower()
             param = parts[1] if len(parts) > 1 else None
             cmd_def = get_command_by_name(cmd_name)
             if cmd_def:
@@ -849,10 +925,10 @@ class TelegramCommandService:
                     if cmd_def.takes_parameter:
                         if param:
                             return handler(param)
-                        if cmd_name == "tara":
-                            return handler("tara")
                         return f"KULLANIM: /{cmd_def.name} <{cmd_def.parameter_name}>"
                     else:
+                        if param:
+                            return f"KULLANIM: /{cmd_def.name}"
                         # For commands like /btc, /eth, /sol that share handle_analyze_symbol
                         # but don't take a parameter in the command, extract symbol from command name
                         if handler_name == "handle_analyze_symbol":
@@ -898,6 +974,9 @@ class TelegramCommandService:
             call_from_thread=lambda callback, *args, **kwargs: callback(*args, **kwargs),
         )
 
+        plain_scan = re.fullmatch(r"([+-]?[0-9]+)\s+tara", lowered)
+        if plain_scan:
+            return self.handle_scan(plain_scan[1])
         scan_request = _parse_scan_command(lowered)
         liquidity_symbol = _parse_liquidity_command(normalized)
 
@@ -927,25 +1006,9 @@ class TelegramCommandService:
             # Bare symbol without slash is treated as chat in groups
             return "Slash komut kullanın: /btc, /eth, /analiz BTC"
 
-        outcome = self.runtime.analyze_symbol(
-            normalized, force_refresh=True, track_signal=True
-        )
-        if not outcome.get("ok"):
-            return (
-                f"{normalized.upper()} ANALİZ EDİLEMEDİ\n\n"
-                "Piyasa verisi alınamadı veya analiz tamamlanamadı.\n"
-                "Sembolün Gate.io USDT perpetual olduğunu kontrol et; ayrıntı için /durum."
-            )
-        raw_result = outcome.get("result") or {}
-        card = (
-            build_selected_strategy_card(raw_result)
-            if isinstance(raw_result.get("strategy_lab"), dict)
-            else build_signal_card(raw_result)
-        )
-        if not card.get("strategy") and not card.get("strategy_id"):
-            analysis = raw_result.get("analysis") or {}
-            card["strategy"] = analysis.get("strategy") or "SMC"
-        return _format_telegram_card(card, outcome.get("elapsed_ms", 0))
+        if raw.startswith("/") and _is_symbol_input(normalized):
+            return self.handle_analyze_symbol(normalized)
+        return "Komut tanınmadı. /yardim"
 
     # --- Command Handlers ---
 
@@ -976,14 +1039,6 @@ class TelegramCommandService:
 
         pool = get_opportunity_pool()
         normalized_symbol = self.runtime.normalize_symbol(symbol)
-        before = pool.get_all_setups()
-        previous_pending = [
-            item
-            for bucket in ("candidates", "validated")
-            for item in before.get(bucket, [])
-            if item.symbol == normalized_symbol
-        ]
-
         outcome = self.runtime.analyze_symbol(
             symbol, force_refresh=True, track_signal=True
         )
@@ -1005,44 +1060,22 @@ class TelegramCommandService:
             card["strategy"] = analysis.get("strategy") or "SMC"
 
         message = _format_telegram_card(card, outcome.get("elapsed_ms", 0))
-        current = pool.get_validated_setups(symbol=normalized_symbol, limit=50)
-        replaced = next(
-            (
-                item for item in current
-                if previous_pending and all(item.setup_id != old.setup_id for old in previous_pending)
-            ),
-            None,
-        )
-        if replaced is not None and previous_pending:
-            old_setup = max(previous_pending, key=lambda item: item.updated_at_ms or item.created_at_ms)
-            message += (
-                "\n\nSETUP DEĞİŞTİ — ESKİ KAYIT YENİLENDİ"
-                f"\nEski: {old_setup.direction} / {_format_strategy_name(old_setup.strategy_name)}"
-                f"\nYeni: {replaced.direction} / {_format_strategy_name(replaced.strategy_name)}"
-                f"\nYeni giriş: {_format_price(replaced.entry_price)}"
-                f" | SL: {_format_price(replaced.stop_loss)}"
-                f"\nEski setup aktif listeden kaldırıldı ve arşive alındı."
-            )
-        invalidated = (raw_result.get("invalidated_pool_setups") or [])
-        if invalidated:
-            message += "\n\nSTRATEJİ YAPISI BOZULDU — SETUP KALDIRILDI"
-            for item in invalidated:
-                message += (
-                    f"\n{str(item.get('symbol') or symbol).replace(':USDT', '')} | "
-                    f"{str(item.get('direction') or '—')} | "
-                    f"{_format_strategy_name(item.get('strategy_name') or item.get('strategy_id'))}"
-                )
-            message += (
-                "\nNeden: Stratejinin güncel analizi setup koşullarının artık "
-                "geçerli olmadığını gösterdi."
-                "\nDurum: Fırsat havuzundan ve mevcut setup listesinden kaldırıldı; "
-                "geçmiş kaydı arşivde tutuldu."
-            )
+        if "cycle_result" in outcome:
+            row = outcome["cycle_result"]
+            if row.get("setup") and card.get("decision_action") not in {"EXECUTE","EXECUTE_WITH_CAUTION"}:
+                return message
+            if hasattr(self._delivery,"actions"):
+                self._delivery.actions.append(lambda: pool.tracking.follow_analysis(self.chat_id, row))
+            else:
+                pool.tracking.follow_analysis(self.chat_id, row)
+            return message
         return message
 
     def handle_scan(self, cmd_name=None) -> str:
         """Handle /tara [N] and legacy /20tara ... commands."""
         limit = self._parse_scan_limit(cmd_name)
+        if limit is None:
+            return "KULLANIM: /tara <1-1000>"
         return self._queue_scan_report(limit)
 
     def handle_scan_all(self) -> str:
@@ -1145,61 +1178,27 @@ class TelegramCommandService:
         if not _is_symbol_input(symbol):
             return "KULLANIM: /setup BTC"
         normalized = self.runtime.normalize_symbol(symbol)
-        pools = get_opportunity_pool().get_all_setups()
-        lines = [f"ATLAS | {normalized.replace(':USDT', '')} SETUP'LARI"]
-        found = 0
-        for bucket, label in (
-            ("candidates", "ADAYLAR"),
-            ("validated", "DOĞRULANMIŞ / GİRİŞ BEKLEYEN"),
-            ("active", "KABUL EDİLMİŞ / AKTİF"),
-        ):
-            matches = [
-                item for item in (pools.get(bucket, []) or [])
-                if str(getattr(item, "symbol", "")).upper() == normalized.upper()
-            ]
-            if not matches:
-                continue
-            lines.extend(["", f"{label} ({len(matches)})"])
-            for item in matches:
-                found += 1
-                lines.extend([
-                    f"{item.symbol.replace(':USDT', '')} | {str(item.direction).upper()}",
-                    f"Strateji: {_format_strategy_name(item.strategy_name)} | Durum: {item.status}",
-                    f"Emir: {str(item.entry_type or item.setup_type).upper()}",
-                    f"Giriş: {_format_price(item.entry_price)} | SL: {_format_price(item.stop_loss)}",
-                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
-                    f"Net RR: {_format_rr(item.net_rr_after_costs)}",
-                    "",
-                ])
-        if not found:
-            lines.append("Bu sembol için canlı havuz setup'ı bulunmuyor.")
-        return "\n".join(lines).rstrip()
+        items = get_opportunity_pool().get_validated_setups(symbol=normalized, limit=1)
+        if not items:
+            return f"{normalized} — Doğrulanmış setup yok."
+        item = items[0]
+        return _format_telegram_card(dict(symbol=item.symbol, direction=item.direction,
+            strategy=item.strategy_name, decision_action="EXECUTE", entry_type=item.entry_type,
+            entry=item.entry_price, stop_loss=item.stop_loss, tp_levels=[item.tp1,item.tp2,item.tp3],
+            net_rr=item.net_rr_after_costs))
 
     def handle_history(self) -> str:
         """Show recent completed and invalidated signal records."""
-        outcomes = self.runtime.signal_outcomes(limit=5000) or []
-        terminal = {"TP1", "TP2", "TP3", "SL", "EXPIRED", "INVALIDATED"}
-        rows = sorted(
-            [item for item in outcomes if str(item.get("status") or "").upper() in terminal],
-            key=lambda item: int(item.get("resolved_at") or item.get("opened_at") or 0),
-            reverse=True,
-        )[:15]
-        if not rows:
-            return "ATLAS | GEÇMİŞ\n\nHenüz sonuçlanmış veya iptal edilmiş kayıt yok."
-        lines = ["ATLAS | SONUÇLANAN / İPTAL EDİLEN KAYITLAR"]
-        for item in rows:
-            status = str(item.get("status") or "").upper()
-            if status == "INVALIDATED":
-                payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-                lines.extend([
-                    "",
-                    f"{str(item.get('symbol') or '?').replace(':USDT', '')} | {str(item.get('direction') or '?').upper()}",
-                    f"Strateji: {_outcome_strategy(item)}",
-                    "Durum: HAVUZDAN KALDIRILDI",
-                    f"Neden: {str(item.get('invalidation_reason') or payload.get('invalidation_reason') or 'Yapı geçersiz')}",
-                ])
-            else:
-                lines.extend(["", _format_outcome_item(item, "SONUÇLANDI")])
+        rows = get_opportunity_pool().tracking.tracked(self.chat_id)
+        history = [(symbol, revision, state, plan) for symbol, revision, state, plan in rows
+                   if state in {"CLOSED", "INVALIDATED"}]
+        history.sort(key=lambda row: row[3].get("resolved_at") or row[3]["opened_at"], reverse=True)
+        lines = ["SİNYAL GEÇMİŞİ"]
+        for symbol, revision, state, plan in history[:15]:
+            label = "Geçersizleşti" if state == "INVALIDATED" else f"{plan['status']} | {plan['realized_r']:+.2f}R"
+            lines.append(f"{symbol.split('/')[0]} | {plan['direction']} | {plan['strategy']} | {label} (v{revision})")
+        if not history:
+            lines.append("Henüz kapanan veya geçersizleşen takip kaydı yok.")
         return "\n".join(lines)
 
     def handle_motors(self) -> str:
@@ -1285,22 +1284,21 @@ class TelegramCommandService:
     @staticmethod
     def _parse_scan_limit(cmd_name) -> Optional[int]:
         """Extract the requested scan size from a command name like '200tara'."""
-        import re as _re
-        text = str(cmd_name or "")
-        match = _re.search(r"(\d+)", text)
-        if not match:
-            return None
-        try:
-            limit = int(match.group(1))
-        except ValueError:
-            return None
-        return max(1, min(limit, 1000))
+        match = re.fullmatch(r"([0-9]{1,4})(?:tara)?", str(cmd_name or ""))
+        if match and 1 <= int(match[1]) <= 1000:
+            return int(match[1])
+        return None
 
     def _queue_scan_report(self, limit: Optional[int]) -> str:
         """Start/queue a scan via the runtime scan service and report progress."""
         result = self.runtime.start_scan(limit)
         if not result.get("started"):
             return "ATLAS | TARAMA BAŞLATILAMADI\nMevcut tarama kuyruğu değiştirilmedi. /taramadurum ile durumu kontrol et."
+        if result.get("continuous"):
+            progress = result["progress"]
+            return (f"300 sembollük tarama | Döngü {progress['generation']}\n"
+                    f"Öncelik: hacim sıralamasındaki ilk {result['selected']} sembolün bekleyen işleri.\n"
+                    f"Başarılı: {progress['done']} | Başarısız: {progress['failed']} | Bekleyen: {progress['pending']}")
         return self._format_scan_progress(result)
 
     def _format_scan_progress(self, result: dict, resumed: bool = False) -> str:
@@ -1326,165 +1324,60 @@ class TelegramCommandService:
 
     def _format_best_setups(self, count: int) -> str:
         """Read-only report of complete, validated trade plans from the pool."""
-        best = get_opportunity_pool().get_best_setups(limit=count)
+        pool = get_opportunity_pool()
+        if count == 20:
+            best = pool.get_best_setups(limit=pool.max_validated)
+        elif hasattr(self._delivery,"actions"):
+            best, shown = pool.prepare_best_reply(self.chat_id, count)
+            if best:
+                self._delivery.actions.append(lambda: pool.tracking.follow_delivered(self.chat_id,shown))
+        else:
+            best = pool.follow_best(self.chat_id, count)
+        title = "HAVUZ" if count == 20 else f"EN İYİ {count} SETUP"
         if not best:
-            return (
-                f"ATLAS | EN İYİ {count} SETUP\n\n"
-                "Doğrulanmış setup havuzu boş.\n"
-                "Yeni tarama: /20tara"
-            )
-        now_ms = int(time.time() * 1000)
-        lines = [f"ATLAS | EN İYİ {len(best)} SETUP", "Kaynak: Kalıcı doğrulanmış havuz", ""]
-        for index, setup in enumerate(best, start=1):
-            age_hours = max(0.0, (now_ms - setup.created_at_ms) / 3_600_000.0) if setup.created_at_ms else None
-            age = f"{age_hours:.1f} sa" if age_hours is not None else "bilinmiyor"
-            entry_type = str(getattr(setup, "entry_type", "") or getattr(setup, "setup_type", "—")).upper()
-            lines.extend([
-                f"{index}. {str(setup.symbol).replace(':USDT', '')} | {setup.direction}",
-                f"Strateji: {_format_strategy_name(setup.strategy_name)} | Emir: {entry_type}",
-                f"Giriş: {_format_price(setup.entry_price)} | Stop Loss: {_format_price(setup.stop_loss)}",
-                f"TP1: {_format_price(setup.tp1)} | TP2: {_format_price(setup.tp2)} | TP3: {_format_price(setup.tp3)}",
-                f"Net RR: {_format_rr(getattr(setup, 'net_rr_after_costs', None))} | {setup.status} | Yaş: {age}",
-                "",
-            ])
-        lines.extend([
-            "Yeni tarama başlatılmadı; kuyruk ve havuz değiştirilmedi.",
-            "Skor sıralama ölçüsüdür, kazanma olasılığı değildir.",
-        ])
+            return f"{title}\nDoğrulanmış setup havuzu boş."
+        lines = [title]
+        for index, item in enumerate(best, 1):
+            lines.append(f"{index}. {item.symbol.replace(':USDT','')} | {item.direction} | "
+                         f"{_format_strategy_name(item.strategy_name)} | {_format_rr(item.net_rr_after_costs)}")
         return "\n".join(lines)
 
     def handle_islemler(self) -> str:
-        """Single source of truth for live signals, pool setups and recent removals."""
-        pool = get_opportunity_pool()
-        outcomes = self.runtime.signal_outcomes(limit=5000) or []
-        pending = sorted(
-            [item for item in outcomes if str(item.get("status") or "PENDING").upper() == "PENDING"],
-            key=lambda item: int(item.get("opened_at") or 0),
-            reverse=True,
-        )
-        tracking = [item for item in pending if bool(item.get("entry_reached"))]
-        waiting_signals = [item for item in pending if not bool(item.get("entry_reached"))]
-        terminal = {"TP1", "TP2", "TP3", "SL", "EXPIRED"}
-        closed = sorted(
-            [item for item in outcomes if str(item.get("status") or "").upper() in terminal],
-            key=lambda item: int(item.get("resolved_at") or item.get("opened_at") or 0),
-            reverse=True,
-        )[:8]
-
-        tracked = list(pending) + list(closed)
-        validated = [
-            item for item in pool.get_best_setups(limit=50)
-            if not any(_same_tracked_setup(item, outcome) for outcome in tracked)
-        ]
-        active = [
-            item for item in pool.get_active_setups()
-            if not any(_same_tracked_setup(item, outcome) for outcome in tracked)
-        ]
-        history = pool.get_recent_history(limit=100) if callable(
-            getattr(pool, "get_recent_history", None)
-        ) else []
-        removed_statuses = {"INVALIDATED", "REJECTED", "EXPIRED", "CANCELLED"}
-        pool_removed = [
-            item for item in history
-            if str(item.get("status") or "").upper() in removed_statuses
-            or bool(item.get("invalidation_reason"))
-        ]
-        signal_removed = [
-            {
-                **item,
-                "strategy_id": (item.get("payload") or {}).get("strategy_id") or item.get("strategy_id"),
-                "strategy_name": (item.get("payload") or {}).get("strategy") or (item.get("payload") or {}).get("strategy_id") or item.get("strategy_id"),
-            }
-            for item in outcomes
-            if str(item.get("status") or "").upper() == "INVALIDATED"
-        ]
-        removed = sorted(
-            pool_removed + signal_removed,
-            key=lambda item: int(
-                item.get("closed_at_ms") or item.get("resolved_at") or item.get("updated_at_ms") or 0
-            ),
-            reverse=True,
-        )[:8]
-
-        lines = [
-            "ATLAS | İŞLEMLER",
-            f"Açık işlem: {len(tracking)} | Giriş bekliyor: {len(waiting_signals) + len(validated)}",
-            f"Aktif havuz: {len(active)} | Son kapanan: {len(closed)} | Kaldırılan setup: {len(removed)}",
-        ]
-
-        if tracking:
-            lines.extend(["", "AKTİF İŞLEM TAKİBİ"])
-            for item in tracking[:10]:
-                lines.extend([_format_outcome_item(item, "AÇIK / TAKİPTE"), ""])
-            if len(tracking) > 10:
-                lines.append(f"Diğer açık işlemler: +{len(tracking) - 10}")
-
-        if active:
-            lines.extend(["", "KABUL EDİLMİŞ / AKTİF İŞLEMLER"])
-            for item in active[:10]:
-                status = str(getattr(item, "status", "ACTIVE") or "ACTIVE").upper()
-                current_tp = int(getattr(item, "current_tp", 0) or 0)
-                progress = f"TP{current_tp} gerçekleşti" if current_tp else "Hedef bekleniyor"
-                lines.extend([
-                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
-                    f"Strateji: {_format_strategy_name(item.strategy_name)} | Durum: {status}",
-                    f"Giriş: {_format_price(item.entry_filled_price or item.entry_price)}",
-                    f"Koruma SL: {_format_price(item.trailing_stop or item.stop_loss)}",
-                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
-                    f"İlerleme: {progress}",
-                    "",
-                ])
-
-        if waiting_signals:
-            lines.extend(["", "GİRİŞ BEKLEYEN SİNYALLER"])
-            for item in waiting_signals[:10]:
-                lines.extend([_format_outcome_item(item, "GİRİŞ BEKLENİYOR"), ""])
-            if len(waiting_signals) > 10:
-                lines.append(f"Diğer giriş bekleyen sinyaller: +{len(waiting_signals) - 10}")
-
-        if validated:
-            lines.extend(["", "HAVUZDA GİRİŞ BEKLEYEN SETUP'LAR"])
-            for item in validated[:10]:
-                entry_type = str(getattr(item, "entry_type", "") or getattr(item, "setup_type", "—")).upper()
-                lines.extend([
-                    f"{str(item.symbol).replace(':USDT', '')} | {item.direction}",
-                    f"Strateji: {_format_strategy_name(item.strategy_name)} | Emir: {entry_type}",
-                    f"Giriş: {_format_price(item.entry_price)} | SL: {_format_price(item.stop_loss)}",
-                    f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
-                    f"Net RR: {_format_rr(getattr(item, 'net_rr_after_costs', None))}",
-                    "",
-                ])
-            if len(validated) > 10:
-                lines.append(f"Diğer giriş bekleyen setup: +{len(validated) - 10}")
-
-        if closed:
-            lines.extend(["", "SON KAPANAN İŞLEMLER"])
-            for item in closed:
-                lines.extend([_format_outcome_item(item, "SONUÇLANDI"), ""])
-
-        if removed:
-            lines.extend(["", "YAPISI BOZULDUĞU / İPTAL EDİLDİĞİ İÇİN KALDIRILAN SETUP'LAR"])
-            for item in removed:
-                symbol = str(item.get("symbol") or "?").replace(":USDT", "")
-                direction = str(item.get("direction") or "?").upper()
-                strategy = _format_strategy_name(item.get("strategy_name") or item.get("strategy_id"))
-                reason = str(item.get("invalidation_reason") or item.get("status") or "Kaldırıldı")
-                reason = reason.replace("_", " ").strip()
-                lines.extend([
-                    f"{symbol} | {direction} | {strategy}",
-                    f"Durum: HAVUZDAN KALDIRILDI | Neden: {reason}",
-                    "",
-                ])
-
-        if not (tracking or waiting_signals or validated or active or closed or removed):
-            lines.extend(["", "Açık işlem, giriş bekleyen setup veya son durum kaydı yok."])
-
-        lines.extend([
-            "",
-            "TP/SL takibi Atlas'ın mum verisine dayanır; borsa emir/fill teyidi değildir.",
-            "Eski komutlar /mevcut ve /setuplar aynı birleşik ekranı açar.",
-        ])
-        return "\n".join(lines).rstrip()
+        rows = get_opportunity_pool().tracking.tracked(self.chat_id)
+        live = [(symbol,state,plan) for symbol,_,state,plan in rows if state in {"ACTIVE","WAITING","AMBIGUOUS"}]
+        tz = ZoneInfo("Europe/Istanbul")
+        today = datetime.now(tz).date()
+        recent = [(symbol,state,plan) for symbol,_,state,plan in rows if state in {"INVALIDATED","CLOSED"}
+                  and datetime.fromtimestamp((plan.get("resolved_at") or 0)/1000,tz).date()==today]
+        lines = [f"İŞLEMLERİM — {len(live)+len(recent)}"]
+        for index, (symbol, state, plan) in enumerate(live, 1):
+            hits = plan.get("tps_hit") or []
+            status = f"TP{max(hits)} alındı" if hits else "Aktif" if state == "ACTIVE" else "Giriş bekliyor"
+            if state == "AMBIGUOUS":
+                status = "Mum sırası veya veri belirsiz"
+            lines.append(f"{index}. {symbol.split('/')[0]} | {plan['direction']} | {status}")
+        for index,(symbol,state,plan) in enumerate(recent, len(live)+1):
+            label = "Setup geçersizleşti" if state == "INVALIDATED" else f"{plan['status']} | Kapandı"
+            lines.append(f"{index}. {symbol.split('/')[0]} | {plan['direction']} | {label}")
+        if not live and not recent:
+            lines.append("Takipte güncel setup yok.")
+        closed = [plan for _,_,state,plan in rows if state == "CLOSED"]
+        if rows:
+            total = sum(p.get("realized_r",0) for p in closed)
+            partial = sum(p.get("realized_r",0) for _,_,p in live)
+            wins = sum(p.get("realized_r",0)>0 for p in closed)
+            losses = sum(p.get("realized_r",0)<0 for p in closed)
+            lines.append(f"Kapanan: {len(closed)} | Kazanan: {wins} | Kaybeden: {losses}")
+            if closed:
+                lines.append(f"Başarı: %{100*wins/len(closed):.1f}")
+            lines.append(f"Kapanan net: {total:+.2f}R | Kısmi TP (brüt): {partial:+.2f}R")
+            marks = [p.get("open_r") for _,state,p in live if state in {"ACTIVE","AMBIGUOUS"}]
+            if all(value is not None for value in marks):
+                lines.append(f"Açık sinyal PnL (son kapanış): {sum(marks):+.2f}R")
+            else:
+                lines.append("Açık sinyal PnL: kapanmış mum bekleniyor.")
+        lines.append("Sanal sinyal takibi. Gerçek emir gönderilmez.")
+        return "\n".join(lines)
 
     def handle_mevcut(self) -> str:
         """Show today's signal outcomes and still-open signals only."""
@@ -1732,15 +1625,17 @@ class TelegramCommandService:
             if scanner.get("started_at") else 0
         )
         bot = self._bot_info_cache or {}
+        generation = (snap.get("scan_queue") or {}).get("generation", scanner.get("cycle", 0))
         return "\n".join([
             "ATLAS | SERVİS DURUMU",
             "",
             f"Bot: {bot.get('first_name', 'Atlas')} (@{bot.get('username', '?')})",
             f"Servis: {service} | Telegram polling: {polling}",
-            f"Tarama: {status} | Döngü: {scanner.get('cycle', 0)}",
+            f"Tarama: {status} | Döngü: {generation}",
             f"İşlenen: {scanner.get('processed', 0)} | Başarılı: {scanner.get('success', 0)} | Hatalı: {scanner.get('failed', 0)}",
             f"Çalışma süresi: {uptime}",
             "",
+            f"Teslimi doğrulanamayan bildirim: {get_opportunity_pool().tracking.unconfirmed_notifications(self.chat_id)}",
             "Kuyruk ayrıntısı: /taramadurum",
             "Sunucu kaynakları: /sistem",
         ])

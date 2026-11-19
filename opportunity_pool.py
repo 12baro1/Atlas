@@ -10,6 +10,8 @@ Three distinct pools:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import json
 import logging
 import math
@@ -121,6 +123,9 @@ class SetupCandidate:
     expires_at_ms: Optional[int] = None
     invalidation_reason: Optional[str] = None
     
+    execution_costs: dict = field(default_factory=dict)
+    setup_version: int = 1
+
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         # Convert enums to strings
@@ -206,7 +211,7 @@ class OpportunityPool:
         self,
         base_path: str = "opportunity_pool",
         max_candidates: int = 500,
-        max_validated: int = 200,
+        max_validated: int = 300,
         max_history: int = 5000,
         expiry_hours: int = 24,
         freshness_hours: int = 2,
@@ -223,6 +228,8 @@ class OpportunityPool:
         self.freshness_hours = max(1, int(freshness_hours))
         
         self._lock = threading.RLock()
+        self._batch_depth = 0
+        self._publication = None
         
         # In-memory pools
         self._candidates: Dict[str, SetupCandidate] = {}      # All candidates
@@ -278,6 +285,99 @@ class OpportunityPool:
     # Candidate Pool (Discovered setups)
     # ---------------------------------------------------------------------
     
+    @property
+    def tracking(self):
+        return self._store
+
+    @contextmanager
+    def _publish_transaction(self, marker, value, decisions):
+        with self._lock:
+            self._batch_depth += 1
+            self._publication = (marker, value, decisions)
+            try:
+                try:
+                    yield
+                finally:
+                    self._batch_depth -= 1
+                self.save_all()
+            except Exception:
+                self.load_all()
+                raise
+            finally:
+                self._publication = None
+
+    def clean_published_if_due(self, now_ms=None):
+        now = int(time.time()*1000) if now_ms is None else now_ms
+        with self._lock:
+            last = self.tracking.get_meta("pool_cleanup_ms")
+            if last is None:
+                self.tracking.set_meta("pool_cleanup_ms", str(now))
+                return False
+            if now - int(last) < 86400000:
+                return False
+            with self._publish_transaction("pool_cleanup_ms", now, []):
+                for setup_id in list(self._validated) + list(self._candidates):
+                    self.invalidate_setup(setup_id, "POOL_REFRESH")
+            return True
+
+    def publish_cycle(self, generation, observations, universe=None):
+        with self._lock:
+            if generation <= int(self.tracking.get_meta("published_generation", "0")):
+                return False
+            applied = []
+            with self._publish_transaction("published_generation", generation, applied):
+                if universe is not None:
+                    members = set(universe)
+                    for old in list(self._validated.values()):
+                        if old.symbol not in members:
+                            self.invalidate_setup(old.setup_id, "OUTSIDE_RANKED_UNIVERSE")
+                for row in observations:
+                    symbol = row["symbol"]
+                    last = self.tracking.get_meta("cycle:"+symbol)
+                    if last and [row["cutoff"],row["observed"]] < json.loads(last):
+                        continue
+                    for strategy in row["broken"]:
+                        self.invalidate_strategy_setup(symbol, strategy)
+                    if row["setup"]:
+                        candidate = SetupCandidate.from_dict(row["setup"])
+                        if candidate is None:
+                            raise ValueError("Invalid staged setup")
+                        old = self._validated.get(candidate.setup_id)
+                        version = old.setup_version if old else int(self.tracking.get_meta("version:"+symbol, "0"))+1
+                        candidate.setup_version = version
+                        row = dict(row, version=version)
+                        self.replace_selected(candidate)
+                    applied.append(row)
+            return True
+
+    def replace_selected(self, candidate):
+        # The seven generators remain independent. The runtime publishes one winner.
+        with self._lock:
+            for old in list(self._validated.values()):
+                if old.symbol == candidate.symbol and old.setup_id != candidate.setup_id:
+                    self.invalidate_setup(old.setup_id, "REPLACED_BY_NEW_ANALYSIS")
+            self.add_candidate(candidate)
+            self.validate_candidate(candidate.setup_id)
+
+    def prepare_best_reply(self, chat, count):
+        with self._lock:
+            items = self.follow_best(chat, count, subscribe=False)
+            return items, self.tracking.displayed_observations(items)
+
+    def follow_best(self, chat, count, symbol=None, setup_id=None, *, subscribe=True):
+        with self._lock:
+            ranked = self.get_best_setups(limit=len(self._validated))
+            selected = {}
+            for item in ranked:
+                if symbol and item.symbol != symbol or setup_id and item.setup_id != setup_id:
+                    continue
+                selected.setdefault(item.symbol, item)
+                if len(selected) >= count:
+                    break
+            if subscribe:
+                self.tracking.follow(chat, selected.values())
+            return list(selected.values())
+
     def add_candidate(self, candidate: SetupCandidate) -> bool:
         """
         Add a new candidate to the pool.
@@ -385,6 +485,7 @@ class OpportunityPool:
         existing.confidence = new.confidence
         existing.grade = new.grade
         existing.score = new.score
+        existing.execution_costs = new.execution_costs
         existing.net_rr_after_costs = new.net_rr_after_costs
         existing.reasons = new.reasons
         existing.supporting_evidence = new.supporting_evidence
@@ -473,6 +574,7 @@ class OpportunityPool:
             if len(self._validated) > self.max_validated:
                 self._evict_oldest_validated()
             
+            self.save_all()
             logger.info(f"Candidate validated: {setup_id}")
             return True
     
@@ -867,6 +969,8 @@ class OpportunityPool:
     def save_all(self):
         """Save all pools: SQLite (transactional primary) + JSON mirror."""
         with self._lock:
+            if self._batch_depth:
+                return
             self.base_path.mkdir(parents=True, exist_ok=True)
             
             if self._store is not None:
@@ -877,12 +981,16 @@ class OpportunityPool:
                         {k: v.to_dict() for k, v in self._validated.items()},
                         {k: v.to_dict() for k, v in self._active.items()},
                         new_history,
+                        publication=self._publication,
                     )
                     if self.max_history > 0:
                         self._history = self._history[-self.max_history:]
                     self._history_flushed = len(self._history)
                 except Exception as e:
                     logger.error(f"SQLite pool persistence failed: {e}")
+                    if self._publication:
+                        self.load_all()
+                        raise
             
             # JSON mirror: best effort, kept for tooling and rollback safety
             try:
@@ -942,6 +1050,9 @@ class OpportunityPool:
                     stored_active = self._store.load_pool("active")
                     stored_history = self._store.load_history()
                 
+                self._candidates.clear()
+                self._validated.clear()
+                self._active.clear()
                 for setup_id, payload in stored_candidates.items():
                     record = SetupCandidate.from_dict(payload)
                     if record is not None:

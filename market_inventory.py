@@ -109,7 +109,7 @@ class MarketInventory:
                 "ranking_source": self._last_ranking_source,
             }
 
-    def get_ranked_symbols(self, limit: Optional[int] = None) -> List[str]:
+    def get_ranked_symbols(self, limit: Optional[int] = None, *, require_volume=False) -> List[str]:
         """Rank tradable contracts by 24h quote turnover using one bulk request.
 
         If ticker data is incomplete or unavailable, preserve the full inventory
@@ -141,7 +141,7 @@ class MarketInventory:
                         volume = 0.0
                     if not (volume > 0 and volume < float("inf")):
                         volume = 0.0
-                    if volume <= 0:
+                    if volume <= 0 and not require_volume:
                         try:
                             last = float(ticker.get("last") or ticker.get("close") or 0)
                             base_volume = float(ticker.get("baseVolume") or 0)
@@ -158,13 +158,13 @@ class MarketInventory:
 
         if scores:
             ranked = sorted(
-                symbols,
+                scores if require_volume else symbols,
                 key=lambda symbol: (scores.get(symbol, -1.0), symbol),
                 reverse=True,
             )
             self._last_ranking_source = "gateio_24h_quote_volume"
         else:
-            ranked = sorted(symbols)
+            ranked = [] if require_volume else sorted(symbols)
             self._last_ranking_source = "alphabetical_fallback"
 
         return ranked if limit is None else ranked[:max(0, int(limit))]

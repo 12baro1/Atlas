@@ -133,13 +133,9 @@ def test_best_five_read_only_from_pool(pool):
     # No scan, no analysis, no pool mutation was ever requested
     runtime.start_scan.assert_not_called()
     runtime.analyze_symbol.assert_not_called()
-    assert "EN İYİ 2" in result
-    assert "BTC/USDT" in result
-    assert "LIMIT" in result
-    assert "Giriş: 50,000.0" in result
-    assert "Stop Loss: 49,500.0" in result
-    assert "Net RR: +3.00R" in result
-    assert "kazanma olasılığı değildir" in result
+    assert result.splitlines() == ["EN İYİ 5 SETUP", "1. ETH/USDT | LONG | SMC | +3.00R",
+                                   "2. BTC/USDT | LONG | SMC | +2.50R"]
+    assert len(pool.tracking.tracked(service.chat_id)) == 2
     # Strictly read-only: pool state unchanged
     stats = pool.get_stats()
     assert stats["validated"] == 2 and stats["candidates"] == 0
@@ -150,7 +146,7 @@ def test_best_ten_read_only(pool):
         make_validated(pool, f"s{index}", f"S{index}/USDT:USDT")
     service = make_service()
     result = service.handle_best_ten()
-    assert "EN İYİ 3" in result
+    assert "EN İYİ 10" in result
 
 
 def test_best_report_empty_pool_explicit(pool):
@@ -241,7 +237,7 @@ def test_plain_text_best_five_does_not_start_scan(pool):
     result = service.execute_command("en iyi 5")
     runtime.start_scan.assert_not_called()
     runtime.analyze_symbol.assert_not_called()
-    assert "EN İYİ 1" in result
+    assert "EN İYİ 5" in result
 
 
 def test_scan_resume_failure_is_not_reported_as_running():

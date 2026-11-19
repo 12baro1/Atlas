@@ -406,7 +406,7 @@ def test_telegram_card_requires_three_ordered_targets():
     assert "Giriş (MARKET)" not in message
 
 
-def test_best_setups_output_contains_entry_sl_three_tps_and_net_rr(monkeypatch):
+def test_best_setups_output_is_one_line_per_displayed_plan(monkeypatch):
     from types import SimpleNamespace
     import telegram_command_service as telegram_module
 
@@ -418,17 +418,11 @@ def test_best_setups_output_contains_entry_sl_three_tps_and_net_rr(monkeypatch):
         net_rr_after_costs=1.8, status="VALIDATED",
         created_at_ms=0, updated_at_ms=0,
     )
-    pool = SimpleNamespace(get_best_setups=lambda **kwargs: [setup])
+    pool = SimpleNamespace(follow_best=lambda chat, count: [setup])
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
     service = TelegramCommandService(object(), "token", "chat")
     message = service._format_best_setups(5)
-    for expected in (
-        "BTC/USDT | LONG", "Strateji: SMC | Emir: LIMIT",
-        "Giriş: 100", "Stop Loss: 98", "TP1: 102", "TP2: 104",
-        "TP3: 106", "Net RR: +1.80R",
-        "Yeni tarama başlatılmadı",
-    ):
-        assert expected in message
+    assert message.splitlines() == ["EN İYİ 5 SETUP", "1. BTC/USDT | LONG | SMC | +1.80R"]
 
 
 def test_scan_status_contains_only_queue_and_market_status():
@@ -512,7 +506,7 @@ def test_performance_report_shows_cumulative_profit_loss_in_r():
     assert "Net sonuç: +1.00R" in message
     assert "TL/USDT tutarı değildir" in message
 
-def test_islemler_includes_recently_removed_setups(monkeypatch):
+def test_unfollowed_removed_setups_are_private(monkeypatch):
     from types import SimpleNamespace
     import telegram_command_service as telegram_module
 
@@ -525,6 +519,7 @@ def test_islemler_includes_recently_removed_setups(monkeypatch):
         "closed_at_ms": 3000,
     }
     pool = SimpleNamespace(
+        tracking=SimpleNamespace(tracked=lambda chat: []),
         get_best_setups=lambda **kwargs: [],
         get_active_setups=lambda: [],
         get_recent_history=lambda **kwargs: [removed_setup],
@@ -536,17 +531,16 @@ def test_islemler_includes_recently_removed_setups(monkeypatch):
             return []
 
     message = TelegramCommandService(Runtime(), "token", "chat").handle_islemler()
-    assert "YAPISI BOZULDUĞU / İPTAL EDİLDİĞİ İÇİN KALDIRILAN SETUP'LAR" in message
-    assert "AVAX/USDT" in message
-    assert "HAVUZDAN KALDIRILDI" in message
-    assert "STRATEGY STRUCTURE BROKEN" in message
+    assert "İŞLEMLERİM — 0" in message
+    assert all(symbol not in message for symbol in ("BTC", "ETH", "SOL", "AVAX"))
 
 
-def test_islemler_combines_open_waiting_and_closed_without_pool_duplicates(monkeypatch):
+def test_global_open_waiting_and_closed_do_not_subscribe_chat(monkeypatch):
     from types import SimpleNamespace
     import telegram_command_service as telegram_module
 
     pool = SimpleNamespace(
+        tracking=SimpleNamespace(tracked=lambda chat: []),
         get_best_setups=lambda **kwargs: [],
         get_active_setups=lambda: [],
     )
@@ -577,10 +571,8 @@ def test_islemler_combines_open_waiting_and_closed_without_pool_duplicates(monke
             ]
 
     message = TelegramCommandService(Runtime(), "token", "chat").handle_islemler()
-    assert "AKTİF İŞLEM TAKİBİ" in message
-    assert "GİRİŞ BEKLEYEN SİNYALLER" in message
-    assert "SON KAPANAN İŞLEMLER" in message
-    assert "BTC/USDT" in message and "ETH/USDT" in message and "SOL/USDT" in message
+    assert "İŞLEMLERİM — 0" in message
+    assert all(symbol not in message for symbol in ("BTC", "ETH", "SOL", "AVAX"))
 
 
 def test_retired_setup_commands_are_aliases_to_islemler():
@@ -604,11 +596,12 @@ def test_liquidity_failure_hides_raw_traceback():
 
 
 
-def test_islemler_moves_invalidated_waiting_signal_to_removed_section(monkeypatch):
+def test_unfollowed_invalidated_signal_is_private(monkeypatch):
     from types import SimpleNamespace
     import telegram_command_service as telegram_module
 
     pool = SimpleNamespace(
+        tracking=SimpleNamespace(tracked=lambda chat: []),
         get_best_setups=lambda **kwargs: [],
         get_active_setups=lambda: [],
         get_recent_history=lambda **kwargs: [],
@@ -630,10 +623,8 @@ def test_islemler_moves_invalidated_waiting_signal_to_removed_section(monkeypatc
             }]
 
     message = TelegramCommandService(Runtime(), "token", "chat").handle_islemler()
-    assert "AVAX/USDT | LONG | SMC" in message
-    assert "HAVUZDAN KALDIRILDI" in message
-    assert "STRATEGY STRUCTURE BROKEN" in message
-    assert "GİRİŞ BEKLEYEN SİNYALLER" not in message
+    assert "İŞLEMLERİM — 0" in message
+    assert all(symbol not in message for symbol in ("BTC", "ETH", "SOL", "AVAX"))
 
 
 def test_slow_symbol_analysis_does_not_block_telegram_command_worker(monkeypatch):

@@ -43,7 +43,7 @@ def register_bot_commands(token: str) -> bool:
             LOGGER.error("BotFather registration failed: %s", result.get("description"))
             return False
     except requests.RequestException as exc:
-        LOGGER.error("BotFather registration network error: %s", exc)
+        LOGGER.error("BotFather registration network error: %s", type(exc).__name__)
         return False
     except Exception:
         LOGGER.exception("BotFather registration error")
@@ -63,7 +63,7 @@ def get_current_commands(token: str) -> list[dict]:
             return result.get("result", [])
         return []
     except Exception:
-        LOGGER.exception("Failed to get current commands")
+        LOGGER.warning("Failed to get current commands")
         return []
 
 
@@ -78,7 +78,7 @@ def delete_bot_commands(token: str) -> bool:
         result = response.json()
         return result.get("ok", False)
     except Exception:
-        LOGGER.exception("Failed to delete commands")
+        LOGGER.warning("Failed to delete commands")
         return False
 
 

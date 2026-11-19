@@ -549,6 +549,8 @@ def _setup_diagnostic(strategy_id, data, regime, smc_result=None):
             checks.append("CONDITION_NOT_MET: 48 aligned returns, valid beta, >=0.8% or 0.55x volatility-scaled 12-bar residual alpha, same-direction recent 6-bar alpha and rising/falling EMA20 confirmation were not all present.")
     elif strategy_id == "smc":
         smc_analysis = smc_result.get("analysis") if isinstance(smc_result, dict) else {}
+        if not candles("4h") or not smc_analysis:
+            checks.append("MISSING_DATA: SMC higher-timeframe input or analysis is unavailable.")
         gate_reason = smc_analysis.get("smc_mandatory_gate_reason") if isinstance(smc_analysis, dict) else None
         checks.append(gate_reason or "NO_SMC_GEOMETRY: integrated SMC specialist world did not provide a valid directional entry/stop/three-target plan.")
     checks = [item for item in checks if item]
@@ -788,6 +790,7 @@ class SevenStrategyLab:
                     reason = _setup_diagnostic(strategy_id, data, regime, smc_result=smc_result)
                     status = (
                         "MISSING_DATA" if "MISSING_DATA:" in reason
+                        else "INVALID_DATA" if "INVALID_DATA:" in reason
                         else "INSUFFICIENT_HISTORY" if "INSUFFICIENT_HISTORY:" in reason
                         else "CONDITION_NOT_MET" if (
                             "CONDITION_NOT_MET:" in reason or "REGIME_MISMATCH:" in reason

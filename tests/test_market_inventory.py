@@ -184,3 +184,12 @@ def test_ranked_symbols_fall_back_to_alphabetical_when_tickers_fail(tmp_path):
     ]
     assert inventory.status()["ranking_source"] == "alphabetical_fallback"
 
+
+
+def test_continuous_ranking_requires_measured_quote_turnover(tmp_path):
+    class Gate(FakeGateExchange):
+        def fetch_tickers(self, symbols=None):
+            return {"BTC/USDT:USDT":{"quoteVolume":1000},
+                    "ETH/USDT:USDT":{"baseVolume":1000,"last":1000}}
+    inventory=make_inventory(tmp_path,Gate())
+    assert inventory.get_ranked_symbols(300,require_volume=True)==["BTC/USDT:USDT"]
