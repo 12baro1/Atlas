@@ -415,6 +415,7 @@ class AtlasRuntime:
             self._set_status("READY")
 
     def snapshot(self):
+        queue_status = self._scan_service.status() if getattr(self, "_scan_service", None) else None
         with self._lock:
             return {
                 "scanner": dict(self._scanner_stats),
@@ -423,7 +424,7 @@ class AtlasRuntime:
                 "current_signal": self._current_signal,
                 "recent": list(self._last_results),
                 "error": self._error,
-                "scan_queue": self._scan_service.status() if getattr(self, "_scan_service", None) else None,
+                "scan_queue": queue_status,
                 "strategy_telemetry": self._strategy_telemetry_locked() if hasattr(self, "_strategy_telemetry") else None,
             }
 
@@ -709,7 +710,6 @@ class AtlasRuntime:
                     if result is None:
                         self._inc("skipped")
                         return {"ok": False, "symbol": symbol, "error": "no_result"}
-                    self._inc("success")
                     
                     # Invalidate an unaccepted setup only when its OWN strategy
                     # completed a fresh evaluation and explicitly reports that
@@ -748,6 +748,7 @@ class AtlasRuntime:
                         for strategy in evidence["broken"]:
                             invalidate(symbol=symbol, strategy_id=strategy, reason="STRATEGY_STRUCTURE_BROKEN")
 
+            self._inc("success")
             if from_scan:
                 self._log(f"[{scan_index}/{scan_total}] analyzed {symbol}")
             else:
@@ -952,8 +953,7 @@ class AtlasRuntime:
         strategy_name = str(selected.get("strategy") or strategy_id)
 
         # Net RR: cost-adjusted value comes from the shared risk engine via the
-        # strategy lab. Fall back to the raw partial-exit weighted RR only when
-        # the cost-adjusted figure is missing; never invent a number.
+        # strategy lab. Gross reward cannot substitute for an unknown net reward.
         weights = selected.get("partial_exit_weights") or {}
         try:
             w_total = sum(float(weights.get(key, 0.0)) for key in ("tp1", "tp2", "tp3"))
@@ -969,11 +969,12 @@ class AtlasRuntime:
         except (TypeError, ValueError, OverflowError):
             weighted_rr = rr_tp2
         try:
-            net_rr_after_costs = float(selected.get("estimated_net_rr"))
+            planned_rr = (selected.get("risk_plan") or {}).get("weighted_net_rr")
+            net_rr_after_costs = float(planned_rr if planned_rr is not None else selected.get("estimated_net_rr"))
         except (TypeError, ValueError, OverflowError):
             net_rr_after_costs = None
         if net_rr_after_costs is None or not math.isfinite(net_rr_after_costs):
-            net_rr_after_costs = weighted_rr
+            return None
         net_rr = net_rr_after_costs
 
         confidence = selected.get("strength")
@@ -1012,6 +1013,13 @@ class AtlasRuntime:
             grade="SELECTED",
             score=confidence,
             net_rr_after_costs=round(net_rr_after_costs, 4),
+            execution_costs={
+                **{key: selected["risk_plan"][key] for key in
+                   ("maker_fee_rate", "taker_fee_rate", "spread_rate", "slippage_rate")
+                   if (selected.get("risk_plan") or {}).get(key) is not None},
+                "model": (selected.get("risk_plan") or {}).get("cost_model"),
+                "partial_exit_weights": (selected.get("risk_plan") or {}).get("partial_exit_weights") or weights,
+            },
             status=SetupStatus.DISCOVERED.value,
             setup_type=SetupType.LIMIT.value if entry_type == "LIMIT" else SetupType.MARKET.value,
             regime=str(regime or selected.get("market_regime") or "UNKNOWN"),
@@ -1050,6 +1058,7 @@ class AtlasRuntime:
                             "NO_SETUP": "no_setup",
                             "CONDITION_NOT_MET": "condition_not_met",
                             "MISSING_DATA": "missing_data",
+                            "INVALID_DATA": "missing_data",
                             "INSUFFICIENT_HISTORY": "insufficient_history",
                             "ERROR": "errors",
                         }.get(status, "other_no_setup")

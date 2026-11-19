@@ -411,6 +411,16 @@ class ScanQueue:
                 )
             return True
 
+    def restore_unstaged_jobs(self, generation):
+        """Old workers could mark a job done before cycle_results existed."""
+        with self._transaction() as conn:
+            return conn.execute("""
+                UPDATE scan_jobs SET state='pending', completed_at_ms=NULL, lease_until_ms=NULL
+                WHERE scan_generation=? AND state='done' AND NOT EXISTS (
+                    SELECT 1 FROM cycle_results r WHERE r.generation=scan_jobs.scan_generation
+                    AND r.symbol=scan_jobs.symbol)
+            """, (generation,)).rowcount
+
     def cycle_results(self, generation):
         rows = self._thread_conn().execute("SELECT payload FROM cycle_results WHERE generation=? ORDER BY symbol", (generation,))
         return [json.loads(row[0]) for row in rows]

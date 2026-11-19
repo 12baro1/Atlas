@@ -141,7 +141,7 @@ class MarketInventory:
                         volume = 0.0
                     if not (volume > 0 and volume < float("inf")):
                         volume = 0.0
-                    if volume <= 0:
+                    if volume <= 0 and not require_volume:
                         try:
                             last = float(ticker.get("last") or ticker.get("close") or 0)
                             base_volume = float(ticker.get("baseVolume") or 0)

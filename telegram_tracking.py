@@ -19,6 +19,11 @@ CREATE TABLE IF NOT EXISTS chat_events(
  id INTEGER PRIMARY KEY, chat TEXT NOT NULL, symbol TEXT NOT NULL,
  revision INTEGER NOT NULL, event TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER DEFAULT 0,
  UNIQUE(chat,symbol,revision,event));
+CREATE TABLE IF NOT EXISTS chat_event_delivery(
+ event_id INTEGER PRIMARY KEY REFERENCES chat_events(id),
+ state TEXT NOT NULL CHECK(state IN ('sending','retry','uncertain','failed','sent')),
+ attempts INTEGER NOT NULL, next_at INTEGER NOT NULL, message_id INTEGER);
+CREATE INDEX IF NOT EXISTS chat_event_pending ON chat_events(chat,delivered,id);
 """
 
 
@@ -58,11 +63,12 @@ def transition(conn, chat, symbol, revision, setup, *, announce):
     if not setup:
         return
     revision += 1
+    costs = dict(setup.get("execution_costs") or {}, entry_type=setup["entry_type"])
     outcome = dict(symbol=symbol, direction=setup["direction"], entry=setup["entry_price"],
                    stop_loss=setup["stop_loss"], tp1=setup["tp1"], tp2=setup["tp2"], tp3=setup["tp3"],
                    strategy=setup["strategy_name"], strategy_id=setup["strategy_id"], opened_at=int(time.time()*1000), status="PENDING",
-                   partial_weights=CandleSimulation()._signal_partial_weights(), realized_r=0.0,
-                   entry_reached=False, payload={"execution_costs":{"entry_type":setup["entry_type"]}})
+                   partial_weights=costs.get("partial_exit_weights") or CandleSimulation()._signal_partial_weights(), realized_r=0.0,
+                   entry_reached=False, payload={"execution_costs":costs})
     conn.execute("UPDATE chat_follows SET revision=? WHERE chat=? AND symbol=?", (revision, chat, symbol))
     conn.execute("INSERT INTO chat_plans VALUES(?,?,?,?,?,?)",
                  (chat, symbol, revision, setup["setup_id"], "WAITING", json.dumps(outcome)))
@@ -119,6 +125,7 @@ def advance(conn, symbol, candles):
                     break
             simulator.resolve_signal_outcome(outcome, [candle])
             if outcome["status"] != "PENDING":
+                outcome["resolved_at"] = candle.time + 900000
                 break
         if outcome["entry_reached"] and not entered:
             event(conn, chat, symbol, revision, "ENTRY", "Sinyal takibi: giriş seviyesi görüldü.")
@@ -126,7 +133,8 @@ def advance(conn, symbol, candles):
             event(conn, chat, symbol, revision, f"TP{level}", f"Sinyal takibi: TP{level} alındı.")
         if candles and outcome["entry_reached"] and outcome["status"] == "PENDING":
             mark = candles[-1]
-            if mark.time >= outcome["opened_at"] and math.isfinite(mark.close) and mark.close > 0:
+            if (mark.time >= outcome["opened_at"] and mark.time + 900000 >= outcome.get("mark_time", 0)
+                    and math.isfinite(mark.close) and mark.close > 0):
                 weights = simulator._norm_partial_weights(outcome)
                 remaining = 1 - sum(weights[i-1] for i in outcome.get("tps_hit", []))
                 sign = 1 if outcome["direction"] == "LONG" else -1

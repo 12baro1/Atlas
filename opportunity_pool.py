@@ -123,6 +123,7 @@ class SetupCandidate:
     expires_at_ms: Optional[int] = None
     invalidation_reason: Optional[str] = None
     
+    execution_costs: dict = field(default_factory=dict)
     setup_version: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
@@ -358,6 +359,11 @@ class OpportunityPool:
             self.add_candidate(candidate)
             self.validate_candidate(candidate.setup_id)
 
+    def prepare_best_reply(self, chat, count):
+        with self._lock:
+            items = self.follow_best(chat, count, subscribe=False)
+            return items, self.tracking.displayed_observations(items)
+
     def follow_best(self, chat, count, symbol=None, setup_id=None, *, subscribe=True):
         with self._lock:
             ranked = self.get_best_setups(limit=len(self._validated))
@@ -479,6 +485,7 @@ class OpportunityPool:
         existing.confidence = new.confidence
         existing.grade = new.grade
         existing.score = new.score
+        existing.execution_costs = new.execution_costs
         existing.net_rr_after_costs = new.net_rr_after_costs
         existing.reasons = new.reasons
         existing.supporting_evidence = new.supporting_evidence

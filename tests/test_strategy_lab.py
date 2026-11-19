@@ -222,8 +222,7 @@ def test_diagnostics_report_every_strategy_and_status_counts():
     assert len(diagnostics["strategies"]) == 7
     assert diagnostics["status_counts"] == {
         "INSUFFICIENT_HISTORY": 3,
-        "MISSING_DATA": 3,
-        "NO_SETUP": 1,
+        "MISSING_DATA": 4,
     }
     by_id = {item["strategy_id"]: item for item in report["strategies"]}
     assert "open_interest_timestamps_ms" in by_id["liquidation_cascade"]["reason"]

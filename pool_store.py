@@ -201,6 +201,13 @@ class PoolStore:
                         conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", ("version:"+symbol,str(row["version"])))
                     conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)",
                                  ("cycle:"+symbol,json.dumps([row["cutoff"],row["observed"]])))
+                    # Save material changes even when nobody currently follows the symbol.
+                    # An HTTP reply can be in flight across several publications.
+                    keys = ["broken:"+symbol+":"+sid for sid in row.get("broken", [])]
+                    if row.get("setup"):
+                        keys.append("selected:"+symbol)
+                    conn.executemany("INSERT OR REPLACE INTO pool_meta VALUES(?,?)",
+                                     [(key,json.dumps(row)) for key in keys])
                     followers = conn.execute("SELECT chat,revision FROM chat_follows WHERE symbol=?", (symbol,)).fetchall()
                     for chat,revision in followers:
                         self._apply_observation(conn, chat, revision, row, announce=True)
@@ -222,29 +229,49 @@ class PoolStore:
         telegram_tracking.transition(conn, chat, symbol, revision, setup, announce=announce)
 
     def follow_analysis(self, chat, row):
+        self.follow_delivered(chat, [row])
+
+    def follow_delivered(self, chat, observations):
         with self._transaction() as conn:
-            if row.get("setup"):
-                conn.execute("INSERT OR IGNORE INTO chat_follows(chat,symbol) VALUES(?,?)", (chat,row["symbol"]))
-            member = conn.execute("SELECT revision FROM chat_follows WHERE chat=? AND symbol=?",
-                                  (chat,row["symbol"])).fetchone()
-            if member:
+            for row in observations:
+                symbol = row["symbol"]
+                if row.get("setup"):
+                    conn.execute("INSERT OR IGNORE INTO chat_follows(chat,symbol) VALUES(?,?)", (chat,symbol))
+                member = conn.execute("SELECT revision FROM chat_follows WHERE chat=? AND symbol=?",
+                                      (chat,symbol)).fetchone()
+                if not member:
+                    continue
                 self._apply_observation(conn, chat, member[0], row, announce=member[0]>0)
+                if not row.get("setup"):
+                    continue
+                changes = []
+                strategies = {row["setup"]["strategy_id"]}
+                selected = self.get_meta("selected:"+symbol)
+                if selected:
+                    latest = json.loads(selected)
+                    changes.append(latest)
+                    strategies.add(latest["setup"]["strategy_id"])
+                for sid in strategies:
+                    broken = self.get_meta("broken:"+symbol+":"+sid)
+                    if broken:
+                        changes.append(json.loads(broken))
+                for newer in sorted(changes, key=lambda item: (item["cutoff"],item["observed"])):
+                    if (newer["cutoff"],newer["observed"]) <= (row["cutoff"],row["observed"]):
+                        continue
+                    revision, = conn.execute("SELECT revision FROM chat_follows WHERE chat=? AND symbol=?",
+                                             (chat,symbol)).fetchone()
+                    self._apply_observation(conn, chat, revision, newer, announce=True)
+
+    def displayed_observations(self, setups):
+        observations = []
+        for setup in setups:
+            cutoff, observed = json.loads(self.get_meta("cycle:"+setup.symbol, "[0,0]"))
+            observations.append(dict(symbol=setup.symbol, cutoff=cutoff, observed=observed,
+                                     setup=setup.to_dict(), broken=[]))
+        return observations
 
     def follow(self, chat, setups):
-        with self._transaction() as conn:
-            for setup in setups:
-                symbol = setup.symbol
-                row = conn.execute("SELECT payload FROM setups WHERE pool='validated' AND setup_id=?",
-                                   (setup.setup_id,)).fetchone()
-                if not row:
-                    continue
-                conn.execute("INSERT OR IGNORE INTO chat_follows(chat,symbol) VALUES(?,?)", (chat, symbol))
-                revision, = conn.execute("SELECT revision FROM chat_follows WHERE chat=? AND symbol=?",
-                                         (chat, symbol)).fetchone()
-                clock = conn.execute("SELECT value FROM pool_meta WHERE key=?", ("cycle:"+symbol,)).fetchone()
-                cutoff, observed = json.loads(clock[0]) if clock else (0,0)
-                self._apply_observation(conn, chat, revision, dict(symbol=symbol, setup=json.loads(row[0]),
-                                        cutoff=cutoff, observed=observed, broken=[]), announce=revision>0)
+        self.follow_delivered(chat,self.displayed_observations(setups))
 
     def tracked(self, chat):
         return [(symbol, revision, state, json.loads(payload))
@@ -265,10 +292,44 @@ class PoolStore:
             "SELECT id,message FROM chat_events WHERE chat=? AND delivered=0 ORDER BY id LIMIT 50", (chat,)
         ).fetchall()
 
-    def acknowledge_notification(self, chat, event_id):
+    def claim_notification(self, chat):
+        """Commit the send intent before crossing the non-idempotent HTTP boundary."""
+        now = int(time.time())
         with self._transaction() as conn:
-            conn.execute("UPDATE chat_events SET delivered=1 WHERE chat=? AND id=?", (chat,event_id))
+            conn.execute("UPDATE chat_event_delivery SET state='uncertain' WHERE state='sending' AND next_at<=?",
+                         (now,))
+            row = conn.execute("""
+                SELECT e.id,e.message,d.state,d.attempts,d.next_at
+                FROM chat_events e LEFT JOIN chat_event_delivery d ON e.id=d.event_id
+                WHERE e.chat=? AND e.delivered=0 AND (d.state IS NULL OR d.state IN ('sending','retry'))
+                ORDER BY e.id LIMIT 1
+            """, (chat,)).fetchone()
+            if not row:
+                return None
+            event_id, message, state, attempts, next_at = row
+            if state == "sending" or (next_at and next_at > now):
+                return None
+            attempt = (attempts or 0) + 1
+            conn.execute("INSERT OR REPLACE INTO chat_event_delivery VALUES(?, 'sending', ?, ?, NULL)",
+                         (event_id, attempt, now + 120))
+            return event_id, message, attempt
 
+    def finish_notification(self, chat, event_id, attempt, state, *, message_id=None, retry_after=0):
+        now = int(time.time())
+        with self._transaction() as conn:
+            changed = conn.execute("""
+                UPDATE chat_event_delivery SET state=?, next_at=?, message_id=?
+                WHERE event_id=? AND attempts=? AND state IN ('sending','uncertain')
+                  AND EXISTS (SELECT 1 FROM chat_events WHERE id=? AND chat=?)
+            """, (state, now + retry_after, message_id, event_id, attempt, event_id, chat)).rowcount
+            if changed and state == "sent":
+                conn.execute("UPDATE chat_events SET delivered=1 WHERE id=? AND chat=?", (event_id, chat))
+
+    def unconfirmed_notifications(self, chat):
+        return self._thread_conn().execute("""
+            SELECT COUNT(*) FROM chat_event_delivery d JOIN chat_events e ON e.id=d.event_id
+            WHERE e.chat=? AND d.state IN ('uncertain','failed')
+        """, (chat,)).fetchone()[0]
 
     def save_pool(self, pool: str, records: Dict[str, Dict[str, Any]], *, connection=None) -> int:
         """Replace the stored contents of one live pool in a single transaction.

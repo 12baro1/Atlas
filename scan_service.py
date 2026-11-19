@@ -336,9 +336,11 @@ class ScanService:
                 return
             if status["complete"]:
                 gen = status["generation"]
-                rows = self.queue.cycle_results(gen)
-                if status["total"] == DEFAULT_SCAN_UNIVERSE_LIMIT:
-                    pool.publish_cycle(gen, rows, self.queue.generation_symbols(gen))
+                published = int(pool.tracking.get_meta("published_generation", "0"))
+                if status["total"] == DEFAULT_SCAN_UNIVERSE_LIMIT and gen > published:
+                    if self.queue.restore_unstaged_jobs(gen):
+                        return
+                    pool.publish_cycle(gen, self.queue.cycle_results(gen), self.queue.generation_symbols(gen))
                 self.queue.discard_applied_results(gen)
             if time.monotonic() - self._last_rank_attempt < 30:
                 return

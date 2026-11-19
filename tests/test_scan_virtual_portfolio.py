@@ -108,7 +108,7 @@ def test_chat_lifecycle_cleanup_outbox_and_restart(pool):
     pool.publish_cycle(4,[recovered])
     assert "Giriş bekliyor" in chat.execute_command("/islemler")
     assert "BTC" not in other.execute_command("/islemler")
-    chat._api = MagicMock()
+    chat._api = MagicMock(return_value={"message_id": 1, "chat":{"id":chat.chat_id}})
     chat._deliver_notifications()
     chat._deliver_notifications()
     assert chat._api.call_count == 2
@@ -269,3 +269,129 @@ def test_runtime_market_input_to_stage_and_manual_portfolio(pool, monkeypatch):
     pool.publish_cycle(1,[result["cycle_result"]])
     assert pool.get_best_setups()[0].setup_version==1
     assert bot.execute_command("/eniyi5").count("BTC")==1
+
+
+def test_delivery_claim_has_one_owner_and_unknown_result_survives_restart(pool):
+    from concurrent.futures import ThreadPoolExecutor
+    bot = service()
+    pool.publish_cycle(1,[observation()])
+    bot.execute_command("/eniyi5")
+    pool.publish_cycle(2,[observation(stamp=2,setup=False,broken=True)])
+    with ThreadPoolExecutor(max_workers=4) as threads:
+        claims = list(threads.map(lambda _: pool.tracking.claim_notification(bot.chat_id), range(4)))
+    claim, = [item for item in claims if item]
+    event_id, _, attempt = claim
+    assert pool.tracking.claim_notification("13") is None
+    # Simulate the process disappearing after the send intent was committed.
+    with pool.tracking._transaction() as conn:
+        conn.execute("UPDATE chat_event_delivery SET next_at=0 WHERE event_id=?", (event_id,))
+    again = OpportunityPool(base_path=pool.base_path,auto_persist=False)
+    try:
+        assert not again.tracking.claim_notification(bot.chat_id)
+        assert again.tracking.unconfirmed_notifications(bot.chat_id)==1
+        again.tracking.finish_notification("13",event_id,attempt,"sent",message_id=123)
+        assert again.tracking.unconfirmed_notifications(bot.chat_id)==1
+    finally:
+        again.stop()
+
+
+@pytest.mark.parametrize("failure", ["retry","uncertain","wrong_chat"])
+def test_delivery_requires_acknowledgement_and_only_retries_definite_failure(pool, failure, monkeypatch):
+    import pool_store
+    bot = service()
+    pool.publish_cycle(1,[observation()])
+    bot.execute_command("/eniyi5")
+    pool.publish_cycle(2,[observation(stamp=2,setup=False,broken=True)])
+    now = [1000]
+    monkeypatch.setattr(pool_store.time,"time",lambda:now[0])
+    bad = telegram.TelegramDeliveryError(failure, retry_after=30) if failure!="wrong_chat" else {
+        "chat":{"id":999},"message_id":321}
+    bot._api = MagicMock(side_effect=[bad,{"chat":{"id":bot.chat_id},"message_id":234}])
+    bot._deliver_notifications()
+    bot._deliver_notifications()
+    assert bot._api.call_count==1
+    now[0]+=31
+    bot._deliver_notifications()
+    if failure=="retry":
+        assert bot._api.call_count==2
+        assert not pool.tracking.pending_notifications(bot.chat_id)
+    else:
+        assert bot._api.call_count==1
+        assert pool.tracking.unconfirmed_notifications(bot.chat_id)==1
+
+
+def test_replacement_during_external_reply_preserves_membership(pool):
+    bot = service()
+    pool.publish_cycle(1,[observation()])
+    def send(*args,**kwargs):
+        updated = observation(stamp=2)
+        updated["setup"].update(setup_id="replacement",tp3=54000)
+        pool.publish_cycle(2,[updated])
+        return {"message_id":5,"chat":{"id":bot.chat_id}}
+    bot._api = send
+    bot._command_and_reply("/eniyi5")
+    plans = pool.tracking.tracked(bot.chat_id)
+    assert [(p[2],p[3]["tp3"]) for p in plans]==[("WAITING",54000),("INVALIDATED",53000)]
+
+
+def test_replayed_market_snapshot_cannot_rewind_partial_pnl(pool):
+    from types import SimpleNamespace
+    bot = service()
+    row = observation()
+    row["setup"]["execution_costs"]={"partial_exit_weights":{"tp1":0.2,"tp2":0.3,"tp3":0.5}}
+    pool.tracking.follow_analysis(bot.chat_id,row)
+    start = pool.tracking.tracked(bot.chat_id)[0][3]["opened_at"]
+    def bar(i, low, high, close):
+        return SimpleNamespace(time=start+900000*i,low=low,high=high,close=close,open=close)
+    fill, partial = bar(1,49950,50050,50000), bar(2,50600,51050,50900)
+    pool.tracking.advance_tracking(BTC,[fill,partial])
+    pool.tracking.advance_tracking(BTC,[fill])
+    outcome=pool.tracking.tracked(bot.chat_id)[0][3]
+    assert outcome["tps_hit"]==[1]
+    assert outcome["realized_r"]==pytest.approx(.4)
+    assert outcome["open_r"]==pytest.approx(.8*900/500)
+    assert outcome["mark_time"]==partial.time+900000
+
+
+def test_published_rr_requires_finite_cost_adjusted_reward():
+    runtime=make_runtime()
+    selected=engine_shaped_result()["strategy_lab"]["selected"]
+    selected.pop("estimated_net_rr")
+    assert runtime._setup_to_candidate(selected,BTC) is None
+    selected["risk_plan"]={"weighted_net_rr":1.25}
+    selected["estimated_net_rr"]=2.5
+    assert runtime._setup_to_candidate(selected,BTC).net_rr_after_costs==1.25
+
+
+def test_pr219_jobs_without_staged_evidence_are_repaired_before_publication(tmp_path,pool):
+    queue=ScanQueue(tmp_path/"old")
+    symbols=[BTC]+[f"T{i}/USDT:USDT" for i in range(299)]
+    generation=queue.rebuild(symbols)["generation"]
+    while (claim:=queue.claim_next()):
+        symbol=claim["symbol"]
+        row=observation(symbol,setup=False) if symbol!=BTC else None
+        queue.complete(symbol,True,claim=claim,result=row)
+    runtime=MagicMock()
+    runtime._opportunity_pool.return_value=pool
+    scanner=ScanService(runtime,queue,MagicMock(),continuous=True)
+    scanner.roll_cycle()
+    assert queue.current_generation()==generation and queue.progress()["done"]==299
+    assert not pool.tracking.get_meta("published_generation")
+    claim=queue.claim_next()
+    assert claim["symbol"]==BTC
+    queue.complete(BTC,True,claim=claim,result=observation())
+    scanner.roll_cycle()
+    assert pool.get_best_setups()[0].symbol==BTC
+    scanner.roll_cycle()
+    assert queue.progress()["pending"]==0
+    queue.close()
+
+
+def test_smc_without_h4_and_invalid_generators_are_not_structural_invalidation(monkeypatch):
+    import strategy_lab
+    report=strategy_lab.SevenStrategyLab().analyze({"symbol":BTC})
+    smc=next(row for row in report["strategies"] if row["strategy_id"]=="smc")
+    assert smc["status"]=="MISSING_DATA"
+    monkeypatch.setattr(strategy_lab,"_setup_diagnostic",lambda *args,**kwargs:"INVALID_DATA: ATR unavailable")
+    report=strategy_lab.SevenStrategyLab().analyze({"symbol":BTC})
+    assert {row["status"] for row in report["strategies"]}=={"INVALID_DATA"}

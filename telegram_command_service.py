@@ -462,6 +462,13 @@ def is_recognized_command(command: str) -> bool:
     )
 
 
+class TelegramDeliveryError(requests.RequestException):
+    def __init__(self, state, retry_after=0):
+        super().__init__("Telegram sendMessage failed")
+        self.state = state
+        self.retry_after = retry_after
+
+
 class TelegramCommandService:
     """Long-poll Telegram and execute recognized commands against one runtime."""
 
@@ -590,6 +597,22 @@ class TelegramCommandService:
                 timeout=(5, timeout),
             )
             elapsed = time.perf_counter() - start
+            if method == "sendMessage":
+                try:
+                    body = response.json()
+                except ValueError:
+                    body = None
+                rejected = isinstance(body, dict) and body.get("ok") is False
+                code = body.get("error_code", response.status_code) if rejected else response.status_code
+                if code == 429:
+                    params = body.get("parameters") if isinstance(body, dict) else None
+                    try:
+                        delay = int((params or {}).get("retry_after", 0))
+                    except (AttributeError, ValueError, TypeError):
+                        delay = 0
+                    raise TelegramDeliveryError("retry", max(1, delay))
+                if rejected:
+                    raise TelegramDeliveryError("retry" if isinstance(code,int) and code >= 500 else "failed")
             response.raise_for_status()
             result = response.json()
             if not result.get("ok"):
@@ -598,11 +621,19 @@ class TelegramCommandService:
             if method == "sendMessage":
                 self.logger.info("Telegram reply sent | characters=%s", len(str(payload.get("text") or "")))
             return result.get("result")
+        except TelegramDeliveryError:
+            raise
         except requests.RequestException as exc:
             elapsed = time.perf_counter() - start
             status = getattr(exc.response, "status_code", None)
             self.logger.error("Telegram %s failed | type=%s status=%s (%.3fs)",
                               method, type(exc).__name__, status, elapsed)
+            if method == "sendMessage":
+                if isinstance(exc, requests.ConnectTimeout):
+                    raise TelegramDeliveryError("retry") from None
+                if status and 400 <= status < 500:
+                    raise TelegramDeliveryError("failed") from None
+                raise TelegramDeliveryError("uncertain") from None
             # requests exceptions can contain the entire bot-token URL.
             raise requests.RequestException(f"Telegram {method} failed (HTTP {status})") from None
 
@@ -652,11 +683,28 @@ class TelegramCommandService:
 
     def _deliver_notifications(self):
         tracking = get_opportunity_pool().tracking
-        for event_id, message in tracking.pending_notifications(self.chat_id):
-            with self._reply_lock:
-                self._api("sendMessage", {"chat_id": self.chat_id, "text": message},
-                          timeout=10, session=self._reply_session)
-            tracking.acknowledge_notification(self.chat_id, event_id)
+        for _ in range(5):
+            claim = tracking.claim_notification(self.chat_id)
+            if not claim:
+                return
+            event_id, message, attempt = claim
+            try:
+                with self._reply_lock:
+                    receipt = self._api("sendMessage", {"chat_id": self.chat_id, "text": message},
+                                        timeout=10, session=self._reply_session)
+                if (not isinstance(receipt, dict) or type(receipt.get("message_id")) is not int
+                        or receipt["message_id"] <= 0
+                        or str((receipt.get("chat") or {}).get("id")) != self.chat_id):
+                    raise TelegramDeliveryError("uncertain")
+            except TelegramDeliveryError as exc:
+                state = "failed" if exc.state == "retry" and attempt >= 8 else exc.state
+                delay = max(exc.retry_after, min(600, 2 ** attempt)) if state == "retry" else 0
+                tracking.finish_notification(self.chat_id,event_id,attempt,state,retry_after=delay)
+                return
+            except Exception:
+                tracking.finish_notification(self.chat_id,event_id,attempt,"uncertain")
+                return
+            tracking.finish_notification(self.chat_id,event_id,attempt,"sent",message_id=receipt["message_id"])
 
     def _handle_update(self, update: dict) -> None:
         """Process a single Telegram update with full diagnostics."""
@@ -1280,9 +1328,9 @@ class TelegramCommandService:
         if count == 20:
             best = pool.get_best_setups(limit=pool.max_validated)
         elif hasattr(self._delivery,"actions"):
-            best = pool.follow_best(self.chat_id, count, subscribe=False)
+            best, shown = pool.prepare_best_reply(self.chat_id, count)
             if best:
-                self._delivery.actions.append(lambda: pool.tracking.follow(self.chat_id,best))
+                self._delivery.actions.append(lambda: pool.tracking.follow_delivered(self.chat_id,shown))
         else:
             best = pool.follow_best(self.chat_id, count)
         title = "HAVUZ" if count == 20 else f"EN İYİ {count} SETUP"
@@ -1322,7 +1370,7 @@ class TelegramCommandService:
             lines.append(f"Kapanan: {len(closed)} | Kazanan: {wins} | Kaybeden: {losses}")
             if closed:
                 lines.append(f"Başarı: %{100*wins/len(closed):.1f}")
-            lines.append(f"Kapanan sinyaller net: {total:+.2f}R | Açık sinyallerde alınan kısmi hedef: {partial:+.2f}R")
+            lines.append(f"Kapanan net: {total:+.2f}R | Kısmi TP (brüt): {partial:+.2f}R")
             marks = [p.get("open_r") for _,state,p in live if state in {"ACTIVE","AMBIGUOUS"}]
             if all(value is not None for value in marks):
                 lines.append(f"Açık sinyal PnL (son kapanış): {sum(marks):+.2f}R")
@@ -1577,15 +1625,17 @@ class TelegramCommandService:
             if scanner.get("started_at") else 0
         )
         bot = self._bot_info_cache or {}
+        generation = (snap.get("scan_queue") or {}).get("generation", scanner.get("cycle", 0))
         return "\n".join([
             "ATLAS | SERVİS DURUMU",
             "",
             f"Bot: {bot.get('first_name', 'Atlas')} (@{bot.get('username', '?')})",
             f"Servis: {service} | Telegram polling: {polling}",
-            f"Tarama: {status} | Döngü: {scanner.get('cycle', 0)}",
+            f"Tarama: {status} | Döngü: {generation}",
             f"İşlenen: {scanner.get('processed', 0)} | Başarılı: {scanner.get('success', 0)} | Hatalı: {scanner.get('failed', 0)}",
             f"Çalışma süresi: {uptime}",
             "",
+            f"Teslimi doğrulanamayan bildirim: {get_opportunity_pool().tracking.unconfirmed_notifications(self.chat_id)}",
             "Kuyruk ayrıntısı: /taramadurum",
             "Sunucu kaynakları: /sistem",
         ])
