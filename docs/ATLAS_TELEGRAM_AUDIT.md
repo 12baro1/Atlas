@@ -35,15 +35,23 @@ Aşağıdaki değişkenler uygulamada gerçek havuz ve sinyal alanlarından dold
 ```text
 EN İYİ 5 SETUP
 1. {sembol} | {yön} | {strateji} | {net_R}
+Giriş: {giriş} | Stop: {stop}
+TP1: {tp1} | TP2: {tp2} | TP3: {tp3}
 
 İŞLEMLERİM — {sayı}
 1. {sembol} | {yön} | Giriş bekliyor
+Giriş: {giriş} | Stop: {stop}
+TP1: {tp1} | TP2: {tp2} | TP3: {tp3}
 2. {sembol} | {yön} | TP1 alındı
+Giriş: {giriş} | Stop: {stop}
+TP1: {tp1} | TP2: {tp2} | TP3: {tp3}
+Güncel stop: {güncel_stop}
 
 {sembol} — SETUP GÜNCELLENDİ
 Eski: {yön} | {strateji}
 Yeni: {yön} | {strateji}
-Giriş: {giriş} | Stop: {stop} | TP1: {tp1} | TP2: {tp2}
+Giriş: {giriş} | Stop: {stop}
+TP1: {tp1} | TP2: {tp2} | TP3: {tp3}
 ```
 
 ## Doğrulama ve işletim sınırları

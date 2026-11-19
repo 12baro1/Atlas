@@ -133,8 +133,9 @@ def test_best_five_read_only_from_pool(pool):
     # No scan, no analysis, no pool mutation was ever requested
     runtime.start_scan.assert_not_called()
     runtime.analyze_symbol.assert_not_called()
-    assert result.splitlines() == ["EN İYİ 5 SETUP", "1. ETH/USDT | LONG | SMC | +3.00R",
-                                   "2. BTC/USDT | LONG | SMC | +2.50R"]
+    levels = ["Giriş: 50000.0 | Stop: 49500.0", "TP1: 51000.0 | TP2: 52000.0 | TP3: 53000.0"]
+    assert result.splitlines() == ["EN İYİ 5 SETUP", "1. ETH/USDT | LONG | SMC | +3.00R", *levels,
+                                   "2. BTC/USDT | LONG | SMC | +2.50R", *levels]
     assert len(pool.tracking.tracked(service.chat_id)) == 2
     # Strictly read-only: pool state unchanged
     stats = pool.get_stats()

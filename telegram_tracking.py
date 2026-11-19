@@ -3,6 +3,7 @@ import math
 import json
 import time
 
+from telegram_prices import tracked_levels
 from trade_journal import TradeJournal
 
 
@@ -39,7 +40,8 @@ class CandleSimulation(TradeJournal):
         return 0
 
 
-def event(conn, chat, symbol, revision, kind, message):
+def event(conn, chat, symbol, revision, kind, message, plan):
+    message += "\n" + tracked_levels(plan)
     conn.execute("INSERT OR IGNORE INTO chat_events(chat,symbol,revision,event,message) VALUES(?,?,?,?,?)",
                  (chat, symbol, revision, kind, f"{symbol.replace(':USDT', '')} — {message}"))
 
@@ -59,7 +61,7 @@ def transition(conn, chat, symbol, revision, setup, *, announce):
             conn.execute("UPDATE chat_plans SET state='INVALIDATED',payload=? WHERE chat=? AND symbol=? AND revision=?",
                          (json.dumps(old),chat, symbol, revision))
             if announce and not setup:
-                event(conn, chat, symbol, revision, "INVALIDATED", "SETUP KALDIRILDI\nNeden: Strateji yapısı bozuldu. Yeni setup bekleniyor.")
+                event(conn, chat, symbol, revision, "INVALIDATED", "SETUP KALDIRILDI\nNeden: Strateji yapısı bozuldu. Yeni setup bekleniyor.", old)
     if not setup:
         return
     revision += 1
@@ -75,7 +77,7 @@ def transition(conn, chat, symbol, revision, setup, *, announce):
     if announce:
         label = "YENİ SETUP" if not current or state in {"INVALIDATED","CLOSED"} else "SETUP GÜNCELLENDİ"
         previous = f"\nEski: {old['direction']} | {old['strategy']}" if current else ""
-        event(conn, chat, symbol, revision, "SETUP", f"{label}{previous}\nYeni: {outcome['direction']} | {outcome['strategy']}\nGiriş: {outcome['entry']} | Stop: {outcome['stop_loss']} | TP1: {outcome['tp1']} | TP2: {outcome['tp2']}")
+        event(conn, chat, symbol, revision, "SETUP", f"{label}{previous}\nYeni: {outcome['direction']} | {outcome['strategy']}", outcome)
 
 
 def advance(conn, symbol, candles):
@@ -128,9 +130,9 @@ def advance(conn, symbol, candles):
                 outcome["resolved_at"] = candle.time + 900000
                 break
         if outcome["entry_reached"] and not entered:
-            event(conn, chat, symbol, revision, "ENTRY", "Sinyal takibi: giriş seviyesi görüldü.")
+            event(conn, chat, symbol, revision, "ENTRY", "Sinyal takibi: giriş seviyesi görüldü.", outcome)
         for level in sorted(set(outcome.get("tps_hit", [])) - previous):
-            event(conn, chat, symbol, revision, f"TP{level}", f"Sinyal takibi: TP{level} alındı.")
+            event(conn, chat, symbol, revision, f"TP{level}", f"Sinyal takibi: TP{level} alındı.", outcome)
         if candles and outcome["entry_reached"] and outcome["status"] == "PENDING":
             mark = candles[-1]
             if (mark.time >= outcome["opened_at"] and mark.time + 900000 >= outcome.get("mark_time", 0)
@@ -143,13 +145,13 @@ def advance(conn, symbol, candles):
                 outcome["mark_time"] = mark.time + 900000
         status = outcome["status"]
         if status == "SL":
-            event(conn, chat, symbol, revision, "STOP", "Sinyal takibi: stop görüldü.")
+            event(conn, chat, symbol, revision, "STOP", "Sinyal takibi: stop görüldü.", outcome)
         if status != "PENDING":
-            event(conn, chat, symbol, revision, "CLOSED", f"Sinyal kapandı | {outcome['realized_r']:+.2f}R")
+            event(conn, chat, symbol, revision, "CLOSED", f"Sinyal kapandı | {outcome['realized_r']:+.2f}R", outcome)
         state = ("ACTIVE" if outcome["entry_reached"] else "WAITING") if status == "PENDING" else "CLOSED"
         if ambiguous:
             state = "AMBIGUOUS"
             outcome.pop("open_r", None)
-            event(conn, chat, symbol, revision, "AMBIGUOUS", "Fiyat sırası veya mum geçmişi belirsiz. Sonuç hesaplanamadı.")
+            event(conn, chat, symbol, revision, "AMBIGUOUS", "Fiyat sırası veya mum geçmişi belirsiz. Sonuç hesaplanamadı.", outcome)
         conn.execute("UPDATE chat_plans SET state=?,payload=? WHERE chat=? AND symbol=? AND revision=?",
                      (state, json.dumps(outcome), chat, symbol, revision))
