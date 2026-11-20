@@ -117,6 +117,7 @@ class AtlasRuntime:
         self._scan_service = ScanService(
             runtime=self, queue=self._scan_queue, inventory=self._market_inventory, continuous=True,
             worker_count=1, analysis_gap_seconds=5, scan_allowed=self._daily_refresh.scan_allowed,
+            refresh_tracked_setups=self._refresh_tracked_setups,
         )
 
         with self._journal_lock:
@@ -228,6 +229,27 @@ class AtlasRuntime:
 
     def _opportunity_pool(self):
         return get_opportunity_pool()
+
+    def _refresh_tracked_setups(self, stop_event):
+        from tracking_history import TrackingHistory
+
+        tracking = self._opportunity_pool().tracking
+        if not tracking.open_symbols() or stop_event.is_set():
+            return
+        history = TrackingHistory()
+        try:
+            for symbol in tracking.open_symbols(due_only=True):
+                if stop_event.is_set():
+                    return
+                try:
+                    tracking.advance_tracking(symbol, history=history)
+                except Exception as exc:
+                    self.logger.warning(
+                        "Tracked setup data unavailable for %s (%s)", symbol, type(exc).__name__
+                    )
+            tracking.refresh_live_trades(history, stop_event)
+        finally:
+            history.exchange.session.close()
 
     # ------------------------------------------------------------------
     # Scan service facade (Telegram-independent, requirement F)

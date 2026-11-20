@@ -24,6 +24,7 @@ logger = logging.getLogger("atlas.scan_service")
 
 # Hard ceiling shared by Telegram scan commands and the durable scan queue.
 DEFAULT_SCAN_UNIVERSE_LIMIT = 300
+SCAN_PUBLICATION_BATCH_SIZE = 10
 
 
 class ScanService:
@@ -38,9 +39,11 @@ class ScanService:
         analysis_gap_seconds: float = 0.5,
         continuous=False,
         scan_allowed=None,
+        refresh_tracked_setups=None,
     ):
         self.continuous = continuous
         self.scan_allowed = scan_allowed
+        self.refresh_tracked_setups = refresh_tracked_setups
         self._cycle_lock = threading.Lock()
         self._last_rank_attempt = float("-inf")
         self._next_memory_sample = 0.0
@@ -340,21 +343,51 @@ class ScanService:
     # Worker loop
     # ------------------------------------------------------------------
 
+    def _publish_scan_batches(self, pool, generation, *, complete):
+        staged = pool.tracking.get_meta("published_scan_batch", "0:0")
+        batch_gen, cursor = map(int, staged.split(":"))
+        if batch_gen != generation:
+            cursor = 0
+        elif not self._check_published_batch(pool, staged):
+            return False
+        while not self._stop_event.is_set():
+            rows = self.queue.staged_batch(generation, cursor, SCAN_PUBLICATION_BATCH_SIZE)
+            if not rows or (len(rows) < SCAN_PUBLICATION_BATCH_SIZE and not complete):
+                if complete:
+                    pool.publish_cycle(generation, [], self.queue.generation_symbols(generation))
+                return complete
+            cursor = rows[-1][0]
+            pool.publish_cycle(generation, [row for _, row in rows], batch_cursor=cursor)
+            if not self._check_published_batch(pool, f"{generation}:{cursor}"):
+                return False
+        return False
+
+    def _check_published_batch(self, pool, marker):
+        if pool.tracking.get_meta("checked_scan_batch") != marker:
+            if self.refresh_tracked_setups is not None and not self._stop_event.is_set():
+                self.refresh_tracked_setups(self._stop_event)
+            if self._stop_event.is_set():
+                return False
+            pool.tracking.set_meta("checked_scan_batch", marker)
+        return True
+
     def roll_cycle(self):
-        """Publish the drained generation before opening its successor, including after restart."""
+        """Publish scan results before claiming further work or starting a new round."""
         with self._cycle_lock:
             pool = self.runtime._opportunity_pool()
             pool.clean_published_if_due()
             status = self.queue.progress()
-            if status["pending"] or status["running"]:
+            gen = status["generation"]
+            published = int(pool.tracking.get_meta("published_generation", "0"))
+            if status["total"] == DEFAULT_SCAN_UNIVERSE_LIMIT and gen > published:
+                if status["complete"] and self.queue.restore_unstaged_jobs(gen):
+                    return
+                finalized = self._publish_scan_batches(pool, gen, complete=status["complete"])
+                if not finalized:
+                    return
+            if not status["complete"] and status["total"]:
                 return
             if status["complete"]:
-                gen = status["generation"]
-                published = int(pool.tracking.get_meta("published_generation", "0"))
-                if status["total"] == DEFAULT_SCAN_UNIVERSE_LIMIT and gen > published:
-                    if self.queue.restore_unstaged_jobs(gen):
-                        return
-                    pool.publish_cycle(gen, self.queue.cycle_results(gen), self.queue.generation_symbols(gen))
                 self.queue.discard_applied_results(gen)
             if time.monotonic() - self._last_rank_attempt < 30:
                 return
@@ -382,6 +415,15 @@ class ScanService:
                 continue
             if self._stop_event.is_set():
                 break
+            if self.continuous:
+                try:
+                    self.roll_cycle()
+                except Exception:
+                    logger.exception("Scan publication, tracking refresh or ranking unavailable")
+                    self._stop_event.wait(2.0)
+                    continue
+                if self._stop_event.is_set() or (self.scan_allowed is not None and not self.scan_allowed.is_set()):
+                    continue
             job = self.queue.claim_next(worker_id=threading.current_thread().name)
             if job is None:
                 # Queue drained: idle short sleep then re-check (a parallel
@@ -389,10 +431,6 @@ class ScanService:
                 if self._stop_event.wait(2.0):
                     break
                 if self.continuous:
-                    try:
-                        self.roll_cycle()
-                    except Exception:
-                        logger.exception("Scan publication or ranking unavailable")
                     continue
                 progress = self.queue.progress()
                 if progress["complete"]:
