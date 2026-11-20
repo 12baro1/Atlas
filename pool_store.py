@@ -29,6 +29,7 @@ from sqlite_connections import ThreadConnections
 
 logger = logging.getLogger("atlas.pool_store")
 
+from trade_journal import breached_setup_stop
 import telegram_tracking
 
 SCHEMA_VERSION = 1
@@ -185,6 +186,10 @@ class PoolStore:
     # Meta
     # ------------------------------------------------------------------
 
+    def validation_counts(self):
+        return {key.split(":", 1)[1]: int(value) for key, value in self._thread_conn().execute(
+            "SELECT key,value FROM pool_meta WHERE key GLOB 'validations:*'")}
+
     def set_meta(self, key: str, value: str):
         with self._transaction() as conn:
             conn.execute(
@@ -228,6 +233,10 @@ class PoolStore:
                 conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", (marker,str(value)))
                 for row in decisions:
                     symbol = row["symbol"]
+                    if row.get("new_validation"):
+                        counter = "validations:" + row["setup"]["strategy_id"]
+                        conn.execute("INSERT INTO pool_meta VALUES(?, '1') ON CONFLICT(key) "
+                                     "DO UPDATE SET value=CAST(value AS INTEGER)+1", (counter,))
                     if row.get("version"):
                         conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", ("version:"+symbol,str(row["version"])))
                     conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)",
@@ -259,7 +268,13 @@ class PoolStore:
         if not setup:
             plan = conn.execute("SELECT payload FROM chat_plans WHERE chat=? AND symbol=? AND revision=?",
                                 (chat,symbol,revision)).fetchone()
-            if not plan or json.loads(plan[0]).get("strategy_id") not in row["broken"]:
+            if not plan:
+                return
+            previous = json.loads(plan[0])
+            if previous.get("strategy_id") not in row["broken"]:
+                return
+            if "structure_close" in row and not breached_setup_stop(
+                    previous["direction"], previous.get("stop_loss"), previous.get("opened_at"), row):
                 return
         telegram_tracking.transition(conn, chat, symbol, revision, setup, announce=announce)
 

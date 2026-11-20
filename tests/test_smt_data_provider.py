@@ -35,3 +35,19 @@ def test_failed_refresh_can_only_reuse_unexpired_benchmark(monkeypatch):
     universe = data_engine.get_smt_universe(force_refresh=True)
     assert universe["BTC/USDT:USDT"]["15m"] == []
     assert universe["BTC/USDT:USDT"]["4h"] == ["cached"]
+
+
+def test_shared_cache_does_not_reuse_previous_bar_after_close(monkeypatch):
+    calls = []
+    clock = [3599]
+    monkeypatch.setattr(data_engine.time, "time", lambda: clock[0])
+    monkeypatch.setattr(data_engine, "_fetch", lambda *args: calls.append(args) or [clock[0]])
+    data_engine.invalidate_all()
+    try:
+        for _ in range(2):
+            assert data_engine.fetch_candles("BTC", "1h", 100) == [3599]
+        clock[0] += 1
+        assert data_engine.fetch_candles("BTC", "1h", 100) == [3600]
+        assert len(calls) == 2
+    finally:
+        data_engine.invalidate_all()

@@ -24,6 +24,15 @@ def _gzip_payload(payload):
     return gzip.compress(json.dumps(payload, default=str).encode("utf-8"))
 
 
+def breached_setup_stop(direction, stop, opened_at, evidence):
+    """A later fully closed bar must confirm loss of this particular plan's stop."""
+    if not opened_at or evidence["cutoff"] < opened_at or stop is None:
+        return False
+    price = evidence["structure_close"]
+    return ((direction == "LONG" and price <= stop) or
+            (direction == "SHORT" and price >= stop))
+
+
 class TradeJournal:
     """Atlas analiz, trade ve performans kayıtlarını tek bir yerde toplar."""
 
@@ -599,15 +608,14 @@ class TradeJournal:
         cutoff_ms = int(time.time() * 1000) - int(retention_days) * 86400 * 1000 if retention_days > 0 else 0
         self._snapshots.sort(key=lambda s: s.get("timestamp", 0))
         stale = [
-            s for s in self._snapshots
+            s for index, s in enumerate(self._snapshots)
             if (retention_days > 0 and s.get("timestamp", 0) < cutoff_ms)
-            or (max_snapshots > 0 and len(self._snapshots) - self._snapshots.index(s) - 1 >= max_snapshots)
+            or (max_snapshots > 0 and len(self._snapshots) - index - 1 >= max_snapshots)
         ]
 
         if not stale:
             return
-        stale_ids = {s.get("id") for s in stale}
-        archived = 0
+        archived_ids = set()
         with self._connect() as connection:
             connection.execute(
                 """
@@ -633,12 +641,12 @@ class TradeJournal:
                         ),
                     )
                     connection.execute("DELETE FROM analysis_snapshots WHERE id = ?", (s.get("id"),))
-                    archived += 1
+                    archived_ids.add(s.get("id"))
                 except Exception:
                     continue
             connection.commit()
-        self._snapshots = [s for s in self._snapshots if s.get("id") not in stale_ids]
-        if archived:
+        self._snapshots = [s for s in self._snapshots if s.get("id") not in archived_ids]
+        if archived_ids:
             self._vacuum_if_large()
 
     def compact_database(self):
@@ -715,30 +723,17 @@ class TradeJournal:
             return
         try:
             with self._connect() as connection:
-                rows = connection.execute("SELECT id, timestamp, symbol, timeframe, payload FROM analysis_snapshots ORDER BY timestamp").fetchall()
-                for _id, _ts, _sym, _tf, payload in rows:
-                    try:
-                        self._snapshots.append(json.loads(payload))
-                    except Exception:
-                        continue
-                trades = connection.execute("SELECT id, symbol, side, status, opened_at, closed_at, payload FROM trades ORDER BY opened_at").fetchall()
-                for _id, _symbol, _side, _status, _opened_at, _closed_at, payload in trades:
-                    try:
-                        self._trades.append(json.loads(payload))
-                    except Exception:
-                        continue
-                outcomes = connection.execute("SELECT signal_id, symbol, direction, timeframe, status, opened_at, resolved_at, payload FROM signal_outcomes ORDER BY opened_at").fetchall()
-                for _sid, _sym, _dir, _tf, _status, _opened_at, _resolved_at, payload in outcomes:
-                    try:
-                        self._signal_outcomes.append(json.loads(payload))
-                    except Exception:
-                        continue
-                manual = connection.execute("SELECT id, signal_id, symbol, side, status, opened_at, closed_at, payload FROM manual_trades ORDER BY opened_at").fetchall()
-                for _id, _sid, _sym, _side, _status, _opened_at, _closed_at, payload in manual:
-                    try:
-                        self._manual_trades.append(json.loads(payload))
-                    except Exception:
-                        continue
+                for table, order, target in (
+                    ("analysis_snapshots", "timestamp", self._snapshots),
+                    ("trades", "opened_at", self._trades),
+                    ("signal_outcomes", "opened_at", self._signal_outcomes),
+                    ("manual_trades", "opened_at", self._manual_trades),
+                ):
+                    for (payload,) in connection.execute(f"SELECT payload FROM {table} ORDER BY {order}"):
+                        try:
+                            target.append(json.loads(payload))
+                        except (TypeError, ValueError):
+                            continue
         except Exception:
             return
 
@@ -2382,7 +2377,7 @@ class TradeJournal:
             out.append(outcome)
         return out
 
-    def invalidate_pending_signal_outcomes(self, *, symbol, strategy_id, reason):
+    def invalidate_pending_signal_outcomes(self, *, symbol, strategy_id, reason, evidence=None):
         """Mark only unentered pending signals invalid when their own strategy breaks."""
         normalized_symbol = str(symbol or "").upper().replace(":USDT", "")
         normalized_strategy = str(strategy_id or "").strip().lower()
@@ -2405,6 +2400,9 @@ class TradeJournal:
                 payload.get("strategy_id") or outcome.get("strategy_id") or ""
             ).strip().lower() if isinstance(payload, dict) else str(outcome.get("strategy_id") or "").strip().lower()
             if recorded_strategy != normalized_strategy:
+                continue
+            if evidence and not breached_setup_stop(outcome.get("direction"), outcome.get("stop_loss"),
+                                                    outcome.get("opened_at"), evidence):
                 continue
 
             outcome["status"] = "INVALIDATED"

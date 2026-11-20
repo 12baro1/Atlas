@@ -318,11 +318,11 @@ class ScanQueue:
             # Recover expired leases first so crashed workers release jobs.
             gen = self.current_generation()
             conn.execute(
-                "UPDATE scan_jobs SET state = ?, lease_until_ms = NULL, "
-                "last_error = COALESCE(last_error, 'lease_expired') "
+                "UPDATE scan_jobs SET state = CASE WHEN retries >= ? THEN ? ELSE ? END, "
+                "retries = MIN(retries + 1, ?), lease_until_ms = NULL, last_error = 'lease_expired' "
                 "WHERE state = ? AND scan_generation = ? "
                 "AND lease_until_ms IS NOT NULL AND lease_until_ms < ?",
-                (PENDING, RUNNING, gen, now_ms),
+                (self.max_retries, FAILED, PENDING, self.max_retries, RUNNING, gen, now_ms),
             )
             row = conn.execute(
                 "SELECT symbol, attempts, retries FROM scan_jobs "

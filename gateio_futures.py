@@ -4,8 +4,28 @@ from __future__ import annotations
 import os
 import math
 import time
+import threading
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import requests
+
+
+_request_metrics = threading.local()
+
+
+@dataclass
+class RequestMetrics:
+    count: int = 0
+    seconds: float = 0.0
+    last_response: float = 0.0
+
+
+def request_metrics():
+    """Counters owned by one worker, also readable by its supervisor."""
+    metrics = getattr(_request_metrics, "value", None)
+    if metrics is None:
+        metrics = _request_metrics.value = RequestMetrics()
+    return metrics
 
 
 BASE_URL = "https://api.gateio.ws/api/v4"
@@ -88,6 +108,7 @@ class GateFuturesExchange:
         retryable_statuses = {429, 500, 502, 503, 504}
         last_error = None
         for attempt in range(1, self.max_retries + 1):
+            started = time.monotonic()
             try:
                 response = self.session.get(
                     BASE_URL + path,
@@ -110,6 +131,12 @@ class GateFuturesExchange:
                 if attempt >= self.max_retries:
                     raise
                 last_error = exc
+
+            finally:
+                metrics = request_metrics()
+                metrics.last_response = time.monotonic()
+                metrics.count += 1
+                metrics.seconds += metrics.last_response - started
 
             delay = self.retry_backoff_seconds * (2 ** (attempt - 1))
             if delay > 0:
@@ -175,13 +202,14 @@ class GateFuturesExchange:
             query["to"] = min(now_s, query["from"] + self.parse_timeframe(timeframe) * count - 1)
         rows = self._get("/futures/usdt/candlesticks", query) or []
         by_time = {}
+        multiplier = self.contract_size(symbol) if rows else None
         for row in rows:
             try:
                 if since is not None and int(row["t"]) * 1000 < since:
                     continue
                 stamp = int(row["t"]) * 1000
                 candle = [stamp, float(row["o"]), float(row["h"]), float(row["l"]), float(row["c"]),
-                          _scaled_contract_amount(abs(float(row["v"])), self.contract_size(symbol))]
+                          _scaled_contract_amount(abs(float(row["v"])), multiplier)]
                 # Conflicting duplicates leave a gap for historical verification.
                 if stamp in by_time and by_time[stamp] != candle:
                     by_time[stamp] = None

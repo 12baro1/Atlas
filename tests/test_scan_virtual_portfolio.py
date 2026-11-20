@@ -98,7 +98,7 @@ def test_chat_lifecycle_cleanup_outbox_and_restart(pool):
     assert len(pool.tracking.tracked(chat.chat_id)) == 1
     assert not pool.clean_published_if_due(DAY+99)
     assert pool.clean_published_if_due(DAY+100)
-    assert "havuzu boş" in chat.execute_command("/eniyi5")
+    assert "BTC" in chat.execute_command("/eniyi5")
     assert "Giriş bekliyor" in chat.execute_command("/islemler")
     pool.publish_cycle(2,[observation(stamp=2,setup=False)])
     assert "Giriş bekliyor" in chat.execute_command("/islemler")
@@ -444,3 +444,47 @@ def test_remove_and_resume_symbol_persists_and_is_chat_scoped(tmp_path, monkeypa
         assert len([row for row in pool.tracking.tracked(bot.chat_id) if row[0]==arb]) == 2
     finally:
         pool.stop()
+
+
+def test_no_new_trigger_preserves_setup_until_evidence_breaks_its_stop(tmp_path, monkeypatch):
+    import time
+    clock = [1_800_000_000]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    path = tmp_path / "pool"
+    pool = OpportunityPool(base_path=path, auto_persist=False)
+    row = observation(stamp=clock[0]*1000)
+    try:
+        pool.publish_cycle(1, [row])
+        pool.follow_best("chat", 1)
+        clock[0] += 900
+        neutral = dict(observation(stamp=clock[0]*1000, setup=False, broken=True), structure_close=51000)
+        pool.publish_cycle(2, [neutral])
+        assert pool.get_best_setups()[0].setup_id == row["setup"]["setup_id"]
+        assert pool.tracking.tracked("chat")[0][2] == "WAITING"
+        pool.publish_cycle(3, [dict(row, cutoff=neutral["cutoff"], observed=neutral["observed"])])
+        assert pool.tracking.validation_counts() == {row["setup"]["strategy_id"]:1}
+        clock[0] += 3 * 3600
+        assert not pool.get_best_setups() and pool.get_stats()["validated_stored"] == 1
+        pool.stop()
+        pool = OpportunityPool(base_path=path, auto_persist=False)
+        assert pool.get_stats()["validated_stored"] == 1 and not pool.get_best_setups()
+        breach = dict(neutral, cutoff=clock[0]*1000, observed=clock[0]*1000, structure_close=49499)
+        pool.publish_cycle(4, [breach])
+        assert pool.get_stats()["validated_stored"] == 0
+        assert pool.tracking.tracked("chat")[0][2] == "INVALIDATED"
+    finally:
+        pool.stop()
+
+
+def test_unranked_or_rejected_plan_needs_fresh_selection_to_be_displayed(pool):
+    row = observation()
+    pool.publish_cycle(1, [row], [BTC])
+    pool.publish_cycle(2, [], ["OTHER"])
+    assert not pool.get_best_setups() and pool.get_stats()["validated_stored"] == 1
+    pool.publish_cycle(3, [], [BTC])
+    assert not pool.get_best_setups()
+    pool.publish_cycle(4, [dict(row, observed=4)], [BTC])
+    assert pool.get_best_setups()
+    rejected = dict(row, observed=5, setup=None, blocked_strategies=[row["setup"]["strategy_id"]])
+    pool.publish_cycle(5, [rejected], [BTC])
+    assert not pool.get_best_setups() and pool.get_stats()["validated_stored"] == 1

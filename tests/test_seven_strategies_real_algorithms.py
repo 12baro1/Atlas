@@ -533,3 +533,32 @@ def test_all_seven_strategies_have_independent_generators():
     }
     for sid, gen in generators.items():
         assert callable(gen), f"{sid} generator is not callable"
+
+
+@pytest.mark.parametrize(("fixture", "generate"), [
+    (_trend_pullback_bullish_data, trend_generate),
+    (_volatility_breakout_data, breakout_generate),
+    (_mean_reversion_data, lambda data: mean_reversion_generate(data, {"label": "RANGE", "adx": 15})),
+    (_liquidation_cascade_data, liquidation_generate),
+    (_relative_strength_data, relative_strength_generate),
+])
+def test_native_price_and_flow_direction_reversal(fixture, generate):
+    data = fixture()
+    assert generate(data)["direction"] == "LONG"
+
+    def mirror(series):
+        return [Candle(c.time, 200-c.open, 200-c.low, 200-c.high, 200-c.close, c.volume) for c in series]
+
+    for tf in ("15m", "1h", "4h", "1d"):
+        if tf in data:
+            data[tf] = mirror(data[tf])
+    for key, series in data.get("correlation_universe", {}).items():
+        data["correlation_universe"][key] = mirror(series)
+    for peer in data.get("sector_peer_universe", {}).values():
+        peer["4h"] = mirror(peer["4h"])
+    for trade in data.get("recent_trades", []):
+        trade.update(side="sell", price=200-trade["price"])
+    if "funding_rate" in data:
+        data["funding_rate"] = [-value for value in data["funding_rate"]]
+    data["current_price"] = 200-data["current_price"]
+    assert generate(data)["direction"] == "SHORT"

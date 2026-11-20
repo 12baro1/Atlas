@@ -165,3 +165,22 @@ def test_second_analysis_of_same_setup_is_idempotent(tmp_path):
     assert len(pool._validated) == 1
     assert pool.get_stats()["candidates"] == 0
     pool.stop()
+
+
+def test_changing_indicator_values_do_not_grow_telemetry():
+    from collections import defaultdict
+    runtime = make_runtime()
+    runtime._strategy_telemetry = dict(analyses=0, raw_setups_generated=0, common_filter_passed=0,
+                                       common_filter_rejected=0, rejection_reasons=defaultdict(int),
+                                       per_strategy=defaultdict(lambda: {"setups":0, "rejected":0}))
+    for i in range(5000):
+        runtime._accumulate_strategy_telemetry({"strategy_lab": {"diagnostics": {"strategies": [
+            {"strategy_id":"mean_reversion", "status":"CONDITION_NOT_MET", "reason":f"ADX={i}"},
+            {"strategy_id":"trend_pullback", "status":"BLOCKED_COMMON_FILTER", "direction":"SHORT",
+             "rejection_reasons":[f"net RR={i/5000}"]}
+        ]}}})
+    row = runtime._strategy_telemetry["per_strategy"]["mean_reversion"]
+    assert row["analyses"] == sum(row["reason_counts"].values()) == 5000
+    assert len(row["reason_counts"]) == 33
+    assert len(runtime.strategy_telemetry()["rejection_reasons"]) == 65
+    assert runtime.strategy_telemetry()["per_strategy"]["trend_pullback"]["short"] == 5000

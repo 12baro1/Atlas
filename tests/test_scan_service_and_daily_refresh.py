@@ -662,3 +662,24 @@ def test_due_symbols_prioritize_entered_positions_and_skip_unclosed_bars(tmp_pat
         assert store.open_symbols(due_only=True) == ["B","C","F","A"]
     finally:
         store.close()
+
+
+def test_stall_requires_two_lease_periods_without_gate_progress(tmp_path, monkeypatch):
+    from gateio_futures import RequestMetrics
+    from unittest.mock import Mock
+    from scan_queue import ScanQueue
+    inventory = Mock()
+    inventory.status.return_value = {}
+    scanner = ScanService(Mock(), ScanQueue(tmp_path), inventory, continuous=True)
+    try:
+        now = 10_000
+        monkeypatch.setattr("scan_service.time.monotonic", lambda: now)
+        metrics = RequestMetrics(last_response=now-1)
+        scanner._monitored_job = ("BTC", now-900, metrics)
+        assert "stalled_symbol" not in scanner.status()
+        metrics.last_response = now-601
+        assert scanner.status()["stalled_symbol"] == "BTC"
+        scanner._monitored_job = None
+        assert "stalled_symbol" not in scanner.status()
+    finally:
+        scanner.queue.close()

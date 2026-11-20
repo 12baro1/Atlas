@@ -125,6 +125,8 @@ class SetupCandidate:
     
     execution_costs: dict = field(default_factory=dict)
     setup_version: int = 1
+    evidence_at_ms: int = 0
+    requires_revalidation: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -316,8 +318,7 @@ class OpportunityPool:
             if now - int(last) < 86400000:
                 return False
             with self._publish_transaction("pool_cleanup_ms", now, []):
-                for setup_id in list(self._validated) + list(self._candidates):
-                    self.invalidate_setup(setup_id, "POOL_REFRESH")
+                self.cleanup_expired()
             return True
 
     def publish_cycle(self, generation, observations, universe=None):
@@ -330,14 +331,18 @@ class OpportunityPool:
                     members = set(universe)
                     for old in list(self._validated.values()):
                         if old.symbol not in members:
-                            self.invalidate_setup(old.setup_id, "OUTSIDE_RANKED_UNIVERSE")
+                            old.requires_revalidation = True
                 for row in observations:
                     symbol = row["symbol"]
                     last = self.tracking.get_meta("cycle:"+symbol)
                     if last and [row["cutoff"],row["observed"]] < json.loads(last):
                         continue
+                    for setup_id in self._by_symbol.get(symbol, ()):
+                        old = self._validated.get(setup_id)
+                        if old and old.strategy_id in row.get("blocked_strategies", ()):
+                            old.requires_revalidation = True
                     for strategy in row["broken"]:
-                        self.invalidate_strategy_setup(symbol, strategy)
+                        self.invalidate_strategy_setup(symbol, strategy, evidence=row)
                     if row["setup"]:
                         candidate = SetupCandidate.from_dict(row["setup"])
                         if candidate is None:
@@ -347,6 +352,7 @@ class OpportunityPool:
                         candidate.setup_version = version
                         row = dict(row, version=version)
                         self.replace_selected(candidate)
+                        row["new_validation"] = old is None and candidate.setup_id in self._validated
                     applied.append(row)
             return True
 
@@ -472,6 +478,8 @@ class OpportunityPool:
     def _update_candidate(self, existing: SetupCandidate, new: SetupCandidate):
         """Update existing candidate with newer data."""
         existing.updated_at_ms = int(time.time() * 1000)
+        existing.requires_revalidation = new.requires_revalidation
+        existing.evidence_at_ms = new.evidence_at_ms
         existing.entry_price = new.entry_price
         existing.stop_loss = new.stop_loss
         existing.tp1 = new.tp1
@@ -579,7 +587,7 @@ class OpportunityPool:
             return True
     
     def _evict_oldest_validated(self):
-        oldest = min(self._validated.items(), key=lambda x: x[1].validated_at_ms)
+        oldest = min(self._validated.items(), key=lambda x: (not x[1].requires_revalidation, x[1].validated_at_ms))
         candidate = self._validated.get(oldest[0])
         if not candidate:
             return
@@ -647,7 +655,7 @@ class OpportunityPool:
         return False
     
     def invalidate_strategy_setup(
-        self, symbol: str, strategy_id: str, reason: str = "STRATEGY_STRUCTURE_BROKEN"
+        self, symbol: str, strategy_id: str, reason: str = "STRATEGY_STRUCTURE_BROKEN", *, evidence=None
     ) -> List[SetupCandidate]:
         """Archive live, not-yet-entered setups when their own strategy breaks.
 
@@ -664,6 +672,10 @@ class OpportunityPool:
                 for setup_id, candidate in list(pool.items()):
                     if candidate.symbol != symbol or candidate.strategy_id != strategy_id:
                         continue
+                    if evidence and "structure_close" in evidence:
+                        from trade_journal import breached_setup_stop
+                        if not breached_setup_stop(candidate.direction, candidate.stop_loss, candidate.created_at_ms, evidence):
+                            continue
                     if pool is self._active and candidate.status != SetupStatus.ACTIVE.value:
                         continue
                     pool.pop(setup_id, None)
@@ -681,6 +693,10 @@ class OpportunityPool:
                 )
         return removed
 
+    def _fresh_validation(self, candidate, now_ms):
+        stamp = candidate.evidence_at_ms or candidate.validated_at_ms
+        return not candidate.requires_revalidation and bool(stamp) and 0 <= now_ms - stamp <= self.freshness_hours * 3_600_000
+
     def get_validated_setups(
         self,
         symbol: Optional[str] = None,
@@ -692,7 +708,8 @@ class OpportunityPool:
     ) -> List[SetupCandidate]:
         """Get validated setups with optional filters."""
         with self._lock:
-            candidates = list(self._validated.values())
+            now_ms = int(time.time()*1000)
+            candidates = [c for c in self._validated.values() if self._fresh_validation(c, now_ms)]
             
             if symbol:
                 candidates = [c for c in candidates if c.symbol == symbol]
@@ -723,17 +740,15 @@ class OpportunityPool:
 
         Strategy-native invalidation is handled when a fresh analysis reports
         NO_SETUP or CONDITION_NOT_MET for that same strategy. Setup age and
-        timestamps are not invalidation criteria. RR must still be finite and
+        timestamps are not invalidation criteria. Only recent evidence is displayed. RR must be finite and
         strictly positive before a setup is ranked.
         """
         self.cleanup_expired()
         with self._lock:
-            now_ms = int(time.time() * 1000)  # Used only for ranking preference, never expiry.
-            # Strategy structure, not elapsed time, determines setup validity.
-            # Historical timestamps remain useful for display/audit only.
+            now_ms = int(time.time() * 1000)
             candidates = []
             for c in self._validated.values():
-                if c.status != SetupStatus.VALIDATED.value:
+                if c.status != SetupStatus.VALIDATED.value or not self._fresh_validation(c, now_ms):
                     continue
                 # RR validity (finite and strictly positive)
                 try:
@@ -1145,10 +1160,12 @@ class OpportunityPool:
 
     def get_stats(self) -> Dict[str, Any]:
         """Get pool statistics."""
+        now_ms = int(time.time()*1000)
         with self._lock:
             return {
                 "candidates": len(self._candidates),
-                "validated": len(self._validated),
+                "validated": sum(self._fresh_validation(c, now_ms) for c in self._validated.values()),
+                "validated_stored": len(self._validated),
                 "active": len(self._active),
                 "history": len(self._history),
                 "by_symbol": {s: len(ids) for s, ids in self._by_symbol.items()},
