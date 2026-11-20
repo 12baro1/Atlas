@@ -135,8 +135,10 @@ class PoolStore:
                 UPDATE chat_plans SET state='UNVERIFIED', payload=json_set(
                     json_remove(payload, '$.manual_review', '$.retry_at'), '$.status', 'UNVERIFIED',
                     '$.resolved_at', COALESCE(json_extract(payload, '$.history_checked_at'), ?))
-                WHERE state='AMBIGUOUS' AND (json_extract(payload, '$.retry_count') >= ?
-                    OR json_extract(payload, '$.manual_review')=1)
+                WHERE state='AMBIGUOUS' AND (json_extract(payload, '$.manual_review')=1
+                    OR (json_extract(payload, '$.retry_count') >= ? AND NOT (
+                        COALESCE(json_extract(payload, '$.entry_reached_at'), 0) > 0
+                        AND COALESCE(json_array_length(payload, '$.tps_hit'), 0) BETWEEN 1 AND 2)))
             """, (int(time.time()*1000), telegram_tracking.MAX_VERIFICATION_ATTEMPTS))
             conn.execute("""
                 UPDATE chat_plans SET payload = json_set(
@@ -145,17 +147,14 @@ class PoolStore:
                 WHERE state='AMBIGUOUS' AND json_extract(payload, '$.ambiguity_reason')=?
             """, ("Aynı milisaniyede farklı işlem fiyatları",))
 
-            # Older releases could archive an open remainder solely on a transport
-            # timeout. Resume only the current followed revision with confirmed TPs.
+            # Recover a previously archived remainder only when this revision is
+            # still the current follow and the subscriber did not remove it.
             conn.execute("""
                 UPDATE chat_plans AS p SET state='AMBIGUOUS', payload=json_set(
                     json_remove(payload,'$.retry_count','$.retry_at','$.resolved_at','$.manual_review'),
-                    '$.status','PENDING', '$.ambiguity_reason','Bağlantı sonrası geçmiş kontrolü bekleniyor')
+                    '$.status','PENDING', '$.ambiguity_reason','Kısmi işlem geçmişi yeniden doğrulanacak')
                 WHERE state='UNVERIFIED' AND json_array_length(payload,'$.tps_hit') BETWEEN 1 AND 2
-                  AND json_extract(payload,'$.ambiguity_reason') IN (
-                    'Gate.io geçmiş verisi alınamadı (TimeoutError)', 'Gate.io geçmiş verisi alınamadı (ReadTimeout)',
-                    'Gate.io geçmiş verisi alınamadı (ConnectTimeout)', 'Gate.io geçmiş verisi alınamadı (ConnectionError)',
-                    'Gate.io geçmiş verisi alınamadı (Timeout)')
+                  AND COALESCE(json_extract(payload,'$.entry_reached_at'), 0) > 0
                   AND EXISTS (SELECT 1 FROM chat_follows f WHERE f.chat=p.chat AND f.symbol=p.symbol
                               AND f.revision=p.revision)
                   AND NOT EXISTS (SELECT 1 FROM chat_tracking_preferences f WHERE f.chat=p.chat AND f.symbol=p.symbol

@@ -296,11 +296,64 @@ def test_repeated_transport_timeouts_after_tp1_do_not_archive_then_stop():
     assert (state, p["status"], p["tps_hit"]) == ("CLOSED", "SL", [1])
 
 
-def test_only_current_partial_timeout_archive_reopens(tmp_path):
+def test_bnb_short_keeps_partial_position_until_verified_stop(tmp_path, monkeypatch):
+    import time
+    from pool_store import PoolStore
+    from telegram_tracking import MAX_VERIFICATION_ATTEMPTS
+
+    symbol = "BNB/USDT:USDT"
+    clock = [START + BAR]
+    monkeypatch.setattr(time, "time", lambda: clock[0] / 1000)
+    original = plan(
+        symbol=symbol, direction="SHORT", strategy="SMC", strategy_id="smc",
+        stop_loss=110, tp1=90, tp2=80, tp3=70, tps_hit=[1], trailing_stop=100,
+        realized_r=0.5, partial_weights=[0.5, 0.3, 0.2],
+    )
+    history = Mock()
+    history.candles.return_value = []
+    store = PoolStore(str(tmp_path))
+    with store._transaction() as conn:
+        conn.execute("INSERT INTO chat_follows VALUES(?,?,?)", ("chat", symbol, 1))
+        conn.execute("INSERT INTO chat_plans VALUES(?,?,?,?,?,?)",
+                     ("chat", symbol, 1, "old-short", "ACTIVE", json.dumps(original)))
+
+    for _ in range(MAX_VERIFICATION_ATTEMPTS + 1):
+        store.advance_tracking(symbol, history=history)
+        _, _, state, remainder = store.tracked("chat")[0]
+        assert state == "AMBIGUOUS" and remainder["tps_hit"] == [1]
+        clock[0] = remainder["retry_at"]
+    row = observation(symbol, stamp=clock[0])
+    store.follow_analysis("chat", row)
+    assert [(row[1], row[2]) for row in store.tracked("chat")] == [(1, "AMBIGUOUS")]
+    store.close()
+
+    store = PoolStore(str(tmp_path))
+    try:
+        assert store.tracked("chat")[0][2] == "AMBIGUOUS"
+        history.candles.side_effect = lambda _, start, width, count: [
+            bar(start, 85, 88, 79, 82), bar(start + width, 82, 91, 81, 90)
+        ]
+        store.advance_tracking(symbol, history=history)
+        _, _, state, closed = store.tracked("chat")[0]
+        assert (state, closed["status"], closed["tps_hit"]) == ("CLOSED", "SL", [1, 2])
+        messages = [message for _, message in store.pending_notifications("chat")]
+        assert any("TP2 alındı" in message for message in messages)
+        assert any("stop görüldü" in message for message in messages)
+        store.follow_analysis("chat", dict(row, observed=row["observed"] + 1))
+        assert [(row[1], row[2]) for row in store.tracked("chat")] == [(2, "WAITING"), (1, "CLOSED")]
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize("reason", [
+    "Gate.io geçmiş verisi alınamadı (ReadTimeout)",
+    "5m geçmişinde eksik veya çelişkili mum",
+])
+def test_only_current_partial_archive_reopens(tmp_path, reason):
     from pool_store import PoolStore
     store = PoolStore(str(tmp_path))
     p = plan(tps_hit=[1], trailing_stop=100, status="UNVERIFIED", retry_count=3,
-             resolved_at=START, ambiguity_reason="Gate.io geçmiş verisi alınamadı (ReadTimeout)")
+             resolved_at=START, ambiguity_reason=reason)
     with store._transaction() as conn:
         conn.execute("INSERT INTO chat_follows VALUES(?,?,?)", ("c", BTC, 2))
         for revision in (1, 2):
