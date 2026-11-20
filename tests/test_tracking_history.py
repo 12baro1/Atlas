@@ -95,7 +95,8 @@ def test_delayed_backfill_and_restart_retains_retry_and_stops_polling(tmp_path, 
         assert "Doğrulanamadı · takipten kaldırıldı" in bot.handle_history()
         pool.tracking.advance_tracking(BTC, history=history)
         assert history.candles.call_count == 3 * 2
-        assert len(pool.tracking.pending_notifications("1")) == 1
+        messages = [text for _, text in pool.tracking.pending_notifications("1")]
+        assert len(messages) == 1 and "GİRİŞ TAKİBİ SONLANDI" in messages[0]
     finally:
         pool.stop()
 
@@ -166,17 +167,28 @@ def test_worker_recovers_delayed_data_and_updates_telegram_once(tmp_path, monkey
         history.candles.side_effect = TimeoutError()
         worker.refresh_virtual_positions()
         report = bot.handle_islemler()
-        assert "DOĞRULAMA BEKLİYOR" in report and "Son arka plan kontrolü" in report
+        assert "GİRİŞ BEKLEYENLER" in report and "Son takip kontrolü" in report
+        assert "DOĞRULAMA BEKLİYOR" not in report
+        assert not pool.tracking.pending_notifications(bot.chat_id)
         assert pool.tracking.tracked(bot.chat_id)[0][3]["history_checked_at"] == clock[0]
         history.candles.side_effect = None
         history.candles.return_value = [bar(START, 50000, 50100, 49900, 50010)]
         clock[0] += MINUTE
         worker.refresh_virtual_positions()
-        assert "Aktif" in bot.handle_islemler()
+        assert "AÇIK İŞLEMLER" in bot.handle_islemler()
         messages = pool.tracking.pending_notifications(bot.chat_id)
         assert sum("giriş seviyesi" in text for _, text in messages) == 1
+        assert not any("Geçmiş doğrulandı" in text for _, text in messages)
         worker.refresh_virtual_positions()
         assert pool.tracking.pending_notifications(bot.chat_id) == messages
+
+        clock[0] = START + 2 * BAR
+        history.candles.side_effect = TimeoutError()
+        worker.refresh_virtual_positions()
+        report = bot.handle_islemler()
+        assert "DOĞRULAMA BEKLİYOR" in report
+        messages = pool.tracking.pending_notifications(bot.chat_id)
+        assert sum("DOĞRULAMA BEKLİYOR" in text for _, text in messages) == 1
     finally:
         pool.stop()
 

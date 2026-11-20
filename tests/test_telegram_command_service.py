@@ -708,21 +708,28 @@ def test_trade_report_separates_today_history_and_preserves_cards(monkeypatch):
         ("AXIS", 1, "CLOSED", dict(base, status="SL", resolved_at=now, realized_r=-1)),
         ("OLD", 1, "CLOSED", dict(base, status="TP3", resolved_at=now-86400000, realized_r=2)),
         ("LAB", 1, "CLOSED", dict(base, status="SL", resolved_at=now, realized_r=-1)),
-        ("CAP", 1, "AMBIGUOUS", dict(base, manual_review=True, ambiguity_reason="Eksik mum")),
-        ("AVA", 1, "ACTIVE", dict(base, open_r=0.5)),
+        ("CAP", 1, "AMBIGUOUS", dict(base, manual_review=True, ambiguity_reason="Eksik mum",
+                                     entry_reached=True, entry_reached_at=now)),
+        ("BNB/USDT:USDT", 1, "ACTIVE", dict(base, open_r=0.5, tps_hit=[1], trailing_stop=100,
+                                           partial_weights=[0.5, 0.3, 0.2])),
         ("ELSA", 1, "WAITING", base),
     ]
     tracking = SimpleNamespace(iter_tracked=lambda _: rows)
     monkeypatch.setattr(telegram, "get_opportunity_pool", lambda: SimpleNamespace(tracking=tracking))
     report = TelegramCommandService(None, "offline", "chat").handle_islemler()
-    sections = ["İŞLEMLERİM — 5", "Aktif (1)", "Giriş bekliyor (1)", "DOĞRULAMA BEKLİYOR (1)",
-                "Bugün kapanan (2)", "Tüm dönem · kapanan işlemler", "Kapanan: 3"]
+    sections = ["İŞLEMLERİM — 5", "AÇIK İŞLEMLER (1)", "GİRİŞ BEKLEYENLER (1)", "DOĞRULAMA BEKLİYOR (1)",
+                "BUGÜN KAPANANLAR (2)", "Tüm dönem · kapanan işlemler", "Kapanan: 3"]
     assert [report.index(s) for s in sections] == sorted(report.index(s) for s in sections)
     assert report.index("OLD") > report.index("Önceki günlerde kapanan TP işlemleri (1/1)")
     assert "OLD · SHORT · TP3 alındı · +2.00R" in report and "Kalıcı inceleme" in report
+    assert "1 açık · 1 giriş bekliyor · 1 doğrulanıyor" in report
+    assert "BNB/USDT · SHORT\n✓ TP1 alındı · Açık kalan %50" in report
+    assert "Güncel stop: 100.0\nİlk stop: 110.0" in report
+    assert "✓ TP1: 90.0\n○ TP2: 80.0\n○ TP3: 70.0" in report
+    assert "0 kâr · 2 zarar · Net -2.00R" in report
     for block in report.split("\n\n"):
         if "Giriş:" in block:
-            assert any(block in chunk for chunk in split_message(report, limit=180))
+            assert any(block in chunk for chunk in split_message(report, limit=250))
 
 
 def test_partial_targets_survive_stop_and_midnight_in_both_reports(monkeypatch):
@@ -741,7 +748,7 @@ def test_partial_targets_survive_stop_and_midnight_in_both_reports(monkeypatch):
     monkeypatch.setattr(telegram, "get_opportunity_pool", lambda: SimpleNamespace(tracking=tracking))
     service = TelegramCommandService(None, "offline", "chat")
     report = service.handle_islemler()
-    assert "OPEN · LONG · TP1 alındı" in report
+    assert "OPEN · LONG\n✓ TP1 alındı" in report
     assert "EXIT · LONG · TP1, TP2 alındı · Stop · +0.60R" in report
     assert "OTHER" not in report
     assert "TP1, TP2 alındı · Stop" in service.handle_history()
