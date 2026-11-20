@@ -501,6 +501,36 @@ def test_remove_and_resume_symbol_persists_and_is_chat_scoped(tmp_path, monkeypa
         pool.stop()
 
 
+def test_delivered_top_ten_tracks_current_setups_after_explicit_reenable(pool, monkeypatch):
+    import time
+
+    bot = service()
+    now = [1_800_000_000]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    tut, ub, morpho = ("TUT/USDT:USDT", "UB/USDT:USDT", "MORPHO/USDT:USDT")
+    observations = [observation(symbol, stamp=now[0]*1000) for symbol in (tut, ub, morpho)]
+    pool.publish_cycle(1, observations)
+
+    now[0] += 1
+    for symbol in (tut, ub, morpho):
+        pool.tracking.set_symbol_tracking(bot.chat_id, symbol, enabled=True)
+    pool.tracking.set_symbol_tracking(bot.chat_id, ub, enabled=False)
+
+    def send(method, payload, **kwargs):
+        for symbol in ("TUT/USDT", "UB/USDT", "MORPHO/USDT"):
+            assert symbol in payload["text"]
+        now[0] += 900
+        # A newer neutral analysis should not prevent tracking the setup still in the pool.
+        pool.publish_cycle(2, [observation(tut, stamp=now[0]*1000, setup=False)])
+        pool.tracking.set_symbol_tracking(bot.chat_id, morpho, enabled=False)
+        return {"message_id": 17, "chat": {"id": bot.chat_id}}
+
+    bot._api = MagicMock(side_effect=send)
+    bot._command_and_reply("/eniyi10")
+    assert [(row[0], row[2]) for row in pool.tracking.tracked(bot.chat_id)] == [(tut, "WAITING")]
+    assert "TUT/USDT" in bot.execute_command("/islemler")
+
+
 def test_no_new_trigger_preserves_setup_until_evidence_breaks_its_stop(tmp_path, monkeypatch):
     import time
     clock = [1_800_000_000]

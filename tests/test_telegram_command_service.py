@@ -418,7 +418,10 @@ def test_best_setups_output_includes_levels_per_displayed_plan(monkeypatch):
         net_rr_after_costs=1.8, status="VALIDATED",
         created_at_ms=0, updated_at_ms=0,
     )
-    pool = SimpleNamespace(follow_best=lambda chat, count: [setup])
+    pool = SimpleNamespace(
+        prepare_best_reply=lambda chat, count: ([setup], []),
+        follow_best_reply=lambda chat, shown, requested_at: None,
+    )
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
     service = TelegramCommandService(object(), "token", "chat")
     message = service._format_best_setups(5)

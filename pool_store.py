@@ -259,12 +259,16 @@ class PoolStore:
                     for chat,revision in followers:
                         self._apply_observation(conn, chat, revision, row, announce=True)
 
-    def _apply_observation(self, conn, chat, revision, row, *, announce, structure_only=False):
+    def _apply_observation(self, conn, chat, revision, row, *, announce, structure_only=False, requested_at=None):
         symbol = row["symbol"]
         preference = conn.execute("SELECT muted,changed_at FROM chat_tracking_preferences WHERE chat=? AND symbol=?",
                                   (chat, symbol)).fetchone()
-        if preference and (preference[0] or row["observed"] <= preference[1]):
-            return
+        if preference:
+            muted, changed_at = preference
+            predates_preference = (row["observed"] <= changed_at if requested_at is None
+                                   else requested_at < changed_at)
+            if muted or predates_preference:
+                return
         stamp = (row["cutoff"], row["observed"])
         key = f"watch:{chat}:{symbol}"
         old = conn.execute("SELECT value FROM pool_meta WHERE key=?", (key,)).fetchone()
@@ -291,7 +295,7 @@ class PoolStore:
     def follow_analysis(self, chat, row):
         self.follow_delivered(chat, [row])
 
-    def follow_delivered(self, chat, observations):
+    def follow_delivered(self, chat, observations, *, requested_at=None):
         with self._transaction() as conn:
             for row in observations:
                 symbol = row["symbol"]
@@ -301,7 +305,9 @@ class PoolStore:
                                       (chat,symbol)).fetchone()
                 if not member:
                     continue
-                self._apply_observation(conn, chat, member[0], row, announce=member[0]>0)
+                self._apply_observation(
+                    conn, chat, member[0], row, announce=member[0]>0, requested_at=requested_at
+                )
                 if not row.get("setup"):
                     continue
                 changes = []

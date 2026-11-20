@@ -1384,12 +1384,14 @@ class TelegramCommandService:
         pool = get_opportunity_pool()
         if count == 20:
             best = pool.get_best_setups(limit=pool.max_validated)
-        elif hasattr(self._delivery,"actions"):
+        else:
+            requested_at = int(time.time() * 1000)
             best, shown = pool.prepare_best_reply(self.chat_id, count)
             if best:
-                self._delivery.actions.append(lambda: pool.tracking.follow_delivered(self.chat_id,shown))
-        else:
-            best = pool.follow_best(self.chat_id, count)
+                if hasattr(self._delivery, "actions"):
+                    self._delivery.actions.append(lambda: pool.follow_best_reply(self.chat_id, shown, requested_at))
+                else:
+                    pool.follow_best_reply(self.chat_id, shown, requested_at)
         title = "HAVUZ" if count == 20 else f"EN İYİ {count} SETUP"
         if not best:
             return f"{title}\nDoğrulanmış setup havuzu boş."
