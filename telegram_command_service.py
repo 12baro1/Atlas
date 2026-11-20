@@ -80,6 +80,20 @@ def split_message(value: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
     return chunks
 
 
+def _confirmed_targets(plan):
+    hits = set(plan.get("tps_hit") or ())
+    return [f"TP{level}" for level in (1, 2, 3)
+            if level in hits or plan.get(f"hit_tp{level}") or plan.get("status") == f"TP{level}"]
+
+
+def _trade_progress(plan):
+    targets = _confirmed_targets(plan)
+    parts = [", ".join(targets) + " alındı"] if targets else []
+    if plan.get("status") == "SL":
+        parts.append("Stop")
+    return " · ".join(parts)
+
+
 def _format_rr(value):
     try:
         number = float(value)
@@ -1182,7 +1196,7 @@ class TelegramCommandService:
         history.sort(key=lambda row: row[3].get("resolved_at") or row[3]["opened_at"], reverse=True)
         lines = ["SİNYAL GEÇMİŞİ"]
         for symbol, revision, state, plan in history[:15]:
-            label = "Geçersizleşti" if state == "INVALIDATED" else f"{plan['status']} | {plan['realized_r']:+.2f}R"
+            label = "Geçersizleşti" if state == "INVALIDATED" else f"{_trade_progress(plan) or plan['status']} | {plan['realized_r']:+.2f}R"
             lines.append(f"{symbol.split('/')[0]} | {plan['direction']} | {plan['strategy']} | {label} (v{revision})")
             lines.append(tracked_levels(plan))
         if not history:
@@ -1343,6 +1357,7 @@ class TelegramCommandService:
             "INVALIDATED": ("Bugün geçersizleşen", []),
         }
         closed = []
+        earlier_targets = []
         for symbol, _, state, plan in rows:
             if state not in sections:
                 continue
@@ -1351,6 +1366,8 @@ class TelegramCommandService:
             if state in {"CLOSED", "INVALIDATED"}:
                 resolved = datetime.fromtimestamp((plan.get("resolved_at") or 0) / 1000, tz)
                 if resolved.date() != today:
+                    if state == "CLOSED" and plan.get("resolved_at") and resolved.date() < today and _confirmed_targets(plan):
+                        earlier_targets.append((resolved, symbol, plan))
                     continue
             sections[state][1].append((symbol, plan))
 
@@ -1362,13 +1379,9 @@ class TelegramCommandService:
                 if index == 0:
                     card.append(f"{heading} ({len(items)})")
                 label = f"{symbol.split('/')[0]} · {plan['direction']}"
-                hits = plan.get("tps_hit") or []
-                if hits:
-                    label += f" · TP{max(hits)} alındı"
-                if state == "CLOSED":
-                    result = "Stop" if plan["status"] == "SL" else plan["status"]
-                    if result != f"TP{max(hits, default=0)}":
-                        label += f" · {result}"
+                progress = _trade_progress(plan) or (plan["status"] if state == "CLOSED" else "")
+                if progress:
+                    label += f" · {progress}"
                 card.append(label)
                 card.append(tracked_levels(plan))
                 if state == "AMBIGUOUS":
@@ -1381,6 +1394,14 @@ class TelegramCommandService:
                 blocks.append("\n".join(card))
         if not count:
             blocks.append("Takipte güncel setup yok.")
+        if earlier_targets:
+            earlier_targets.sort(key=lambda row: row[0], reverse=True)
+            shown = earlier_targets[:10]
+            history = [f"Önceki günlerde kapanan TP işlemleri ({len(shown)}/{len(earlier_targets)})"]
+            for resolved, symbol, plan in shown:
+                history.append(f"{resolved:%d.%m.%Y} · {symbol.split('/')[0]} · {plan['direction']} · "
+                               f"{_trade_progress(plan)} · {plan['realized_r']:+.2f}R")
+            blocks.append("\n".join(history))
         if rows:
             wins = sum(p.get("realized_r", 0) > 0 for p in closed)
             losses = sum(p.get("realized_r", 0) < 0 for p in closed)

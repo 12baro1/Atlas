@@ -718,7 +718,30 @@ def test_trade_report_separates_today_history_and_preserves_cards(monkeypatch):
     sections = ["İŞLEMLERİM — 5", "Aktif (1)", "Giriş bekliyor (1)", "DOĞRULAMA BEKLİYOR (1)",
                 "Bugün kapanan (2)", "Tüm dönem · kapanan işlemler", "Kapanan: 3"]
     assert [report.index(s) for s in sections] == sorted(report.index(s) for s in sections)
-    assert "OLD" not in report and "Kalıcı inceleme" in report
+    assert report.index("OLD") > report.index("Önceki günlerde kapanan TP işlemleri (1/1)")
+    assert "OLD · SHORT · TP3 alındı · +2.00R" in report and "Kalıcı inceleme" in report
     for block in report.split("\n\n"):
         if "Giriş:" in block:
             assert any(block in chunk for chunk in split_message(report, limit=180))
+
+
+def test_partial_targets_survive_stop_and_midnight_in_both_reports(monkeypatch):
+    import time
+    from types import SimpleNamespace
+    import telegram_command_service as telegram
+
+    yesterday = int(time.time()*1000) - 86400000
+    base = dict(direction="LONG", strategy="SMC", opened_at=yesterday-900000)
+    rows = [
+        ("OPEN", 1, "ACTIVE", dict(base, tps_hit=[1], status="PENDING")),
+        ("EXIT", 1, "CLOSED", dict(base, tps_hit=[1, 2], status="SL", resolved_at=yesterday, realized_r=0.6)),
+        ("OTHER", 1, "CLOSED", dict(base, status="SL", resolved_at=yesterday, realized_r=0.1)),
+    ]
+    tracking = SimpleNamespace(tracked=lambda _: rows)
+    monkeypatch.setattr(telegram, "get_opportunity_pool", lambda: SimpleNamespace(tracking=tracking))
+    service = TelegramCommandService(None, "offline", "chat")
+    report = service.handle_islemler()
+    assert "OPEN · LONG · TP1 alındı" in report
+    assert "EXIT · LONG · TP1, TP2 alındı · Stop · +0.60R" in report
+    assert "OTHER" not in report
+    assert "TP1, TP2 alındı · Stop" in service.handle_history()
