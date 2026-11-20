@@ -238,6 +238,14 @@ class PoolStore:
             if publication:
                 marker, value, decisions = publication
                 conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", (marker,str(value)))
+                if marker in {"published_scan_batch", "published_generation"} and decisions:
+                    report = {
+                        "at_ms": int(time.time() * 1000),
+                        "analyzed": len(decisions),
+                        "selected": sum(bool(row.get("setup")) for row in decisions),
+                    }
+                    conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)",
+                                 ("last_scan_publication", json.dumps(report)))
                 for row in decisions:
                     symbol = row["symbol"]
                     if row.get("new_validation"):
@@ -525,24 +533,36 @@ class PoolStore:
         with self._transaction() as conn:
             conn.execute("UPDATE chat_event_delivery SET state='uncertain' WHERE state='sending' AND next_at<=?",
                          (now,))
+            pause = conn.execute("SELECT value FROM pool_meta WHERE key=?",
+                                 (f"notification_pause:{chat}",)).fetchone()
+            if pause and int(pause[0]) > now:
+                return None
             row = conn.execute("""
-                SELECT e.id,e.message,d.state,d.attempts,d.next_at
-                FROM chat_events e LEFT JOIN chat_event_delivery d ON e.id=d.event_id
-                LEFT JOIN chat_tracking_preferences p ON p.chat=e.chat AND p.symbol=e.symbol
-                WHERE e.chat=? AND e.delivered=0 AND e.id>COALESCE(p.suppress_through,0) AND (d.state IS NULL OR d.state IN ('sending','retry'))
+                WITH first_by_symbol AS (
+                    SELECT MIN(e.id) AS id
+                    FROM chat_events e
+                    LEFT JOIN chat_event_delivery d ON e.id=d.event_id
+                    LEFT JOIN chat_tracking_preferences p ON p.chat=e.chat AND p.symbol=e.symbol
+                    WHERE e.chat=? AND e.delivered=0 AND e.id>COALESCE(p.suppress_through,0)
+                      AND (d.state IS NULL OR d.state IN ('sending','retry'))
+                    GROUP BY e.symbol
+                )
+                SELECT e.id,e.message,d.attempts
+                FROM first_by_symbol f JOIN chat_events e ON e.id=f.id
+                LEFT JOIN chat_event_delivery d ON e.id=d.event_id
+                WHERE d.state IS NULL OR (d.state='retry' AND d.next_at<=?)
                 ORDER BY e.id LIMIT 1
-            """, (chat,)).fetchone()
+            """, (chat, now)).fetchone()
             if not row:
                 return None
-            event_id, message, state, attempts, next_at = row
-            if state == "sending" or (next_at and next_at > now):
-                return None
+            event_id, message, attempts = row
             attempt = (attempts or 0) + 1
             conn.execute("INSERT OR REPLACE INTO chat_event_delivery VALUES(?, 'sending', ?, ?, NULL)",
                          (event_id, attempt, now + 120))
             return event_id, message, attempt
 
-    def finish_notification(self, chat, event_id, attempt, state, *, message_id=None, retry_after=0):
+    def finish_notification(self, chat, event_id, attempt, state, *, message_id=None, retry_after=0,
+                            rate_limit_seconds=0):
         now = int(time.time())
         with self._transaction() as conn:
             changed = conn.execute("""
@@ -552,6 +572,11 @@ class PoolStore:
             """, (state, now + retry_after, message_id, event_id, attempt, event_id, chat)).rowcount
             if changed and state == "sent":
                 conn.execute("UPDATE chat_events SET delivered=1 WHERE id=? AND chat=?", (event_id, chat))
+            if changed and rate_limit_seconds:
+                conn.execute("""
+                    INSERT INTO pool_meta VALUES(?,?)
+                    ON CONFLICT(key) DO UPDATE SET value=MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER))
+                """, (f"notification_pause:{chat}", now + rate_limit_seconds))
 
     def unconfirmed_notifications(self, chat):
         return self._thread_conn().execute("""
