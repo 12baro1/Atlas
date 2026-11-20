@@ -346,8 +346,12 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
         if history:
             plan.pop("network_failures", None)
             attempts = plan.get("retry_count", 0) + 1
-            plan["retry_count"] = attempts
+            plan["retry_count"] = min(attempts, MAX_VERIFICATION_ATTEMPTS)
             if attempts >= MAX_VERIFICATION_ATTEMPTS:
+                if plan.get("entry_reached") and plan.get("entry_reached_at"):
+                    # Missing history cannot establish an exit from the remaining position.
+                    plan["retry_at"] = now + 15 * MINUTE
+                    return "AMBIGUOUS", plan
                 plan.pop("retry_at", None)
                 plan.update(status="UNVERIFIED", resolved_at=now)
                 return "UNVERIFIED", plan

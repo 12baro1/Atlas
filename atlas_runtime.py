@@ -51,6 +51,7 @@ class AtlasRuntime:
         self.engine = AtlasEngine()
         self.strategy_outcome_journal = StrategyOutcomeJournal()
         self._stop_event = threading.Event()
+        self._waiting_structure_checked = {}
         self._thread = None
         # Per-symbol locks to allow parallel analysis of different symbols
         # while protecting AtlasMainEngine.evidence_pool for the same symbol.
@@ -233,23 +234,45 @@ class AtlasRuntime:
     def _refresh_tracked_setups(self, stop_event):
         from tracking_history import TrackingHistory
 
-        tracking = self._opportunity_pool().tracking
-        if not tracking.open_symbols() or stop_event.is_set():
+        pool = self._opportunity_pool()
+        tracking = pool.tracking
+        if stop_event.is_set():
             return
-        history = TrackingHistory()
-        try:
-            for symbol in tracking.open_symbols(due_only=True):
-                if stop_event.is_set():
-                    return
-                try:
-                    tracking.advance_tracking(symbol, history=history)
-                except Exception as exc:
-                    self.logger.warning(
-                        "Tracked setup data unavailable for %s (%s)", symbol, type(exc).__name__
-                    )
-            tracking.refresh_live_trades(history, stop_event)
-        finally:
-            history.exchange.session.close()
+        if tracking.open_symbols():
+            history = TrackingHistory()
+            try:
+                for symbol in tracking.open_symbols(due_only=True):
+                    if stop_event.is_set():
+                        return
+                    try:
+                        tracking.advance_tracking(symbol, history=history)
+                    except Exception as exc:
+                        self.logger.warning(
+                            "Tracked setup data unavailable for %s (%s)", symbol, type(exc).__name__
+                        )
+                tracking.refresh_live_trades(history, stop_event)
+            finally:
+                history.exchange.session.close()
+
+        waiting = tracking.waiting_symbols()
+        self._waiting_structure_checked = {
+            symbol: epoch for symbol, epoch in self._waiting_structure_checked.items() if symbol in waiting
+        }
+        # Strategy structure is evaluated from closed 15-minute candles.
+        candle_ms = 15 * 60 * 1000
+        closed_candle = (int(time.time() * 1000) // candle_ms - 1) * candle_ms
+        for symbol in sorted(waiting):
+            if stop_event.is_set():
+                return
+            if self._waiting_structure_checked.get(symbol) == closed_candle:
+                continue
+            result = self.analyze_for_cycle(symbol)
+            observation = result.get("cycle_result")
+            if result.get("ok") and observation and observation["cutoff"] >= closed_candle:
+                for strategy in observation["broken"]:
+                    pool.invalidate_strategy_setup(symbol, strategy, evidence=observation)
+                tracking.apply_waiting_structure(observation)
+                self._waiting_structure_checked[symbol] = closed_candle
 
     # ------------------------------------------------------------------
     # Scan service facade (Telegram-independent, requirement F)
