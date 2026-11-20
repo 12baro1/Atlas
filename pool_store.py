@@ -138,7 +138,7 @@ class PoolStore:
                 WHERE state='AMBIGUOUS' AND (json_extract(payload, '$.manual_review')=1
                     OR (json_extract(payload, '$.retry_count') >= ? AND NOT (
                         COALESCE(json_extract(payload, '$.entry_reached_at'), 0) > 0
-                        AND COALESCE(json_array_length(payload, '$.tps_hit'), 0) BETWEEN 1 AND 2)))
+                        AND COALESCE(json_extract(payload, '$.entry_reached'), 0)=1)))
             """, (int(time.time()*1000), telegram_tracking.MAX_VERIFICATION_ATTEMPTS))
             conn.execute("""
                 UPDATE chat_plans SET payload = json_set(
@@ -147,13 +147,13 @@ class PoolStore:
                 WHERE state='AMBIGUOUS' AND json_extract(payload, '$.ambiguity_reason')=?
             """, ("Aynı milisaniyede farklı işlem fiyatları",))
 
-            # Recover a previously archived remainder only when this revision is
+            # Recover a previously archived open position only when this revision is
             # still the current follow and the subscriber did not remove it.
             conn.execute("""
                 UPDATE chat_plans AS p SET state='AMBIGUOUS', payload=json_set(
                     json_remove(payload,'$.retry_count','$.retry_at','$.resolved_at','$.manual_review'),
-                    '$.status','PENDING', '$.ambiguity_reason','Kısmi işlem geçmişi yeniden doğrulanacak')
-                WHERE state='UNVERIFIED' AND json_array_length(payload,'$.tps_hit') BETWEEN 1 AND 2
+                    '$.status','PENDING', '$.ambiguity_reason','Açık işlem geçmişi yeniden doğrulanacak')
+                WHERE state='UNVERIFIED' AND COALESCE(json_extract(payload,'$.entry_reached'), 0)=1
                   AND COALESCE(json_extract(payload,'$.entry_reached_at'), 0) > 0
                   AND EXISTS (SELECT 1 FROM chat_follows f WHERE f.chat=p.chat AND f.symbol=p.symbol
                               AND f.revision=p.revision)
@@ -259,7 +259,7 @@ class PoolStore:
                     for chat,revision in followers:
                         self._apply_observation(conn, chat, revision, row, announce=True)
 
-    def _apply_observation(self, conn, chat, revision, row, *, announce):
+    def _apply_observation(self, conn, chat, revision, row, *, announce, structure_only=False):
         symbol = row["symbol"]
         preference = conn.execute("SELECT muted,changed_at FROM chat_tracking_preferences WHERE chat=? AND symbol=?",
                                   (chat, symbol)).fetchone()
@@ -270,7 +270,8 @@ class PoolStore:
         old = conn.execute("SELECT value FROM pool_meta WHERE key=?", (key,)).fetchone()
         if old and stamp < tuple(json.loads(old[0])):
             return
-        conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", (key,json.dumps(stamp)))
+        if not structure_only:
+            conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", (key,json.dumps(stamp)))
         setup = row.get("setup")
         if not setup:
             plan = conn.execute("SELECT payload FROM chat_plans WHERE chat=? AND symbol=? AND revision=?",
@@ -283,6 +284,8 @@ class PoolStore:
             if "structure_close" in row and not breached_setup_stop(
                     previous["direction"], previous.get("stop_loss"), previous.get("opened_at"), row):
                 return
+        if structure_only:
+            conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", (key,json.dumps(stamp)))
         telegram_tracking.transition(conn, chat, symbol, revision, setup, announce=announce)
 
     def follow_analysis(self, chat, row):
@@ -384,6 +387,27 @@ class PoolStore:
             " GROUP BY symbol ORDER BY MIN(CASE WHEN state='ACTIVE' OR json_extract(payload,'$.entry_reached')=1 "
             "THEN 0 WHEN state='AMBIGUOUS' THEN 1 ELSE 2 END),symbol", params)]
 
+    def waiting_symbols(self):
+        return {row[0] for row in self._thread_conn().execute(
+            "SELECT p.symbol FROM chat_plans p JOIN chat_follows f USING(chat,symbol,revision) "
+            "WHERE p.state='WAITING' AND COALESCE(json_extract(p.payload,'$.entry_reached'),0)=0"
+        )}
+
+    def apply_waiting_structure(self, observation):
+        if not observation.get("broken") or "structure_close" not in observation:
+            return
+        # The priority pass updates existing tracking only. The scan publisher
+        # still owns selection and announcement of fresh opportunities.
+        row = dict(observation, setup=None)
+        with self._transaction() as conn:
+            followers = conn.execute(
+                "SELECT p.chat,p.revision FROM chat_plans p JOIN chat_follows f USING(chat,symbol,revision) "
+                "WHERE p.symbol=? AND p.state='WAITING' "
+                "AND COALESCE(json_extract(p.payload,'$.entry_reached'),0)=0", (row["symbol"],)
+            ).fetchall()
+            for chat, revision in followers:
+                self._apply_observation(conn, chat, revision, row, announce=True, structure_only=True)
+
     def refresh_live_trades(self, history, stop_event):
         now = int(time.time() * 1000)
         # One trade page per distinct symbol and interval across subscribed chats.
@@ -391,7 +415,7 @@ class PoolStore:
         read_trades = lru_cache(maxsize=8)(history.trade_range)
         rows = self._thread_conn().execute(
             "SELECT symbol,chat,revision,state,payload FROM chat_plans WHERE state IN ('ACTIVE','WAITING') "
-            "ORDER BY symbol,chat,revision").fetchall()
+            "ORDER BY CASE WHEN state='ACTIVE' THEN 0 ELSE 1 END,symbol,chat,revision").fetchall()
         for symbol, *row in rows:
             if stop_event.is_set():
                 break

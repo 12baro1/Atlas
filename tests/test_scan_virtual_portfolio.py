@@ -531,6 +531,47 @@ def test_no_new_trigger_preserves_setup_until_evidence_breaks_its_stop(tmp_path,
         pool.stop()
 
 
+def test_priority_tracking_checks_waiting_structure_outside_scan_queue(pool, monkeypatch):
+    import threading
+    import time
+
+    runtime = make_runtime()
+    runtime._waiting_structure_checked = {}
+    runtime._opportunity_pool = lambda: pool
+    runtime.logger = MagicMock()
+    clock = [1800000000]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    history = MagicMock()
+    monkeypatch.setattr("tracking_history.TrackingHistory", lambda: history)
+    monkeypatch.setattr(pool.tracking, "advance_tracking", MagicMock())
+    live = MagicMock()
+    monkeypatch.setattr(pool.tracking, "refresh_live_trades", live)
+    row = observation(BTC, stamp=clock[0] * 1000)
+    pool.publish_cycle(1, [row])
+    pool.follow_best("chat", 1)
+
+    clock[0] += 1800
+    cutoff = (clock[0] // 900 - 1) * 900000
+    replacement = observation(BTC, stamp=clock[0]*1000, broken=True)
+    replacement["setup"]["setup_id"] = "fresh-opportunity"
+    evidence = dict(replacement, cutoff=cutoff, structure_close=51000)
+    runtime.analyze_for_cycle = MagicMock(return_value={"ok": True, "cycle_result": evidence})
+    stop_event = threading.Event()
+    runtime._refresh_tracked_setups(stop_event)
+    live.assert_called_once()
+    runtime.analyze_for_cycle.assert_called_once_with(BTC)
+    assert pool.tracking.tracked("chat")[0][2] == "WAITING"
+    runtime._refresh_tracked_setups(stop_event)
+    runtime.analyze_for_cycle.assert_called_once_with(BTC)
+
+    clock[0] += 900
+    evidence.update(cutoff=cutoff + 900000, observed=clock[0]*1000, structure_close=49499)
+    runtime._refresh_tracked_setups(stop_event)
+    assert not pool.get_best_setups()
+    assert [(row[1], row[2]) for row in pool.tracking.tracked("chat")] == [(1, "INVALIDATED")]
+    assert "SETUP KALDIRILDI" in pool.tracking.pending_notifications("chat")[-1][1]
+
+
 def test_unranked_or_rejected_plan_needs_fresh_selection_to_be_displayed(pool):
     row = observation()
     pool.publish_cycle(1, [row], [BTC])

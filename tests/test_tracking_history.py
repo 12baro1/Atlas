@@ -277,6 +277,17 @@ def test_background_worker_continues_targets_after_tp1_and_restart(tmp_path, mon
         pool.stop()
 
 
+def test_confirmed_open_position_without_tp_survives_missing_history():
+    history = Mock()
+    history.candles.return_value = []
+    p = plan(retry_count=2)
+    state, pending = evaluate(BTC, "ACTIVE", json.dumps(p), START + BAR, history=history)
+    assert state == "AMBIGUOUS"
+    assert pending["status"] == "PENDING"
+    assert pending["entry_reached_at"] == p["entry_reached_at"]
+    assert pending["retry_at"] > START + BAR
+
+
 def test_repeated_transport_timeouts_after_tp1_do_not_archive_then_stop():
     import requests
     history = Mock()
