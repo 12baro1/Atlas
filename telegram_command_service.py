@@ -1388,7 +1388,7 @@ class TelegramCommandService:
     def _set_symbol_tracking(self, raw, *, enabled):
         ticker = re.fullmatch(r"([A-Z0-9]+?)(?:/USDT(?::USDT)?|_USDT|USDT)?", raw.strip().upper())
         if not ticker:
-            return "Kullanım: /ekle ARB" if enabled else "Kullanım: /çıkart ARB"
+            return "Kullanım: /ekle ARB" if enabled else "Kullanım: /kaldir BNB"
         base = ticker[1]
         symbol = f"{base}/USDT:USDT"
         changed = get_opportunity_pool().tracking.set_symbol_tracking(self.chat_id, symbol, enabled=enabled)
