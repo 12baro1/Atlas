@@ -152,24 +152,41 @@ class DailyPoolRefresh:
         The thread re-checks every interval, so a VPS restart shortly after
         00:00 still performs the pending refresh on the next tick.
         """
-        def loop():
-            while not self._stop_event.is_set():
-                if self.continuous:
-                    try:
-                        self.refresh_virtual_positions()
-                    except Exception:
-                        logger.exception("Virtual position refresh failed")
-                    if not self._stop_event.is_set():
-                        try:
-                            self.pool.tracking.refresh_closed_targets()
-                        except Exception:
-                            logger.exception("Closed target observation failed")
+        def maintenance():
+            if self.continuous:
                 try:
-                    self.run_if_due()
-                except Exception as exc:  # pragma: no cover
-                    logger.error(f"Daily refresh loop error: {exc}")
-                if self._stop_event.wait(max(10, int(check_interval_seconds))):
-                    break
+                    self.refresh_virtual_positions()
+                except Exception:
+                    logger.exception("Virtual position refresh failed")
+                if not self._stop_event.is_set():
+                    try:
+                        self.pool.tracking.refresh_closed_targets()
+                    except Exception:
+                        logger.exception("Closed target observation failed")
+            try:
+                self.run_if_due()
+            except Exception as exc:  # pragma: no cover
+                logger.error(f"Daily refresh loop error: {exc}")
+
+        def loop():
+            from tracking_history import TrackingHistory
+            history = TrackingHistory() if self.continuous else None
+            due = 0
+            interval = max(10, int(check_interval_seconds))
+            try:
+                while not self._stop_event.is_set():
+                    if time.monotonic() >= due:
+                        maintenance()
+                        due = time.monotonic() + interval
+                    if history and not self._stop_event.is_set():
+                        try:
+                            self.pool.tracking.refresh_live_trades(history, self._stop_event)
+                        except Exception:
+                            logger.exception("Live position refresh failed")
+                    self._stop_event.wait(5 if history else interval)
+            finally:
+                if history:
+                    history.exchange.session.close()
 
         self._thread = threading.Thread(target=loop, daemon=True, name="AtlasDailyRefresh")
         if self.continuous:

@@ -1451,6 +1451,9 @@ class TelegramCommandService:
                     label += f" · {progress}"
                 card.append(label)
                 card.append(tracked_levels(plan))
+                if state in {"ACTIVE", "WAITING"} and plan.get("live_price") is not None:
+                    traded = datetime.fromtimestamp((plan["verified_until"] - 1) / 1000, tz)
+                    card.append(f"Son işlem fiyatı: {_format_price(plan['live_price'])} · {traded:%d.%m %H:%M:%S} TSİ")
                 if state == "CLOSED" and (note := _post_exit_note(plan)):
                     card.append(note)
                 if state == "AMBIGUOUS":

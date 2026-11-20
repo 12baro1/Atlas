@@ -68,8 +68,10 @@ class TrackingHistory:
         return convert([[int(r['t']) * 1000, r['o'], r['h'], r['l'], r['c'], r['v']] for r in rows])
 
     def _ticks(self, symbol, candle_time):
-        start = candle_time
-        rows = self._get('trades', symbol, start, start + MINUTE, limit=1000)
+        return self.trade_range(symbol, candle_time, candle_time + MINUTE)
+
+    def trade_range(self, symbol, start, end):
+        rows = self._get('trades', symbol, start, end, limit=1000)
         if not rows or len(rows) >= 1000:
             raise EvidenceMissing("1m işlem geçmişi eksik veya sayfa sınırında")
         ticks = {}
@@ -79,7 +81,7 @@ class TrackingHistory:
             price, size = float(row['price']), abs(float(row['size']))
             if not isfinite(price) or not isfinite(size) or min(price, size) <= 0:
                 raise EvidenceMissing("Geçersiz işlem fiyatı veya hacmi")
-            if not start <= stamp < start + MINUTE or row['id'] in ids:
+            if not start <= stamp < end or row['id'] in ids:
                 raise EvidenceMissing("1m işlem geçmişi aralık veya kimlik uyuşmazlığı")
             ids.add(row['id'])
             if stamp not in ticks:

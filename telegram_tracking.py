@@ -218,9 +218,64 @@ def recover_missing_bar(history, symbol, start, now):
     raise EvidenceMissing("15m geçmişi eksik, alt mumlar aralığı tamamlamıyor")
 
 
+def mark_position(plan, price, stamp):
+    weights = CandleSimulation()._norm_partial_weights(plan)
+    remaining = 1 - sum(weights[i-1] for i in plan.get("tps_hit", []))
+    sign = 1 if plan["direction"] == "LONG" else -1
+    plan["open_r"] = sign * (price - plan["entry"]) * remaining / abs(plan["entry"] - plan["stop_loss"])
+    plan["mark_time"] = stamp
+
+
+def evaluate_live(symbol, state, raw, now, read_trades):
+    """Replay a completed slice of public trades; the open candle is never a fill."""
+    plan = json.loads(raw)
+    parent = next_bar(plan)
+    cursor = max(parent, plan.get("verified_until", 0))
+    # Leave two seconds for the exchange to publish trades. The historical
+    # worker owns older gaps and ambiguous evidence.
+    end = (now // 1000 - 2) * 1000
+    if state not in {"ACTIVE", "WAITING"} or not 0 < end - cursor <= BAR:
+        return
+    start = cursor // 1000 * 1000
+    try:
+        groups = read_trades(symbol, start, end)
+    except EvidenceMissing:
+        return
+    previous = plan.get("live_price")
+    for group in groups:
+        if group.time < cursor:
+            continue
+        low, high = min(group.prices), max(group.prices)
+        price = low if low == high else None
+        if not plan["entry_reached"]:
+            entry = plan["entry"]
+            if price is None and (low <= entry <= high or
+                                  plan["payload"]["execution_costs"]["entry_type"] == "MARKET"):
+                break
+            if previous is not None and (previous < entry < low or high < entry < previous):
+                break
+        tick = Candle(group.time, price, high, low, price, group.volume)
+        if not apply_bar(plan, tick, 1):
+            break
+        previous = price
+        plan["verified_until"] = group.time + 1
+        plan["next_bar_time"] = plan["verified_until"] // BAR * BAR
+        plan["live_price"] = price
+        if plan["status"] != "PENDING":
+            return "CLOSED", plan
+    if plan.get("verified_until", 0) > cursor:
+        if plan["entry_reached"] and previous is not None:
+            mark_position(plan, previous, plan["verified_until"] - 1)
+        elif previous is None:
+            plan.pop("open_r", None)
+        return ("ACTIVE" if plan["entry_reached"] else "WAITING"), plan
+
+
 def evaluate(symbol, state, raw, now, candles=None, history=None):
     plan = json.loads(raw)
     if plan.get("manual_review") or plan.get("retry_at", 0) > now:
+        return
+    if history is None and plan.get("verified_until"):
         return
     start = next_bar(plan)
     count = min(96, (now - start) // BAR)
@@ -255,16 +310,13 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
             plan["next_bar_time"] = stamp + BAR
             plan.pop("parent_prices")
             plan.pop("verified_until", None)
+            plan.pop("live_price", None)
             for key in ("ambiguity_reason", "blocked_at", "retry_at", "retry_count", "network_failures"):
                 plan.pop(key, None)
             if plan["status"] != "PENDING":
                 return "CLOSED", plan
             if plan["entry_reached"]:
-                weights = CandleSimulation()._norm_partial_weights(plan)
-                remaining = 1 - sum(weights[i-1] for i in plan.get("tps_hit", []))
-                sign = 1 if plan["direction"] == "LONG" else -1
-                plan["open_r"] = sign * (candle.close - plan["entry"]) * remaining / abs(plan["entry"] - plan["stop_loss"])
-                plan["mark_time"] = stamp + BAR
+                mark_position(plan, candle.close, stamp + BAR)
             if recovered or refined or (not history and stamp == last_available):
                 break
     except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
