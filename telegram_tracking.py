@@ -163,17 +163,21 @@ def apply_bar(plan, candle, width):
 
 
 def resolve_bar(plan, symbol, candle, width, history, now):
-    verified = plan.get("verified_until", 0)
+    verified = max(plan["opened_at"], plan.get("verified_until", 0))
     if candle.time + width <= verified:
         return False
     if candle.time >= verified and apply_bar(plan, candle, width):
         plan["verified_until"] = candle.time + width
         return False
-    if width == BAR and candle.time < verified and entry_confirmed(plan):
-        _, touched, stopped = _exit_levels_in_bar(plan, candle)
-        if not touched and not stopped:
-            # A closed 5m candle bounds the entire unprocessed tail as well.
-            # Do not replay the prefix where the position was already updated.
+    if width == BAR and candle.time < verified:
+        can_skip_tail = False
+        if entry_confirmed(plan):
+            _, touched, stopped = _exit_levels_in_bar(plan, candle)
+            can_skip_tail = not touched and not stopped
+        elif plan["payload"]["execution_costs"]["entry_type"] == "LIMIT":
+            can_skip_tail = not candle.low <= plan["entry"] <= candle.high
+        if can_skip_tail:
+            # The complete range also bounds the unprocessed portion.
             plan["last_processed_candle_time"] = candle.time
             plan["verified_until"] = candle.time + width
             return False
@@ -250,8 +254,11 @@ def mark_position(plan, price, stamp):
 def evaluate_live(symbol, state, raw, now, read_trades):
     """Replay a completed slice of public trades; the open candle is never a fill."""
     plan = json.loads(raw)
-    parent = next_bar(plan)
-    cursor = max(parent, plan.get("verified_until", 0))
+    cursor = plan["opened_at"]
+    if plan["entry_reached"] or any(
+        key in plan for key in ("next_bar_time", "last_processed_candle_time", "verified_until")
+    ):
+        cursor = max(next_bar(plan), plan.get("verified_until", 0))
     # Leave two seconds for the exchange to publish trades. The historical
     # worker owns older gaps and ambiguous evidence.
     end = (now // 1000 - 2) * 1000
@@ -299,6 +306,11 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
     if history is None and plan.get("verified_until"):
         return
     start = next_bar(plan)
+    if not plan["entry_reached"] and not any(
+        key in plan for key in ("next_bar_time", "last_processed_candle_time", "verified_until")
+    ) and plan["opened_at"] % BAR:
+        # Resolve the signal's partial opening candle when live trades were unavailable.
+        start = plan["opened_at"] // BAR * BAR
     width = plan.get("parent_width", QUARTER_HOUR) if "parent_prices" in plan else BAR
     count = min(1 if width == QUARTER_HOUR else 96, (now - start) // width)
     if count <= 0:

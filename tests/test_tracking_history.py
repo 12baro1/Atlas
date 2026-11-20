@@ -514,15 +514,15 @@ def test_live_tied_stop_and_target_preserve_verified_prefix_for_history():
     assert evaluate(BTC, state, json.dumps(result), START+BAR, [bar(START,100,121,95,121)]) is None
 
 
-def test_signal_eligible_on_next_five_minute_open():
+def test_live_tracking_can_confirm_entry_after_publication_inside_an_open_candle():
     from telegram_tracking import evaluate_live
     opened = START + MINUTE
     raw = json.dumps(plan(opened_at=opened, entry_reached=False, entry_reached_at=None))
-    read = Mock(return_value=[TradeGroup(START+5*MINUTE+100, {100}, 1)])
-    assert evaluate_live(BTC, "WAITING", raw, START+4*MINUTE, read) is None
+    read = Mock(return_value=[TradeGroup(opened-1, {100}, 1), TradeGroup(opened+100, {100}, 1)])
+    assert evaluate_live(BTC, "WAITING", raw, opened+1000, read) is None
     read.assert_not_called()
-    state, result = evaluate_live(BTC, "WAITING", raw, START+5*MINUTE+4000, read)
-    assert state == "ACTIVE" and result["entry_reached_at"] == START+5*MINUTE+100
+    state, result = evaluate_live(BTC, "WAITING", raw, opened+4000, read)
+    assert state == "ACTIVE" and result["entry_reached_at"] == opened+100
 
 
 def test_pinned_legacy_parent_finishes_before_switching_to_five_minutes():

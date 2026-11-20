@@ -59,6 +59,7 @@ class DailyPoolRefresh:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._live_thread: Optional[threading.Thread] = None
 
     # ------------------------------------------------------------------
     # Core operation
@@ -169,30 +170,47 @@ class DailyPoolRefresh:
                 logger.error(f"Daily refresh loop error: {exc}")
 
         def loop():
-            from tracking_history import TrackingHistory
-            history = TrackingHistory() if self.continuous else None
-            due = 0
             interval = max(10, int(check_interval_seconds))
+            while not self._stop_event.is_set():
+                maintenance()
+                self._stop_event.wait(interval)
+
+        def live_loop():
+            from functools import partial
+            from types import SimpleNamespace
+
+            from gateio_tracking_stream import GateTrackingStream
+            from tracking_history import TrackingHistory
+
+            history = TrackingHistory()
+            stream = GateTrackingStream()
+            fallback_due = 0
+            stream.start()
             try:
                 while not self._stop_event.is_set():
-                    if time.monotonic() >= due:
-                        maintenance()
-                        due = time.monotonic() + interval
-                    if history and not self._stop_event.is_set():
-                        try:
-                            self.pool.tracking.refresh_live_trades(history, self._stop_event)
-                        except Exception:
-                            logger.exception("Live position refresh failed")
-                    self._stop_event.wait(5 if history else interval)
+                    try:
+                        stream.follow(self.pool.tracking.live_trade_symbols())
+                        fallback = None
+                        if time.monotonic() >= fallback_due:
+                            fallback = history.trade_range
+                            fallback_due = time.monotonic() + 5
+                        source = SimpleNamespace(trade_range=partial(stream.trade_range, fallback=fallback))
+                        self.pool.tracking.refresh_live_trades(source, self._stop_event)
+                    except Exception:
+                        logger.exception("Live position refresh failed")
+                    self._stop_event.wait(1)
             finally:
-                if history:
-                    history.exchange.session.close()
+                stream.stop()
+                history.exchange.session.close()
 
         self._thread = threading.Thread(target=loop, daemon=True, name="AtlasDailyRefresh")
         if self.continuous:
             self.scan_allowed.clear()
         try:
             self._thread.start()
+            if self.continuous:
+                self._live_thread = threading.Thread(target=live_loop, daemon=True, name="AtlasLiveTracking")
+                self._live_thread.start()
         except RuntimeError:
             self.scan_allowed.set()
             raise
@@ -201,11 +219,11 @@ class DailyPoolRefresh:
     def stop(self, timeout: float = 5.0) -> bool:
         """Stop the background refresh thread without losing a live thread reference."""
         self._stop_event.set()
-        thread = self._thread
-        if thread is None:
-            return True
-        thread.join(timeout=max(0.0, float(timeout)))
-        stopped = not thread.is_alive()
-        if stopped:
-            self._thread = None
-        return stopped
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        for attribute in ("_thread", "_live_thread"):
+            thread = getattr(self, attribute)
+            if thread and thread.is_alive():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            if thread and not thread.is_alive():
+                setattr(self, attribute, None)
+        return self._thread is None and self._live_thread is None

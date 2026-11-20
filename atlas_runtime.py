@@ -250,7 +250,6 @@ class AtlasRuntime:
                         self.logger.warning(
                             "Tracked setup data unavailable for %s (%s)", symbol, type(exc).__name__
                         )
-                tracking.refresh_live_trades(history, stop_event)
             finally:
                 history.exchange.session.close()
 
