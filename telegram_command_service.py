@@ -1420,6 +1420,8 @@ class TelegramCommandService:
                 if changed else f"{base} bu sohbetin takip listesinde yok.")
 
     def handle_islemler(self) -> str:
+        from telegram_tracking import CandleSimulation, entry_confirmed
+
         rows = get_opportunity_pool().tracking.iter_tracked(self.chat_id)
         tz = ZoneInfo("Europe/Istanbul")
         today = datetime.now(tz).date()
@@ -1436,6 +1438,8 @@ class TelegramCommandService:
         earlier_targets = []
         for symbol, _, state, plan in rows:
             has_rows = True
+            if state == "AMBIGUOUS" and not entry_confirmed(plan):
+                state = "WAITING"
             if state not in sections:
                 continue
             if state == "CLOSED":
@@ -1478,8 +1482,6 @@ class TelegramCommandService:
                 if state in {"ACTIVE", "AMBIGUOUS"}:
                     hits = confirmed_target_levels(plan)
                     if hits and plan.get("partial_weights"):
-                        from telegram_tracking import CandleSimulation
-
                         weights = CandleSimulation()._norm_partial_weights(plan)
                         remaining = max(0, 1 - sum(weights[level - 1] for level in hits))
                         percentage = f"{remaining * 100:.1f}".removesuffix(".0").replace(".", ",")

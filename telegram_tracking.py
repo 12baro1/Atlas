@@ -356,6 +356,10 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
     return ("ACTIVE" if plan["entry_reached"] else "WAITING"), plan
 
 
+def entry_confirmed(plan):
+    return bool(plan.get("entry_reached") and plan.get("entry_reached_at"))
+
+
 def save(conn, symbol, row, result):
     chat, revision, state, raw = row
     new_state, plan = result
@@ -366,7 +370,9 @@ def save(conn, symbol, row, result):
     old = json.loads(raw)
     def record(kind, message):
         event(conn, chat, symbol, revision, kind, message, plan)
-    if plan["entry_reached"] and not old.get("entry_reached_at"):
+    confirmed = entry_confirmed(plan)
+    was_confirmed = entry_confirmed(old)
+    if confirmed and not was_confirmed:
         record("ENTRY", "Sinyal takibi: giriş seviyesi görüldü.")
     for level in sorted(set(plan.get("tps_hit", [])) - set(old.get("tps_hit", []))):
         record(f"TP{level}", f"Sinyal takibi: TP{level} alındı.")
@@ -375,7 +381,10 @@ def save(conn, symbol, row, result):
     if new_state == "CLOSED":
         watch_closed_targets(conn, chat, symbol, revision, plan)
         record("CLOSED", f"Sinyal kapandı | {plan['realized_r']:+.2f}R")
-    if new_state == "AMBIGUOUS" and state != new_state:
+    if new_state == "UNVERIFIED" and not confirmed:
+        record("ENTRY_UNVERIFIED", "GİRİŞ TAKİBİ SONLANDI — Fiyat geçmişinden giriş teyit edilemedi.")
+    was_verifying_open_position = state == "AMBIGUOUS" and was_confirmed
+    if confirmed and new_state == "AMBIGUOUS" and not was_verifying_open_position:
         record(f"VERIFY_{plan['blocked_at']}", "DOĞRULAMA BEKLİYOR — " + plan["ambiguity_reason"])
-    if state == "AMBIGUOUS" and new_state in {"WAITING", "ACTIVE"}:
+    if was_verifying_open_position and new_state == "ACTIVE":
         record(f"VERIFIED_{old.get('blocked_at', next_bar(old))}", "Geçmiş doğrulandı, sinyal takibi sürüyor.")
