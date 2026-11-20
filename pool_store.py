@@ -127,6 +127,16 @@ class PoolStore:
             conn.executescript(_SCHEMA + telegram_tracking.SCHEMA)
             self.set_meta("schema_version", str(SCHEMA_VERSION))
 
+        # Older trackers rejected the entire minute for any multi-price timestamp.
+        # Change the old reason atomically so a restart never replenishes retries.
+        with self._transaction() as conn:
+            conn.execute("""
+                UPDATE chat_plans SET payload = json_set(
+                    json_remove(payload, '$.manual_review', '$.retry_count', '$.retry_at'),
+                    '$.ambiguity_reason', 'Geçmiş işlemler yeniden doğrulanacak')
+                WHERE state='AMBIGUOUS' AND json_extract(payload, '$.ambiguity_reason')=?
+            """, ("Aynı milisaniyede farklı işlem fiyatları",))
+
     def _recover_corrupt_file(self):
         """Quarantine the corrupt DB sidecar files and start a fresh one."""
         stamp = int(time.time() * 1000)
