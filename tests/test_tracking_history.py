@@ -172,7 +172,7 @@ def test_worker_recovers_delayed_data_and_updates_telegram_once(tmp_path, monkey
         history.candles.return_value = [bar(START, 50000, 50100, 49900, 50010)]
         clock[0] += MINUTE
         worker.refresh_virtual_positions()
-        assert "Aktif" in bot.handle_islemler()
+        assert "AÇIK İŞLEMLER" in bot.handle_islemler()
         messages = pool.tracking.pending_notifications(bot.chat_id)
         assert sum("giriş seviyesi" in text for _, text in messages) == 1
         worker.refresh_virtual_positions()

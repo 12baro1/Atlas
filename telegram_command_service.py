@@ -103,6 +103,35 @@ def _trade_progress(plan):
     return " · ".join(parts)
 
 
+def _format_islemler_levels(plan, state):
+    costs = (plan.get("payload") or {}).get("execution_costs") or {}
+    entry_type = costs.get("entry_type")
+    entry_label = {"LIMIT": "Limit giriş", "MARKET": "Piyasa girişi"}.get(entry_type, "Giriş")
+    original_stop = plan.get("stop_loss")
+    current_stop = plan.get("trailing_stop")
+    if current_stop is None:
+        current_stop = original_stop
+    stop_label = "Güncel stop" if current_stop != original_stop else "Stop"
+    lines = [f"{entry_label}: {_format_price(plan.get('entry'))} · {stop_label}: {_format_price(current_stop)}"]
+    if current_stop != original_stop:
+        lines.append(f"İlk stop: {_format_price(original_stop)}")
+    hits = set(confirmed_target_levels(plan))
+    targets = []
+    for level in (1, 2, 3):
+        value = plan.get(f"tp{level}")
+        if value is not None:
+            mark = ""
+            if state != "WAITING":
+                mark = "✓ " if level in hits else "○ "
+            targets.append(f"{mark}TP{level}: {_format_price(value)}")
+    if state == "WAITING":
+        if targets:
+            lines.append(" · ".join(targets))
+    else:
+        lines.extend(targets)
+    return lines
+
+
 def _format_rr(value):
     try:
         number = float(value)
@@ -1395,11 +1424,11 @@ class TelegramCommandService:
         tz = ZoneInfo("Europe/Istanbul")
         today = datetime.now(tz).date()
         sections = {
-            "ACTIVE": ("Aktif", []),
-            "WAITING": ("Giriş bekliyor", []),
-            "AMBIGUOUS": ("DOĞRULAMA BEKLİYOR", []),
-            "CLOSED": ("Bugün kapanan", []),
-            "INVALIDATED": ("Bugün geçersizleşen", []),
+            "ACTIVE": ("🟢 AÇIK İŞLEMLER", []),
+            "WAITING": ("🟡 GİRİŞ BEKLEYENLER", []),
+            "AMBIGUOUS": ("🟠 DOĞRULAMA BEKLİYOR", []),
+            "CLOSED": ("📊 BUGÜN KAPANANLAR", []),
+            "INVALIDATED": ("⚪ BUGÜN GEÇERSİZLEŞENLER", []),
         }
         closed_count = wins = losses = target_count = 0
         total = 0.0
@@ -1431,33 +1460,57 @@ class TelegramCommandService:
             sections[state][1].append((symbol, plan))
 
         count = sum(len(items) for _, items in sections.values())
-        blocks = [f"İŞLEMLERİM — {count}"]
+        active, waiting, verifying = (len(sections[state][1]) for state in ("ACTIVE", "WAITING", "AMBIGUOUS"))
+        blocks = [f"ATLAS · İŞLEMLERİM — {count}\n"
+                  f"{active} açık · {waiting} giriş bekliyor · {verifying} doğrulanıyor"]
         for state, (heading, items) in sections.items():
+            if not items:
+                continue
+            section = f"{heading} ({len(items)})"
+            if state == "CLOSED":
+                results = [plan.get("realized_r", 0) for _, plan in items]
+                section += (f"\n{sum(result > 0 for result in results)} kâr · "
+                            f"{sum(result < 0 for result in results)} zarar · Net {_format_rr(sum(results))}")
             for index, (symbol, plan) in enumerate(items):
-                card = []
-                if index == 0:
-                    card.append(f"{heading} ({len(items)})")
-                label = f"{symbol.split('/')[0]} · {plan['direction']}"
+                card = [section] if index == 0 else []
+                label = f"{symbol.removesuffix(':USDT').removesuffix(':usdt')} · {plan['direction']}"
                 progress = _trade_progress(plan) or (plan["status"] if state == "CLOSED" else "")
-                if progress:
-                    label += f" · {progress}"
-                card.append(label)
-                card.append(tracked_levels(plan))
-                if state in {"ACTIVE", "WAITING"} and plan.get("live_price") is not None:
+                if state in {"ACTIVE", "AMBIGUOUS"}:
+                    hits = confirmed_target_levels(plan)
+                    if hits and plan.get("partial_weights"):
+                        from telegram_tracking import CandleSimulation
+
+                        weights = CandleSimulation()._norm_partial_weights(plan)
+                        remaining = max(0, 1 - sum(weights[level - 1] for level in hits))
+                        percentage = f"{remaining * 100:.1f}".removesuffix(".0").replace(".", ",")
+                        progress += f" · Açık kalan %{percentage}"
+                    card.append(label)
+                    if progress:
+                        card.append(f"✓ {progress}")
+                else:
+                    card.append(f"{label} · {progress}" if progress else label)
+                if state in {"ACTIVE", "WAITING", "AMBIGUOUS"}:
+                    card.extend(_format_islemler_levels(plan, state))
+                else:
+                    card.append(tracked_levels(plan))
+                if state in {"ACTIVE", "WAITING"} and plan.get("live_price") is not None and plan.get("verified_until"):
                     traded = datetime.fromtimestamp((plan["verified_until"] - 1) / 1000, tz)
                     card.append(f"Son işlem fiyatı: {_format_price(plan['live_price'])} · {traded:%d.%m %H:%M:%S} TSİ")
+                if state == "WAITING" and plan.get("history_checked_at"):
+                    checked = datetime.fromtimestamp(plan["history_checked_at"] / 1000, tz)
+                    card.append(f"Son takip kontrolü {checked:%d.%m %H:%M} TSİ")
                 if state == "CLOSED" and (note := _post_exit_note(plan)):
                     card.append(note)
                 if state == "AMBIGUOUS":
                     card.append(plan.get("ambiguity_reason") or "Geçmiş mumlar doğrulanacak")
                     if plan.get("history_checked_at"):
                         checked = datetime.fromtimestamp(plan["history_checked_at"] / 1000, tz)
-                        card.append(f"Son arka plan kontrolü {checked:%d.%m %H.%M} TSİ")
+                        card.append(f"Son arka plan kontrolü {checked:%d.%m %H:%M} TSİ")
                     if plan.get("manual_review"):
                         card.append("Kalıcı inceleme")
                     elif plan.get("retry_at"):
                         retry = datetime.fromtimestamp(plan["retry_at"] / 1000, tz)
-                        card.append(f"Yeniden kontrol {retry:%H.%M} TSİ")
+                        card.append(f"Sonraki kontrol {retry:%H:%M} TSİ")
                 blocks.append("\n".join(card))
         if not count:
             blocks.append("Takipte güncel setup yok.")
