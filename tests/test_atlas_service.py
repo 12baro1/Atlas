@@ -156,3 +156,25 @@ def test_startup_inventory_respects_shutdown_signal():
 
 def test_service_scheduler_clock_is_available():
     assert callable(atlas_service.time.monotonic)
+
+
+def test_systemd_watchdog_protocol(monkeypatch):
+    from unittest.mock import MagicMock, call
+    from configparser import ConfigParser
+    from pathlib import Path
+
+    config = ConfigParser(interpolation=None)
+    config.read(Path(atlas_service.__file__).parent / "deploy" / "atlas.service")
+    service = config["Service"]
+    assert service["Type"] == "notify" and service["WatchdogSec"] == "3min"
+    assert service["Restart"] == "always" and config["Unit"]["StartLimitIntervalSec"] == "0"
+    factory = MagicMock()
+    monkeypatch.setattr(atlas_service.socket, "socket", factory)
+    monkeypatch.setenv("NOTIFY_SOCKET", "@atlas-test")
+    atlas_service.notify_systemd("READY=1")
+    atlas_service.notify_systemd("WATCHDOG=1")
+    sender = factory.return_value.__enter__.return_value
+    assert sender.sendto.call_args_list == [call(b"READY=1", "\0atlas-test"), call(b"WATCHDOG=1", "\0atlas-test")]
+    monkeypatch.delenv("NOTIFY_SOCKET")
+    atlas_service.notify_systemd("WATCHDOG=1")
+    assert factory.call_count == 2

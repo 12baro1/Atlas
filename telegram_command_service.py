@@ -18,6 +18,7 @@ Legacy plain-text commands (e.g., "btc", "en iyi 5 işlem") are preserved for ba
 
 from __future__ import annotations
 
+import heapq
 import logging
 import math
 import os
@@ -1190,12 +1191,11 @@ class TelegramCommandService:
 
     def handle_history(self) -> str:
         """Show recent completed and invalidated signal records."""
-        rows = get_opportunity_pool().tracking.tracked(self.chat_id)
-        history = [(symbol, revision, state, plan) for symbol, revision, state, plan in rows
-                   if state in {"CLOSED", "INVALIDATED"}]
-        history.sort(key=lambda row: row[3].get("resolved_at") or row[3]["opened_at"], reverse=True)
+        rows = get_opportunity_pool().tracking.iter_tracked(self.chat_id)
+        history = heapq.nlargest(15, (row for row in rows if row[2] in {"CLOSED", "INVALIDATED"}),
+                                 key=lambda row: row[3].get("resolved_at") or row[3]["opened_at"])
         lines = ["SİNYAL GEÇMİŞİ"]
-        for symbol, revision, state, plan in history[:15]:
+        for symbol, revision, state, plan in history:
             label = "Geçersizleşti" if state == "INVALIDATED" else f"{_trade_progress(plan) or plan['status']} | {plan['realized_r']:+.2f}R"
             lines.append(f"{symbol.split('/')[0]} | {plan['direction']} | {plan['strategy']} | {label} (v{revision})")
             lines.append(tracked_levels(plan))
@@ -1346,7 +1346,7 @@ class TelegramCommandService:
         return "\n".join(lines)
 
     def handle_islemler(self) -> str:
-        rows = get_opportunity_pool().tracking.tracked(self.chat_id)
+        rows = get_opportunity_pool().tracking.iter_tracked(self.chat_id)
         tz = ZoneInfo("Europe/Istanbul")
         today = datetime.now(tz).date()
         sections = {
@@ -1356,18 +1356,30 @@ class TelegramCommandService:
             "CLOSED": ("Bugün kapanan", []),
             "INVALIDATED": ("Bugün geçersizleşen", []),
         }
-        closed = []
+        closed_count = wins = losses = target_count = 0
+        total = 0.0
+        has_rows = False
         earlier_targets = []
         for symbol, _, state, plan in rows:
+            has_rows = True
             if state not in sections:
                 continue
             if state == "CLOSED":
-                closed.append(plan)
+                net = plan.get("realized_r", 0)
+                closed_count += 1
+                total += net
+                wins += net > 0
+                losses += net < 0
             if state in {"CLOSED", "INVALIDATED"}:
                 resolved = datetime.fromtimestamp((plan.get("resolved_at") or 0) / 1000, tz)
                 if resolved.date() != today:
                     if state == "CLOSED" and plan.get("resolved_at") and resolved.date() < today and _confirmed_targets(plan):
-                        earlier_targets.append((resolved, symbol, plan))
+                        target_count += 1
+                        row = (resolved, -target_count, symbol, plan)
+                        if len(earlier_targets) < 10:
+                            heapq.heappush(earlier_targets, row)
+                        else:
+                            heapq.heappushpop(earlier_targets, row)
                     continue
             sections[state][1].append((symbol, plan))
 
@@ -1395,21 +1407,17 @@ class TelegramCommandService:
         if not count:
             blocks.append("Takipte güncel setup yok.")
         if earlier_targets:
-            earlier_targets.sort(key=lambda row: row[0], reverse=True)
-            shown = earlier_targets[:10]
-            history = [f"Önceki günlerde kapanan TP işlemleri ({len(shown)}/{len(earlier_targets)})"]
-            for resolved, symbol, plan in shown:
+            shown = sorted(earlier_targets, reverse=True)
+            history = [f"Önceki günlerde kapanan TP işlemleri ({len(shown)}/{target_count})"]
+            for resolved, _, symbol, plan in shown:
                 history.append(f"{resolved:%d.%m.%Y} · {symbol.split('/')[0]} · {plan['direction']} · "
                                f"{_trade_progress(plan)} · {plan['realized_r']:+.2f}R")
             blocks.append("\n".join(history))
-        if rows:
-            wins = sum(p.get("realized_r", 0) > 0 for p in closed)
-            losses = sum(p.get("realized_r", 0) < 0 for p in closed)
-            total = sum(p.get("realized_r", 0) for p in closed)
+        if has_rows:
             summary = ["Tüm dönem · kapanan işlemler",
-                       f"Kapanan: {len(closed)} | Kazanan: {wins} | Kaybeden: {losses}"]
-            if closed:
-                summary.append(f"Başarı: %{100*wins/len(closed):.1f}")
+                       f"Kapanan: {closed_count} | Kazanan: {wins} | Kaybeden: {losses}"]
+            if closed_count:
+                summary.append(f"Başarı: %{100*wins/closed_count:.1f}")
             summary.append(f"Kapanan net: {total:+.2f}R")
             blocks.append("\n".join(summary))
 

@@ -265,10 +265,13 @@ class PoolStore:
         self.follow_delivered(chat,self.displayed_observations(setups))
 
     def tracked(self, chat):
-        return [(symbol, revision, state, json.loads(payload))
-                for symbol, revision, state, payload in self._thread_conn().execute(
-                    "SELECT symbol,revision,state,payload FROM chat_plans WHERE chat=? ORDER BY symbol,revision DESC",
-                    (chat,))]
+        return list(self.iter_tracked(chat))
+
+    def iter_tracked(self, chat):
+        for symbol, revision, state, payload in self._thread_conn().execute(
+                "SELECT symbol,revision,state,payload FROM chat_plans WHERE chat=? ORDER BY symbol,revision DESC",
+                (chat,)):
+            yield symbol, revision, state, json.loads(payload)
 
     def open_symbols(self):
         return [row[0] for row in self._thread_conn().execute(
@@ -421,18 +424,17 @@ class PoolStore:
         return inserted
 
     def load_history(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        sql = (
-            "SELECT payload FROM history ORDER BY archive_id ASC"
-        )
-        rows = self._thread_conn().execute(sql).fetchall()
+        # Walk newest first and stop after the requested number of valid rows.
+        rows = self._thread_conn().execute("SELECT payload FROM history ORDER BY archive_id DESC")
         result = []
         for (payload,) in rows:
             try:
                 result.append(json.loads(payload))
             except (TypeError, ValueError):
                 continue
-        if limit is not None and len(result) > limit:
-            result = result[-limit:]
+            if limit and limit > 0 and len(result) >= limit:
+                break
+        result.reverse()
         return result
 
     # ------------------------------------------------------------------

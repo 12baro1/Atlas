@@ -199,3 +199,21 @@ def test_snapshot_failure_rolls_back_all_pools_and_history(tmp_path):
     assert store.load_pool("active") == {}
     assert store.load_history() == []
     store.close()
+
+
+def test_history_limit_only_decodes_recent_rows(tmp_path, monkeypatch):
+    store = PoolStore(str(tmp_path))
+    try:
+        store.append_history([history_payload(str(i)) for i in range(100)])
+        decoded = []
+        load = json.loads
+
+        def count(payload):
+            decoded.append(payload)
+            return load(payload)
+
+        monkeypatch.setattr(json, "loads", count)
+        assert [row["setup_id"] for row in store.load_history(3)] == ["97", "98", "99"]
+        assert len(decoded) == 3
+    finally:
+        store.close()
