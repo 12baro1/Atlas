@@ -1398,6 +1398,9 @@ class TelegramCommandService:
                 card.append(tracked_levels(plan))
                 if state == "AMBIGUOUS":
                     card.append(plan.get("ambiguity_reason") or "Geçmiş mumlar doğrulanacak")
+                    if plan.get("history_checked_at"):
+                        checked = datetime.fromtimestamp(plan["history_checked_at"] / 1000, tz)
+                        card.append(f"Son arka plan kontrolü {checked:%d.%m %H.%M} TSİ")
                     if plan.get("manual_review"):
                         card.append("Kalıcı inceleme")
                     elif plan.get("retry_at"):

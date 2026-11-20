@@ -5,7 +5,7 @@ from core.candle import Candle
 from opportunity_pool import OpportunityPool
 from telegram_tracking import evaluate
 from tests.test_scan_virtual_portfolio import BTC, observation
-from tracking_history import BAR, MINUTE, EvidenceMissing, TrackingHistory
+from tracking_history import BAR, MINUTE, EvidenceMissing, TrackingHistory, TradeGroup
 
 START = 1795140900000
 
@@ -56,7 +56,7 @@ def test_historical_trades_required_for_same_minute_entry_and_tp():
     state, p = evaluate(BTC, "WAITING", raw, START+BAR, history=history)
     assert state == "AMBIGUOUS" and not p["entry_reached"] and not p.get("tps_hit")
     history.ticks.side_effect = None
-    history.ticks.return_value = [bar(START+i, x,x,x,x) for i,x in enumerate([105,100,99,112,111])]
+    history.ticks.return_value = [TradeGroup(START+i, {x}, 1) for i,x in enumerate([105,100,99,112,111])]
     state, p = evaluate(BTC, state, json.dumps(p), p["retry_at"], history=history)
     assert state == "ACTIVE" and p["tps_hit"] == [1]
 
@@ -159,7 +159,9 @@ def test_worker_recovers_delayed_data_and_updates_telegram_once(tmp_path, monkey
     try:
         history.candles.side_effect = TimeoutError()
         worker.refresh_virtual_positions()
-        assert "DOĞRULAMA BEKLİYOR" in bot.handle_islemler()
+        report = bot.handle_islemler()
+        assert "DOĞRULAMA BEKLİYOR" in report and "Son arka plan kontrolü" in report
+        assert pool.tracking.tracked(bot.chat_id)[0][3]["history_checked_at"] == clock[0]
         history.candles.side_effect = None
         history.candles.return_value = [bar(START, 50000, 50100, 49900, 50010)]
         clock[0] += MINUTE
@@ -171,3 +173,51 @@ def test_worker_recovers_delayed_data_and_updates_telegram_once(tmp_path, monkey
         assert pool.tracking.pending_notifications(bot.chat_id) == messages
     finally:
         pool.stop()
+
+
+def test_tied_prices_only_block_order_dependent_outcomes(monkeypatch):
+    from telegram_tracking import resolve_bar
+    import pytest
+
+    history = TrackingHistory()
+    def replay(prices, already_entered):
+        rows = [dict(create_time_ms=START+t, price=p, size=1, id=i) for i,(t,p) in enumerate(prices)]
+        monkeypatch.setattr(history, "_get", lambda *args, **kwargs: rows[::-1])
+        history.ticks.cache_clear()
+        values = [price for _,price in prices]
+        candle = bar(START, values[0], max(values), min(values), values[-1], len(values))
+        result = plan(entry_reached=already_entered)
+        resolve_bar(result, BTC, candle, MINUTE, history, START+MINUTE)
+        return result
+
+    # Mixed prices both before and after a known entry. The next timestamp hits TP1.
+    resolved = replay([(0,105),(0,106),(1,100),(2,111),(2,112)], False)
+    assert resolved["entry_reached_at"] == START+1 and resolved["tps_hit"] == [1]
+    # A tie after the proved stop cannot cancel the outcome.
+    assert replay([(0,105),(1,90),(2,115),(2,116)], True)["status"] == "SL"
+    with pytest.raises(EvidenceMissing, match="seviyelerinin sırası"):
+        replay([(0,105),(1,90),(1,112),(2,106)], True)
+    with pytest.raises(EvidenceMissing, match="atladı"):
+        replay([(0,105),(1,99),(1,102),(2,112)], False)
+
+
+def test_old_tie_review_reopens_once_without_losing_progress(tmp_path):
+    from pool_store import PoolStore
+
+    store = PoolStore(str(tmp_path))
+    p = plan(ambiguity_reason="Aynı milisaniyede farklı işlem fiyatları", manual_review=True,
+             retry_count=6, retry_at=START, next_bar_time=START, verified_until=START+1, tps_hit=[1])
+    with store._transaction() as conn:
+        conn.execute("INSERT INTO chat_plans VALUES(?,?,?,?,?,?)", ("c", BTC, 1, "setup", "AMBIGUOUS", json.dumps(p)))
+    store.close()
+    store = PoolStore(str(tmp_path))
+    assert store.open_symbols() == [BTC]
+    reopened = store.tracked("c")[0][3]
+    assert reopened["verified_until"] == START+1 and reopened["tps_hit"] == [1]
+    reopened.update(manual_review=True, retry_count=6, ambiguity_reason="Aynı milisaniyede işlem seviyelerinin sırası doğrulanamadı")
+    with store._transaction() as conn:
+        conn.execute("UPDATE chat_plans SET payload=?", (json.dumps(reopened),))
+    store.close()
+    store = PoolStore(str(tmp_path))
+    assert not store.open_symbols()
+    store.close()
