@@ -123,9 +123,12 @@ class AtlasRuntime:
         try:
             # Finish persisted work before applying a new bounded universe.
             self._scan_service.ensure_workers()
-            self._daily_refresh.start_background()
         except Exception as exc:
             self.logger.error(f"Scan infrastructure startup failed: {exc}")
+        try:
+            self._daily_refresh.start_background()
+        except Exception as exc:
+            self.logger.error(f"Virtual position and pool maintenance startup failed: {exc}")
         self._set_status("READY")
 
     def stop(self, timeout=5.0):

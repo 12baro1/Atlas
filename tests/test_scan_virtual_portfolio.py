@@ -162,6 +162,7 @@ def test_virtual_candles_and_midnight(pool, finish, monkeypatch):
     def bar(i, low, high):
         return SimpleNamespace(time=start+900000*i, low=low, high=high, open=(low+high)/2, close=(low+high)/2)
     def advance(i,low,high):
+        monkeypatch.setattr(telegram_tracking.time,"time",lambda:(start+(i+1)*900000)/1000)
         pool.tracking.advance_tracking(BTC,[bar(i,low,high)])
         return pool.tracking.tracked(chat.chat_id)[0]
     assert advance(1,51000,52000)[2]=="WAITING"
@@ -338,7 +339,10 @@ def test_replacement_during_external_reply_preserves_membership(pool):
     assert [(p[2],p[3]["tp3"]) for p in plans]==[("WAITING",54000),("INVALIDATED",53000)]
 
 
-def test_replayed_market_snapshot_cannot_rewind_partial_pnl(pool):
+def test_replayed_market_snapshot_cannot_rewind_partial_pnl(pool, monkeypatch):
+    import time
+    start = int(time.time() // 900) * 900_000
+    monkeypatch.setattr(time, "time", lambda: start / 1000)
     from types import SimpleNamespace
     bot = service()
     row = observation()
@@ -348,6 +352,7 @@ def test_replayed_market_snapshot_cannot_rewind_partial_pnl(pool):
     def bar(i, low, high, close):
         return SimpleNamespace(time=start+900000*i,low=low,high=high,close=close,open=close)
     fill, partial = bar(1,49950,50050,50000), bar(2,50600,51050,50900)
+    monkeypatch.setattr(time, "time", lambda: start / 1000 + 2700)
     pool.tracking.advance_tracking(BTC,[fill,partial])
     pool.tracking.advance_tracking(BTC,[fill])
     outcome=pool.tracking.tracked(bot.chat_id)[0][3]

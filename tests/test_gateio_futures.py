@@ -205,3 +205,12 @@ def test_funding_snapshot_uses_exchange_time_and_preserves_unknown(monkeypatch):
     monkeypatch.setattr(ex, "_get", lambda *args: [{"t": 1700000000, "r": "0"}])
     snapshot = ex.fetch_funding_rate("BTC/USDT:USDT")
     assert snapshot["timestamp"] == 1700000000000 and snapshot["fundingRate"] == 0
+
+
+def test_snapshot_drops_conflicting_duplicates_before_limiting(monkeypatch):
+    exchange = FakeGate()
+    exchange.load_markets()
+    row = dict(t=1700000000, o="100", h="102", l="99", c="101", v="5")
+    older = dict(row, t=1699999100)
+    monkeypatch.setattr(exchange, "_get", lambda *args: [row, older, dict(row, h="103"), row, older])
+    assert [r[0] for r in exchange.fetch_ohlcv("BTC/USDT:USDT", "15m")] == [1699999100000]

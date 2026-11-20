@@ -124,16 +124,19 @@ class DailyPoolRefresh:
     # ------------------------------------------------------------------
 
     def refresh_virtual_positions(self):
-        from data_engine import fetch_candles
-        from timing import closed_htf_candles
+        from tracking_history import TrackingHistory
+        history = TrackingHistory()
+        try:
+            self._refresh_symbols(history)
+        finally:
+            history.exchange.session.close()
+
+    def _refresh_symbols(self, history):
         for symbol in self.pool.tracking.open_symbols():
             if self._stop_event.is_set():
                 return
             try:
-                candles = fetch_candles(symbol, "15m", 200)
-                closed = closed_htf_candles(candles, int(time.time()*1000), "15m")
-                if closed:
-                    self.pool.tracking.advance_tracking(symbol, closed)
+                self.pool.tracking.advance_tracking(symbol, history=history)
             except Exception as exc:
                 logger.warning("Virtual position data unavailable for %s (%s)", symbol, type(exc).__name__)
 
@@ -147,10 +150,13 @@ class DailyPoolRefresh:
             while not self._stop_event.is_set():
                 try:
                     self.run_if_due()
-                    if self.continuous:
-                        self.refresh_virtual_positions()
                 except Exception as exc:  # pragma: no cover
                     logger.error(f"Daily refresh loop error: {exc}")
+                if self.continuous:
+                    try:
+                        self.refresh_virtual_positions()
+                    except Exception:
+                        logger.exception("Virtual position refresh failed")
                 if self._stop_event.wait(max(10, int(check_interval_seconds))):
                     break
 

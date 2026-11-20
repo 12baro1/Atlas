@@ -1341,7 +1341,14 @@ class TelegramCommandService:
             hits = plan.get("tps_hit") or []
             status = f"TP{max(hits)} alındı" if hits else "Aktif" if state == "ACTIVE" else "Giriş bekliyor"
             if state == "AMBIGUOUS":
-                status = "Mum sırası veya veri belirsiz"
+                status = "DOĞRULAMA BEKLİYOR — " + plan.get("ambiguity_reason", "Geçmiş mumlar doğrulanacak")
+                if hits:
+                    status += f" | Son doğrulanan: TP{max(hits)}"
+                if plan.get("manual_review"):
+                    status += " (kalıcı inceleme)"
+                elif plan.get("retry_at"):
+                    retry = datetime.fromtimestamp(plan["retry_at"]/1000, tz)
+                    status += f" (yeniden kontrol {retry:%H.%M} TSİ)"
             lines.append(f"{index}. {symbol.split('/')[0]} | {plan['direction']} | {status}")
             lines.append(tracked_levels(plan))
         for index,(symbol,state,plan) in enumerate(recent, len(live)+1):

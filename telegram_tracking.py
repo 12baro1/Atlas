@@ -1,8 +1,9 @@
 """Chat-scoped theoretical signals. All transitions share the pool transaction."""
-import math
 import json
 import time
 
+from core.candle import Candle
+from tracking_history import BAR, MINUTE, EvidenceMissing, indexed, matches
 from telegram_prices import tracked_levels
 from trade_journal import TradeJournal
 
@@ -80,78 +81,185 @@ def transition(conn, chat, symbol, revision, setup, *, announce):
         event(conn, chat, symbol, revision, "SETUP", f"{label}{previous}\nYeni: {outcome['direction']} | {outcome['strategy']}", outcome)
 
 
-def advance(conn, symbol, candles):
-    simulator = CandleSimulation()
-    rows = conn.execute("SELECT chat,revision,payload FROM chat_plans WHERE symbol=? AND state IN ('ACTIVE','WAITING')",
-                        (symbol,)).fetchall()
-    for chat, revision, raw in rows:
-        outcome = json.loads(raw)
-        entered = outcome["entry_reached"]
-        previous = set(outcome.get("tps_hit", []))
-        ambiguous = False
-        for candle in candles:
-            cursor = outcome.get("last_processed_candle_time", outcome["opened_at"])
-            if candle.time <= cursor:
+def next_bar(plan):
+    # The journal starts on the first 15m open strictly after publication.
+    return plan.get("next_bar_time", (plan.get("last_processed_candle_time", plan["opened_at"]) // BAR + 1) * BAR)
+
+
+def apply_bar(plan, candle, width):
+    """Return False without mutating the plan if OHLC cannot order its events."""
+    if getattr(candle, "volume", None) == 0:
+        plan["last_processed_candle_time"] = candle.time
+        return True
+    long = plan["direction"] == "LONG"
+    stop = plan.get("trailing_stop", plan["stop_loss"])
+    hits = plan.get("tps_hit", [])
+    targets = [plan[f"tp{i}"] for i in (1, 2, 3) if i not in hits]
+    touched = [p for p in targets if (candle.high >= p if long else candle.low <= p)]
+    stopped = candle.low <= stop if long else candle.high >= stop
+    market = not plan["entry_reached"] and plan["payload"]["execution_costs"]["entry_type"] == "MARKET"
+    entry = candle.open if market else plan["entry"]
+    if not plan["entry_reached"]:
+        if market:
+            if not (stop < entry < targets[0] if long else stop > entry > targets[0]):
+                return False
+        elif not candle.low <= entry <= candle.high:
+            plan["last_processed_candle_time"] = candle.time
+            return True
+        elif touched or stopped:
+            return False
+
+    if len(touched) > 1 and width > 1:
+        return False
+    if touched:
+        moved_stops = [entry if target == plan["tp1"] else plan["tp1"]
+                       for target in touched if target != plan["tp3"]]
+        if stopped or any(candle.low <= p if long else candle.high >= p for p in moved_stops):
+            return False
+    if market:
+        plan.update(entry=entry, entry_reached=True, entry_reached_at=candle.time)
+    CandleSimulation().resolve_signal_outcome(plan, [candle])
+    if plan["status"] != "PENDING":
+        plan["resolved_at"] = candle.time + width
+    return True
+
+
+def resolve_bar(plan, symbol, candle, width, history, now):
+    verified = plan.get("verified_until", 0)
+    if candle.time + width <= verified:
+        return False
+    if candle.time >= verified and apply_bar(plan, candle, width):
+        plan["verified_until"] = candle.time + width
+        return False
+    if history is None:
+        raise EvidenceMissing("Mum içinde giriş, hedef veya stop sırası belirsiz")
+    if width == MINUTE:
+        children = history.ticks(symbol, candle.time)
+        if not matches(candle, children):
+            raise EvidenceMissing("İşlem geçmişi 1m mumun fiyat ve hacmini doğrulamıyor")
+        previous_price = children[0].open
+        for tick in children:
+            crossed_entry = min(previous_price, tick.close) < plan["entry"] < max(previous_price, tick.close)
+            previous_price = tick.close
+            if tick.time < verified:
                 continue
-            if candle.time - cursor > 900000:
-                ambiguous = True
+            if not plan["entry_reached"] and crossed_entry:
+                raise EvidenceMissing("İşlem fiyatları giriş seviyesini atladı")
+            if not apply_bar(plan, tick, 1):
+                raise EvidenceMissing("İşlem fiyatı plan seviyeleriyle uyuşmuyor")
+            plan["verified_until"] = tick.time + 1
+            if plan["status"] != "PENDING":
                 break
-            long = outcome["direction"] == "LONG"
-            stop = outcome.get("trailing_stop", outcome["stop_loss"])
-            hit_stop = candle.low <= stop if long else candle.high >= stop
-            remaining = [outcome[f"tp{i}"] for i in (1,2,3) if i not in outcome.get("tps_hit", [])]
-            hit_targets = [t for t in remaining if (candle.high >= t if long else candle.low <= t)]
-            if not outcome["entry_reached"]:
-                market = outcome["payload"]["execution_costs"]["entry_type"] == "MARKET"
-                if market:
-                    fill = candle.open
-                    if not (stop < fill < remaining[0] if long else stop > fill > remaining[0]):
-                        ambiguous = True
-                        break
-                    outcome["entry"] = fill
-                    outcome["entry_reached"] = True
-                    outcome["entry_reached_at"] = candle.time
-                elif not (candle.low <= outcome["entry"] <= candle.high):
-                    outcome["last_processed_candle_time"] = candle.time
-                    continue
-                elif hit_targets or hit_stop:
-                    outcome["entry_reached"] = True
-                    ambiguous = True
-                    break
-            if outcome["entry_reached"] and hit_targets:
-                level = max(i for i in (1,2,3) if outcome[f"tp{i}"] in hit_targets)
-                moved = outcome["entry"] if level == 1 else outcome["tp1"]
-                crosses_moved = candle.low <= moved if long else candle.high >= moved
-                if hit_stop or (level < 3 and crosses_moved) or (len(hit_targets)>1 and crosses_moved):
-                    ambiguous = True
-                    break
-            simulator.resolve_signal_outcome(outcome, [candle])
-            if outcome["status"] != "PENDING":
-                outcome["resolved_at"] = candle.time + 900000
+        return True
+    for step in ((5 * MINUTE, MINUTE) if width == BAR else (MINUTE,)):
+        children = child_range(history, symbol, candle.time, width, step, now)
+        if all(children) and matches(candle, children):
+            break
+    else:
+        raise EvidenceMissing("Alt mum geçmişi eksik veya üst mumla uyuşmuyor")
+    for child in children:
+        resolve_bar(plan, symbol, child, step, history, now)
+        if plan["status"] != "PENDING":
+            break
+    return True
+
+
+def child_range(history, symbol, start, span, width, now):
+    bars = indexed(history.candles(symbol, start, width, span // width), width, now)
+    return [bars.get(t) for t in range(start, start + span, width)]
+
+
+def recover_missing_bar(history, symbol, start, now):
+    for width in (5 * MINUTE, MINUTE):
+        children = child_range(history, symbol, start, BAR, width, now)
+        if all(children):
+            return Candle(start, children[0].open, max(c.high for c in children),
+                          min(c.low for c in children), children[-1].close, sum(c.volume for c in children))
+    raise EvidenceMissing("15m geçmişi eksik, alt mumlar aralığı tamamlamıyor")
+
+
+def evaluate(symbol, state, raw, now, candles=None, history=None):
+    plan = json.loads(raw)
+    if plan.get("manual_review") or plan.get("retry_at", 0) > now:
+        return
+    start = next_bar(plan)
+    count = min(96, (now - start) // BAR)
+    if count <= 0:
+        return
+    # Older code set entry_reached before proving the order and omitted its timestamp.
+    if state == "AMBIGUOUS" and plan["entry_reached"] and not plan.get("entry_reached_at"):
+        plan["entry_reached"] = False
+    try:
+        if history:
+            candles = history.candles(symbol, start, BAR, count)
+        bars = indexed(candles or [], BAR, now)
+        last_available = max(bars, default=0)
+        if not history and last_available < start:
+            return
+        for stamp in range(start, start + count * BAR, BAR):
+            candle = bars.get(stamp)
+            recovered = False
+            if candle is None:
+                if history is None or stamp in bars:
+                    raise EvidenceMissing("15m geçmişinde eksik veya çelişkili mum")
+                candle = recover_missing_bar(history, symbol, stamp, now)
+                recovered = True
+            # Pin the parent while verified children advance the journal cursor.
+            plan["next_bar_time"] = stamp
+            prices = [candle.open, candle.high, candle.low, candle.close]
+            if plan.get("parent_prices", prices) != prices:
+                raise EvidenceMissing("Kısmen doğrulanmış 15m mumun fiyatları değişti")
+            plan["parent_prices"] = prices
+            refined = resolve_bar(plan, symbol, candle, BAR, history, now)
+            plan["next_bar_time"] = stamp + BAR
+            plan.pop("parent_prices")
+            plan.pop("verified_until", None)
+            for key in ("ambiguity_reason", "blocked_at", "retry_at", "retry_count"):
+                plan.pop(key, None)
+            if plan["status"] != "PENDING":
+                return "CLOSED", plan
+            if plan["entry_reached"]:
+                weights = CandleSimulation()._norm_partial_weights(plan)
+                remaining = 1 - sum(weights[i-1] for i in plan.get("tps_hit", []))
+                sign = 1 if plan["direction"] == "LONG" else -1
+                plan["open_r"] = sign * (candle.close - plan["entry"]) * remaining / abs(plan["entry"] - plan["stop_loss"])
+                plan["mark_time"] = stamp + BAR
+            if recovered or refined or (not history and stamp == last_available):
                 break
-        if outcome["entry_reached"] and not entered:
-            event(conn, chat, symbol, revision, "ENTRY", "Sinyal takibi: giriş seviyesi görüldü.", outcome)
-        for level in sorted(set(outcome.get("tps_hit", [])) - previous):
-            event(conn, chat, symbol, revision, f"TP{level}", f"Sinyal takibi: TP{level} alındı.", outcome)
-        if candles and outcome["entry_reached"] and outcome["status"] == "PENDING":
-            mark = candles[-1]
-            if (mark.time >= outcome["opened_at"] and mark.time + 900000 >= outcome.get("mark_time", 0)
-                    and math.isfinite(mark.close) and mark.close > 0):
-                weights = simulator._norm_partial_weights(outcome)
-                remaining = 1 - sum(weights[i-1] for i in outcome.get("tps_hit", []))
-                sign = 1 if outcome["direction"] == "LONG" else -1
-                risk = abs(outcome["entry"] - outcome["stop_loss"])
-                outcome["open_r"] = sign * (mark.close - outcome["entry"]) * remaining / risk
-                outcome["mark_time"] = mark.time + 900000
-        status = outcome["status"]
-        if status == "SL":
-            event(conn, chat, symbol, revision, "STOP", "Sinyal takibi: stop görüldü.", outcome)
-        if status != "PENDING":
-            event(conn, chat, symbol, revision, "CLOSED", f"Sinyal kapandı | {outcome['realized_r']:+.2f}R", outcome)
-        state = ("ACTIVE" if outcome["entry_reached"] else "WAITING") if status == "PENDING" else "CLOSED"
-        if ambiguous:
-            state = "AMBIGUOUS"
-            outcome.pop("open_r", None)
-            event(conn, chat, symbol, revision, "AMBIGUOUS", "Fiyat sırası veya mum geçmişi belirsiz. Sonuç hesaplanamadı.", outcome)
-        conn.execute("UPDATE chat_plans SET state=?,payload=? WHERE chat=? AND symbol=? AND revision=?",
-                     (state, json.dumps(outcome), chat, symbol, revision))
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        if not plan.get("verified_until"):
+            plan.pop("parent_prices", None)
+        plan.pop("open_r", None)
+        plan["blocked_at"] = next_bar(plan)
+        plan["ambiguity_reason"] = str(exc) if isinstance(exc, EvidenceMissing) else f"Gate.io geçmiş verisi alınamadı ({type(exc).__name__})"
+        if history:
+            attempts = plan.get("retry_count", 0) + 1
+            plan["retry_count"] = attempts
+            plan["manual_review"] = attempts >= 6
+            plan["retry_at"] = now + MINUTE * 2 ** (attempts - 1)
+        return "AMBIGUOUS", plan
+    return ("ACTIVE" if plan["entry_reached"] else "WAITING"), plan
+
+
+def save(conn, symbol, row, result):
+    chat, revision, state, raw = row
+    new_state, plan = result
+    updated = conn.execute("UPDATE chat_plans SET state=?,payload=? WHERE chat=? AND symbol=? AND revision=? AND state=? AND payload=?",
+                           (new_state, json.dumps(plan), chat, symbol, revision, state, raw))
+    if not updated.rowcount:
+        return
+    old = json.loads(raw)
+    def record(kind, message):
+        event(conn, chat, symbol, revision, kind, message, plan)
+    if plan["entry_reached"] and not old.get("entry_reached_at"):
+        record("ENTRY", "Sinyal takibi: giriş seviyesi görüldü.")
+    for level in sorted(set(plan.get("tps_hit", [])) - set(old.get("tps_hit", []))):
+        record(f"TP{level}", f"Sinyal takibi: TP{level} alındı.")
+    if plan["status"] == "SL":
+        record("STOP", "Sinyal takibi: stop görüldü.")
+    if new_state == "CLOSED":
+        record("CLOSED", f"Sinyal kapandı | {plan['realized_r']:+.2f}R")
+    if new_state == "AMBIGUOUS" and state != new_state:
+        record(f"VERIFY_{plan['blocked_at']}", "DOĞRULAMA BEKLİYOR — " + plan["ambiguity_reason"])
+    if state == "AMBIGUOUS" and new_state in {"WAITING", "ACTIVE"}:
+        record(f"VERIFIED_{old.get('blocked_at', next_bar(old))}", "Geçmiş doğrulandı, sinyal takibi sürüyor.")
