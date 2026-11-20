@@ -695,3 +695,30 @@ def test_status_uses_actual_command_polling_thread_not_legacy_config(monkeypatch
     status = runtime.telegram_status()
     assert status["polling_enabled"] is False
     assert status["service_running"] is False
+
+
+def test_trade_report_separates_today_history_and_preserves_cards(monkeypatch):
+    import time
+    from types import SimpleNamespace
+    import telegram_command_service as telegram
+
+    base = dict(direction="SHORT", entry=100, stop_loss=110, tp1=90, tp2=80, tp3=70)
+    now = int(time.time() * 1000)
+    rows = [
+        ("AXIS", 1, "CLOSED", dict(base, status="SL", resolved_at=now, realized_r=-1)),
+        ("OLD", 1, "CLOSED", dict(base, status="TP3", resolved_at=now-86400000, realized_r=2)),
+        ("LAB", 1, "CLOSED", dict(base, status="SL", resolved_at=now, realized_r=-1)),
+        ("CAP", 1, "AMBIGUOUS", dict(base, manual_review=True, ambiguity_reason="Eksik mum")),
+        ("AVA", 1, "ACTIVE", dict(base, open_r=0.5)),
+        ("ELSA", 1, "WAITING", base),
+    ]
+    tracking = SimpleNamespace(tracked=lambda _: rows)
+    monkeypatch.setattr(telegram, "get_opportunity_pool", lambda: SimpleNamespace(tracking=tracking))
+    report = TelegramCommandService(None, "offline", "chat").handle_islemler()
+    sections = ["İŞLEMLERİM — 5", "Aktif (1)", "Giriş bekliyor (1)", "DOĞRULAMA BEKLİYOR (1)",
+                "Bugün kapanan (2)", "Tüm dönem · kapanan işlemler", "Kapanan: 3"]
+    assert [report.index(s) for s in sections] == sorted(report.index(s) for s in sections)
+    assert "OLD" not in report and "Kalıcı inceleme" in report
+    for block in report.split("\n\n"):
+        if "Giriş:" in block:
+            assert any(block in chunk for chunk in split_message(report, limit=180))
