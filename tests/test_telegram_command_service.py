@@ -732,6 +732,29 @@ def test_trade_report_separates_today_history_and_preserves_cards(monkeypatch):
             assert any(block in chunk for chunk in split_message(report, limit=250))
 
 
+def test_trade_report_keeps_archived_entered_position_visible(monkeypatch):
+    from types import SimpleNamespace
+    import telegram_command_service as telegram
+
+    active = dict(direction="SHORT", entry=100, stop_loss=110, tp1=90, tp2=80, tp3=70)
+    archived = dict(active, entry_reached=True, entry_reached_at=1000, resolved_at=2000,
+                    status="UNVERIFIED", tps_hit=[1], ambiguity_reason="Alt mum geçmişi eksik")
+    rows = [
+        ("BNB/USDT:USDT", 2, "WAITING", active),
+        ("BNB/USDT:USDT", 1, "UNVERIFIED", archived),
+        ("OTHER/USDT:USDT", 1, "UNVERIFIED", dict(active, resolved_at=2000)),
+    ]
+    tracking = SimpleNamespace(iter_tracked=lambda _: rows)
+    monkeypatch.setattr(telegram, "get_opportunity_pool", lambda: SimpleNamespace(tracking=tracking))
+
+    report = TelegramCommandService(None, "offline", "chat").execute_command("/islemler")
+    assert "0 açık · 1 giriş bekliyor · 0 doğrulanıyor" in report
+    assert "DOĞRULANAMAYAN İŞLEMLER (1)\nBNB/USDT · SHORT · TP1 alındı" in report
+    assert "Takip durdu · Çıkış teyit edilemedi\nAlt mum geçmişi eksik" in report
+    assert "OTHER" not in report
+    assert "Açık sinyal PnL" not in report
+
+
 def test_partial_targets_survive_stop_and_midnight_in_both_reports(monkeypatch):
     import time
     from types import SimpleNamespace
