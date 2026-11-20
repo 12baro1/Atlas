@@ -6,7 +6,7 @@ import requests
 
 from core.candle import Candle
 from tracking_history import BAR, MINUTE, EvidenceMissing, indexed, matches, trades_match
-from telegram_prices import tracked_levels
+from telegram_prices import confirmed_target_levels, tracked_levels
 from trade_journal import TradeJournal
 
 
@@ -25,6 +25,12 @@ CREATE TABLE IF NOT EXISTS chat_plans(
  setup_id TEXT NOT NULL, state TEXT NOT NULL, payload TEXT NOT NULL,
  PRIMARY KEY(chat,symbol,revision));
 CREATE INDEX IF NOT EXISTS chat_plan_state ON chat_plans(symbol,state);
+CREATE TABLE IF NOT EXISTS post_exit_watch(
+ chat TEXT NOT NULL, symbol TEXT NOT NULL, revision INTEGER NOT NULL,
+ cursor_ms INTEGER NOT NULL, next_at INTEGER NOT NULL DEFAULT 0,
+ attempts INTEGER NOT NULL DEFAULT 0, hits TEXT NOT NULL DEFAULT '[]', incomplete INTEGER NOT NULL DEFAULT 0, done INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(chat,symbol,revision));
+CREATE INDEX IF NOT EXISTS post_exit_due ON post_exit_watch(done,next_at);
 CREATE TABLE IF NOT EXISTS chat_events(
  id INTEGER PRIMARY KEY, chat TEXT NOT NULL, symbol TEXT NOT NULL,
  revision INTEGER NOT NULL, event TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER DEFAULT 0,
@@ -87,6 +93,17 @@ def transition(conn, chat, symbol, revision, setup, *, announce):
         label = "YENİ SETUP" if not current or state in {"INVALIDATED","CLOSED","UNVERIFIED","REMOVED"} else "SETUP GÜNCELLENDİ"
         previous = f"\nEski: {old['direction']} | {old['strategy']}" if current else ""
         event(conn, chat, symbol, revision, "SETUP", f"{label}{previous}\nYeni: {outcome['direction']} | {outcome['strategy']}", outcome)
+
+
+def watch_closed_targets(conn, chat, symbol, revision, plan):
+    hits = confirmed_target_levels(plan)
+    if not hits or 3 in hits or not plan.get("resolved_at"):
+        return
+    if not any(plan.get(f"tp{i}") for i in (2, 3) if i > max(hits)):
+        return
+    end = int(plan["resolved_at"])
+    conn.execute("INSERT OR IGNORE INTO post_exit_watch(chat,symbol,revision,cursor_ms) "
+                 "VALUES(?,?,?,?)", (chat, symbol, revision, end))
 
 
 def next_bar(plan):
@@ -294,6 +311,7 @@ def save(conn, symbol, row, result):
     if plan["status"] == "SL":
         record("STOP", "Sinyal takibi: stop görüldü.")
     if new_state == "CLOSED":
+        watch_closed_targets(conn, chat, symbol, revision, plan)
         record("CLOSED", f"Sinyal kapandı | {plan['realized_r']:+.2f}R")
     if new_state == "AMBIGUOUS" and state != new_state:
         record(f"VERIFY_{plan['blocked_at']}", "DOĞRULAMA BEKLİYOR — " + plan["ambiguity_reason"])

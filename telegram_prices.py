@@ -33,3 +33,9 @@ def format_plan_levels(entry, stop, tp1, tp2, tp3, trailing_stop=None):
 def tracked_levels(plan):
     return format_plan_levels(plan.get("entry"), plan.get("stop_loss"), plan.get("tp1"),
                               plan.get("tp2"), plan.get("tp3"), plan.get("trailing_stop"))
+
+
+def confirmed_target_levels(plan):
+    hits = set(plan.get("tps_hit") or ())
+    return [level for level in (1, 2, 3) if level in hits or plan.get(f"hit_tp{level}")
+            or plan.get("status") == f"TP{level}"]
