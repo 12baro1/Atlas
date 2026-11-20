@@ -408,6 +408,12 @@ class PoolStore:
             for chat, revision in followers:
                 self._apply_observation(conn, chat, revision, row, announce=True, structure_only=True)
 
+    def live_trade_symbols(self):
+        return [row[0] for row in self._thread_conn().execute(
+            "SELECT DISTINCT symbol FROM chat_plans WHERE state IN ('ACTIVE','WAITING','AMBIGUOUS') "
+            "AND COALESCE(json_extract(payload,'$.manual_review'),0)=0"
+        )]
+
     def refresh_live_trades(self, history, stop_event):
         now = int(time.time() * 1000)
         # One trade page per distinct symbol and interval across subscribed chats.
