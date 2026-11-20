@@ -197,9 +197,9 @@ Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Ge
 
 ## 7 strateji analizi
 
-Tek coin komutunda Atlas aynı kapanmış piyasa verisi üzerinde 6 yeni stratejiyi ve mevcut SMC kararını bağımsız değerlendirir. Her stratejinin giriş/stop/hedef geometrisi ayrı tutulur. Yeni motorların adayları yalnızca setup gücü puanıyla seçilmez: stratejiye özel, maliyet sonrası IS/OOS performansı, minimum örneklem ve expectancy güven sınırı doğrulanmadan SMC'nin önüne geçemez. Doğrulanmış deneysel edge yoksa SMC adayı varsa o gösterilir; SMC de yoksa seçilmiş plan üretilmez. Yeni motorların hedefleri yeterli swing likiditesi varsa yapısal seviyelerden, yoksa açıkça etiketlenmiş R-katı fallback ile hesaplanır.
+Tek coin analizinde ve 300 sembollük taramada yedi strateji kendi ham planını üretir. Ortak filtre giriş yönünü, yapısal stop ve hedefleri, işlem maliyetlerini ve maliyet sonrası net RR eşiğini (varsayılan 2,0) kontrol eder. Merkezi karar motoru uygun adayları önce net RR, ardından güç ve rejim uyumu ile sıralar. SMC diğer altı stratejiyle aynı seçim aşamasına girer. `/motorlar` üretim sayaçlarını, `/istatistik` sık görülen eleme nedenlerini gösterir.
 
-**Önemli doğrulama sınırı:** 6 yeni strateji deneysel aday üreticilerdir. Strateji replay'i kronolojik IS/OOS ayrımı ve 5 anchored walk-forward penceresi kullanır; maliyetler ve tarihsel funding verisi mevcut olduğunda aynı yürütme simülatöründen geçirilir. Bunlar gerçek borsa dolumu değildir. Eksik veya kısmi OI/funding verisi açıkça raporlanır; funding geçmişi tam kapsama sahip değilse --persist performans günlüğüne sonuç yazmaz. Order Flow Momentum yalnızca karar zamanından önce arşivlenmiş, taze order-book/trade örnekleri varsa tarihsel olarak ölçülebilir. Liquidation Cascade gerçek likidasyon akışı değil, OI/funding/işlem akışı proxy'sidir. Hiçbir motorun kârlılığı kanıtlanmış değildir; terfi için aynı kod revizyonu/sembol/rejim altında minimum IS/OOS örneklemi, PF ve expectancy eşikleri geçilmelidir. Atlas emir göndermez.
+**Önemli doğrulama sınırı:** 6 yeni strateji deneysel aday üreticilerdir. Strateji replay'i kronolojik IS/OOS ayrımı ve 5 anchored walk-forward penceresi kullanır; maliyetler ve tarihsel funding verisi mevcut olduğunda aynı yürütme simülatöründen geçirilir. Bunlar gerçek borsa dolumu değildir. Eksik veya kısmi OI/funding verisi açıkça raporlanır; funding geçmişi tam kapsama sahip değilse --persist performans günlüğüne sonuç yazmaz. Order Flow Momentum yalnızca karar zamanından önce arşivlenmiş, taze order-book/trade örnekleri varsa tarihsel olarak ölçülebilir. Liquidation Cascade gerçek likidasyon akışı değil, OI/funding/işlem akışı proxy'sidir. Performans günlüğü aynı kod revizyonu, sembol ve rejim için IS/OOS sonuçlarını ayrı izler. Atlas emir göndermez.
 
 ## Backtest
 
@@ -241,7 +241,7 @@ Maliyet modeli ve IS/OOS kayıtlarını yerel performans günlüğüne yazmak i�
 python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30 --persist
 ```
 
-Performans kayıtları sembol, rejim ve kod revizyonuna göre ayrılır. Kod revizyonu değiştiğinde eski sonuçlar yeni sürümün seçiminde kullanılmaz. Minimum örneklem ve güven sınırı geçilmeden deneysel strateji seçime terfi etmez.
+Performans kayıtları sembol, rejim ve kod revizyonuna göre ayrılır. Kod revizyonu değiştiğinde eski sonuçlar yeni sürümün seçiminde kullanılmaz. Canlı aday seçimini ortak risk filtresi ve merkezi sıralama belirler.
 
 **Tarihsel veri sınırı:** OI ve funding geçmişi Gate.io'in tarihsel uç noktalarından zaman damgasıyla alınır. Veri kapsaması HISTORICAL, PARTIAL veya UNAVAILABLE olarak raporlanır. Funding ödemeleri pozisyon yönüne göre modellenir; olumsuz debiler maliyete yazılır, olumlu krediler muhafazakâr biçimde kazanç sayılmaz. Kısmi funding geçmişiyle sonuç üretilebilir ancak bu sonuç strateji terfisi için kalıcı performans günlüğüne yazılmaz. Geçmiş order-book/taker-trade snapshot'ları geriye dönük üretilemez; Order Flow Momentum yalnızca yerel arşivde karar anından önce mevcut olan taze örneklerle ölçülür.
 

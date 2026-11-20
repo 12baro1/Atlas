@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+from gateio_futures import request_metrics
 import sqlite3
 import threading
 import time
@@ -41,6 +43,8 @@ class ScanService:
         self.scan_allowed = scan_allowed
         self._cycle_lock = threading.Lock()
         self._last_rank_attempt = float("-inf")
+        self._next_memory_sample = 0.0
+        self._monitored_job = None
         self.runtime = runtime
         self.queue = queue
         self.inventory = inventory
@@ -95,8 +99,9 @@ class ScanService:
             # start could clear the stop event between set() and join().
             self._stop_event.set()
             workers = list(self._workers)
+            deadline = time.monotonic() + max(0, timeout_seconds)
             for worker in workers:
-                worker.join(timeout=timeout_seconds)
+                worker.join(timeout=max(0, deadline - time.monotonic()))
             alive_workers = [worker for worker in workers if worker.is_alive()]
             alive = [worker.name for worker in alive_workers]
             # Retain references to workers that did not finish within the
@@ -233,7 +238,7 @@ class ScanService:
         # "Scan all" means all of the configured liquid universe. Preserve
         # smaller requests and clamp unbounded/larger requests to top 300.
         if self.continuous:
-            self.roll_cycle()
+            # The worker owns network ranking and publication; commands read the durable queue.
             ranking = self.queue.generation_ranking()
             ranked = ranking.get("symbols") or []
             selected = ranked[:limit]
@@ -323,6 +328,12 @@ class ScanService:
             inventory_status["ranking_source"] = ranking["ranking_source"]
         inventory_status["active_generation_symbols"] = len(ranking.get("symbols") or [])
         progress["inventory"] = inventory_status
+        job = self._monitored_job
+        if job is not None:
+            symbol, claimed, metrics = job
+            idle = time.monotonic() - max(claimed, metrics.last_response)
+            if idle > 2 * self.queue.lease_seconds:
+                progress["stalled_symbol"] = symbol
         return progress
 
     # ------------------------------------------------------------------
@@ -392,6 +403,11 @@ class ScanService:
                     continue
                 continue
             symbol = job["symbol"]
+            started = time.monotonic()
+            metrics = request_metrics()
+            requests_before, seconds_before = metrics.count, metrics.seconds
+            if self.continuous and self.worker_count == 1:
+                self._monitored_job = (symbol, started, metrics)
             try:
                 if self.continuous:
                     outcome = self.runtime.analyze_for_cycle(symbol)
@@ -404,13 +420,25 @@ class ScanService:
                 error = None if ok else str(outcome.get("error") or "analysis_failed")
             except Exception as exc:
                 ok, result, error = False, None, str(exc)[:180]
+            finally:
+                self._monitored_job = None
             # If SQLite is busy the lease can expire and the job can be reclaimed.
             # Do not turn a database write failure into a failed market analysis.
             self.queue.complete(symbol, ok=ok, claim=job, **({"result": result} if self.continuous else {}),
                                 error=error)
-            if ok:
-                logger.debug("Scan %s: ok", symbol)
-            else:
+            finished = time.monotonic()
+            logger.info("Scan symbol=%s ok=%s elapsed_ms=%.0f gate_requests=%d gate_ms=%.0f", symbol, ok,
+                        (finished-started)*1000, metrics.count-requests_before,
+                        (metrics.seconds-seconds_before)*1000)
+            if finished >= self._next_memory_sample:
+                self._next_memory_sample = finished + 60
+                try:
+                    fields = [line.strip() for line in Path("/proc/self/status").read_text().splitlines()
+                              if line.startswith(("VmRSS:", "VmSwap:"))]
+                    logger.info("Scan process memory | %s", " | ".join(fields))
+                except OSError:
+                    pass
+            if not ok:
                 logger.warning("Scan %s failed: %s", symbol, error[:180])
             # Bounded gap between analyses keeps Gate.io usage rate-limit safe.
             if self._stop_event.wait(self.analysis_gap_seconds):

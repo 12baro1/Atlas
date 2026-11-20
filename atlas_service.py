@@ -225,11 +225,13 @@ def main() -> int:
     try:
         notify_systemd("READY=1")
         while not stop_event.wait(5):
-            scan_status = runtime.scan_status()
+            scan_status = runtime.scan_progress()
+            if scan_status.get("stalled_symbol"):
+                raise RuntimeError(f"Scan worker stalled across two lease periods: {scan_status['stalled_symbol']}")
             if not scan_status.get("workers_running"):
                 logger.error("Durable scan worker stopped; attempting recovery")
                 runtime.resume_scan()
-                scan_status = runtime.scan_status()
+                scan_status = runtime.scan_progress()
                 if not scan_status.get("workers_running"):
                     raise RuntimeError("Atlas durable scan worker stopped unexpectedly")
 

@@ -8,6 +8,7 @@ import math
 import os
 import threading
 import traceback
+from weakref import WeakValueDictionary
 import time
 from collections import defaultdict, deque
 from typing import Any, Dict, Optional
@@ -17,6 +18,14 @@ from engine import AtlasEngine
 from strategy_outcome_journal import StrategyOutcomeJournal
 from manual_trade_service import ManualTradeService
 from opportunity_pool import get_opportunity_pool, SetupCandidate
+
+def _count_reason(counts, reason, limit):
+    # Price, ADX and net RR can change the diagnostic string every scan.
+    key = str(reason)[:240]
+    if key not in counts and len(counts) >= limit:
+        key = "Diğer gerekçeler"
+    counts[key] = counts.get(key, 0) + 1
+
 
 def _is_fresh_15m_data(candles, now_ms, max_age_seconds):
     """Return False for absent, future, or stale last-closed 15m candles."""
@@ -45,7 +54,7 @@ class AtlasRuntime:
         self._thread = None
         # Per-symbol locks to allow parallel analysis of different symbols
         # while protecting AtlasMainEngine.evidence_pool for the same symbol.
-        self._analysis_locks = {}
+        self._analysis_locks = WeakValueDictionary()
         self._analysis_locks_lock = threading.Lock()
         self._journal_lock = threading.RLock()
         self.manual_service = ManualTradeService(
@@ -231,12 +240,18 @@ class AtlasRuntime:
     def stop_scan(self):
         return self._scan_service.stop_scan()
 
+    def scan_progress(self):
+        """Queue and worker health without acquiring opportunity-pool publication locks."""
+        return self._scan_service.status()
+
     def scan_status(self):
-        status = self._scan_service.status()
+        status = self.scan_progress()
         # Queue progress alone cannot explain an empty setup pool. Expose the
         # seven-strategy generation funnel and validated pool alongside it.
         status["strategy_telemetry"] = self.strategy_telemetry()
-        status["pool"] = self._opportunity_pool().get_stats()
+        pool = self._opportunity_pool()
+        status["pool"] = pool.get_stats()
+        status["pool_validations"] = pool.tracking.validation_counts()
         return status
 
     def refresh_market_inventory(self):
@@ -636,7 +651,7 @@ class AtlasRuntime:
             self.engine.trade_journal.expire_stale_signal_outcomes()
 
     def analyze_for_cycle(self, symbol):
-        return self._analyze_symbol(symbol, force_refresh=True, from_scan=True, track_signal=False,
+        return self._analyze_symbol(symbol, force_refresh=False, from_scan=True, track_signal=False,
                                     use_websocket=False)
 
     def _analyze_symbol(self, raw_symbol, force_refresh=False, from_scan=False, scan_index=None, scan_total=None, track_signal=None, use_websocket=True):
@@ -662,7 +677,8 @@ class AtlasRuntime:
 
             lock = self._get_analysis_lock(symbol)
             with lock:
-                data = get_market_data(symbol, force_refresh=force_refresh, use_websocket=bool(use_websocket and not from_scan))
+                data = get_market_data(symbol, force_refresh=force_refresh, use_websocket=bool(use_websocket and not from_scan),
+                                       build_evidence=False)
                 # Never base live SMC confirmation on a still-forming 15m candle.
                 # Backtests use historical candles and do not pass through this live-runtime filter.
                 from timing import closed_htf_candles
@@ -720,6 +736,7 @@ class AtlasRuntime:
                     # its native setup conditions are no longer present.
                     strategy_lab = result.get("strategy_lab") or {}
                     diagnostics = strategy_lab.get("diagnostics") or {}
+                    self._accumulate_strategy_telemetry(result)
                     selected = strategy_lab.get("selected")
                     if not diagnostics.get("strategies"):
                         return {"ok": False, "error": "missing_strategy_evaluations"}
@@ -731,15 +748,16 @@ class AtlasRuntime:
                                                          regime=strategy_lab.get("regime")) if selected else None
                     if selected and not candidate:
                         return {"ok": False, "error": "invalid_selected_plan"}
-                    evidence = {"symbol": symbol, "cutoff": int(closed_15m[-1].time),
+                    evidence = {"structure_close": closed_15m[-1].close, "symbol": symbol, "cutoff": int(closed_15m[-1].time),
                                 "observed": started, "setup": candidate.to_dict() if candidate else None,
+                                "blocked_strategies": [row["strategy_id"] for row in diagnostics["strategies"]
+                                                       if row.get("strategy_id") and row.get("status") == "BLOCKED_COMMON_FILTER"],
                                 "broken": [row["strategy_id"] for row in diagnostics.get("strategies", [])
                                            if row.get("strategy_id") and row.get("status") in
                                            {"NO_SETUP", "CONDITION_NOT_MET"}]}
                     tracking_bars = data.get("5m") or data.get("5M")
                     if tracking_bars:
                         pool.tracking.advance_tracking(symbol, tracking_bars)
-                    self._accumulate_strategy_telemetry(result)
                     self._register_result(result)
                     with self._lock:
                         self._latest_analysis_by_symbol[symbol] = result
@@ -752,7 +770,7 @@ class AtlasRuntime:
                     invalidate = getattr(self.engine.trade_journal, "invalidate_pending_signal_outcomes", None)
                     if invalidate:
                         for strategy in evidence["broken"]:
-                            invalidate(symbol=symbol, strategy_id=strategy, reason="STRATEGY_STRUCTURE_BROKEN")
+                            invalidate(symbol=symbol, strategy_id=strategy, reason="STRATEGY_STRUCTURE_BROKEN", evidence=evidence)
 
             self._inc("success")
             if from_scan:
@@ -1035,6 +1053,7 @@ class AtlasRuntime:
             opposing_evidence=[str(v) for v in (selected.get("opposing_event_ids") or [])],
             created_at_ms=int(time.time() * 1000),
             updated_at_ms=int(time.time() * 1000),
+            evidence_at_ms=int(time.time() * 1000),
             validated_at_ms=0,  # Set by validate_candidate
             trace_id=trace_id,
         )
@@ -1056,9 +1075,13 @@ class AtlasRuntime:
                 for row in diagnostics.get("strategies") or []:
                     strategy_id = str(row.get("strategy_id") or "unknown")
                     counts = telemetry["per_strategy"][strategy_id]
+                    counts["analyses"] = counts.get("analyses", 0) + 1
                     status = str(row.get("status") or "")
                     if status in ("SELECTED", "FILTERED_NOT_SELECTED", "BLOCKED_COMMON_FILTER"):
                         counts["setups"] += 1
+                        side = str(row.get("direction") or "").lower()
+                        if side in ("long", "short"):
+                            counts[side] = counts.get(side, 0) + 1
                     else:
                         status_key = {
                             "NO_SETUP": "no_setup",
@@ -1071,18 +1094,19 @@ class AtlasRuntime:
                         counts[status_key] = counts.get(status_key, 0) + 1
                         reason = str(row.get("reason") or "").strip()
                         if reason:
-                            counts.setdefault("reason_counts", defaultdict(int))[reason] += 1
+                            reasons = counts.setdefault("reason_counts", defaultdict(int))
+                            _count_reason(reasons, reason, 32)
                     if row.get("selected"):
                         counts["selected"] += 1
                         counts["passed"] += 1
                     if status in ("SELECTED", "FILTERED_NOT_SELECTED"):
                         counts["passed"] += 0 if row.get("selected") else 1
                         for reason in row.get("rejection_reasons") or []:
-                            telemetry["rejection_reasons"][f"SINGLE_DECISION:{reason}"] += 1
+                            _count_reason(telemetry["rejection_reasons"], f"SINGLE_DECISION:{reason}", 64)
                     elif status == "BLOCKED_COMMON_FILTER":
                         counts["rejected"] += 1
                         for reason in row.get("rejection_reasons") or []:
-                            telemetry["rejection_reasons"][str(reason)] += 1
+                            _count_reason(telemetry["rejection_reasons"], reason, 64)
         except Exception as exc:
             self.logger.debug(f"Telemetry accumulation skipped: {exc}")
 

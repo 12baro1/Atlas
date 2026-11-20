@@ -101,3 +101,13 @@ def test_default_max_snapshots_caps_active_table(tmp_path, monkeypatch):
     monkeypatch.delenv("ATLAS_JOURNAL_RETENTION_MAX_SNAPSHOTS", raising=False)
     from config import Config
     assert Config.JOURNAL_RETENTION_MAX_SNAPSHOTS == 5000
+
+def test_failed_archive_write_retains_snapshot_in_memory_and_on_disk(tmp_path, monkeypatch):
+    import trade_journal
+    journal = TradeJournal(str(tmp_path / "snapshot.db"))
+    def fail(snapshot):
+        raise ValueError("simulated archive failure")
+    monkeypatch.setattr(trade_journal, "_gzip_payload", fail)
+    _snapshot(journal, int(time.time()*1000) - 40*86400*1000)
+    assert len(journal._snapshots) == 1
+    assert len(TradeJournal(journal.db_path)._snapshots) == 1

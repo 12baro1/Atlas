@@ -778,3 +778,33 @@ def test_notifications_run_while_polling_has_no_updates(monkeypatch):
         assert delivered.wait(2)
     finally:
         assert service.stop(timeout=3)
+
+
+def test_polling_reconnect_preserves_first_fresh_command_and_offset(monkeypatch):
+    import requests
+    service = TelegramCommandService(None, "offline", "123")
+    calls = []
+    def poll(method, payload, timeout):
+        calls.append(dict(payload))
+        if len(calls) == 1:
+            raise requests.ConnectionError()
+        if len(calls) == 2:
+            return [{"update_id":18,"message":{"chat":{"id":"123"},"text":"/islemler","date":int(time.time())}}]
+        service.stop_flag.set()
+        return []
+    monkeypatch.setattr(service, "_api", poll)
+    monkeypatch.setattr(service.stop_flag, "wait", lambda delay: None)
+    service._poll_loop()
+    assert service._command_queue.get_nowait()[0] == "/islemler"
+    assert calls[2]["offset"] == 19 and "offset" not in calls[0]
+
+
+def test_queue_saturation_does_not_send_from_polling_thread(monkeypatch):
+    import queue
+    service = TelegramCommandService(None, "offline", "123")
+    service._command_queue = queue.Queue(maxsize=1)
+    service._command_queue.put_nowait(("/durum", "durum"))
+    monkeypatch.setattr(service,"_api",lambda *a,**kw: (_ for _ in ()).throw(AssertionError("network on poller")))
+    service._handle_update({"message":{"chat":{"id":"123"},"date":int(time.time()),"text":"/tara"}})
+    assert service._queue_overflow.is_set()
+    assert service._analysis_symbol_for_command("/likidite BTC") == "BTC"

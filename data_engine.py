@@ -86,6 +86,12 @@ def _fetch(symbol, timeframe, limit):
     return candles
 
 
+def _bar_period(timeframe):
+    # Gate weekly bars open on Monday. Unix epoch was a Thursday.
+    offset = 3 * 86400 if timeframe == "1w" else 0
+    return int(time.time() + offset) // GateFuturesExchange.parse_timeframe(timeframe)
+
+
 def fetch_candles(symbol, timeframe, limit, force_refresh=False):
     ttl = TF_CACHE_TTL_SECONDS.get(timeframe, 0)
     if ttl <= 0:
@@ -94,11 +100,12 @@ def fetch_candles(symbol, timeframe, limit, force_refresh=False):
     # limit'i anahtara kat: aynı sembol/ZF farklı limitlerle istenirse
     # birbirinin önbellek kaydını kirletip warmup eksikliği yaratmasın.
     key = (symbol, timeframe, limit)
+    period = _bar_period(timeframe)
 
     if not force_refresh:
         with _cache_lock:
             cached = _cache.get(key)
-            if cached is not None and now - cached[1] <= ttl:
+            if cached is not None and now - cached[1] <= ttl and cached[2] == period:
                 _cache.move_to_end(key)
                 return cached[0]
 
@@ -106,7 +113,7 @@ def fetch_candles(symbol, timeframe, limit, force_refresh=False):
     with _cache_lock:
         cached = _cache.get(key)
         if cached is None or now >= cached[1]:
-            _cache[key] = (candles, now)
+            _cache[key] = (candles, now, period)
             _cache.move_to_end(key)
             if len(_cache) > MAX_CANDLE_CACHE_ENTRIES:
                 _cache.popitem(last=False)
@@ -121,7 +128,7 @@ def invalidate_all():
         _smt_cache.clear()
 
 
-def get_market_data(symbol, force_refresh=False, use_websocket=True):
+def get_market_data(symbol, force_refresh=False, use_websocket=True, *, build_evidence=True):
     data = {"symbol": symbol, "tick_size": None}
     # Trace kimliği analiz başında bir kez üretilir; tüm aşamalar aynı kimliği taşır.
     ensure_trace(data)
@@ -527,8 +534,9 @@ def get_market_data(symbol, force_refresh=False, use_websocket=True):
             pass
     # Derived evidence is shared once per market snapshot. Consumers still
     # choose only the evidence relevant to their own independent strategy.
-    from shared.market_data_services import build_shared_market_evidence
-    data["shared_market_evidence"] = build_shared_market_evidence(data)
+    if build_evidence:
+        from shared.market_data_services import build_shared_market_evidence
+        data["shared_market_evidence"] = build_shared_market_evidence(data)
     return data
 
 
@@ -571,19 +579,21 @@ def get_smt_universe(force_refresh=False):
             now = time.monotonic()
             cached = _smt_cache.get(key)
             ttl = _SMT_CACHE_TTL_SECONDS[timeframe]
+            period = _bar_period(timeframe)
             if (
                 not force_refresh
                 and cached is not None
+                and cached[2] == period
                 and now - cached[1] <= ttl
             ):
                 frames[timeframe] = cached[0]
                 continue
             try:
                 candles = fetch_candles(symbol, timeframe, TIMEFRAMES[timeframe], force_refresh=force_refresh)
-                _smt_cache[key] = (candles, now)
+                _smt_cache[key] = (candles, now, period)
                 frames[timeframe] = candles
             except Exception:
                 # Recheck age after a failed request, which can consume the remaining TTL.
-                frames[timeframe] = cached[0] if cached and time.monotonic() - cached[1] <= ttl else []
+                frames[timeframe] = cached[0] if cached and cached[2] == _bar_period(timeframe) and time.monotonic() - cached[1] <= ttl else []
         universe[symbol] = frames
     return universe

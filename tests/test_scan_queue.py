@@ -320,3 +320,18 @@ def test_failed_open_preserves_existing_history(tmp_path, monkeypatch):
     reopened = make_queue(tmp_path)
     assert reopened.generation_symbols() == ["BTC"]
     reopened.close()
+
+
+def test_repeated_expired_leases_finish_and_leave_other_jobs_runnable(tmp_path):
+    queue = make_queue(tmp_path, max_retries=1)
+    try:
+        queue.enqueue(["A", "B"])
+        for _ in range(2):
+            claim = queue.claim_next()
+            assert claim["symbol"] == "A"
+            queue._thread_conn().execute("UPDATE scan_jobs SET lease_until_ms=0 WHERE symbol='A'")
+        assert queue.claim_next()["symbol"] == "B"
+        assert not queue.complete("A", True, claim=claim)
+        assert queue.progress()["failed"] == 1
+    finally:
+        queue.close()

@@ -493,6 +493,8 @@ class TelegramCommandService:
         self._session = requests.Session()
         self._reply_session = requests.Session()
         self._command_queue = queue.Queue(maxsize=MAX_QUEUED_COMMANDS)
+        self._notification_session = requests.Session()
+        self._queue_overflow = threading.Event()
         self._notification_thread = None
         self._command_thread = None
         self._analysis_lock = threading.Lock()
@@ -573,6 +575,8 @@ class TelegramCommandService:
             self.logger.warning("Telegram polling thread still active at shutdown")
 
         notifications_alive = bool(self._notification_thread and self._notification_thread.is_alive())
+        if not notifications_alive:
+            self._notification_session.close()
         if not analysis_alive and not command_alive and not polling_alive and not notifications_alive:
             self._reply_session.close()
         else:
@@ -654,22 +658,7 @@ class TelegramCommandService:
 
     def _poll_loop(self) -> None:
         self.logger.info("Telegram command polling started for configured group")
-        # Discard messages queued before startup. A stale backlog must not
-        # delay or age out commands sent after this process becomes available.
-        try:
-            pending = self._api(
-                "getUpdates",
-                {"offset": -1, "timeout": 0, "allowed_updates": ["message", "edited_message"]},
-                timeout=5,
-            ) or []
-            if pending:
-                self._offset = max(int(item.get("update_id", 0)) for item in pending) + 1
-                self.logger.info(
-                    "Discarded pre-start Telegram backlog | updates=%s next_offset=%s",
-                    len(pending), self._offset,
-                )
-        except Exception:
-            self.logger.exception("Could not synchronize Telegram update offset; continuing polling")
+        # Age and chat checks apply to the first batch too, including fresh commands sent during restart.
         while not self.stop_flag.is_set():
             try:
                 payload = {
@@ -710,15 +699,15 @@ class TelegramCommandService:
                 return
             event_id, message, attempt = claim
             try:
-                with self._reply_lock:
-                    receipt = self._api("sendMessage", {"chat_id": self.chat_id, "text": message},
-                                        timeout=10, session=self._reply_session)
+                receipt = self._api("sendMessage", {"chat_id": self.chat_id, "text": message},
+                                    timeout=10, session=self._notification_session)
                 if (not isinstance(receipt, dict) or type(receipt.get("message_id")) is not int
                         or receipt["message_id"] <= 0
                         or str((receipt.get("chat") or {}).get("id")) != self.chat_id):
                     raise TelegramDeliveryError("uncertain")
             except TelegramDeliveryError as exc:
                 state = exc.state
+                self.logger.warning("Telegram notification delivery | event=%d attempt=%d state=%s", event_id, attempt, state)
                 delay = max(exc.retry_after, min(600, 2 ** min(attempt, 10))) if state == "retry" else 0
                 tracking.finish_notification(self.chat_id,event_id,attempt,state,retry_after=delay)
                 return
@@ -785,18 +774,7 @@ class TelegramCommandService:
             # Keep the group clean: send only the final command result.
         except queue.Full:
             self.logger.warning("Telegram command queue full; rejecting command: %s", command[:80])
-            try:
-                self._api(
-                    "sendMessage",
-                    {
-                        "chat_id": self.chat_id,
-                        "text": "Atlas önceki komutu işliyor. Biraz sonra tekrar deneyin.",
-                        "disable_web_page_preview": True,
-                    },
-                    timeout=10,
-                )
-            except Exception:
-                self.logger.exception("Telegram queue-full reply could not be sent")
+            self._queue_overflow.set()
 
     def _send_command_reply(self, message: str) -> bool:
         # requests.Session is not thread-safe. Background analyses may finish
@@ -810,6 +788,9 @@ class TelegramCommandService:
                         timeout=10,
                         session=self._reply_session,
                     )
+                except TelegramDeliveryError as exc:
+                    self.logger.warning("Telegram command delivery | state=%s retry_after=%s", exc.state, exc.retry_after)
+                    return False
                 except Exception:
                     self.logger.exception("Telegram command reply could not be sent")
                     return False
@@ -831,7 +812,9 @@ class TelegramCommandService:
         """Return a symbol only for commands routed to the long-running analyzer."""
         normalized = normalize_command(raw_command)
         if not str(raw_command or "").strip().startswith("/"):
-            return None
+            from atlas_tui import _parse_liquidity_command
+            symbol = _parse_liquidity_command(normalized)
+            return (symbol or self.runtime.current_symbol()) if symbol is not False else None
         parts = normalized.split(maxsplit=1)
         if not parts:
             return None
@@ -839,7 +822,7 @@ class TelegramCommandService:
         if command is None and len(parts) == 1:
             from atlas_tui import _is_symbol_input
             return parts[0].upper() if _is_symbol_input(parts[0]) else None
-        if not command or command.handler != "handle_analyze_symbol":
+        if not command or command.handler not in {"handle_analyze_symbol", "handle_liquidity"}:
             return None
         symbol = parts[1] if command.takes_parameter and len(parts) > 1 else parts[0]
         return str(symbol or "").strip().upper() or None
@@ -865,32 +848,27 @@ class TelegramCommandService:
         if not symbol:
             return False
         with self._analysis_lock:
-            existing = self._analysis_threads.get(symbol)
-            if existing and existing.is_alive():
-                self._send_command_reply(
-                    f"ATLAS | {symbol}\nBu sembolün analizi zaten çalışıyor. Sonuç bekleniyor."
+            if symbol in self._analysis_threads:
+                message = f"ATLAS | {symbol} analizi zaten çalışıyor."
+            elif self._analysis_threads:
+                message = "Bir sembol analizi sürüyor. Tamamlandığında tekrar deneyebilirsiniz."
+            else:
+                thread = threading.Thread(
+                    target=self._run_background_analysis, args=(raw_command, command_label, symbol),
+                    name=f"atlas-telegram-analysis-{symbol.lower()}", daemon=True,
                 )
+                self._analysis_threads[symbol] = thread
+                try:
+                    thread.start()
+                except RuntimeError:
+                    self._analysis_threads.pop(symbol, None)
+                    raise
                 return True
-            if len(self._analysis_threads) >= 3:
-                self._send_command_reply(
-                    "ATLAS | ANALİZ KUYRUĞU DOLU\nEn fazla 3 sembol analizi aynı anda çalışabilir."
-                )
-                return True
-            thread = threading.Thread(
-                target=self._run_background_analysis,
-                args=(raw_command, command_label, symbol),
-                name=f"atlas-telegram-analysis-{symbol.lower()}",
-                daemon=True,
-            )
-            self._analysis_threads[symbol] = thread
-            self._send_command_reply(
-                f"ATLAS | {symbol} ANALİZİ BAŞLADI\nSonuç hazır olduğunda bu gruba gönderilecek."
-            )
-            thread.start()
+        self._send_command_reply(message)
         return True
 
     def _command_worker_loop(self) -> None:
-        while not self.stop_flag.is_set() or not self._command_queue.empty():
+        while not self.stop_flag.is_set():
             try:
                 raw_command, command_label = self._command_queue.get(timeout=0.5)
             except queue.Empty:
@@ -909,6 +887,9 @@ class TelegramCommandService:
                 self.logger.warning("Telegram command worker recovered | type=%s", type(exc).__name__)
             finally:
                 self._command_queue.task_done()
+                if self._queue_overflow.is_set() and not self.stop_flag.is_set():
+                    self._queue_overflow.clear()
+                    self._send_command_reply("Komut kuyruğu doldu. Yanıtsız kalan komutunuzu tekrar gönderebilirsiniz.")
 
     def execute_command(self, command: str) -> str:
         try:
@@ -1239,7 +1220,9 @@ class TelegramCommandService:
 
     def handle_motors(self) -> str:
         """Report all seven independent strategy generation counters."""
-        telemetry = (self.runtime.scan_status().get("strategy_telemetry") or {})
+        status = self.runtime.scan_status()
+        telemetry = status.get("strategy_telemetry") or {}
+        validations = status.get("pool_validations") or {}
         rows = telemetry.get("per_strategy") or {}
         strategies = (
             ("smc", "SMC"),
@@ -1253,11 +1236,15 @@ class TelegramCommandService:
         lines = ["ATLAS | 7 BAĞIMSIZ STRATEJİ", f"Toplam analiz: {telemetry.get('analyses', 0)}"]
         for key, label in strategies:
             item = rows.get(key) or {}
+            no_setup = sum(item.get(field, 0) for field in (
+                "no_setup", "condition_not_met", "missing_data", "insufficient_history", "errors", "other_no_setup"))
             lines.extend([
                 "",
                 label,
+                f"Analiz: {item.get('analyses', 0)} | LONG: {item.get('long', 0)} | SHORT: {item.get('short', 0)}",
+                f"Karara ulaşan: {item.get('passed', 0)} | Havuz doğrulaması (kalıcı): {validations.get(key, 0)}",
                 f"Setup: {item.get('setups', 0)} | Filtreyi geçti: {item.get('passed', 0)} | Elendi: {item.get('rejected', 0)}",
-                f"Setup yok: {item.get('no_setup', 0)} | Veri eksik: {item.get('missing_data', 0)} | Hata: {item.get('errors', 0)}",
+                f"Setup yok: {no_setup} | Veri eksik: {item.get('missing_data', 0)} | Hata: {item.get('errors', 0)}",
             ])
         lines.extend(["", "Ayrıntılı ortak filtre istatistiği: /istatistik"])
         return "\n".join(lines)
@@ -1296,6 +1283,9 @@ class TelegramCommandService:
             f"Aktif takip: {stats.get('active', 0)}",
             f"Arşiv: {stats.get('history', 0)}",
         ]
+        waiting = stats.get("validated_stored", stats.get("validated", 0)) - stats.get("validated", 0)
+        if waiting:
+            lines.append(f"Yeniden doğrulama bekleyen: {waiting}")
         if best:
             item = best[0]
             entry_type = str(getattr(item, "entry_type", "") or getattr(item, "setup_type", "—")).upper()
@@ -1328,6 +1318,8 @@ class TelegramCommandService:
     def _queue_scan_report(self, limit: Optional[int]) -> str:
         """Start/queue a scan via the runtime scan service and report progress."""
         result = self.runtime.start_scan(limit)
+        if result.get("continuous") and not result.get("started"):
+            return "Tarama işçisi başlatıldı. Gate.io sıralaması bekleniyor. /taramadurum"
         if not result.get("started"):
             return "ATLAS | TARAMA BAŞLATILAMADI\nMevcut tarama kuyruğu değiştirilmedi. /taramadurum ile durumu kontrol et."
         if result.get("continuous"):
@@ -1687,6 +1679,8 @@ class TelegramCommandService:
                 f"{item.get('passed', 0)} geçti | {item.get('rejected', 0)} elendi | "
                 f"{no_setup} setup yok"
             )
+            for reason in (item.get("top_reasons") or [])[:1]:
+                lines.append(f"  {reason['count']} kez · {reason['reason']}")
         lines.extend([
             "",
             "ORTAK FİLTRE",
@@ -1694,6 +1688,9 @@ class TelegramCommandService:
             f"Elenen: {telemetry.get('common_filter_rejected', 0)}",
             "Not: Strateji setup üretimi ile nihai seçim ayrı aşamalardır.",
         ])
+        reasons = telemetry.get("rejection_reasons") or {}
+        for reason, count in sorted(reasons.items(), key=lambda pair: -pair[1])[:3]:
+            lines.append(f"{count} kez · {reason}")
         return "\n".join(lines)
 
     def handle_learning(self) -> str:

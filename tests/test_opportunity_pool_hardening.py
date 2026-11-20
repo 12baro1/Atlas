@@ -585,7 +585,7 @@ def test_best_setups_excludes_invalid_rr(tmp_path):
     pool.stop()
 
 
-def test_best_setups_keeps_missing_timestamps_when_setup_geometry_is_valid(tmp_path):
+def test_best_setups_hides_but_retains_unverifiable_legacy_timestamp(tmp_path):
     """Timestamps are audit metadata, not strategy-structure validity."""
     pool = make_pool(tmp_path, expiry_hours=24)
     now_ms = int(time.time() * 1000)
@@ -609,7 +609,8 @@ def test_best_setups_keeps_missing_timestamps_when_setup_geometry_is_valid(tmp_p
     best = pool.get_best_setups(limit=5)
     symbols = {c.setup_id for c in best}
     assert "valid" in symbols
-    assert "no_created" in symbols
+    assert "no_created" not in symbols
+    assert pool.get_setup("no_created") is c
     pool.stop()
 
 
