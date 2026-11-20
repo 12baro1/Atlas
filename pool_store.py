@@ -383,7 +383,7 @@ class PoolStore:
 
     def refresh_closed_targets(self, history=None):
         """Observe one bounded page after live positions, without changing their execution ledger."""
-        from tracking_history import MINUTE, BAR, EvidenceMissing, TrackingHistory, indexed
+        from tracking_history import MINUTE, QUARTER_HOUR, EvidenceMissing, TrackingHistory, indexed
         from telegram_prices import confirmed_target_levels
         now = int(time.time() * 1000)
         row = self._thread_conn().execute("""
@@ -393,13 +393,13 @@ class PoolStore:
             WHERE w.done=0 AND w.next_at<=? AND p.state='CLOSED' AND COALESCE(f.muted,0)=0
               AND CASE WHEN w.cursor_ms % ? = 0 THEN w.cursor_ms + ? ELSE (w.cursor_ms / ? + 1)*? END <= ?
             ORDER BY w.next_at,w.cursor_ms LIMIT 1
-        """, (now, BAR, BAR, MINUTE, MINUTE, now)).fetchone()
+        """, (now, QUARTER_HOUR, QUARTER_HOUR, MINUTE, MINUTE, now)).fetchone()
         if not row:
             return
         chat, symbol, revision, start, raw_hits, raw_plan, attempts = row
         key = (chat, symbol, revision, start)
-        width = MINUTE if start % BAR else BAR
-        maximum = (BAR - start % BAR) // MINUTE if width == MINUTE else 96
+        width = MINUTE if start % QUARTER_HOUR else QUARTER_HOUR
+        maximum = (QUARTER_HOUR - start % QUARTER_HOUR) // MINUTE if width == MINUTE else 96
         count = min(maximum, (now - start) // width)
         end = start + width * count
         incomplete = False

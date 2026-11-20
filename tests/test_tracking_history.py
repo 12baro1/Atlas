@@ -35,12 +35,11 @@ def test_missing_unclosed_duplicate_out_of_order_and_no_exit_before_entry():
 
 
 def test_1m_orders_tp_before_trailing_stop_and_ignores_later_original_stop():
-    parent = bar(START, 105, 112, 89, 96, 7)
+    parent = bar(START, 105, 112, 89, 96, 5)
     minutes = [bar(START, 105, 112, 104, 111), bar(START+MINUTE, 111, 111, 89, 96)]
     minutes.extend(bar(START+i*MINUTE, 96, 96, 96, 96) for i in (2, 3, 4))
-    five = [bar(START, 105, 112, 89, 96, 5)] + [bar(START+i*MINUTE, 96, 96, 96, 96) for i in (5, 10)]
     history = Mock()
-    history.candles.side_effect = lambda symbol, start, width, count: {BAR:[parent], 5*MINUTE:five, MINUTE:minutes}[width]
+    history.candles.side_effect = lambda symbol, start, width, count: {BAR:[parent], MINUTE:minutes}[width]
     state, p = evaluate(BTC, "ACTIVE", json.dumps(plan()), START+BAR, history=history)
     assert (state, p["status"], p["tps_hit"], p["trailing_stop"]) == ("CLOSED", "SL", [1], 100)
     assert p["resolved_at"] == START+2*MINUTE
@@ -95,7 +94,7 @@ def test_delayed_backfill_and_restart_retains_retry_and_stops_polling(tmp_path, 
         assert "BTC" not in bot.handle_islemler()
         assert "Doğrulanamadı · takipten kaldırıldı" in bot.handle_history()
         pool.tracking.advance_tracking(BTC, history=history)
-        assert history.candles.call_count == 3 * 3
+        assert history.candles.call_count == 3 * 2
         assert len(pool.tracking.pending_notifications("1")) == 1
     finally:
         pool.stop()
@@ -115,16 +114,14 @@ def test_gate_futures_wire_format_and_fractional_epoch_seconds(monkeypatch):
 
 def test_partial_verification_survives_missing_later_ticks_and_restart():
     first = bar(START, 105, 112, 104, 111)
-    second = bar(START+5*MINUTE, 111, 121, 99, 111)
-    third = bar(START+10*MINUTE, 111, 111, 111, 111)
+    second = bar(START+MINUTE, 111, 121, 99, 111)
+    third = bar(START+2*MINUTE, 111, 111, 111, 111)
     parent = bar(START, 105, 121, 99, 111, 3)
     history = Mock()
     def candles(symbol, start, width, count):
         if width == BAR:
             return [parent]
-        if width == 5*MINUTE:
-            return [first, second, third]
-        return [second] + [bar(start+i*width, 111,111,111,111,0) for i in range(1,count)]
+        return [first, second, third] + [bar(start+i*width, 111,111,111,111,0) for i in (3,4)]
     history.candles.side_effect = candles
     history.ticks.side_effect = EvidenceMissing("işlem geçmişi eksik")
     state, p = evaluate(BTC, "ACTIVE", json.dumps(plan()), START+BAR, history=history)
@@ -136,7 +133,7 @@ def test_partial_verification_survives_missing_later_ticks_and_restart():
 
 def test_missing_parent_rebuilt_from_complete_children():
     history = Mock()
-    children = [bar(START+i*5*MINUTE, 105,106,104,105) for i in range(3)]
+    children = [bar(START+i*MINUTE, 105,106,104,105) for i in range(5)]
     history.candles.side_effect = [[], children[::-1]]
     state, p = evaluate(BTC, "WAITING", json.dumps(plan(entry_reached=False)), START+BAR, history=history)
     assert state == "WAITING" and p["next_bar_time"] == START+BAR
@@ -416,3 +413,30 @@ def test_live_tied_stop_and_target_preserve_verified_prefix_for_history():
     assert (state, result["tps_hit"], result["verified_until"]) == ("ACTIVE", [1], START+2)
     assert evaluate_live(BTC, state, json.dumps(result), START+9000, lambda *args: rows) is None
     assert evaluate(BTC, state, json.dumps(result), START+BAR, [bar(START,100,121,95,121)]) is None
+
+
+def test_signal_eligible_on_next_five_minute_open():
+    from telegram_tracking import evaluate_live
+    opened = START + MINUTE
+    raw = json.dumps(plan(opened_at=opened, entry_reached=False, entry_reached_at=None))
+    read = Mock(return_value=[TradeGroup(START+5*MINUTE+100, {100}, 1)])
+    assert evaluate_live(BTC, "WAITING", raw, START+4*MINUTE, read) is None
+    read.assert_not_called()
+    state, result = evaluate_live(BTC, "WAITING", raw, START+5*MINUTE+4000, read)
+    assert state == "ACTIVE" and result["entry_reached_at"] == START+5*MINUTE+100
+
+
+def test_pinned_legacy_parent_finishes_before_switching_to_five_minutes():
+    span = 15 * MINUTE
+    prefix = plan(tps_hit=[1], trailing_stop=100, realized_r=.3, verified_until=START+BAR,
+                  last_processed_candle_time=START, next_bar_time=START, parent_prices=[111,112,105,111])
+    history = Mock()
+    history.candles.side_effect = [
+        [bar(START,111,112,105,111,3)],
+        [bar(START+i*BAR,111,112,105,111) for i in range(3)],
+        [bar(START+span,111,121,111,120)]]
+    state, result = evaluate(BTC, "AMBIGUOUS", json.dumps(prefix), START+span, history=history)
+    assert result["next_bar_time"] == START+span and result["realized_r"] == .3
+    state, result = evaluate(BTC, state, json.dumps(result), START+span+BAR, history=history)
+    assert result["tps_hit"] == [1,2]
+    assert [call.args[2] for call in history.candles.call_args_list] == [span, 5*MINUTE, 5*MINUTE]

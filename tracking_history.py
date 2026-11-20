@@ -8,7 +8,8 @@ from core.candle import convert
 from gateio_futures import GateFuturesExchange, trade_timestamp_ms
 
 MINUTE = 60_000
-BAR = 15 * MINUTE
+BAR = 5 * MINUTE
+QUARTER_HOUR = 15 * MINUTE
 
 
 class EvidenceMissing(ValueError):
