@@ -1192,12 +1192,16 @@ class TelegramCommandService:
     def handle_history(self) -> str:
         """Show recent completed and invalidated signal records."""
         rows = get_opportunity_pool().tracking.iter_tracked(self.chat_id)
-        history = heapq.nlargest(15, (row for row in rows if row[2] in {"CLOSED", "INVALIDATED", "UNVERIFIED"}),
+        history = heapq.nlargest(15, (row for row in rows if row[2] in {"CLOSED", "INVALIDATED", "UNVERIFIED", "REMOVED"}),
                                  key=lambda row: row[3].get("resolved_at") or row[3]["opened_at"])
         lines = ["SİNYAL GEÇMİŞİ"]
         for symbol, revision, state, plan in history:
             if state == "INVALIDATED":
                 label = "Geçersizleşti"
+            elif state == "REMOVED":
+                label = "Kullanıcı takipten çıkardı"
+                if _trade_progress(plan):
+                    label += f" · {_trade_progress(plan)}"
             elif state == "UNVERIFIED":
                 progress = _trade_progress(plan)
                 label = "Doğrulanamadı · takipten kaldırıldı"
@@ -1354,6 +1358,25 @@ class TelegramCommandService:
             lines.append(format_plan_levels(item.entry_price, item.stop_loss, item.tp1, item.tp2, item.tp3))
         return "\n".join(lines)
 
+    def handle_remove_symbol(self, raw):
+        return self._set_symbol_tracking(raw, enabled=False)
+
+    def handle_add_symbol(self, raw):
+        return self._set_symbol_tracking(raw, enabled=True)
+
+    def _set_symbol_tracking(self, raw, *, enabled):
+        ticker = re.fullmatch(r"([A-Z0-9]+?)(?:/USDT(?::USDT)?|_USDT|USDT)?", raw.strip().upper())
+        if not ticker:
+            return "Kullanım: /ekle ARB" if enabled else "Kullanım: /çıkart ARB"
+        base = ticker[1]
+        symbol = f"{base}/USDT:USDT"
+        changed = get_opportunity_pool().tracking.set_symbol_tracking(self.chat_id, symbol, enabled=enabled)
+        if enabled:
+            return (f"{base} için takip açıldı. Yeni geçerli setup bekleniyor." if changed
+                    else f"{base} bu sohbette zaten takipte.")
+        return (f"{base} bu sohbetin işlem takibinden çıkarıldı. Yeniden takip için /ekle {base}"
+                if changed else f"{base} bu sohbetin takip listesinde yok.")
+
     def handle_islemler(self) -> str:
         rows = get_opportunity_pool().tracking.iter_tracked(self.chat_id)
         tz = ZoneInfo("Europe/Istanbul")
@@ -1379,6 +1402,8 @@ class TelegramCommandService:
                 total += net
                 wins += net > 0
                 losses += net < 0
+            if plan.get("tracking_muted"):
+                continue
             if state in {"CLOSED", "INVALIDATED"}:
                 resolved = datetime.fromtimestamp((plan.get("resolved_at") or 0) / 1000, tz)
                 if resolved.date() != today:

@@ -404,3 +404,42 @@ def test_smc_without_h4_and_invalid_generators_are_not_structural_invalidation(m
     monkeypatch.setattr(strategy_lab,"_setup_diagnostic",lambda *args,**kwargs:"INVALID_DATA: ATR unavailable")
     report=strategy_lab.SevenStrategyLab().analyze({"symbol":BTC})
     assert {row["status"] for row in report["strategies"]}=={"INVALID_DATA"}
+
+
+def test_remove_and_resume_symbol_persists_and_is_chat_scoped(tmp_path, monkeypatch):
+    import time
+    from telegram_command_service import is_recognized_command
+
+    path = tmp_path / "manual"
+    pool = OpportunityPool(base_path=path, auto_persist=False)
+    bot = service()
+    other = service("other")
+    arb = "ARB/USDT:USDT"
+    now = int(time.time() * 1000)
+    try:
+        seen = observation(arb, stamp=now-5000)
+        monkeypatch.setattr(opportunity_pool, "_pool_instance", pool)
+        for chat in (bot, other):
+            pool.tracking.follow_analysis(chat.chat_id, seen)
+        pool.tracking.follow_analysis(bot.chat_id, observation())
+        assert is_recognized_command("/çıkart@atlas arb")
+        assert "çıkarıldı" in bot.execute_command("/çıkart@atlas arb")
+        assert "listesinde yok" in bot.execute_command("/cikart ARB/USDT")
+        assert "ARB" not in bot.execute_command("/işlemler")
+        assert "BTC" in bot.execute_command("/işlemler")
+        assert "ARB" in other.handle_islemler()
+        assert "Kullanıcı takipten çıkardı" in bot.handle_history()
+        pool.stop()
+        pool = OpportunityPool(base_path=path, auto_persist=False)
+        monkeypatch.setattr(opportunity_pool, "_pool_instance", pool)
+        newer = observation(arb, stamp=now+2000)
+        pool.tracking.follow_delivered(bot.chat_id, [newer])
+        assert "ARB" not in bot.handle_islemler()
+        assert "takip açıldı" in bot.execute_command("/ekle ARB")
+        pool.tracking.follow_delivered(bot.chat_id, [seen])
+        assert "ARB" not in bot.handle_islemler()
+        pool.tracking.follow_analysis(bot.chat_id, observation(arb, stamp=int(time.time()*1000)+1))
+        assert "ARB" in bot.handle_islemler()
+        assert len([row for row in pool.tracking.tracked(bot.chat_id) if row[0]==arb]) == 2
+    finally:
+        pool.stop()

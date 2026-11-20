@@ -14,6 +14,10 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS chat_follows(
  chat TEXT NOT NULL, symbol TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY(chat,symbol));
+CREATE TABLE IF NOT EXISTS chat_tracking_preferences(
+ chat TEXT NOT NULL, symbol TEXT NOT NULL, muted INTEGER NOT NULL,
+ changed_at INTEGER NOT NULL, suppress_through INTEGER NOT NULL,
+ PRIMARY KEY(chat,symbol));
 CREATE TABLE IF NOT EXISTS chat_plans(
  chat TEXT NOT NULL, symbol TEXT NOT NULL, revision INTEGER NOT NULL,
  setup_id TEXT NOT NULL, state TEXT NOT NULL, payload TEXT NOT NULL,
@@ -55,7 +59,7 @@ def transition(conn, chat, symbol, revision, setup, *, announce):
     if current:
         previous_id, state, raw = current
         old = json.loads(raw)
-        if setup and previous_id == setup["setup_id"] and state != "INVALIDATED":
+        if setup and previous_id == setup["setup_id"] and state not in {"INVALIDATED", "REMOVED"}:
             return
         if state in {"ACTIVE","AMBIGUOUS"}:
             return
@@ -78,7 +82,7 @@ def transition(conn, chat, symbol, revision, setup, *, announce):
     conn.execute("INSERT INTO chat_plans VALUES(?,?,?,?,?,?)",
                  (chat, symbol, revision, setup["setup_id"], "WAITING", json.dumps(outcome)))
     if announce:
-        label = "YENİ SETUP" if not current or state in {"INVALIDATED","CLOSED","UNVERIFIED"} else "SETUP GÜNCELLENDİ"
+        label = "YENİ SETUP" if not current or state in {"INVALIDATED","CLOSED","UNVERIFIED","REMOVED"} else "SETUP GÜNCELLENDİ"
         previous = f"\nEski: {old['direction']} | {old['strategy']}" if current else ""
         event(conn, chat, symbol, revision, "SETUP", f"{label}{previous}\nYeni: {outcome['direction']} | {outcome['strategy']}", outcome)
 

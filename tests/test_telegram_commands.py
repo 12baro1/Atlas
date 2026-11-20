@@ -86,7 +86,7 @@ def test_category_grouping():
     assert len(scan_cmds) == 15
 
     setup_cmds = get_commands_by_category("setup")
-    assert len(setup_cmds) == 6
+    assert len(setup_cmds) == 8
 
     performance_cmds = get_commands_by_category("performance")
     assert len(performance_cmds) == 3  # performans, istatistik, ogrenme
@@ -112,7 +112,7 @@ def test_help_text_contains_all_commands():
 
 def test_command_count():
     """Verify expected total command count."""
-    assert len(TELEGRAM_COMMANDS) == 35
+    assert len(TELEGRAM_COMMANDS) == 37
 
 
 def test_specific_commands_exist():
@@ -122,7 +122,7 @@ def test_specific_commands_exist():
         "tara", "20tara", "30tara", "50tara", "100tara", "200tara", "500tara", "1000tara",
         "tumtara", "eniyi5", "eniyi10",
         "taramadurum", "taramadurdur", "taramadevam", "yenile",
-        "islemler", "likidite", "havuz", "havuzdurum", "setup", "gecmis",
+        "islemler", "cikart", "ekle", "likidite", "havuz", "havuzdurum", "setup", "gecmis",
         "performans", "istatistik", "ogrenme",
         "start", "durum", "motorlar", "veri", "sistem", "yardim",
     }

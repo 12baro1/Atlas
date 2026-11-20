@@ -230,3 +230,39 @@ def test_old_tie_review_reopens_once_without_losing_progress(tmp_path):
     assert not store.open_symbols()
     assert store.tracked("c")[0][2] == "UNVERIFIED"
     store.close()
+
+
+def test_background_worker_continues_targets_after_tp1_and_restart(tmp_path, monkeypatch):
+    import time
+    from daily_refresh import DailyPoolRefresh
+
+    clock = [START-BAR]
+    monkeypatch.setattr(time, "time", lambda: clock[0]/1000)
+    path = tmp_path / "restart-after-tp1"
+    pool = OpportunityPool(base_path=path, auto_persist=False)
+    history = Mock()
+    monkeypatch.setattr("tracking_history.TrackingHistory", lambda: history)
+    def refresh(offset, low, high):
+        stamp = START + offset * BAR
+        price = (low + high) / 2
+        clock[0] = stamp + BAR
+        history.candles.return_value = [bar(stamp, price, high, low, price)]
+        DailyPoolRefresh(pool, None, None, continuous=True).refresh_virtual_positions()
+        history.candles.assert_called_with(BTC, stamp, BAR, 1)
+        return pool.tracking.tracked("chat")[0]
+
+    try:
+        pool.tracking.follow_analysis("chat", observation())
+        assert refresh(0, 49999, 50050)[2] == "ACTIVE"
+        assert refresh(1, 50500, 51100)[3]["tps_hit"] == [1]
+        pool.stop()
+        pool = OpportunityPool(base_path=path, auto_persist=False)
+        assert BTC in pool.tracking.open_symbols()
+        assert refresh(2, 51500, 52100)[3]["tps_hit"] == [1, 2]
+        state = refresh(3, 52500, 53100)
+        assert state[2] == "CLOSED" and state[3]["status"] == "TP3"
+        events = pool.tracking.pending_notifications("chat")
+        for target in ("TP1", "TP2", "TP3"):
+            assert sum(f"{target} alındı" in message for _, message in events) == 1
+    finally:
+        pool.stop()
