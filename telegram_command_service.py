@@ -68,9 +68,11 @@ def split_message(value: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
         return [""]
     chunks = []
     while len(text) > limit:
-        split_at = text.rfind("\n", 0, limit)
-        if split_at < limit // 2:
-            split_at = limit
+        split_at = text.rfind("\n\n", 0, limit + 1)
+        if split_at <= 0:
+            split_at = text.rfind("\n", 0, limit)
+            if split_at < limit // 2:
+                split_at = limit
         chunks.append(text[:split_at])
         text = text[split_at:].lstrip("\n")
     if text:
@@ -1331,49 +1333,74 @@ class TelegramCommandService:
 
     def handle_islemler(self) -> str:
         rows = get_opportunity_pool().tracking.tracked(self.chat_id)
-        live = [(symbol,state,plan) for symbol,_,state,plan in rows if state in {"ACTIVE","WAITING","AMBIGUOUS"}]
         tz = ZoneInfo("Europe/Istanbul")
         today = datetime.now(tz).date()
-        recent = [(symbol,state,plan) for symbol,_,state,plan in rows if state in {"INVALIDATED","CLOSED"}
-                  and datetime.fromtimestamp((plan.get("resolved_at") or 0)/1000,tz).date()==today]
-        lines = [f"İŞLEMLERİM — {len(live)+len(recent)}"]
-        for index, (symbol, state, plan) in enumerate(live, 1):
-            hits = plan.get("tps_hit") or []
-            status = f"TP{max(hits)} alındı" if hits else "Aktif" if state == "ACTIVE" else "Giriş bekliyor"
-            if state == "AMBIGUOUS":
-                status = "DOĞRULAMA BEKLİYOR — " + plan.get("ambiguity_reason", "Geçmiş mumlar doğrulanacak")
+        sections = {
+            "ACTIVE": ("Aktif", []),
+            "WAITING": ("Giriş bekliyor", []),
+            "AMBIGUOUS": ("DOĞRULAMA BEKLİYOR", []),
+            "CLOSED": ("Bugün kapanan", []),
+            "INVALIDATED": ("Bugün geçersizleşen", []),
+        }
+        closed = []
+        for symbol, _, state, plan in rows:
+            if state not in sections:
+                continue
+            if state == "CLOSED":
+                closed.append(plan)
+            if state in {"CLOSED", "INVALIDATED"}:
+                resolved = datetime.fromtimestamp((plan.get("resolved_at") or 0) / 1000, tz)
+                if resolved.date() != today:
+                    continue
+            sections[state][1].append((symbol, plan))
+
+        count = sum(len(items) for _, items in sections.values())
+        blocks = [f"İŞLEMLERİM — {count}"]
+        for state, (heading, items) in sections.items():
+            for index, (symbol, plan) in enumerate(items):
+                card = []
+                if index == 0:
+                    card.append(f"{heading} ({len(items)})")
+                label = f"{symbol.split('/')[0]} · {plan['direction']}"
+                hits = plan.get("tps_hit") or []
                 if hits:
-                    status += f" | Son doğrulanan: TP{max(hits)}"
-                if plan.get("manual_review"):
-                    status += " (kalıcı inceleme)"
-                elif plan.get("retry_at"):
-                    retry = datetime.fromtimestamp(plan["retry_at"]/1000, tz)
-                    status += f" (yeniden kontrol {retry:%H.%M} TSİ)"
-            lines.append(f"{index}. {symbol.split('/')[0]} | {plan['direction']} | {status}")
-            lines.append(tracked_levels(plan))
-        for index,(symbol,state,plan) in enumerate(recent, len(live)+1):
-            label = "Setup geçersizleşti" if state == "INVALIDATED" else f"{plan['status']} | Kapandı"
-            lines.append(f"{index}. {symbol.split('/')[0]} | {plan['direction']} | {label}")
-            lines.append(tracked_levels(plan))
-        if not live and not recent:
-            lines.append("Takipte güncel setup yok.")
-        closed = [plan for _,_,state,plan in rows if state == "CLOSED"]
+                    label += f" · TP{max(hits)} alındı"
+                if state == "CLOSED":
+                    result = "Stop" if plan["status"] == "SL" else plan["status"]
+                    if result != f"TP{max(hits, default=0)}":
+                        label += f" · {result}"
+                card.append(label)
+                card.append(tracked_levels(plan))
+                if state == "AMBIGUOUS":
+                    card.append(plan.get("ambiguity_reason") or "Geçmiş mumlar doğrulanacak")
+                    if plan.get("manual_review"):
+                        card.append("Kalıcı inceleme")
+                    elif plan.get("retry_at"):
+                        retry = datetime.fromtimestamp(plan["retry_at"] / 1000, tz)
+                        card.append(f"Yeniden kontrol {retry:%H.%M} TSİ")
+                blocks.append("\n".join(card))
+        if not count:
+            blocks.append("Takipte güncel setup yok.")
         if rows:
-            total = sum(p.get("realized_r",0) for p in closed)
-            partial = sum(p.get("realized_r",0) for _,_,p in live)
-            wins = sum(p.get("realized_r",0)>0 for p in closed)
-            losses = sum(p.get("realized_r",0)<0 for p in closed)
-            lines.append(f"Kapanan: {len(closed)} | Kazanan: {wins} | Kaybeden: {losses}")
+            wins = sum(p.get("realized_r", 0) > 0 for p in closed)
+            losses = sum(p.get("realized_r", 0) < 0 for p in closed)
+            total = sum(p.get("realized_r", 0) for p in closed)
+            summary = ["Tüm dönem · kapanan işlemler",
+                       f"Kapanan: {len(closed)} | Kazanan: {wins} | Kaybeden: {losses}"]
             if closed:
-                lines.append(f"Başarı: %{100*wins/len(closed):.1f}")
-            lines.append(f"Kapanan net: {total:+.2f}R | Kısmi TP (brüt): {partial:+.2f}R")
-            marks = [p.get("open_r") for _,state,p in live if state in {"ACTIVE","AMBIGUOUS"}]
-            if all(value is not None for value in marks):
-                lines.append(f"Açık sinyal PnL (son kapanış): {sum(marks):+.2f}R")
-            else:
-                lines.append("Açık sinyal PnL: kapanmış mum bekleniyor.")
-        lines.append("Sanal sinyal takibi. Gerçek emir gönderilmez.")
-        return "\n".join(lines)
+                summary.append(f"Başarı: %{100*wins/len(closed):.1f}")
+            summary.append(f"Kapanan net: {total:+.2f}R")
+            blocks.append("\n".join(summary))
+
+            live = [p for state in ("ACTIVE", "AMBIGUOUS") for _, p in sections[state][1]]
+            if live:
+                partial = sum(p.get("realized_r", 0) for p in live)
+                marks = [p.get("open_r") for p in live]
+                pnl = (f"{sum(marks):+.2f}R" if all(value is not None for value in marks)
+                       else "doğrulanmış kapanış bekleniyor")
+                blocks.append(f"Açık takip · kısmi TP (brüt): {partial:+.2f}R\nAçık sinyal PnL: {pnl}")
+        blocks.append("Sanal sinyal takibi. Gerçek emir gönderilmez.")
+        return "\n\n".join(blocks)
 
     def handle_mevcut(self) -> str:
         """Show today's signal outcomes and still-open signals only."""

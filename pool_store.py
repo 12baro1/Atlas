@@ -21,10 +21,11 @@ from contextlib import nullcontext
 import logging
 import shutil
 import sqlite3
-import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from sqlite_connections import ThreadConnections
 
 logger = logging.getLogger("atlas.pool_store")
 
@@ -81,10 +82,7 @@ class PoolStore:
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self.db_path = self.directory / "pool_state.db"
-        self._local = threading.local()
-        self._all_conns: List[sqlite3.Connection] = []
-        self._conn_lock = threading.Lock()
-        self._closed = False
+        self._connections = ThreadConnections()
         self._open()
 
     # ------------------------------------------------------------------
@@ -106,14 +104,7 @@ class PoolStore:
         return conn
 
     def _thread_conn(self) -> sqlite3.Connection:
-        conn = getattr(self._local, "conn", None)
-        if conn is None:
-            conn = self._connect()
-            self._local.conn = conn
-            with self._conn_lock:
-                if not self._closed:
-                    self._all_conns.append(conn)
-        return conn
+        return self._connections.get(self._connect)
 
     def _open(self):
         try:
@@ -125,13 +116,13 @@ class PoolStore:
             conn.executescript(_SCHEMA + telegram_tracking.SCHEMA)
             self.set_meta("schema_version", str(SCHEMA_VERSION))
         except (sqlite3.OperationalError, OSError):
-            self._close_all()
+            self._connections.close()
             raise
         except sqlite3.DatabaseError as exc:
             logger.error(f"Pool store damaged, recovering: {exc}")
-            self._close_all()
+            self._connections.close()
             self._recover_corrupt_file()
-            self._closed = False  # reopen after quarantine
+            self._connections = ThreadConnections()
             conn = self._thread_conn()
             conn.executescript(_SCHEMA + telegram_tracking.SCHEMA)
             self.set_meta("schema_version", str(SCHEMA_VERSION))
@@ -542,19 +533,9 @@ class PoolStore:
         except sqlite3.DatabaseError as exc:
             logger.warning(f"WAL checkpoint failed: {exc}")
 
-    def _close_all(self):
-        with self._conn_lock:
-            self._closed = True
-            for conn in self._all_conns:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-            self._all_conns = []
-        self._local = threading.local()
 
     def close(self):
-        self._close_all()
+        self._connections.close()
 
 
 class _WriteTransaction:
