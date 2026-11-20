@@ -736,7 +736,9 @@ class AtlasRuntime:
                                 "broken": [row["strategy_id"] for row in diagnostics.get("strategies", [])
                                            if row.get("strategy_id") and row.get("status") in
                                            {"NO_SETUP", "CONDITION_NOT_MET"}]}
-                    pool.tracking.advance_tracking(symbol, closed_15m)
+                    tracking_bars = data.get("5m") or data.get("5M")
+                    if tracking_bars:
+                        pool.tracking.advance_tracking(symbol, tracking_bars)
                     self._accumulate_strategy_telemetry(result)
                     self._register_result(result)
                     with self._lock:

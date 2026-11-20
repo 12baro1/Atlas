@@ -5,7 +5,7 @@ import time
 import requests
 
 from core.candle import Candle
-from tracking_history import BAR, MINUTE, EvidenceMissing, indexed, matches, trades_match
+from tracking_history import BAR, MINUTE, QUARTER_HOUR, EvidenceMissing, indexed, matches, trades_match
 from telegram_prices import confirmed_target_levels, tracked_levels
 from trade_journal import TradeJournal
 
@@ -107,8 +107,15 @@ def watch_closed_targets(conn, chat, symbol, revision, plan):
 
 
 def next_bar(plan):
-    # The journal starts on the first 15m open strictly after publication.
-    return plan.get("next_bar_time", (plan.get("last_processed_candle_time", plan["opened_at"]) // BAR + 1) * BAR)
+    if "next_bar_time" in plan:
+        start = plan["next_bar_time"]
+        if "parent_prices" not in plan:
+            start = max(start, plan.get("verified_until", 0) // BAR * BAR)
+        return start
+    if "last_processed_candle_time" in plan:
+        # Older plans with only this cursor already consumed the entire 15m bar.
+        return (plan["last_processed_candle_time"] // QUARTER_HOUR + 1) * QUARTER_HOUR
+    return (plan["opened_at"] // BAR + 1) * BAR
 
 
 def apply_bar(plan, candle, width):
@@ -191,7 +198,7 @@ def resolve_bar(plan, symbol, candle, width, history, now):
             if plan["status"] != "PENDING":
                 break
         return True
-    for step in ((5 * MINUTE, MINUTE) if width == BAR else (MINUTE,)):
+    for step in ((5 * MINUTE, MINUTE) if width == QUARTER_HOUR else (MINUTE,)):
         children = child_range(history, symbol, candle.time, width, step, now)
         if all(children) and matches(candle, children):
             break
@@ -209,13 +216,13 @@ def child_range(history, symbol, start, span, width, now):
     return [bars.get(t) for t in range(start, start + span, width)]
 
 
-def recover_missing_bar(history, symbol, start, now):
-    for width in (5 * MINUTE, MINUTE):
-        children = child_range(history, symbol, start, BAR, width, now)
+def recover_missing_bar(history, symbol, start, now, span):
+    for width in ((BAR, MINUTE) if span == QUARTER_HOUR else (MINUTE,)):
+        children = child_range(history, symbol, start, span, width, now)
         if all(children):
             return Candle(start, children[0].open, max(c.high for c in children),
                           min(c.low for c in children), children[-1].close, sum(c.volume for c in children))
-    raise EvidenceMissing("15m geçmişi eksik, alt mumlar aralığı tamamlamıyor")
+    raise EvidenceMissing(f"{span // MINUTE}m geçmişi eksik, alt mumlar aralığı tamamlamıyor")
 
 
 def mark_position(plan, price, stamp):
@@ -278,7 +285,8 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
     if history is None and plan.get("verified_until"):
         return
     start = next_bar(plan)
-    count = min(96, (now - start) // BAR)
+    width = plan.get("parent_width", QUARTER_HOUR) if "parent_prices" in plan else BAR
+    count = min(1 if width == QUARTER_HOUR else 96, (now - start) // width)
     if count <= 0:
         return
     # Older code set entry_reached before proving the order and omitted its timestamp.
@@ -287,28 +295,30 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
     try:
         if history:
             plan["history_checked_at"] = now
-            candles = history.candles(symbol, start, BAR, count)
-        bars = indexed(candles or [], BAR, now)
+            candles = history.candles(symbol, start, width, count)
+        bars = indexed(candles or [], width, now)
         last_available = max(bars, default=0)
         if not history and last_available < start:
             return
-        for stamp in range(start, start + count * BAR, BAR):
+        for stamp in range(start, start + count * width, width):
             candle = bars.get(stamp)
             recovered = False
             if candle is None:
                 if history is None or stamp in bars:
-                    raise EvidenceMissing("15m geçmişinde eksik veya çelişkili mum")
-                candle = recover_missing_bar(history, symbol, stamp, now)
+                    raise EvidenceMissing(f"{width // MINUTE}m geçmişinde eksik veya çelişkili mum")
+                candle = recover_missing_bar(history, symbol, stamp, now, width)
                 recovered = True
             # Pin the parent while verified children advance the journal cursor.
             plan["next_bar_time"] = stamp
             prices = [candle.open, candle.high, candle.low, candle.close]
             if plan.get("parent_prices", prices) != prices:
-                raise EvidenceMissing("Kısmen doğrulanmış 15m mumun fiyatları değişti")
+                raise EvidenceMissing(f"Kısmen doğrulanmış {width // MINUTE}m mumun fiyatları değişti")
+            plan["parent_width"] = width
             plan["parent_prices"] = prices
-            refined = resolve_bar(plan, symbol, candle, BAR, history, now)
-            plan["next_bar_time"] = stamp + BAR
+            refined = resolve_bar(plan, symbol, candle, width, history, now)
+            plan["next_bar_time"] = stamp + width
             plan.pop("parent_prices")
+            plan.pop("parent_width")
             plan.pop("verified_until", None)
             plan.pop("live_price", None)
             for key in ("ambiguity_reason", "blocked_at", "retry_at", "retry_count", "network_failures"):
@@ -316,7 +326,7 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
             if plan["status"] != "PENDING":
                 return "CLOSED", plan
             if plan["entry_reached"]:
-                mark_position(plan, candle.close, stamp + BAR)
+                mark_position(plan, candle.close, stamp + width)
             if recovered or refined or (not history and stamp == last_available):
                 break
     except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:

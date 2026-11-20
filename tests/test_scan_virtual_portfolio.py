@@ -160,9 +160,9 @@ def test_virtual_candles_and_midnight(pool, finish, monkeypatch):
     chat = service()
     pool.tracking.follow_analysis(chat.chat_id,observation())
     def bar(i, low, high):
-        return SimpleNamespace(time=start+900000*i, low=low, high=high, open=(low+high)/2, close=(low+high)/2)
+        return SimpleNamespace(time=start+300000*i, low=low, high=high, open=(low+high)/2, close=(low+high)/2)
     def advance(i,low,high):
-        monkeypatch.setattr(telegram_tracking.time,"time",lambda:(start+(i+1)*900000)/1000)
+        monkeypatch.setattr(telegram_tracking.time,"time",lambda:(start+(i+1)*300000)/1000)
         pool.tracking.advance_tracking(BTC,[bar(i,low,high)])
         return pool.tracking.tracked(chat.chat_id)[0]
     assert advance(1,51000,52000)[2]=="WAITING"
@@ -350,7 +350,7 @@ def test_replayed_market_snapshot_cannot_rewind_partial_pnl(pool, monkeypatch):
     pool.tracking.follow_analysis(bot.chat_id,row)
     start = pool.tracking.tracked(bot.chat_id)[0][3]["opened_at"]
     def bar(i, low, high, close):
-        return SimpleNamespace(time=start+900000*i,low=low,high=high,close=close,open=close)
+        return SimpleNamespace(time=start+300000*i,low=low,high=high,close=close,open=close)
     fill, partial = bar(1,49950,50050,50000), bar(2,50600,51050,50900)
     monkeypatch.setattr(time, "time", lambda: start / 1000 + 2700)
     pool.tracking.advance_tracking(BTC,[fill,partial])
@@ -359,7 +359,7 @@ def test_replayed_market_snapshot_cannot_rewind_partial_pnl(pool, monkeypatch):
     assert outcome["tps_hit"]==[1]
     assert outcome["realized_r"]==pytest.approx(.4)
     assert outcome["open_r"]==pytest.approx(.8*900/500)
-    assert outcome["mark_time"]==partial.time+900000
+    assert outcome["mark_time"]==partial.time+300000
 
 
 def test_published_rr_requires_finite_cost_adjusted_reward():
