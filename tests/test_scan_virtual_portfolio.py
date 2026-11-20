@@ -406,7 +406,8 @@ def test_smc_without_h4_and_invalid_generators_are_not_structural_invalidation(m
     assert {row["status"] for row in report["strategies"]}=={"INVALID_DATA"}
 
 
-def test_remove_and_resume_symbol_persists_and_is_chat_scoped(tmp_path, monkeypatch):
+@pytest.mark.parametrize("command", ["/kaldir arb", "/kaldır@atlas arb", "/çıkart@atlas arb"])
+def test_remove_and_resume_symbol_persists_and_is_chat_scoped(tmp_path, monkeypatch, command):
     import time
     from telegram_command_service import is_recognized_command
 
@@ -422,8 +423,8 @@ def test_remove_and_resume_symbol_persists_and_is_chat_scoped(tmp_path, monkeypa
         for chat in (bot, other):
             pool.tracking.follow_analysis(chat.chat_id, seen)
         pool.tracking.follow_analysis(bot.chat_id, observation())
-        assert is_recognized_command("/çıkart@atlas arb")
-        assert "çıkarıldı" in bot.execute_command("/çıkart@atlas arb")
+        assert is_recognized_command(command)
+        assert "çıkarıldı" in bot.execute_command(command)
         assert "listesinde yok" in bot.execute_command("/cikart ARB/USDT")
         assert "ARB" not in bot.execute_command("/işlemler")
         assert "BTC" in bot.execute_command("/işlemler")
