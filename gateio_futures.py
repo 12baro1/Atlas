@@ -11,6 +11,15 @@ import requests
 BASE_URL = "https://api.gateio.ws/api/v4"
 
 
+def trade_timestamp_ms(value):
+    """Gate sends both milliseconds and fractional Unix seconds in create_time_ms."""
+    try:
+        stamp = Decimal(str(value))
+        return int(stamp * 1000 if stamp < 10_000_000_000 else stamp)
+    except (InvalidOperation, OverflowError, ValueError) as exc:
+        raise ValueError("Invalid Gate trade timestamp") from exc
+
+
 def _scaled_contract_amount(value, multiplier):
     """Scale Gate contract counts without binary-float multiplication drift."""
     try:
@@ -165,16 +174,22 @@ class GateFuturesExchange:
                 return []
             query["to"] = min(now_s, query["from"] + self.parse_timeframe(timeframe) * count - 1)
         rows = self._get("/futures/usdt/candlesticks", query) or []
-        result = []
+        by_time = {}
         for row in rows:
             try:
                 if since is not None and int(row["t"]) * 1000 < since:
                     continue
-                result.append([int(row["t"]) * 1000, float(row["o"]), float(row["h"]),
-                               float(row["l"]), float(row["c"]), _scaled_contract_amount(abs(float(row["v"])), self.contract_size(symbol))])
+                stamp = int(row["t"]) * 1000
+                candle = [stamp, float(row["o"]), float(row["h"]), float(row["l"]), float(row["c"]),
+                          _scaled_contract_amount(abs(float(row["v"])), self.contract_size(symbol))]
+                # Conflicting duplicates leave a gap for historical verification.
+                if stamp in by_time and by_time[stamp] != candle:
+                    by_time[stamp] = None
+                else:
+                    by_time[stamp] = candle
             except (KeyError, TypeError, ValueError, OverflowError):
                 continue
-        return sorted(result, key=lambda x: x[0])[-count:]
+        return [by_time[t] for t in sorted(by_time) if by_time[t] is not None][-count:]
 
     def fetch_order_book(self, symbol, limit=50, params=None):
         data = self._get("/futures/usdt/order_book", {
@@ -204,12 +219,7 @@ class GateFuturesExchange:
         out = []
         for row in rows:
             try:
-                stamp = int(row["create_time_ms"])
-                # Gate.io's create_time_ms is normally milliseconds, but some
-                # responses/fixtures provide Unix seconds despite the field name.
-                # Normalize before both since filtering and freshness consumers.
-                if stamp < 10_000_000_000:
-                    stamp *= 1000
+                stamp = trade_timestamp_ms(row["create_time_ms"])
                 if since is not None and stamp < int(since):
                     continue
                 size = _scaled_contract_amount(abs(float(row["size"])), self.contract_size(symbol))

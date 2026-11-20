@@ -281,11 +281,23 @@ class PoolStore:
 
     def open_symbols(self):
         return [row[0] for row in self._thread_conn().execute(
-            "SELECT DISTINCT symbol FROM chat_plans WHERE state IN ('WAITING','ACTIVE')")]
+            "SELECT DISTINCT symbol FROM chat_plans WHERE state IN ('WAITING','ACTIVE','AMBIGUOUS') "
+            "AND COALESCE(json_extract(payload,'$.manual_review'),0)=0 "
+            "AND COALESCE(json_extract(payload,'$.retry_at'),0)<=?", (int(time.time()*1000),))]
 
-    def advance_tracking(self, symbol, candles):
-        with self._transaction() as conn:
-            telegram_tracking.advance(conn, symbol, candles)
+    def advance_tracking(self, symbol, candles=None, *, history=None):
+        now = int(time.time() * 1000)
+        rows = self._thread_conn().execute(
+            "SELECT chat,revision,state,payload FROM chat_plans WHERE symbol=? "
+            "AND state IN ('ACTIVE','WAITING','AMBIGUOUS')", (symbol,)).fetchall()
+        for row in rows:
+            if row[2] == "AMBIGUOUS" and history is None:
+                continue
+            result = telegram_tracking.evaluate(symbol, row[2], row[3], now, candles, history)
+            if result:
+                # Network and replay run outside the writer lock. CAS rejects stale snapshots.
+                with self._transaction() as conn:
+                    telegram_tracking.save(conn, symbol, row, result)
 
     def pending_notifications(self, chat):
         return self._thread_conn().execute(
