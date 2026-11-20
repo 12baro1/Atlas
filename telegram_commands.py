@@ -48,6 +48,8 @@ TELEGRAM_COMMANDS = [
     TelegramCommand("havuz", "Havuzdaki doğrulanmış setup listesini göster", "handle_pool", "setup"),
     TelegramCommand("havuzdurum", "Kalıcı setup havuzu durumu", "handle_pool_status", "setup"),
     TelegramCommand("setup", "Belirtilen sembolün havuz setup detayları (örn: /setup BTC)", "handle_setup_symbol", "setup", True, "symbol"),
+    TelegramCommand("cikart", "Sembolü bu sohbetin işlem takibinden çıkar (örn: /çıkart ARB)", "handle_remove_symbol", "setup", True, "symbol"),
+    TelegramCommand("ekle", "Sembolün yeni setuplarını bu sohbette takip et", "handle_add_symbol", "setup", True, "symbol"),
     TelegramCommand("gecmis", "Son kapanan ve iptal edilen kayıtlar", "handle_history", "setup"),
 
     # İşlem görünümü: sinyal günlüğü ve doğrulanmış setup'lar tek komutta
@@ -84,6 +86,7 @@ def get_botfather_commands() -> list[dict]:
 def get_command_by_name(name: str) -> Optional[TelegramCommand]:
     """Look up public commands and preserve retired setup commands as aliases."""
     name_lower = name.lower()
+    name_lower = {"çıkart": "cikart", "işlemler": "islemler"}.get(name_lower, name_lower)
     for cmd in TELEGRAM_COMMANDS:
         if cmd.name.lower() == name_lower:
             return cmd

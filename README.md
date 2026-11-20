@@ -129,6 +129,8 @@ Komutlar **sadece slash (`/`) formatında** çalışır:
 - `/analiz BTC` — Belirtilen coin analizi
 - `/20tara` `/30tara` `/50tara` `/100tara` — N piyasa tara
 - `/tumtara` — Tüm desteklenen USDT perpetual piyasaları tara
+- `/çıkart ARB` veya `/cikart ARB` — Bu sohbetin ARB takibini durdurur ve sembolü `/islemler` listesinden çıkarır.
+- `/ekle ARB` — Yeni bir geçerli plan geldiğinde bu sohbette ARB takibini başlatır.
 - `/eniyi5` — Arka plan havuzundan en iyi 5 setup (yeni tarama **başlatmaz**)
 - `/mevcut` `/setuplar` `/takip` `/likidite BTC` — Setup ve takip
 - `/performans` `/istatistik` `/ogrenme` — Performans ve öğrenme

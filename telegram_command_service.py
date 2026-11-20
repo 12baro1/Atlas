@@ -485,6 +485,7 @@ class TelegramCommandService:
         self._session = requests.Session()
         self._reply_session = requests.Session()
         self._command_queue = queue.Queue(maxsize=MAX_QUEUED_COMMANDS)
+        self._notification_thread = None
         self._command_thread = None
         self._analysis_lock = threading.Lock()
         self._analysis_threads = {}
@@ -524,6 +525,9 @@ class TelegramCommandService:
             daemon=True,
         )
         self._command_thread.start()
+        self._notification_thread = threading.Thread(target=self._notification_loop,
+                                                     name="atlas-telegram-notifications", daemon=True)
+        self._notification_thread.start()
         self._thread = threading.Thread(
             target=self._poll_loop,
             name="atlas-telegram-commands",
@@ -540,7 +544,7 @@ class TelegramCommandService:
             return max(0.0, deadline - time.monotonic())
 
         self.stop_flag.set()
-        for thread in (self._thread, self._command_thread):
+        for thread in (self._thread, self._command_thread, self._notification_thread):
             if thread is not None and thread.is_alive():
                 thread.join(timeout=remaining())
 
@@ -560,7 +564,8 @@ class TelegramCommandService:
         else:
             self.logger.warning("Telegram polling thread still active at shutdown")
 
-        if not analysis_alive and not command_alive and not polling_alive:
+        notifications_alive = bool(self._notification_thread and self._notification_thread.is_alive())
+        if not analysis_alive and not command_alive and not polling_alive and not notifications_alive:
             self._reply_session.close()
         else:
             if analysis_alive:
@@ -569,7 +574,7 @@ class TelegramCommandService:
                 )
             if command_alive:
                 self.logger.warning("Keeping Telegram reply session open while command worker exits")
-        return not polling_alive and not command_alive and not analysis_alive
+        return not polling_alive and not command_alive and not analysis_alive and not notifications_alive
 
     def _fetch_bot_info(self) -> None:
         """Fetch bot username for @BotName command parsing."""
@@ -659,10 +664,6 @@ class TelegramCommandService:
             self.logger.exception("Could not synchronize Telegram update offset; continuing polling")
         while not self.stop_flag.is_set():
             try:
-                try:
-                    self._deliver_notifications()
-                except Exception as exc:
-                    self.logger.warning("Notification delivery deferred | type=%s", type(exc).__name__)
                 payload = {
                     "timeout": 15,
                     "allowed_updates": ["message", "edited_message"],
@@ -683,9 +684,19 @@ class TelegramCommandService:
                 self.stop_flag.wait(3)
         self.logger.info("Telegram command polling stopped")
 
+    def _notification_loop(self):
+        while not self.stop_flag.is_set():
+            try:
+                self._deliver_notifications()
+            except Exception as exc:
+                self.logger.warning("Notification delivery deferred | type=%s", type(exc).__name__)
+            self.stop_flag.wait(3)
+
     def _deliver_notifications(self):
         tracking = get_opportunity_pool().tracking
         for _ in range(5):
+            if self.stop_flag.is_set():
+                return
             claim = tracking.claim_notification(self.chat_id)
             if not claim:
                 return
@@ -699,8 +710,8 @@ class TelegramCommandService:
                         or str((receipt.get("chat") or {}).get("id")) != self.chat_id):
                     raise TelegramDeliveryError("uncertain")
             except TelegramDeliveryError as exc:
-                state = "failed" if exc.state == "retry" and attempt >= 8 else exc.state
-                delay = max(exc.retry_after, min(600, 2 ** attempt)) if state == "retry" else 0
+                state = exc.state
+                delay = max(exc.retry_after, min(600, 2 ** min(attempt, 10))) if state == "retry" else 0
                 tracking.finish_notification(self.chat_id,event_id,attempt,state,retry_after=delay)
                 return
             except Exception:
@@ -886,6 +897,8 @@ class TelegramCommandService:
                     continue
                 self._command_and_reply(raw_command)
                 self.logger.info("Telegram command execution completed: %s", command_label[:80])
+            except Exception as exc:
+                self.logger.warning("Telegram command worker recovered | type=%s", type(exc).__name__)
             finally:
                 self._command_queue.task_done()
 
@@ -1192,12 +1205,16 @@ class TelegramCommandService:
     def handle_history(self) -> str:
         """Show recent completed and invalidated signal records."""
         rows = get_opportunity_pool().tracking.iter_tracked(self.chat_id)
-        history = heapq.nlargest(15, (row for row in rows if row[2] in {"CLOSED", "INVALIDATED", "UNVERIFIED"}),
+        history = heapq.nlargest(15, (row for row in rows if row[2] in {"CLOSED", "INVALIDATED", "UNVERIFIED", "REMOVED"}),
                                  key=lambda row: row[3].get("resolved_at") or row[3]["opened_at"])
         lines = ["SİNYAL GEÇMİŞİ"]
         for symbol, revision, state, plan in history:
             if state == "INVALIDATED":
                 label = "Geçersizleşti"
+            elif state == "REMOVED":
+                label = "Kullanıcı takipten çıkardı"
+                if _trade_progress(plan):
+                    label += f" · {_trade_progress(plan)}"
             elif state == "UNVERIFIED":
                 progress = _trade_progress(plan)
                 label = "Doğrulanamadı · takipten kaldırıldı"
@@ -1354,6 +1371,25 @@ class TelegramCommandService:
             lines.append(format_plan_levels(item.entry_price, item.stop_loss, item.tp1, item.tp2, item.tp3))
         return "\n".join(lines)
 
+    def handle_remove_symbol(self, raw):
+        return self._set_symbol_tracking(raw, enabled=False)
+
+    def handle_add_symbol(self, raw):
+        return self._set_symbol_tracking(raw, enabled=True)
+
+    def _set_symbol_tracking(self, raw, *, enabled):
+        ticker = re.fullmatch(r"([A-Z0-9]+?)(?:/USDT(?::USDT)?|_USDT|USDT)?", raw.strip().upper())
+        if not ticker:
+            return "Kullanım: /ekle ARB" if enabled else "Kullanım: /çıkart ARB"
+        base = ticker[1]
+        symbol = f"{base}/USDT:USDT"
+        changed = get_opportunity_pool().tracking.set_symbol_tracking(self.chat_id, symbol, enabled=enabled)
+        if enabled:
+            return (f"{base} için takip açıldı. Yeni geçerli setup bekleniyor." if changed
+                    else f"{base} bu sohbette zaten takipte.")
+        return (f"{base} bu sohbetin işlem takibinden çıkarıldı. Yeniden takip için /ekle {base}"
+                if changed else f"{base} bu sohbetin takip listesinde yok.")
+
     def handle_islemler(self) -> str:
         rows = get_opportunity_pool().tracking.iter_tracked(self.chat_id)
         tz = ZoneInfo("Europe/Istanbul")
@@ -1379,6 +1415,8 @@ class TelegramCommandService:
                 total += net
                 wins += net > 0
                 losses += net < 0
+            if plan.get("tracking_muted"):
+                continue
             if state in {"CLOSED", "INVALIDATED"}:
                 resolved = datetime.fromtimestamp((plan.get("resolved_at") or 0) / 1000, tz)
                 if resolved.date() != today:

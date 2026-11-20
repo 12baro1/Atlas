@@ -578,3 +578,15 @@ def test_unbounded_scan_command_is_capped_to_top_300(tmp_path):
     assert result["selected"] == 300
     assert result["selected_preview"] == ranked[:5]
     assert result["ranking_source"] == "fake_24h_quote_volume"
+
+
+def test_scan_worker_retries_transient_queue_lock(monkeypatch):
+    import sqlite3
+    from unittest.mock import Mock
+    service = ScanService(Mock(), Mock(), Mock())
+    busy = sqlite3.OperationalError("database is locked")
+    busy.sqlite_errorcode = sqlite3.SQLITE_BUSY
+    service.queue.claim_next.side_effect = [busy, None]
+    monkeypatch.setattr(service._stop_event, "wait", Mock(side_effect=[False, True]))
+    service._worker_loop()
+    assert service.queue.claim_next.call_count == 2

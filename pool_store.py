@@ -144,6 +144,23 @@ class PoolStore:
                 WHERE state='AMBIGUOUS' AND json_extract(payload, '$.ambiguity_reason')=?
             """, ("Aynı milisaniyede farklı işlem fiyatları",))
 
+            # Older releases could archive an open remainder solely on a transport
+            # timeout. Resume only the current followed revision with confirmed TPs.
+            conn.execute("""
+                UPDATE chat_plans AS p SET state='AMBIGUOUS', payload=json_set(
+                    json_remove(payload,'$.retry_count','$.retry_at','$.resolved_at','$.manual_review'),
+                    '$.status','PENDING', '$.ambiguity_reason','Bağlantı sonrası geçmiş kontrolü bekleniyor')
+                WHERE state='UNVERIFIED' AND json_array_length(payload,'$.tps_hit') BETWEEN 1 AND 2
+                  AND json_extract(payload,'$.ambiguity_reason') IN (
+                    'Gate.io geçmiş verisi alınamadı (TimeoutError)', 'Gate.io geçmiş verisi alınamadı (ReadTimeout)',
+                    'Gate.io geçmiş verisi alınamadı (ConnectTimeout)', 'Gate.io geçmiş verisi alınamadı (ConnectionError)',
+                    'Gate.io geçmiş verisi alınamadı (Timeout)')
+                  AND EXISTS (SELECT 1 FROM chat_follows f WHERE f.chat=p.chat AND f.symbol=p.symbol
+                              AND f.revision=p.revision)
+                  AND NOT EXISTS (SELECT 1 FROM chat_tracking_preferences f WHERE f.chat=p.chat AND f.symbol=p.symbol
+                                  AND (f.muted=1 OR f.changed_at >= json_extract(p.payload,'$.resolved_at')))
+            """)
+
     def _recover_corrupt_file(self):
         """Quarantine the corrupt DB sidecar files and start a fresh one."""
         stamp = int(time.time() * 1000)
@@ -222,6 +239,10 @@ class PoolStore:
 
     def _apply_observation(self, conn, chat, revision, row, *, announce):
         symbol = row["symbol"]
+        preference = conn.execute("SELECT muted,changed_at FROM chat_tracking_preferences WHERE chat=? AND symbol=?",
+                                  (chat, symbol)).fetchone()
+        if preference and (preference[0] or row["observed"] <= preference[1]):
+            return
         stamp = (row["cutoff"], row["observed"])
         key = f"watch:{chat}:{symbol}"
         old = conn.execute("SELECT value FROM pool_meta WHERE key=?", (key,)).fetchone()
@@ -281,14 +302,43 @@ class PoolStore:
     def follow(self, chat, setups):
         self.follow_delivered(chat,self.displayed_observations(setups))
 
+    def set_symbol_tracking(self, chat, symbol, *, enabled):
+        """Change this chat's subscription and retire its open plans atomically."""
+        now = int(time.time() * 1000)
+        with self._transaction() as conn:
+            follows = conn.execute("SELECT 1 FROM chat_follows WHERE chat=? AND symbol=?", (chat, symbol)).fetchone()
+            pref = conn.execute("SELECT muted FROM chat_tracking_preferences WHERE chat=? AND symbol=?",
+                                (chat, symbol)).fetchone()
+            if enabled:
+                if follows and not (pref and pref[0]):
+                    return False
+                conn.execute("INSERT OR IGNORE INTO chat_follows(chat,symbol) VALUES(?,?)", (chat, symbol))
+                conn.execute("INSERT INTO chat_tracking_preferences VALUES(?,?,0,?,0) "
+                             "ON CONFLICT(chat,symbol) DO UPDATE SET muted=0,changed_at=excluded.changed_at",
+                             (chat, symbol, now))
+            else:
+                if not follows or (pref and pref[0]):
+                    return False
+                conn.execute("INSERT OR REPLACE INTO chat_tracking_preferences "
+                             "SELECT ?,?,1,?,COALESCE(MAX(id),0) FROM chat_events WHERE chat=? AND symbol=?",
+                             (chat, symbol, now, chat, symbol))
+                conn.execute("UPDATE chat_plans SET state='REMOVED',payload=json_set(payload,'$.status','REMOVED','$.resolved_at',?) "
+                             "WHERE chat=? AND symbol=? AND state IN ('WAITING','ACTIVE','AMBIGUOUS')",
+                             (now, chat, symbol))
+            return True
+
     def tracked(self, chat):
         return list(self.iter_tracked(chat))
 
     def iter_tracked(self, chat):
-        for symbol, revision, state, payload in self._thread_conn().execute(
-                "SELECT symbol,revision,state,payload FROM chat_plans WHERE chat=? ORDER BY symbol,revision DESC",
-                (chat,)):
-            yield symbol, revision, state, json.loads(payload)
+        for symbol, revision, state, payload, muted in self._thread_conn().execute(
+                "SELECT p.symbol,p.revision,p.state,p.payload,f.muted FROM chat_plans p "
+                "LEFT JOIN chat_tracking_preferences f USING(chat,symbol) WHERE p.chat=? "
+                "ORDER BY p.symbol,p.revision DESC", (chat,)):
+            plan = json.loads(payload)
+            if muted:
+                plan["tracking_muted"] = True
+            yield symbol, revision, state, plan
 
     def open_symbols(self):
         return [row[0] for row in self._thread_conn().execute(
@@ -312,7 +362,8 @@ class PoolStore:
 
     def pending_notifications(self, chat):
         return self._thread_conn().execute(
-            "SELECT id,message FROM chat_events WHERE chat=? AND delivered=0 ORDER BY id LIMIT 50", (chat,)
+            "SELECT e.id,e.message FROM chat_events e LEFT JOIN chat_tracking_preferences p USING(chat,symbol) "
+            "WHERE e.chat=? AND e.delivered=0 AND e.id>COALESCE(p.suppress_through,0) ORDER BY e.id LIMIT 50", (chat,)
         ).fetchall()
 
     def claim_notification(self, chat):
@@ -324,7 +375,8 @@ class PoolStore:
             row = conn.execute("""
                 SELECT e.id,e.message,d.state,d.attempts,d.next_at
                 FROM chat_events e LEFT JOIN chat_event_delivery d ON e.id=d.event_id
-                WHERE e.chat=? AND e.delivered=0 AND (d.state IS NULL OR d.state IN ('sending','retry'))
+                LEFT JOIN chat_tracking_preferences p ON p.chat=e.chat AND p.symbol=e.symbol
+                WHERE e.chat=? AND e.delivered=0 AND e.id>COALESCE(p.suppress_through,0) AND (d.state IS NULL OR d.state IN ('sending','retry'))
                 ORDER BY e.id LIMIT 1
             """, (chat,)).fetchone()
             if not row:
