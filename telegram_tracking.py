@@ -118,6 +118,15 @@ def next_bar(plan):
     return (plan["opened_at"] // BAR + 1) * BAR
 
 
+def _exit_levels_in_bar(plan, candle):
+    long = plan["direction"] == "LONG"
+    stop = plan.get("trailing_stop", plan["stop_loss"])
+    targets = [plan[f"tp{i}"] for i in (1, 2, 3) if i not in plan.get("tps_hit", [])]
+    touched = [price for price in targets if (candle.high >= price if long else candle.low <= price)]
+    stopped = candle.low <= stop if long else candle.high >= stop
+    return targets, touched, stopped
+
+
 def apply_bar(plan, candle, width):
     """Return False without mutating the plan if OHLC cannot order its events."""
     if getattr(candle, "volume", None) == 0:
@@ -125,10 +134,7 @@ def apply_bar(plan, candle, width):
         return True
     long = plan["direction"] == "LONG"
     stop = plan.get("trailing_stop", plan["stop_loss"])
-    hits = plan.get("tps_hit", [])
-    targets = [plan[f"tp{i}"] for i in (1, 2, 3) if i not in hits]
-    touched = [p for p in targets if (candle.high >= p if long else candle.low <= p)]
-    stopped = candle.low <= stop if long else candle.high >= stop
+    targets, touched, stopped = _exit_levels_in_bar(plan, candle)
     market = not plan["entry_reached"] and plan["payload"]["execution_costs"]["entry_type"] == "MARKET"
     entry = candle.open if market else plan["entry"]
     if not plan["entry_reached"]:
@@ -163,6 +169,14 @@ def resolve_bar(plan, symbol, candle, width, history, now):
     if candle.time >= verified and apply_bar(plan, candle, width):
         plan["verified_until"] = candle.time + width
         return False
+    if width == BAR and candle.time < verified and entry_confirmed(plan):
+        _, touched, stopped = _exit_levels_in_bar(plan, candle)
+        if not touched and not stopped:
+            # A closed 5m candle bounds the entire unprocessed tail as well.
+            # Do not replay the prefix where the position was already updated.
+            plan["last_processed_candle_time"] = candle.time
+            plan["verified_until"] = candle.time + width
+            return False
     if history is None:
         raise EvidenceMissing("Mum içinde giriş, hedef veya stop sırası belirsiz")
     if width == MINUTE:

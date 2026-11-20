@@ -113,6 +113,29 @@ def test_gate_futures_wire_format_and_fractional_epoch_seconds(monkeypatch):
     assert get.call_args.args[1] == {"contract":"CAP_USDT","from":1795140900,"to":1795140959,"limit":1000}
 
 
+@pytest.mark.parametrize(("position", "candle"), [
+    (plan(entry_reached_at=START+100), bar(START, 100, 106, 98, 105)),
+    (
+        plan(direction="SHORT", stop_loss=110, tp1=90, tp2=80, tp3=70,
+             tps_hit=[1], trailing_stop=100, realized_r=0.5),
+        bar(START, 91, 95, 89, 92),
+    ),
+])
+def test_closed_five_minute_bar_without_exit_levels_needs_no_lower_candles(position, candle):
+    history = Mock()
+    history.candles.side_effect = [[candle], EvidenceMissing("Alt mum geçmişi eksik")]
+    tracked = dict(position, verified_until=START + MINUTE, next_bar_time=START)
+    state, result = evaluate(BTC, "ACTIVE", json.dumps(tracked), START+BAR, history=history)
+
+    assert state == "ACTIVE"
+    assert result["next_bar_time"] == START + BAR
+    assert result.get("tps_hit") == tracked.get("tps_hit")
+    assert result.get("realized_r") == tracked.get("realized_r")
+    assert "ambiguity_reason" not in result
+    history.candles.assert_called_once_with(BTC, START, BAR, 1)
+    history.ticks.assert_not_called()
+
+
 def test_partial_verification_survives_missing_later_ticks_and_restart():
     first = bar(START, 105, 112, 104, 111)
     second = bar(START+MINUTE, 111, 121, 99, 111)
