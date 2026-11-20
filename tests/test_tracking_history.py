@@ -318,3 +318,58 @@ def test_only_current_partial_timeout_archive_reopens(tmp_path):
         assert old[2] == "UNVERIFIED"
     finally:
         store.close()
+
+
+@pytest.mark.parametrize("direction", ["SHORT", "LONG"])
+def test_previous_day_closed_targets_observed_without_changing_fill_or_pnl(tmp_path, monkeypatch, direction):
+    import time
+    import telegram_command_service as telegram
+    from types import SimpleNamespace
+    from pool_store import PoolStore
+    from tests.test_scan_virtual_portfolio import service
+
+    clock = [START + 86400000]
+    monkeypatch.setattr(time, "time", lambda: clock[0]/1000)
+    class ReportDateTime(telegram.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromtimestamp(clock[0] / 1000, tz)
+
+    monkeypatch.setattr(telegram, "datetime", ReportDateTime)
+    store = PoolStore(str(tmp_path))
+    closed = plan(direction=direction, strategy="test", resolved_at=START+1, tps_hit=[1],
+                  status="SL", hit_sl=True, realized_r=0.3)
+    if direction == "SHORT":
+        closed.update(tp1=90, tp2=80, tp3=70)
+    with store._transaction() as conn:
+        conn.execute("INSERT INTO chat_plans VALUES('c','BNB',1,'setup','CLOSED',?)", (json.dumps(closed),))
+        # Simulate a database from a release before post-exit tracking.
+        conn.execute("DELETE FROM pool_meta WHERE key='post_exit_watch_seeded'")
+    store.close()
+    store = PoolStore(str(tmp_path))
+    try:
+        history = Mock()
+        history.ticks.return_value = [TradeGroup(START, {closed["tp3"]}, 1), TradeGroup(START+2, {100}, 1)]
+        store.refresh_closed_targets(history)
+        assert store.tracked("c")[0][3]["post_exit_hits"] == []
+        clock[0] += MINUTE
+        price = closed["tp3"]
+        history.candles.return_value = [bar(START+MINUTE, price,price,price,price)]
+        store.refresh_closed_targets(history)
+        clock[0] += MINUTE
+        store.refresh_closed_targets(history)
+        clock[0] += 2 * MINUTE
+        store.refresh_closed_targets(history)
+        record = store.tracked("c")[0]
+        assert record[2] == "CLOSED" and record[3]["post_exit_hits"] == [2, 3]
+        assert record[3]["tps_hit"] == [1] and record[3]["realized_r"] == 0.3
+        assert record[3]["post_exit_incomplete"] and not store.pending_notifications("c")
+        monkeypatch.setattr(telegram, "get_opportunity_pool", lambda: SimpleNamespace(tracking=store))
+        report = service("c").handle_islemler()
+        assert "TP1 alındı · Stop · +0.30R" in report
+        assert "Kapanıştan sonra fiyat: TP2, TP3" in report
+        clock[0] += BAR
+        store.refresh_closed_targets(history)
+        assert history.candles.call_count == 3
+    finally:
+        store.close()

@@ -159,6 +159,11 @@ class DailyPoolRefresh:
                         self.refresh_virtual_positions()
                     except Exception:
                         logger.exception("Virtual position refresh failed")
+                    if not self._stop_event.is_set():
+                        try:
+                            self.pool.tracking.refresh_closed_targets()
+                        except Exception:
+                            logger.exception("Closed target observation failed")
                 try:
                     self.run_if_due()
                 except Exception as exc:  # pragma: no cover

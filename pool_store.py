@@ -161,6 +161,12 @@ class PoolStore:
                                   AND (f.muted=1 OR f.changed_at >= json_extract(p.payload,'$.resolved_at')))
             """)
 
+            if not conn.execute("SELECT 1 FROM pool_meta WHERE key='post_exit_watch_seeded'").fetchone():
+                for chat, symbol, revision, raw in conn.execute(
+                        "SELECT chat,symbol,revision,payload FROM chat_plans WHERE state='CLOSED'"):
+                    telegram_tracking.watch_closed_targets(conn, chat, symbol, revision, json.loads(raw))
+                conn.execute("INSERT INTO pool_meta VALUES('post_exit_watch_seeded','1')")
+
     def _recover_corrupt_file(self):
         """Quarantine the corrupt DB sidecar files and start a fresh one."""
         stamp = int(time.time() * 1000)
@@ -331,11 +337,15 @@ class PoolStore:
         return list(self.iter_tracked(chat))
 
     def iter_tracked(self, chat):
-        for symbol, revision, state, payload, muted in self._thread_conn().execute(
-                "SELECT p.symbol,p.revision,p.state,p.payload,f.muted FROM chat_plans p "
+        for symbol, revision, state, payload, muted, hits, incomplete in self._thread_conn().execute(
+                "SELECT p.symbol,p.revision,p.state,p.payload,f.muted,w.hits,w.incomplete FROM chat_plans p "
+                "LEFT JOIN post_exit_watch w USING(chat,symbol,revision) "
                 "LEFT JOIN chat_tracking_preferences f USING(chat,symbol) WHERE p.chat=? "
                 "ORDER BY p.symbol,p.revision DESC", (chat,)):
             plan = json.loads(payload)
+            if hits is not None:
+                plan["post_exit_hits"] = json.loads(hits)
+                plan["post_exit_incomplete"] = bool(incomplete)
             if muted:
                 plan["tracking_muted"] = True
             yield symbol, revision, state, plan
@@ -351,6 +361,78 @@ class PoolStore:
             "AND COALESCE(json_extract(payload,'$.retry_at'),0)<=?" + due +
             " GROUP BY symbol ORDER BY MIN(CASE WHEN state='ACTIVE' OR json_extract(payload,'$.entry_reached')=1 "
             "THEN 0 WHEN state='AMBIGUOUS' THEN 1 ELSE 2 END),symbol", params)]
+
+    def refresh_closed_targets(self, history=None):
+        """Observe one bounded page after live positions, without changing their execution ledger."""
+        from tracking_history import MINUTE, BAR, EvidenceMissing, TrackingHistory, indexed
+        from telegram_prices import confirmed_target_levels
+        now = int(time.time() * 1000)
+        row = self._thread_conn().execute("""
+            SELECT w.chat,w.symbol,w.revision,w.cursor_ms,w.hits,p.payload,w.attempts FROM post_exit_watch w
+            JOIN chat_plans p USING(chat,symbol,revision)
+            LEFT JOIN chat_tracking_preferences f USING(chat,symbol)
+            WHERE w.done=0 AND w.next_at<=? AND p.state='CLOSED' AND COALESCE(f.muted,0)=0
+              AND CASE WHEN w.cursor_ms % ? = 0 THEN w.cursor_ms + ? ELSE (w.cursor_ms / ? + 1)*? END <= ?
+            ORDER BY w.next_at,w.cursor_ms LIMIT 1
+        """, (now, BAR, BAR, MINUTE, MINUTE, now)).fetchone()
+        if not row:
+            return
+        chat, symbol, revision, start, raw_hits, raw_plan, attempts = row
+        key = (chat, symbol, revision, start)
+        width = MINUTE if start % BAR else BAR
+        maximum = (BAR - start % BAR) // MINUTE if width == MINUTE else 96
+        count = min(maximum, (now - start) // width)
+        end = start + width * count
+        incomplete = False
+        lows, highs = [], []
+        own_history = history is None
+        if own_history:
+            history = TrackingHistory()
+        try:
+            if start % MINUTE:
+                minute = start // MINUTE * MINUTE
+                end = minute + MINUTE
+                for group in history.ticks(symbol, minute):
+                    if group.time >= start:
+                        lows.append(min(group.prices))
+                        highs.append(max(group.prices))
+            else:
+                bars = indexed(history.candles(symbol, start, width, count), width, now)
+                for stamp in range(start, end, width):
+                    candle = bars.get(stamp)
+                    if candle is None:
+                        incomplete = True
+                    elif candle.volume > 0:
+                        lows.append(candle.low)
+                        highs.append(candle.high)
+        except EvidenceMissing:
+            incomplete = True
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+            with self._transaction() as conn:
+                conn.execute("UPDATE post_exit_watch SET next_at=? WHERE chat=? AND symbol=? AND revision=? AND cursor_ms=?",
+                             (now + 5 * MINUTE, *key))
+            return
+        finally:
+            if own_history:
+                history.exchange.session.close()
+        if incomplete and attempts < 2:
+            with self._transaction() as conn:
+                conn.execute("UPDATE post_exit_watch SET next_at=?,attempts=attempts+1 "
+                             "WHERE chat=? AND symbol=? AND revision=? AND cursor_ms=?",
+                             (now + (attempts + 1) * MINUTE, *key))
+            return
+        plan = json.loads(raw_plan)
+        hits = set(json.loads(raw_hits))
+        reached = confirmed_target_levels(plan)
+        remaining = {i for i in (2, 3) if i > max(reached) and plan.get(f"tp{i}")}
+        for i in remaining - hits:
+            level = plan[f"tp{i}"]
+            if lows and (max(highs) >= level if plan["direction"] == "LONG" else min(lows) <= level):
+                hits.add(i)
+        with self._transaction() as conn:
+            conn.execute("UPDATE post_exit_watch SET cursor_ms=?,hits=?,incomplete=MAX(incomplete,?),done=?,next_at=?,attempts=0 "
+                         "WHERE chat=? AND symbol=? AND revision=? AND cursor_ms=?",
+                         (end, json.dumps(sorted(hits)), int(incomplete), int(remaining <= hits), now+MINUTE, *key))
 
     def advance_tracking(self, symbol, candles=None, *, history=None):
         now = int(time.time() * 1000)

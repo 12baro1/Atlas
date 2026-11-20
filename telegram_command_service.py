@@ -31,7 +31,7 @@ from types import SimpleNamespace
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from telegram_prices import format_price as _format_price, format_plan_levels, tracked_levels
+from telegram_prices import confirmed_target_levels, format_price as _format_price, format_plan_levels, tracked_levels
 
 import requests
 
@@ -82,9 +82,17 @@ def split_message(value: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
 
 
 def _confirmed_targets(plan):
-    hits = set(plan.get("tps_hit") or ())
-    return [f"TP{level}" for level in (1, 2, 3)
-            if level in hits or plan.get(f"hit_tp{level}") or plan.get("status") == f"TP{level}"]
+    return [f"TP{level}" for level in confirmed_target_levels(plan)]
+
+
+def _post_exit_note(plan):
+    if "post_exit_hits" not in plan:
+        return None
+    levels = ", ".join(f"TP{i}" for i in plan["post_exit_hits"])
+    note = levels or "henüz doğrulanmış ek hedef yok"
+    if plan.get("post_exit_incomplete"):
+        note += " (veri kısmi)"
+    return f"Kapanıştan sonra fiyat: {note}"
 
 
 def _trade_progress(plan):
@@ -1443,6 +1451,8 @@ class TelegramCommandService:
                     label += f" · {progress}"
                 card.append(label)
                 card.append(tracked_levels(plan))
+                if state == "CLOSED" and (note := _post_exit_note(plan)):
+                    card.append(note)
                 if state == "AMBIGUOUS":
                     card.append(plan.get("ambiguity_reason") or "Geçmiş mumlar doğrulanacak")
                     if plan.get("history_checked_at"):
@@ -1462,6 +1472,8 @@ class TelegramCommandService:
             for resolved, _, symbol, plan in shown:
                 history.append(f"{resolved:%d.%m.%Y} · {symbol.split('/')[0]} · {plan['direction']} · "
                                f"{_trade_progress(plan)} · {plan['realized_r']:+.2f}R")
+                if note := _post_exit_note(plan):
+                    history.append(note)
             blocks.append("\n".join(history))
         if has_rows:
             summary = ["Tüm dönem · kapanan işlemler",
