@@ -8,6 +8,8 @@ from telegram_prices import tracked_levels
 from trade_journal import TradeJournal
 
 
+MAX_VERIFICATION_ATTEMPTS = 3
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chat_follows(
  chat TEXT NOT NULL, symbol TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
@@ -76,7 +78,7 @@ def transition(conn, chat, symbol, revision, setup, *, announce):
     conn.execute("INSERT INTO chat_plans VALUES(?,?,?,?,?,?)",
                  (chat, symbol, revision, setup["setup_id"], "WAITING", json.dumps(outcome)))
     if announce:
-        label = "YENİ SETUP" if not current or state in {"INVALIDATED","CLOSED"} else "SETUP GÜNCELLENDİ"
+        label = "YENİ SETUP" if not current or state in {"INVALIDATED","CLOSED","UNVERIFIED"} else "SETUP GÜNCELLENDİ"
         previous = f"\nEski: {old['direction']} | {old['strategy']}" if current else ""
         event(conn, chat, symbol, revision, "SETUP", f"{label}{previous}\nYeni: {outcome['direction']} | {outcome['strategy']}", outcome)
 
@@ -251,7 +253,10 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
         if history:
             attempts = plan.get("retry_count", 0) + 1
             plan["retry_count"] = attempts
-            plan["manual_review"] = attempts >= 6
+            if attempts >= MAX_VERIFICATION_ATTEMPTS:
+                plan.pop("retry_at", None)
+                plan.update(status="UNVERIFIED", resolved_at=now)
+                return "UNVERIFIED", plan
             plan["retry_at"] = now + MINUTE * 2 ** (attempts - 1)
         return "AMBIGUOUS", plan
     return ("ACTIVE" if plan["entry_reached"] else "WAITING"), plan

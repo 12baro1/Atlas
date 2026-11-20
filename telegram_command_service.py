@@ -1192,11 +1192,20 @@ class TelegramCommandService:
     def handle_history(self) -> str:
         """Show recent completed and invalidated signal records."""
         rows = get_opportunity_pool().tracking.iter_tracked(self.chat_id)
-        history = heapq.nlargest(15, (row for row in rows if row[2] in {"CLOSED", "INVALIDATED"}),
+        history = heapq.nlargest(15, (row for row in rows if row[2] in {"CLOSED", "INVALIDATED", "UNVERIFIED"}),
                                  key=lambda row: row[3].get("resolved_at") or row[3]["opened_at"])
         lines = ["SİNYAL GEÇMİŞİ"]
         for symbol, revision, state, plan in history:
-            label = "Geçersizleşti" if state == "INVALIDATED" else f"{_trade_progress(plan) or plan['status']} | {plan['realized_r']:+.2f}R"
+            if state == "INVALIDATED":
+                label = "Geçersizleşti"
+            elif state == "UNVERIFIED":
+                progress = _trade_progress(plan)
+                label = "Doğrulanamadı · takipten kaldırıldı"
+                if progress:
+                    label += f" · {progress}"
+                label += " · " + plan["ambiguity_reason"]
+            else:
+                label = f"{_trade_progress(plan) or plan['status']} | {plan['realized_r']:+.2f}R"
             lines.append(f"{symbol.split('/')[0]} | {plan['direction']} | {plan['strategy']} | {label} (v{revision})")
             lines.append(tracked_levels(plan))
         if not history:

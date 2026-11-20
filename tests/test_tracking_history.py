@@ -76,17 +76,24 @@ def test_delayed_backfill_and_restart_retains_retry_and_stops_polling(tmp_path, 
     pool.stop()
     pool = OpportunityPool(base_path=path, auto_persist=False)
     try:
-        for attempt in range(1,7):
+        for attempt in range(1,4):
             p = pool.tracking.tracked("1")[0][3]
             assert p["retry_count"] == attempt and p["blocked_at"] == START
             assert pool.tracking.open_symbols() == []
-            clock[0] = p["retry_at"]
-            if attempt != 6:
+            if attempt < 3:
+                clock[0] = p["retry_at"]
                 assert pool.tracking.open_symbols() == [BTC]
                 pool.tracking.advance_tracking(BTC, history=history)
-        assert p["manual_review"] and pool.tracking.open_symbols() == []
+        assert "retry_at" not in p and p["status"] == "UNVERIFIED"
+        assert pool.tracking.tracked("1")[0][2] == "UNVERIFIED"
+        import opportunity_pool
+        from tests.test_scan_virtual_portfolio import service
+        monkeypatch.setattr(opportunity_pool, "_pool_instance", pool)
+        bot = service("1")
+        assert "BTC" not in bot.handle_islemler()
+        assert "Doğrulanamadı · takipten kaldırıldı" in bot.handle_history()
         pool.tracking.advance_tracking(BTC, history=history)
-        assert history.candles.call_count == 6 * 3
+        assert history.candles.call_count == 3 * 3
         assert len(pool.tracking.pending_notifications("1")) == 1
     finally:
         pool.stop()
@@ -205,14 +212,15 @@ def test_old_tie_review_reopens_once_without_losing_progress(tmp_path):
     from pool_store import PoolStore
 
     store = PoolStore(str(tmp_path))
-    p = plan(ambiguity_reason="Aynı milisaniyede farklı işlem fiyatları", manual_review=True,
-             retry_count=6, retry_at=START, next_bar_time=START, verified_until=START+1, tps_hit=[1])
+    p = plan(ambiguity_reason="Aynı milisaniyede farklı işlem fiyatları", manual_review=False,
+             retry_count=2, retry_at=START, next_bar_time=START, verified_until=START+1, tps_hit=[1])
     with store._transaction() as conn:
         conn.execute("INSERT INTO chat_plans VALUES(?,?,?,?,?,?)", ("c", BTC, 1, "setup", "AMBIGUOUS", json.dumps(p)))
     store.close()
     store = PoolStore(str(tmp_path))
     assert store.open_symbols() == [BTC]
     reopened = store.tracked("c")[0][3]
+    assert reopened["retry_count"] == 2
     assert reopened["verified_until"] == START+1 and reopened["tps_hit"] == [1]
     reopened.update(manual_review=True, retry_count=6, ambiguity_reason="Aynı milisaniyede işlem seviyelerinin sırası doğrulanamadı")
     with store._transaction() as conn:
@@ -220,4 +228,5 @@ def test_old_tie_review_reopens_once_without_losing_progress(tmp_path):
     store.close()
     store = PoolStore(str(tmp_path))
     assert not store.open_symbols()
+    assert store.tracked("c")[0][2] == "UNVERIFIED"
     store.close()
