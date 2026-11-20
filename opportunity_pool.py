@@ -374,6 +374,20 @@ class OpportunityPool:
             items = self.follow_best(chat, count, subscribe=False)
             return items, self.tracking.displayed_observations(items)
 
+    def follow_best_reply(self, chat, displayed, requested_at):
+        """Record the delivered setup and reconcile subsequent market observations."""
+        with self._lock:
+            now_ms = int(time.time() * 1000)
+            rows = []
+            for row in displayed:
+                current = self._validated.get(row["setup"]["setup_id"])
+                if current and self._fresh_validation(current, now_ms):
+                    # A neutral analysis can advance the watch timestamp
+                    # while leaving the displayed setup valid.
+                    row, = self.tracking.displayed_observations([current])
+                rows.append(row)
+            self.tracking.follow_delivered(chat, rows, requested_at=requested_at)
+
     def follow_best(self, chat, count, symbol=None, setup_id=None, *, subscribe=True):
         with self._lock:
             ranked = self.get_best_setups(limit=len(self._validated))
