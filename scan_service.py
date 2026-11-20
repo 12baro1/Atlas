@@ -35,8 +35,10 @@ class ScanService:
         worker_count: int = 1,
         analysis_gap_seconds: float = 0.5,
         continuous=False,
+        scan_allowed=None,
     ):
         self.continuous = continuous
+        self.scan_allowed = scan_allowed
         self._cycle_lock = threading.Lock()
         self._last_rank_attempt = float("-inf")
         self.runtime = runtime
@@ -365,6 +367,10 @@ class ScanService:
 
     def _process_jobs(self):
         while not self._stop_event.is_set():
+            if self.scan_allowed is not None and not self.scan_allowed.wait(timeout=1):
+                continue
+            if self._stop_event.is_set():
+                break
             job = self.queue.claim_next(worker_id=threading.current_thread().name)
             if job is None:
                 # Queue drained: idle short sleep then re-check (a parallel

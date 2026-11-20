@@ -590,3 +590,75 @@ def test_scan_worker_retries_transient_queue_lock(monkeypatch):
     monkeypatch.setattr(service._stop_event, "wait", Mock(side_effect=[False, True]))
     service._worker_loop()
     assert service.queue.claim_next.call_count == 2
+
+
+def test_scan_defers_claim_until_tracking_releases_even_on_data_failure(monkeypatch):
+    import threading
+    from unittest.mock import Mock
+
+    pool, queue = Mock(), Mock()
+    refresh = DailyPoolRefresh(pool, queue, Mock(), continuous=True)
+    scanner = ScanService(Mock(), queue, Mock(), continuous=True, scan_allowed=refresh.scan_allowed)
+    release = threading.Event()
+    checking = threading.Event()
+    scanner_waiting = threading.Event()
+    history = Mock()
+    monkeypatch.setattr("tracking_history.TrackingHistory", lambda: history)
+    pool.tracking.open_symbols.return_value = ["BTC"]
+
+    def track(symbol, history):
+        checking.set()
+        assert release.wait(3)
+        raise TimeoutError()
+
+    def claim(worker_id):
+        scanner._stop_event.set()
+        return None
+
+    original_wait = refresh.scan_allowed.wait
+    def wait(timeout):
+        scanner_waiting.set()
+        return original_wait(timeout)
+
+    monkeypatch.setattr(refresh.scan_allowed, "wait", wait)
+    pool.tracking.advance_tracking.side_effect = track
+    queue.claim_next.side_effect = claim
+    worker = threading.Thread(target=refresh.refresh_virtual_positions)
+    worker.start()
+    try:
+        assert checking.wait(2)
+        scanner.ensure_workers()
+        assert scanner_waiting.wait(2)
+        queue.claim_next.assert_not_called()
+    finally:
+        release.set()
+        worker.join(3)
+    scanner._workers[0].join(3)
+    queue.claim_next.assert_called_once()
+    history.exchange.session.close.assert_called_once()
+    assert refresh.scan_allowed.is_set()
+
+
+def test_due_symbols_prioritize_entered_positions_and_skip_unclosed_bars(tmp_path, monkeypatch):
+    import json
+    import time
+    from pool_store import PoolStore
+    from tracking_history import BAR
+
+    now = 50 * BAR
+    monkeypatch.setattr(time, "time", lambda: now / 1000)
+    store = PoolStore(str(tmp_path))
+    try:
+        with store._transaction() as conn:
+            for chat, symbol, state, payload in [
+                ("1","A","WAITING",{}), ("1","B","WAITING",{}), ("2","B","ACTIVE",{}),
+                ("1","C","AMBIGUOUS",{"entry_reached":True}),
+                ("1","D","ACTIVE",{"next_bar_time":now}),
+                ("1","E","AMBIGUOUS",{"retry_at":now+1}),
+                ("1","F","ACTIVE",{"next_bar_time":now-BAR}),
+            ]:
+                conn.execute("INSERT INTO chat_plans VALUES(?,?,1,'setup',?,?)",
+                             (chat,symbol,state,json.dumps(payload)))
+        assert store.open_symbols(due_only=True) == ["B","C","F","A"]
+    finally:
+        store.close()
