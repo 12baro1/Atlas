@@ -62,8 +62,11 @@ def test_historical_trades_required_for_same_minute_entry_and_tp():
     assert state == "ACTIVE" and p["tps_hit"] == [1]
 
 
-def test_delayed_backfill_and_restart_retains_retry_and_stops_polling(tmp_path, monkeypatch):
+def test_waiting_entry_stays_visible_and_resumes_after_repeated_missing_prices(tmp_path, monkeypatch):
     import time
+    import opportunity_pool
+    from tests.test_scan_virtual_portfolio import service
+
     clock = [START-BAR]
     monkeypatch.setattr(time, "time", lambda: clock[0]/1000)
     path = tmp_path/"pool"
@@ -71,32 +74,32 @@ def test_delayed_backfill_and_restart_retains_retry_and_stops_polling(tmp_path, 
     pool.tracking.follow_analysis("1", observation())
     history = Mock()
     history.candles.return_value = []
-    clock[0] = START+300*BAR
-    pool.tracking.advance_tracking(BTC, history=history)
-    assert history.candles.call_args_list[0].args == (BTC, START, BAR, 96)
-    pool.stop()
-    pool = OpportunityPool(base_path=path, auto_persist=False)
+    clock[0] = START+BAR
     try:
-        for attempt in range(1,4):
-            p = pool.tracking.tracked("1")[0][3]
-            assert p["retry_count"] == attempt and p["blocked_at"] == START
-            assert pool.tracking.open_symbols() == []
-            if attempt < 3:
-                clock[0] = p["retry_at"]
-                assert pool.tracking.open_symbols() == [BTC]
-                pool.tracking.advance_tracking(BTC, history=history)
-        assert "retry_at" not in p and p["status"] == "UNVERIFIED"
-        assert pool.tracking.tracked("1")[0][2] == "UNVERIFIED"
-        import opportunity_pool
-        from tests.test_scan_virtual_portfolio import service
+        for _ in range(4):
+            pool.tracking.advance_tracking(BTC, history=history)
+            _, _, state, pending = pool.tracking.tracked("1")[0]
+            assert state == "AMBIGUOUS" and not pending["entry_reached"]
+            assert not pool.tracking.open_symbols()
+            clock[0] = pending["retry_at"]
+        pool.stop()
+        pool = OpportunityPool(base_path=path, auto_persist=False)
         monkeypatch.setattr(opportunity_pool, "_pool_instance", pool)
         bot = service("1")
-        assert "BTC" not in bot.handle_islemler()
-        assert "Doğrulanamadı · takipten kaldırıldı" in bot.handle_history()
+        report = bot.handle_islemler()
+        assert "BTC" in report and "GİRİŞ BEKLEYENLER" in report and "Sonraki kontrol" in report
+        assert "DOĞRULAMA BEKLİYOR" not in report
+        assert not pool.tracking.pending_notifications("1")
+        assert pool.tracking.open_symbols() == [BTC]
+
+        history.candles.side_effect = lambda symbol, start, width, count: [
+            bar(start+i*width, 50000, 50100, 49900, 50010) for i in range(count)
+        ]
+        clock[0] = pending["retry_at"]
         pool.tracking.advance_tracking(BTC, history=history)
-        assert history.candles.call_count == 3 * 2
-        messages = [text for _, text in pool.tracking.pending_notifications("1")]
-        assert len(messages) == 1 and "GİRİŞ TAKİBİ SONLANDI" in messages[0]
+        report = bot.handle_islemler()
+        assert "AÇIK İŞLEMLER" in report
+        assert sum("giriş seviyesi" in text for _, text in pool.tracking.pending_notifications("1")) == 1
     finally:
         pool.stop()
 
@@ -345,7 +348,7 @@ def test_repeated_transport_timeouts_after_tp1_do_not_archive_then_stop():
 def test_bnb_short_keeps_partial_position_until_verified_stop(tmp_path, monkeypatch):
     import time
     from pool_store import PoolStore
-    from telegram_tracking import MAX_VERIFICATION_ATTEMPTS
+    from telegram_tracking import VERIFICATION_BACKOFF_THRESHOLD
 
     symbol = "BNB/USDT:USDT"
     clock = [START + BAR]
@@ -363,7 +366,7 @@ def test_bnb_short_keeps_partial_position_until_verified_stop(tmp_path, monkeypa
         conn.execute("INSERT INTO chat_plans VALUES(?,?,?,?,?,?)",
                      ("chat", symbol, 1, "old-short", "ACTIVE", json.dumps(original)))
 
-    for _ in range(MAX_VERIFICATION_ATTEMPTS + 1):
+    for _ in range(VERIFICATION_BACKOFF_THRESHOLD + 1):
         store.advance_tracking(symbol, history=history)
         _, _, state, remainder = store.tracked("chat")[0]
         assert state == "AMBIGUOUS" and remainder["tps_hit"] == [1]
@@ -395,23 +398,31 @@ def test_bnb_short_keeps_partial_position_until_verified_stop(tmp_path, monkeypa
     "Gate.io geçmiş verisi alınamadı (ReadTimeout)",
     "5m geçmişinde eksik veya çelişkili mum",
 ])
-def test_only_current_partial_archive_reopens(tmp_path, reason):
+@pytest.mark.parametrize(("entered", "hits"), [(False, []), (True, [1])])
+def test_only_current_unmuted_archive_reopens(tmp_path, reason, entered, hits):
     from pool_store import PoolStore
+    from telegram_tracking import entry_confirmed
+
     store = PoolStore(str(tmp_path))
-    p = plan(tps_hit=[1], trailing_stop=100, status="UNVERIFIED", retry_count=3,
-             resolved_at=START, ambiguity_reason=reason)
+    archived = plan(entry_reached=entered, entry_reached_at=None, tps_hit=hits, trailing_stop=100,
+                    status="UNVERIFIED", retry_count=3, resolved_at=START, ambiguity_reason=reason)
     with store._transaction() as conn:
-        conn.execute("INSERT INTO chat_follows VALUES(?,?,?)", ("c", BTC, 2))
-        for revision in (1, 2):
-            conn.execute("INSERT INTO chat_plans VALUES(?,?,?,?,?,?)",
-                         ("c", BTC, revision, "setup", "UNVERIFIED", json.dumps(p)))
+        conn.executemany("INSERT INTO chat_follows VALUES(?,?,?)", [("c", BTC, 2), ("muted", BTC, 1)])
+        conn.execute("INSERT INTO chat_tracking_preferences VALUES(?,?,1,?,0)", ("muted", BTC, START))
+        conn.executemany(
+            "INSERT INTO chat_plans VALUES(?,?,?,?,?,?)",
+            [(chat, BTC, revision, "setup", "UNVERIFIED", json.dumps(archived))
+             for chat, revision in (("c", 1), ("c", 2), ("muted", 1))],
+        )
     store.close()
     store = PoolStore(str(tmp_path))
     try:
         current, old = store.tracked("c")
-        assert current[2] == "AMBIGUOUS" and current[3]["tps_hit"] == [1]
+        assert current[2] == "AMBIGUOUS" and current[3]["tps_hit"] == hits
+        assert entry_confirmed(current[3]) is entered
         assert current[3]["status"] == "PENDING" and BTC in store.open_symbols()
         assert old[2] == "UNVERIFIED"
+        assert store.tracked("muted")[0][2] == "UNVERIFIED"
     finally:
         store.close()
 

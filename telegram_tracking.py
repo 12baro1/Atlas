@@ -10,7 +10,7 @@ from telegram_prices import confirmed_target_levels, tracked_levels
 from trade_journal import TradeJournal
 
 
-MAX_VERIFICATION_ATTEMPTS = 3
+VERIFICATION_BACKOFF_THRESHOLD = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chat_follows(
@@ -316,8 +316,8 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
     if count <= 0:
         return
     # Older code set entry_reached before proving the order and omitted its timestamp.
-    if state == "AMBIGUOUS" and plan["entry_reached"] and not plan.get("entry_reached_at"):
-        plan["entry_reached"] = False
+    if state == "AMBIGUOUS" and not plan.get("entry_reached_at"):
+        plan["entry_reached"] = entry_confirmed(plan)
     try:
         if history:
             plan["history_checked_at"] = now
@@ -372,22 +372,16 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
         if history:
             plan.pop("network_failures", None)
             attempts = plan.get("retry_count", 0) + 1
-            plan["retry_count"] = min(attempts, MAX_VERIFICATION_ATTEMPTS)
-            if attempts >= MAX_VERIFICATION_ATTEMPTS:
-                if plan.get("entry_reached") and plan.get("entry_reached_at"):
-                    # Missing history cannot establish an exit from the remaining position.
-                    plan["retry_at"] = now + 15 * MINUTE
-                    return "AMBIGUOUS", plan
-                plan.pop("retry_at", None)
-                plan.update(status="UNVERIFIED", resolved_at=now)
-                return "UNVERIFIED", plan
-            plan["retry_at"] = now + MINUTE * 2 ** (attempts - 1)
+            plan["retry_count"] = min(attempts, VERIFICATION_BACKOFF_THRESHOLD)
+            # Missing prices do not establish either an expired entry or an exit.
+            delay = 15 * MINUTE if attempts >= VERIFICATION_BACKOFF_THRESHOLD else MINUTE * 2 ** (attempts - 1)
+            plan["retry_at"] = now + delay
         return "AMBIGUOUS", plan
     return ("ACTIVE" if plan["entry_reached"] else "WAITING"), plan
 
 
 def entry_confirmed(plan):
-    return bool(plan.get("entry_reached") and plan.get("entry_reached_at"))
+    return bool((plan.get("entry_reached") and plan.get("entry_reached_at")) or confirmed_target_levels(plan))
 
 
 def save(conn, symbol, row, result):
@@ -411,8 +405,6 @@ def save(conn, symbol, row, result):
     if new_state == "CLOSED":
         watch_closed_targets(conn, chat, symbol, revision, plan)
         record("CLOSED", f"Sinyal kapandı | {plan['realized_r']:+.2f}R")
-    if new_state == "UNVERIFIED" and not confirmed:
-        record("ENTRY_UNVERIFIED", "GİRİŞ TAKİBİ SONLANDI — Fiyat geçmişinden giriş teyit edilemedi.")
     was_verifying_open_position = state == "AMBIGUOUS" and was_confirmed
     if confirmed and new_state == "AMBIGUOUS" and not was_verifying_open_position:
         record(f"VERIFY_{plan['blocked_at']}", "DOĞRULAMA BEKLİYOR — " + plan["ambiguity_reason"])
