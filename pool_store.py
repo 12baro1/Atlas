@@ -340,11 +340,17 @@ class PoolStore:
                 plan["tracking_muted"] = True
             yield symbol, revision, state, plan
 
-    def open_symbols(self):
+    def open_symbols(self, *, due_only=False):
+        now = int(time.time() * 1000)
+        # Legacy rows without an explicit next bar still go through the normal evaluator.
+        due = " AND COALESCE(json_extract(payload,'$.next_bar_time'),0)<=?" if due_only else ""
+        params = (now, now - telegram_tracking.BAR) if due_only else (now,)
         return [row[0] for row in self._thread_conn().execute(
-            "SELECT DISTINCT symbol FROM chat_plans WHERE state IN ('WAITING','ACTIVE','AMBIGUOUS') "
+            "SELECT symbol FROM chat_plans WHERE state IN ('WAITING','ACTIVE','AMBIGUOUS') "
             "AND COALESCE(json_extract(payload,'$.manual_review'),0)=0 "
-            "AND COALESCE(json_extract(payload,'$.retry_at'),0)<=?", (int(time.time()*1000),))]
+            "AND COALESCE(json_extract(payload,'$.retry_at'),0)<=?" + due +
+            " GROUP BY symbol ORDER BY MIN(CASE WHEN state='ACTIVE' OR json_extract(payload,'$.entry_reached')=1 "
+            "THEN 0 WHEN state='AMBIGUOUS' THEN 1 ELSE 2 END),symbol", params)]
 
     def advance_tracking(self, symbol, candles=None, *, history=None):
         now = int(time.time() * 1000)

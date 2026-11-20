@@ -50,6 +50,8 @@ class DailyPoolRefresh:
 
     def __init__(self, pool, scan_queue, market_inventory, refresh_hour: int = REFRESH_HOUR_IST, *, continuous=False):
         self.continuous = continuous
+        self.scan_allowed = threading.Event()
+        self.scan_allowed.set()
         self.pool = pool
         self.scan_queue = scan_queue
         self.market_inventory = market_inventory
@@ -125,20 +127,24 @@ class DailyPoolRefresh:
 
     def refresh_virtual_positions(self):
         from tracking_history import TrackingHistory
-        history = TrackingHistory()
+        self.scan_allowed.clear()
         try:
-            self._refresh_symbols(history)
-        finally:
-            history.exchange.session.close()
-
-    def _refresh_symbols(self, history):
-        for symbol in self.pool.tracking.open_symbols():
-            if self._stop_event.is_set():
+            symbols = self.pool.tracking.open_symbols(due_only=True)
+            if not symbols:
                 return
+            history = TrackingHistory()
             try:
-                self.pool.tracking.advance_tracking(symbol, history=history)
-            except Exception as exc:
-                logger.warning("Virtual position data unavailable for %s (%s)", symbol, type(exc).__name__)
+                for symbol in symbols:
+                    if self._stop_event.is_set():
+                        break
+                    try:
+                        self.pool.tracking.advance_tracking(symbol, history=history)
+                    except Exception as exc:
+                        logger.warning("Virtual position data unavailable for %s (%s)", symbol, type(exc).__name__)
+            finally:
+                history.exchange.session.close()
+        finally:
+            self.scan_allowed.set()
 
     def start_background(self, check_interval_seconds: int = 60):
         """Start a daemon thread that runs the refresh when it comes due.
@@ -148,20 +154,26 @@ class DailyPoolRefresh:
         """
         def loop():
             while not self._stop_event.is_set():
-                try:
-                    self.run_if_due()
-                except Exception as exc:  # pragma: no cover
-                    logger.error(f"Daily refresh loop error: {exc}")
                 if self.continuous:
                     try:
                         self.refresh_virtual_positions()
                     except Exception:
                         logger.exception("Virtual position refresh failed")
+                try:
+                    self.run_if_due()
+                except Exception as exc:  # pragma: no cover
+                    logger.error(f"Daily refresh loop error: {exc}")
                 if self._stop_event.wait(max(10, int(check_interval_seconds))):
                     break
 
         self._thread = threading.Thread(target=loop, daemon=True, name="AtlasDailyRefresh")
-        self._thread.start()
+        if self.continuous:
+            self.scan_allowed.clear()
+        try:
+            self._thread.start()
+        except RuntimeError:
+            self.scan_allowed.set()
+            raise
         return self._thread
 
     def stop(self, timeout: float = 5.0) -> bool:

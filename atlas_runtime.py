@@ -100,13 +100,14 @@ class AtlasRuntime:
         from daily_refresh import DailyPoolRefresh
         self._market_inventory = get_market_inventory(exchange=exchange)
         self._scan_queue = ScanQueue()
-        self._scan_service = ScanService(
-            runtime=self, queue=self._scan_queue, inventory=self._market_inventory, continuous=True
-        )
         self._daily_refresh = DailyPoolRefresh(
             pool=self._opportunity_pool(),
             scan_queue=self._scan_queue,
             market_inventory=self._market_inventory, continuous=True,
+        )
+        self._scan_service = ScanService(
+            runtime=self, queue=self._scan_queue, inventory=self._market_inventory, continuous=True,
+            worker_count=1, analysis_gap_seconds=5, scan_allowed=self._daily_refresh.scan_allowed,
         )
 
         with self._journal_lock:
@@ -121,14 +122,14 @@ class AtlasRuntime:
         # Scan infrastructure resumes regardless of who started the runtime:
         # pending queue work continues and the daily refresh stays scheduled.
         try:
+            self._daily_refresh.start_background()
+        except Exception as exc:
+            self.logger.error(f"Virtual position and pool maintenance startup failed: {exc}")
+        try:
             # Finish persisted work before applying a new bounded universe.
             self._scan_service.ensure_workers()
         except Exception as exc:
             self.logger.error(f"Scan infrastructure startup failed: {exc}")
-        try:
-            self._daily_refresh.start_background()
-        except Exception as exc:
-            self.logger.error(f"Virtual position and pool maintenance startup failed: {exc}")
         self._set_status("READY")
 
     def stop(self, timeout=5.0):
