@@ -380,6 +380,26 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
     return ("ACTIVE" if plan["entry_reached"] else "WAITING"), plan
 
 
+def evaluate_with_rechecks(symbol, state, raw, now, history, stop_event):
+    """Use the initial retry allowance together, then keep the scheduled backoff."""
+    result = evaluate(symbol, state, raw, now, history=history)
+    for _ in range(VERIFICATION_BACKOFF_THRESHOLD - 1):
+        if not result or stop_event.is_set():
+            break
+        state, plan = result
+        if (state != "AMBIGUOUS" or plan.get("network_failures")
+                or not 0 < plan.get("retry_count", 0) < VERIFICATION_BACKOFF_THRESHOLD):
+            break
+        history.clear_cached_evidence()
+        retry_plan = dict(plan)
+        retry_plan.pop("retry_at", None)
+        checked = evaluate(symbol, state, json.dumps(retry_plan), now, history=history)
+        if checked is None:
+            break
+        result = checked
+    return result
+
+
 def entry_confirmed(plan):
     return bool((plan.get("entry_reached") and plan.get("entry_reached_at")) or confirmed_target_levels(plan))
 

@@ -501,15 +501,22 @@ class PoolStore:
                          "WHERE chat=? AND symbol=? AND revision=? AND cursor_ms=?",
                          (end, json.dumps(sorted(hits)), int(incomplete), int(remaining <= hits), now+MINUTE, *key))
 
-    def advance_tracking(self, symbol, candles=None, *, history=None):
+    def advance_tracking(self, symbol, candles=None, *, history=None, stop_event=None):
         now = int(time.time() * 1000)
         rows = self._thread_conn().execute(
             "SELECT chat,revision,state,payload FROM chat_plans WHERE symbol=? "
             "AND state IN ('ACTIVE','WAITING','AMBIGUOUS')", (symbol,)).fetchall()
         for row in rows:
+            if stop_event is not None and stop_event.is_set():
+                return
             if row[2] == "AMBIGUOUS" and history is None:
                 continue
-            result = telegram_tracking.evaluate(symbol, row[2], row[3], now, candles, history)
+            if history is not None and stop_event is not None:
+                result = telegram_tracking.evaluate_with_rechecks(
+                    symbol, row[2], row[3], now, history, stop_event
+                )
+            else:
+                result = telegram_tracking.evaluate(symbol, row[2], row[3], now, candles, history)
             if result:
                 # Network and replay run outside the writer lock. CAS rejects stale snapshots.
                 with self._transaction() as conn:

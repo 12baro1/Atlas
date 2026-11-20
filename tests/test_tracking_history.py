@@ -315,6 +315,46 @@ def test_background_worker_continues_targets_after_tp1_and_restart(tmp_path, mon
         pool.stop()
 
 
+@pytest.mark.parametrize("recovers", [False, True])
+def test_background_checks_same_uncertain_position_up_to_three_times(recovers):
+    import threading
+    from telegram_tracking import evaluate_with_rechecks
+
+    history = Mock()
+    candle = bar(START, 105, 108, 102, 106)
+    missing = EvidenceMissing("Alt mum geçmişi eksik")
+    history.candles.side_effect = [missing, [candle]] if recovers else [missing] * 3
+
+    now = START + BAR
+    state, tracked = evaluate_with_rechecks(BTC, "ACTIVE", json.dumps(plan()), now, history, threading.Event())
+    attempts = 2 if recovers else 3
+    assert history.candles.call_count == attempts
+    assert all(call.args == (BTC, START, BAR, 1) for call in history.candles.call_args_list)
+    assert history.clear_cached_evidence.call_count == attempts - 1
+    if recovers:
+        assert state == "ACTIVE" and tracked["next_bar_time"] == START + BAR
+        assert "retry_at" not in tracked
+    else:
+        assert state == "AMBIGUOUS" and tracked["retry_at"] == now + 15 * MINUTE
+
+
+def test_background_rechecks_respect_exchange_rate_limit():
+    import threading
+    import requests
+    from telegram_tracking import evaluate_with_rechecks
+
+    response = requests.Response()
+    response.status_code = 429
+    history = Mock()
+    history.candles.side_effect = requests.HTTPError(response=response)
+    state, tracked = evaluate_with_rechecks(
+        BTC, "ACTIVE", json.dumps(plan()), START + BAR, history, threading.Event()
+    )
+    assert state == "AMBIGUOUS" and tracked["network_failures"] == 1
+    history.candles.assert_called_once()
+    history.clear_cached_evidence.assert_not_called()
+
+
 def test_confirmed_open_position_without_tp_survives_missing_history():
     history = Mock()
     history.candles.return_value = []
