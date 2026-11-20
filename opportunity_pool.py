@@ -321,12 +321,16 @@ class OpportunityPool:
                 self.cleanup_expired()
             return True
 
-    def publish_cycle(self, generation, observations, universe=None):
+    def publish_cycle(self, generation, observations, universe=None, *, batch_cursor=None):
         with self._lock:
             if generation <= int(self.tracking.get_meta("published_generation", "0")):
                 return False
             applied = []
-            with self._publish_transaction("published_generation", generation, applied):
+            marker, value = "published_generation", generation
+            if batch_cursor is not None:
+                marker = "published_scan_batch"
+                value = f"{generation}:{batch_cursor}"
+            with self._publish_transaction(marker, value, applied):
                 if universe is not None:
                     members = set(universe)
                     for old in list(self._validated.values()):

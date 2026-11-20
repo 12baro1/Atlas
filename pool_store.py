@@ -221,7 +221,15 @@ class PoolStore:
             if publication:
                 key, incoming, _ = publication
                 previous = conn.execute("SELECT value FROM pool_meta WHERE key=?", (key,)).fetchone()
-                if previous:
+                if key == "published_scan_batch":
+                    position = tuple(map(int, incoming.split(":")))
+                    finalized = conn.execute(
+                        "SELECT value FROM pool_meta WHERE key='published_generation'"
+                    ).fetchone()
+                    if ((finalized and position[0] <= int(finalized[0]))
+                            or (previous and position <= tuple(map(int, previous[0].split(":"))))):
+                        raise RuntimeError("Scan batch overtaken by another publication")
+                elif previous:
                     elapsed = incoming - int(previous[0])
                     if elapsed <= 0 or (key == "pool_cleanup_ms" and elapsed < 86400000):
                         raise RuntimeError("Pool publication overtaken by another writer")

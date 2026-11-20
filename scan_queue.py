@@ -403,8 +403,19 @@ class ScanQueue:
             """, (generation,)).rowcount
 
     def cycle_results(self, generation):
-        rows = self._thread_conn().execute("SELECT payload FROM cycle_results WHERE generation=? ORDER BY symbol", (generation,))
+        rows = self._thread_conn().execute(
+            "SELECT payload FROM cycle_results WHERE generation=? ORDER BY symbol", (generation,),
+        )
         return [json.loads(row[0]) for row in rows]
+
+    def staged_batch(self, generation, after, limit):
+        # Staged rows stay in the queue until final publication. Rowid provides
+        # insertion order even when several jobs finish in the same millisecond.
+        rows = self._thread_conn().execute(
+            "SELECT rowid, payload FROM cycle_results WHERE generation=? AND rowid>? "
+            "ORDER BY rowid LIMIT ?", (generation, after, limit),
+        )
+        return [(cursor, json.loads(payload)) for cursor, payload in rows]
 
     def discard_applied_results(self, generation):
         with self._transaction() as conn:

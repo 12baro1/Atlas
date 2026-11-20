@@ -44,8 +44,16 @@ def test_300_worker_jobs_restart_publish_then_resume(tmp_path, pool):
     runtime = MagicMock()
     runtime._opportunity_pool.return_value = pool
     path = tmp_path/"queue"
+    checked_at = []
+
+    def refresh_tracked(stop_event):
+        assert not stop_event.is_set()
+        checked_at.append(scan.queue.progress()["done"])
+        assert pool.get_best_setups()[0].symbol == BTC
+
     def scanner():
-        return ScanService(runtime, ScanQueue(path), inventory, analysis_gap_seconds=0, continuous=True)
+        return ScanService(runtime, ScanQueue(path), inventory, analysis_gap_seconds=0, continuous=True,
+                           refresh_tracked_setups=refresh_tracked)
     scan = scanner()
     scan.roll_cycle()
     gen = scan.queue.current_generation()
@@ -54,14 +62,21 @@ def test_300_worker_jobs_restart_publish_then_resume(tmp_path, pool):
         if symbol == symbols[1] and not retry:
             retry.append(symbol)
             return {"ok":False, "error":"temporary"}
-        if scan.queue.progress()["done"] == 298:
+        done = scan.queue.progress()["done"]
+        if done < 10:
+            assert not pool.get_best_setups()
+        else:
+            assert checked_at[-1] == done - done % 10
+        if done == 298:
             scan._stop_event.set()
         row = observation(symbol, setup=symbol==BTC)
         return {"ok":True, "cycle_result":row}
     runtime.analyze_for_cycle.side_effect = analyze
     scan._worker_loop()
     assert scan.queue.progress()["done"] == 299 and retry
-    assert not pool.get_best_setups() and not pool.tracking.tracked("-10")
+    assert checked_at == list(range(10, 300, 10))
+    assert pool.get_best_setups()[0].symbol == BTC
+    assert not pool.tracking.tracked("-10")
     scan.queue.close()
     scan = scanner()
     assert scan.queue.current_generation() == gen
@@ -76,6 +91,7 @@ def test_300_worker_jobs_restart_publish_then_resume(tmp_path, pool):
     runtime.analyze_for_cycle.side_effect = finish
     scan._worker_loop()
     assert scan.queue.progress(gen)["done"] == 300
+    assert checked_at == list(range(10, 301, 10))
     assert scan.queue.current_generation() == gen+1 and scan.queue.progress()["total"] == 300
     assert pool.get_best_setups()[0].symbol == BTC
     assert not pool.publish_cycle(gen, [])
@@ -85,6 +101,45 @@ def test_300_worker_jobs_restart_publish_then_resume(tmp_path, pool):
     assert "BTC" in bot.execute_command("/eniyi5")
     assert "BTC" in bot.execute_command("/islemler")
     scan.queue.close()
+
+
+def test_restart_checks_published_batch_before_claiming_next_symbol(tmp_path, pool):
+    queue = ScanQueue(tmp_path/"queue")
+    symbols = [BTC] + [f"S{i}/USDT:USDT" for i in range(299)]
+    generation = queue.rebuild(symbols)["generation"]
+    for _ in range(10):
+        claim = queue.claim_next()
+        symbol = claim["symbol"]
+        queue.complete(symbol, True, claim=claim, result=observation(symbol, setup=symbol == BTC))
+
+    runtime = MagicMock()
+    runtime._opportunity_pool.return_value = pool
+
+    def interrupt(stop_event):
+        stop_event.set()
+
+    scanner = ScanService(runtime, queue, MagicMock(), continuous=True, refresh_tracked_setups=interrupt)
+    scanner.roll_cycle()
+    marker = pool.tracking.get_meta("published_scan_batch")
+    assert marker
+    assert not pool.tracking.get_meta("checked_scan_batch")
+    assert queue.progress()["done"] == 10
+
+    calls = []
+    scanner = ScanService(runtime, queue, MagicMock(), continuous=True, analysis_gap_seconds=0,
+                          refresh_tracked_setups=lambda _: calls.append("check"))
+
+    def analyze(symbol):
+        calls.append(symbol)
+        scanner._stop_event.set()
+        return {"ok": True, "cycle_result": observation(symbol, setup=False)}
+
+    runtime.analyze_for_cycle.side_effect = analyze
+    scanner._worker_loop()
+    assert calls == ["check", symbols[10]]
+    assert pool.tracking.get_meta("checked_scan_batch") == marker
+    assert queue.progress(generation)["done"] == 11
+    queue.close()
 
 
 def test_chat_lifecycle_cleanup_outbox_and_restart(pool):
