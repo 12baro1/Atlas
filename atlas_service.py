@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import signal
+import socket
 import threading
 import time
 from pathlib import Path
@@ -15,6 +16,16 @@ from pathlib import Path
 
 DEFAULT_MAX_SYMBOLS = 300
 DEFAULT_SCAN_INTERVAL_SECONDS = 900
+
+
+def notify_systemd(message):
+    address = os.environ.get("NOTIFY_SOCKET")
+    if address:
+        if address.startswith("@"):
+            address = "\0" + address[1:]
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(1)
+            sock.sendto(message.encode(), address)
 
 
 def configured_max_symbols(raw_value: str | None) -> int:
@@ -212,6 +223,7 @@ def main() -> int:
     last_complete = False
     next_scheduled_scan = time.monotonic() + interval
     try:
+        notify_systemd("READY=1")
         while not stop_event.wait(5):
             scan_status = runtime.scan_status()
             if not scan_status.get("workers_running"):
@@ -255,6 +267,7 @@ def main() -> int:
                         scan_status.get("running", 0),
                     )
                 next_scheduled_scan = time.monotonic() + interval
+            notify_systemd("WATCHDOG=1")
     finally:
         logger.info("Stopping Atlas runtime")
         runtime.stop(timeout=30.0)

@@ -70,8 +70,8 @@ Bu script:
 1. Python sanal ortamı ve bağımlılıkları kurar
 2. `.env` dosyasını oluşturur (`.env.example` varsa)
 3. Testleri çalıştırır
-4. systemd user servisini kurar ve başlatır
-5. `loginctl enable-linger` ayarını yapar (SSH kapanınca/yeniden başlatılda servisin devam etmesi için)
+4. systemd kullanıcı servisini kurar ve SSH oturumu kapandıktan sonra da çalışabilmesi için linger ayarını doğrular
+5. Servisi etkinleştirir ve güncel servis tanımıyla başlatır
 
 ### Manuel kurulum
 
@@ -85,14 +85,19 @@ python -m pytest -q tests/test_atlas_service.py tests/test_telegram_command_serv
 mkdir -p ~/.config/systemd/user
 cp deploy/atlas.service ~/.config/systemd/user/atlas.service
 systemctl --user daemon-reload
-systemctl --user enable --now atlas.service
-sudo loginctl enable-linger $(whoami)
+sudo loginctl enable-linger "$(whoami)"
+systemctl --user enable atlas.service
+systemctl --user restart atlas.service
 ```
+
+Servis beklenmedik çıkıştan 30 saniye sonra tekrar başlatılır. Ana denetim döngüsünden üç dakika boyunca yaşam sinyali gelmezse systemd süreci yeniden başlatır. Kasıtlı `systemctl --user stop atlas.service` komutu servisi durdurur.
 
 ### Doğrulama komutları
 
 ```bash
 systemctl --user status atlas.service
+systemctl --user show atlas.service -p NRestarts -p Result -p WatchdogTimestamp
+loginctl show-user "$(whoami)" -p Linger
 journalctl --user -u atlas.service -n 100 --no-pager
 systemctl --user restart atlas.service
 ```

@@ -3,15 +3,19 @@ Description=Atlas seven-strategy live market analysis
 Documentation=https://github.com/12baro1/Atlas
 Wants=network-online.target
 After=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=5min
+WatchdogSec=3min
 WorkingDirectory=%h/Atlas
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-%h/Atlas/.env
 ExecStart=%h/Atlas/.venv/bin/python %h/Atlas/atlas_service.py
-Restart=on-failure
-RestartSec=10
+Restart=always
+RestartSec=30
 TimeoutStopSec=120
 KillSignal=SIGTERM
 NoNewPrivileges=true

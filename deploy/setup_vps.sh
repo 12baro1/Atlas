@@ -2,7 +2,7 @@
 # VPS setup script for Atlas service
 # Run this script once on a fresh VPS to configure the Atlas systemd user service
 
-set -uo pipefail
+set -euo pipefail
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
@@ -44,6 +44,7 @@ fi
 # 3. Run tests to verify installation
 log "Running tests..."
 source .venv/bin/activate
+python -c "import pytest" 2>/dev/null || python -m pip install pytest
 python -m pytest -q tests/test_atlas_service.py tests/test_telegram_command_service.py -x || {
     log "Tests failed. Please fix issues before continuing."
     exit 1
@@ -59,25 +60,27 @@ log "Service file installed to ${SERVICE_DIR}/atlas.service"
 systemctl --user daemon-reload
 log "Systemd daemon reloaded."
 
-# 6. Enable and start service
-systemctl --user enable --now atlas.service
-log "Service enabled and started."
-
 # 6. Enable linger for user service persistence
 log "Checking linger status..."
 CURRENT_USER=$(whoami)
 LINGER_STATUS=$(loginctl show-user "${CURRENT_USER}" --property=Linger --value 2>/dev/null || echo "unknown")
 if [[ "${LINGER_STATUS}" != "yes" ]]; then
     log "Enabling linger for user ${CURRENT_USER} (requires sudo)..."
-    if sudo loginctl enable-linger "${CURRENT_USER}"; then
-        log "Linger enabled. User service will persist after SSH logout and survive reboot."
+    if [[ $EUID -eq 0 ]]; then
+        loginctl enable-linger "${CURRENT_USER}"
     else
-        log "WARNING: Failed to enable linger. Service may stop when SSH session ends."
-        log "Run manually: sudo loginctl enable-linger ${CURRENT_USER}"
+        sudo loginctl enable-linger "${CURRENT_USER}"
     fi
+    [[ "$(loginctl show-user "${CURRENT_USER}" --property=Linger --value)" == "yes" ]] || {
+        log "Linger verification failed for ${CURRENT_USER}."
+        exit 1
+    }
 else
     log "Linger already enabled for ${CURRENT_USER}."
 fi
+
+systemctl --user enable atlas.service
+systemctl --user restart atlas.service
 
 # 7. Show status
 log "=== Service Status ==="

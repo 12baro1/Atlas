@@ -212,7 +212,7 @@ class OpportunityPool:
         base_path: str = "opportunity_pool",
         max_candidates: int = 500,
         max_validated: int = 300,
-        max_history: int = 5000,
+        max_history: int = 500,
         expiry_hours: int = 24,
         freshness_hours: int = 2,
         auto_persist: bool = True,
@@ -1031,7 +1031,6 @@ class OpportunityPool:
                 stored_candidates = self._store.load_pool("candidates")
                 stored_validated = self._store.load_pool("validated")
                 stored_active = self._store.load_pool("active")
-                stored_history = self._store.load_history()
                 total_stored = (
                     len(stored_candidates) + len(stored_validated) + len(stored_active)
                 )
@@ -1048,7 +1047,6 @@ class OpportunityPool:
                     stored_candidates = self._store.load_pool("candidates")
                     stored_validated = self._store.load_pool("validated")
                     stored_active = self._store.load_pool("active")
-                    stored_history = self._store.load_history()
                 
                 self._candidates.clear()
                 self._validated.clear()
@@ -1065,9 +1063,7 @@ class OpportunityPool:
                     record = SetupCandidate.from_dict(payload)
                     if record is not None:
                         self._active[setup_id] = record
-                self._history = stored_history
-                if len(self._history) > self.max_history:
-                    self._history = self._history[-self.max_history:]
+                self._history = self._store.load_history(limit=self.max_history)
                 self._history_flushed = len(self._history)
             else:
                 # No SQLite store: fall back to the legacy JSON files.
