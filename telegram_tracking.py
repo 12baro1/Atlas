@@ -2,6 +2,8 @@
 import json
 import time
 
+import requests
+
 from core.candle import Candle
 from tracking_history import BAR, MINUTE, EvidenceMissing, indexed, matches, trades_match
 from telegram_prices import tracked_levels
@@ -236,7 +238,7 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
             plan["next_bar_time"] = stamp + BAR
             plan.pop("parent_prices")
             plan.pop("verified_until", None)
-            for key in ("ambiguity_reason", "blocked_at", "retry_at", "retry_count"):
+            for key in ("ambiguity_reason", "blocked_at", "retry_at", "retry_count", "network_failures"):
                 plan.pop(key, None)
             if plan["status"] != "PENDING":
                 return "CLOSED", plan
@@ -254,7 +256,16 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
         plan.pop("open_r", None)
         plan["blocked_at"] = next_bar(plan)
         plan["ambiguity_reason"] = str(exc) if isinstance(exc, EvidenceMissing) else f"Gate.io geçmiş verisi alınamadı ({type(exc).__name__})"
+        temporary = isinstance(exc, (TimeoutError, ConnectionError, requests.Timeout, requests.ConnectionError))
+        if isinstance(exc, requests.HTTPError) and exc.response is not None:
+            temporary = exc.response.status_code in {408, 429, 500, 502, 503, 504}
+        if history and temporary:
+            failures = plan.get("network_failures", 0) + 1
+            plan["network_failures"] = failures
+            plan["retry_at"] = now + MINUTE * 2 ** min(failures - 1, 4)
+            return "AMBIGUOUS", plan
         if history:
+            plan.pop("network_failures", None)
             attempts = plan.get("retry_count", 0) + 1
             plan["retry_count"] = attempts
             if attempts >= MAX_VERIFICATION_ATTEMPTS:

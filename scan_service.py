@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -352,6 +353,18 @@ class ScanService:
 
     def _worker_loop(self):
         while not self._stop_event.is_set():
+            try:
+                self._process_jobs()
+                return
+            except sqlite3.OperationalError as exc:
+                code = getattr(exc, "sqlite_errorcode", 0) & 0xff
+                if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+                    raise
+                logger.warning("Scan queue locked, retrying after 2 seconds")
+                self._stop_event.wait(2)
+
+    def _process_jobs(self):
+        while not self._stop_event.is_set():
             job = self.queue.claim_next(worker_id=threading.current_thread().name)
             if job is None:
                 # Queue drained: idle short sleep then re-check (a parallel
@@ -382,17 +395,17 @@ class ScanService:
                                                           track_signal=False, use_websocket=False)
                     result = None
                 ok = bool(outcome.get("ok")) and (not self.continuous or result is not None)
-                self.queue.complete(symbol, ok=ok, claim=job, **({"result": result} if self.continuous else {}),
-                                    error=None if ok else str(outcome.get("error") or "analysis_failed"))
-                if ok:
-                    logger.debug(f"Scan {symbol}: ok")
-                else:
-                    logger.warning(
-                        f"Scan {symbol} failed: {str(outcome.get('error'))[:180]}"
-                    )
+                error = None if ok else str(outcome.get("error") or "analysis_failed")
             except Exception as exc:
-                logger.error(f"Scan worker error on {symbol}: {exc}")
-                self.queue.complete(symbol, ok=False, error=str(exc)[:180], claim=job)
+                ok, result, error = False, None, str(exc)[:180]
+            # If SQLite is busy the lease can expire and the job can be reclaimed.
+            # Do not turn a database write failure into a failed market analysis.
+            self.queue.complete(symbol, ok=ok, claim=job, **({"result": result} if self.continuous else {}),
+                                error=error)
+            if ok:
+                logger.debug("Scan %s: ok", symbol)
+            else:
+                logger.warning("Scan %s failed: %s", symbol, error[:180])
             # Bounded gap between analyses keeps Gate.io usage rate-limit safe.
             if self._stop_event.wait(self.analysis_gap_seconds):
                 break

@@ -1,6 +1,8 @@
 import json
 from unittest.mock import Mock
 
+import pytest
+
 from core.candle import Candle
 from opportunity_pool import OpportunityPool
 from telegram_tracking import evaluate
@@ -232,7 +234,10 @@ def test_old_tie_review_reopens_once_without_losing_progress(tmp_path):
     store.close()
 
 
-def test_background_worker_continues_targets_after_tp1_and_restart(tmp_path, monkeypatch):
+@pytest.mark.parametrize("finish", ["TP3", "SL"])
+def test_background_worker_continues_targets_after_tp1_and_restart(tmp_path, monkeypatch, finish):
+    import opportunity_pool
+    from tests.test_scan_virtual_portfolio import service
     import time
     from daily_refresh import DailyPoolRefresh
 
@@ -259,10 +264,57 @@ def test_background_worker_continues_targets_after_tp1_and_restart(tmp_path, mon
         pool = OpportunityPool(base_path=path, auto_persist=False)
         assert BTC in pool.tracking.open_symbols()
         assert refresh(2, 51500, 52100)[3]["tps_hit"] == [1, 2]
-        state = refresh(3, 52500, 53100)
-        assert state[2] == "CLOSED" and state[3]["status"] == "TP3"
-        events = pool.tracking.pending_notifications("chat")
-        for target in ("TP1", "TP2", "TP3"):
-            assert sum(f"{target} alındı" in message for _, message in events) == 1
+        state = refresh(3, 52500, 53100) if finish == "TP3" else refresh(3, 50500, 51200)
+        assert state[2] == "CLOSED" and state[3]["status"] == finish
+        monkeypatch.setattr(opportunity_pool, "_pool_instance", pool)
+        bot = service("chat")
+        bot._api = Mock(return_value={"message_id": 42, "chat": {"id": "chat"}})
+        bot._deliver_notifications()
+        bot._deliver_notifications()
+        messages = [call.args[1]["text"] for call in bot._api.call_args_list]
+        expected = ["TP1 alındı", "TP2 alındı", "TP3 alındı" if finish == "TP3" else "stop görüldü"]
+        for event in expected:
+            assert sum(event in message for message in messages) == 1
+        assert not pool.tracking.pending_notifications("chat")
     finally:
         pool.stop()
+
+
+def test_repeated_transport_timeouts_after_tp1_do_not_archive_then_stop():
+    import requests
+    history = Mock()
+    history.candles.side_effect = requests.ReadTimeout()
+    p = plan(tps_hit=[1], trailing_stop=100)
+    now = START + BAR
+    state = "ACTIVE"
+    for failure in range(1, 7):
+        state, p = evaluate(BTC, state, json.dumps(p), now, history=history)
+        assert state == "AMBIGUOUS" and p["status"] == "PENDING"
+        assert p["network_failures"] == failure and p.get("retry_count", 0) == 0
+        assert p["tps_hit"] == [1] and history.candles.call_args.args[1] == START
+        now = p["retry_at"]
+    history.candles.side_effect = None
+    history.candles.return_value = [bar(START,105,108,99,102)]
+    state, p = evaluate(BTC, state, json.dumps(p), now, history=history)
+    assert (state, p["status"], p["tps_hit"]) == ("CLOSED", "SL", [1])
+
+
+def test_only_current_partial_timeout_archive_reopens(tmp_path):
+    from pool_store import PoolStore
+    store = PoolStore(str(tmp_path))
+    p = plan(tps_hit=[1], trailing_stop=100, status="UNVERIFIED", retry_count=3,
+             resolved_at=START, ambiguity_reason="Gate.io geçmiş verisi alınamadı (ReadTimeout)")
+    with store._transaction() as conn:
+        conn.execute("INSERT INTO chat_follows VALUES(?,?,?)", ("c", BTC, 2))
+        for revision in (1, 2):
+            conn.execute("INSERT INTO chat_plans VALUES(?,?,?,?,?,?)",
+                         ("c", BTC, revision, "setup", "UNVERIFIED", json.dumps(p)))
+    store.close()
+    store = PoolStore(str(tmp_path))
+    try:
+        current, old = store.tracked("c")
+        assert current[2] == "AMBIGUOUS" and current[3]["tps_hit"] == [1]
+        assert current[3]["status"] == "PENDING" and BTC in store.open_symbols()
+        assert old[2] == "UNVERIFIED"
+    finally:
+        store.close()

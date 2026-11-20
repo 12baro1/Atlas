@@ -763,3 +763,18 @@ def test_streamed_history_keeps_recent_targets_and_full_totals(monkeypatch):
     assert "TEST20 ·" in positions and "TEST19 ·" not in positions
     history = service.handle_history()
     assert "TEST15 |" in history and "TEST14 |" not in history
+
+
+def test_notifications_run_while_polling_has_no_updates(monkeypatch):
+    import threading
+
+    service = TelegramCommandService(None, "offline", "chat")
+    delivered = threading.Event()
+    monkeypatch.setattr(service, "_fetch_bot_info", lambda: None)
+    monkeypatch.setattr(service, "_poll_loop", service.stop_flag.wait)
+    monkeypatch.setattr(service, "_deliver_notifications", delivered.set)
+    try:
+        assert service.start()
+        assert delivered.wait(2)
+    finally:
+        assert service.stop(timeout=3)

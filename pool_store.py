@@ -144,6 +144,23 @@ class PoolStore:
                 WHERE state='AMBIGUOUS' AND json_extract(payload, '$.ambiguity_reason')=?
             """, ("Aynı milisaniyede farklı işlem fiyatları",))
 
+            # Older releases could archive an open remainder solely on a transport
+            # timeout. Resume only the current followed revision with confirmed TPs.
+            conn.execute("""
+                UPDATE chat_plans AS p SET state='AMBIGUOUS', payload=json_set(
+                    json_remove(payload,'$.retry_count','$.retry_at','$.resolved_at','$.manual_review'),
+                    '$.status','PENDING', '$.ambiguity_reason','Bağlantı sonrası geçmiş kontrolü bekleniyor')
+                WHERE state='UNVERIFIED' AND json_array_length(payload,'$.tps_hit') BETWEEN 1 AND 2
+                  AND json_extract(payload,'$.ambiguity_reason') IN (
+                    'Gate.io geçmiş verisi alınamadı (TimeoutError)', 'Gate.io geçmiş verisi alınamadı (ReadTimeout)',
+                    'Gate.io geçmiş verisi alınamadı (ConnectTimeout)', 'Gate.io geçmiş verisi alınamadı (ConnectionError)',
+                    'Gate.io geçmiş verisi alınamadı (Timeout)')
+                  AND EXISTS (SELECT 1 FROM chat_follows f WHERE f.chat=p.chat AND f.symbol=p.symbol
+                              AND f.revision=p.revision)
+                  AND NOT EXISTS (SELECT 1 FROM chat_tracking_preferences f WHERE f.chat=p.chat AND f.symbol=p.symbol
+                                  AND (f.muted=1 OR f.changed_at >= json_extract(p.payload,'$.resolved_at')))
+            """)
+
     def _recover_corrupt_file(self):
         """Quarantine the corrupt DB sidecar files and start a fresh one."""
         stamp = int(time.time() * 1000)
