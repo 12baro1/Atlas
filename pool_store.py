@@ -362,6 +362,25 @@ class PoolStore:
             " GROUP BY symbol ORDER BY MIN(CASE WHEN state='ACTIVE' OR json_extract(payload,'$.entry_reached')=1 "
             "THEN 0 WHEN state='AMBIGUOUS' THEN 1 ELSE 2 END),symbol", params)]
 
+    def refresh_live_trades(self, history, stop_event):
+        now = int(time.time() * 1000)
+        # One trade page per distinct symbol and interval across subscribed chats.
+        from functools import lru_cache
+        read_trades = lru_cache(maxsize=8)(history.trade_range)
+        rows = self._thread_conn().execute(
+            "SELECT symbol,chat,revision,state,payload FROM chat_plans WHERE state IN ('ACTIVE','WAITING') "
+            "ORDER BY symbol,chat,revision").fetchall()
+        for symbol, *row in rows:
+            if stop_event.is_set():
+                break
+            try:
+                result = telegram_tracking.evaluate_live(symbol, row[2], row[3], now, read_trades)
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+                continue
+            if result:
+                with self._transaction() as conn:
+                    telegram_tracking.save(conn, symbol, row, result)
+
     def refresh_closed_targets(self, history=None):
         """Observe one bounded page after live positions, without changing their execution ledger."""
         from tracking_history import MINUTE, BAR, EvidenceMissing, TrackingHistory, indexed

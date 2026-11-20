@@ -373,3 +373,46 @@ def test_previous_day_closed_targets_observed_without_changing_fill_or_pnl(tmp_p
         assert history.candles.call_count == 3
     finally:
         store.close()
+
+
+def test_live_trades_advance_before_bar_closes_and_resume_after_restart(tmp_path, monkeypatch):
+    import threading
+    import time
+    from pool_store import PoolStore
+
+    clock = [START + 9_000]
+    monkeypatch.setattr(time, "time", lambda: clock[0] / 1000)
+    store = PoolStore(str(tmp_path))
+    raw = json.dumps(plan(entry_reached=False, entry_reached_at=None, next_bar_time=START))
+    with store._transaction() as conn:
+        conn.execute("INSERT INTO chat_plans VALUES('chat',?,1,'setup','WAITING',?)", (BTC, raw))
+    feed = Mock()
+    stop = threading.Event()
+    feed.trade_range.return_value = [TradeGroup(START+t, {p}, 1) for t, p in
+                                     [(100, 115), (200, 100), (300, 111), (400, 121)]]
+    store.refresh_live_trades(feed, stop)
+    feed.trade_range.assert_called_once_with(BTC, START, START+7000)
+    assert store.tracked("chat")[0][3]["tps_hit"] == [1, 2]
+    store.close()
+    store = PoolStore(str(tmp_path))
+    try:
+        clock[0] += 5000
+        feed.trade_range.return_value += [TradeGroup(START+8000, {109}, 1),
+                                         TradeGroup(START+9000, {131}, 1)]
+        store.refresh_live_trades(feed, stop)
+        store.refresh_live_trades(feed, stop)
+        _, _, state, result = store.tracked("chat")[0]
+        assert (state, result["status"], result["tps_hit"]) == ("CLOSED", "SL", [1, 2])
+        events = [r[0] for r in store._thread_conn().execute("SELECT event FROM chat_events ORDER BY id")]
+        assert events == ["ENTRY", "TP1", "TP2", "STOP", "CLOSED"]
+    finally:
+        store.close()
+
+
+def test_live_tied_stop_and_target_preserve_verified_prefix_for_history():
+    from telegram_tracking import evaluate_live
+    rows = [TradeGroup(START+1, {111}, 1), TradeGroup(START+2, {95, 121}, 2)]
+    state, result = evaluate_live(BTC, "ACTIVE", json.dumps(plan()), START+5000, lambda *args: rows)
+    assert (state, result["tps_hit"], result["verified_until"]) == ("ACTIVE", [1], START+2)
+    assert evaluate_live(BTC, state, json.dumps(result), START+9000, lambda *args: rows) is None
+    assert evaluate(BTC, state, json.dumps(result), START+BAR, [bar(START,100,121,95,121)]) is None
