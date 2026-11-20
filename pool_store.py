@@ -131,8 +131,15 @@ class PoolStore:
         # Change the old reason atomically so a restart never replenishes retries.
         with self._transaction() as conn:
             conn.execute("""
+                UPDATE chat_plans SET state='UNVERIFIED', payload=json_set(
+                    json_remove(payload, '$.manual_review', '$.retry_at'), '$.status', 'UNVERIFIED',
+                    '$.resolved_at', COALESCE(json_extract(payload, '$.history_checked_at'), ?))
+                WHERE state='AMBIGUOUS' AND (json_extract(payload, '$.retry_count') >= ?
+                    OR json_extract(payload, '$.manual_review')=1)
+            """, (int(time.time()*1000), telegram_tracking.MAX_VERIFICATION_ATTEMPTS))
+            conn.execute("""
                 UPDATE chat_plans SET payload = json_set(
-                    json_remove(payload, '$.manual_review', '$.retry_count', '$.retry_at'),
+                    json_remove(payload, '$.manual_review', '$.retry_at'),
                     '$.ambiguity_reason', 'Geçmiş işlemler yeniden doğrulanacak')
                 WHERE state='AMBIGUOUS' AND json_extract(payload, '$.ambiguity_reason')=?
             """, ("Aynı milisaniyede farklı işlem fiyatları",))
