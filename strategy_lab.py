@@ -96,10 +96,13 @@ def _finalize_candidate_geometry(candidate, candle_sets):
 
     # Detect pivots independently per timeframe; never concatenate intervals.
     swing_highs, swing_lows = [], []
+    valid_structure_sets = 0
     for candle_set in candle_sets or []:
         sample = list(candle_set or [])[-120:]
+        # Do not combine or interpolate malformed timeframe data.
         if any(not _valid_ohlc(item) for item in sample):
-            return "INVALID_OHLC_IN_STRUCTURE_DATA"
+            continue
+        valid_structure_sets += 1
         for index in range(2, len(sample) - 2):
             high = _value(sample[index], "high")
             low = _value(sample[index], "low")
@@ -115,6 +118,9 @@ def _finalize_candidate_geometry(candidate, candle_sets):
             if all(value is not None for value in left_lows + right_lows):
                 if low < min(left_lows + right_lows):
                     swing_lows.append(low)
+
+    if not valid_structure_sets:
+        return "INVALID_OHLC_IN_STRUCTURE_DATA"
 
     buffer = atr * 0.05
     if direction == "LONG":

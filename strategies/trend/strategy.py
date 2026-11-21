@@ -27,7 +27,7 @@ def generate(data):
     e20, e50, e1 = _ema(c4, 20), _ema(c4, 50), _ema(c1, 20)
     adx_value = _adx(h4)
     e20_previous = _ema(c4[:-5], 20)
-    if None in (e20, e50, e1, adx_value, e20_previous) or adx_value < 16:
+    if None in (e20, e50, e1, adx_value, e20_previous):
         return None
     trend_slope = (e20 - e20_previous) / atr
     directional = _directional_movement(h4)
@@ -69,6 +69,9 @@ def generate(data):
                    + min(efficiency * 10.0, 7.0)
                    + min(abs(directional["plus_di"] - directional["minus_di"]) * 0.15, 6.0)
                    + max(0.0, 7.0 - pullback_distance * 5.0))
+    # Weak ADX lowers confidence rather than hiding a valid EMA/DMI reclaim.
+    if adx_value < 16:
+        strength = max(0.0, strength - 10.0)
     # _valid_plan in common filter computes structural stop; pass dummy stop (ignored)
     dummy_stop = entry - atr if direction == "LONG" else entry + atr
     plan = _raw_candidate(direction, entry, dummy_stop, atr, "trend_pullback", strength, entry_reference=_entry_reference(data))
