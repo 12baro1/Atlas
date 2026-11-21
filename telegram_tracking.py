@@ -45,6 +45,8 @@ CREATE INDEX IF NOT EXISTS chat_event_pending ON chat_events(chat,delivered,id);
 
 class CandleSimulation(TradeJournal):
     """Reuse journal execution rules with persistence owned by the pool transaction."""
+    _MOVE_STOP_TO_TP1_AT_TP2 = False
+
     def __init__(self):
         pass
 
@@ -150,9 +152,9 @@ def apply_bar(plan, candle, width):
     if len(touched) > 1 and width > 1:
         return False
     if touched:
-        moved_stops = [entry if target == plan["tp1"] else plan["tp1"]
-                       for target in touched if target != plan["tp3"]]
-        if stopped or any(candle.low <= p if long else candle.high >= p for p in moved_stops):
+        entry_stop_touched = (plan["tp1"] in touched
+                              and (candle.low <= entry if long else candle.high >= entry))
+        if stopped or entry_stop_touched:
             return False
     if market:
         plan.update(entry=entry, entry_reached=True, entry_reached_at=candle.time)

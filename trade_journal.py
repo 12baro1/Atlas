@@ -36,6 +36,8 @@ def breached_setup_stop(direction, stop, opened_at, evidence):
 class TradeJournal:
     """Atlas analiz, trade ve performans kayıtlarını tek bir yerde toplar."""
 
+    _MOVE_STOP_TO_TP1_AT_TP2 = True
+
     def __init__(self, db_path=None):
         self.db_path = str(db_path) if db_path else None
         self._snapshots = []
@@ -1291,12 +1293,13 @@ class TradeJournal:
                         trailing_stop = max(current_stop if current_stop is not None else stop_loss, entry)
                     else:
                         trailing_stop = min(current_stop if current_stop is not None else stop_loss, entry)
-                elif 2 in reached and 3 not in reached:
-                    tp1 = self._num(outcome.get("tp1"))
-                    if tp1 is not None:
-                        trailing_stop = tp1
-                else:
-                    trailing_stop = current_stop
+                elif self._MOVE_STOP_TO_TP1_AT_TP2:
+                    if 2 in reached and 3 not in reached:
+                        tp1 = self._num(outcome.get("tp1"))
+                        if tp1 is not None:
+                            trailing_stop = tp1
+                    else:
+                        trailing_stop = current_stop
 
                 if len(reached) >= len(tps):
                     closed_all = True

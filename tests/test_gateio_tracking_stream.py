@@ -25,17 +25,19 @@ def test_stream_tracks_entry_and_each_partial_target_before_five_minute_close():
     stream.follow([BTC])
     receive(stream, [
         (START - 2000, 101), (START + 100, 100), (START + 1100, 110),
-        (START + 2100, 120), (START + 3100, 130), (START + 4100, 129),
+        (START + 2100, 120), (START + 3100, 105), (START + 4100, 130), (START + 5100, 129),
     ])
     state = "WAITING"
     tracked = plan(opened_at=START, entry_reached=False, entry_reached_at=None, partial_weights=[0.5, 0.3, 0.2])
     for elapsed, target_levels, expected_state in [
         (3000, [], "ACTIVE"), (4000, [1], "ACTIVE"),
-        (5000, [1, 2], "ACTIVE"), (6000, [1, 2, 3], "CLOSED"),
+        (5000, [1, 2], "ACTIVE"), (6000, [1, 2], "ACTIVE"), (7000, [1, 2, 3], "CLOSED"),
     ]:
         state, tracked = evaluate_live(BTC, state, json.dumps(tracked), START + elapsed, stream.trade_range)
         assert state == expected_state
         assert tracked.get("tps_hit", []) == target_levels
+        if target_levels:
+            assert tracked["trailing_stop"] == tracked["entry"]
     assert tracked["status"] == "TP3"
 
 
