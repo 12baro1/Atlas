@@ -1503,6 +1503,9 @@ class TelegramCommandService:
                 if state == "WAITING" and plan.get("history_checked_at"):
                     checked = datetime.fromtimestamp(plan["history_checked_at"] / 1000, tz)
                     card.append(f"Son takip kontrolü {checked:%d.%m %H:%M} TSİ")
+                if state == "WAITING" and plan.get("retry_at"):
+                    retry = datetime.fromtimestamp(plan["retry_at"] / 1000, tz)
+                    card.append(f"Sonraki kontrol {retry:%H:%M} TSİ")
                 if state == "CLOSED" and (note := _post_exit_note(plan)):
                     card.append(note)
                 if state == "AMBIGUOUS":

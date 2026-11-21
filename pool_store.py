@@ -135,11 +135,8 @@ class PoolStore:
                 UPDATE chat_plans SET state='UNVERIFIED', payload=json_set(
                     json_remove(payload, '$.manual_review', '$.retry_at'), '$.status', 'UNVERIFIED',
                     '$.resolved_at', COALESCE(json_extract(payload, '$.history_checked_at'), ?))
-                WHERE state='AMBIGUOUS' AND (json_extract(payload, '$.manual_review')=1
-                    OR (json_extract(payload, '$.retry_count') >= ? AND NOT (
-                        COALESCE(json_extract(payload, '$.entry_reached_at'), 0) > 0
-                        AND COALESCE(json_extract(payload, '$.entry_reached'), 0)=1)))
-            """, (int(time.time()*1000), telegram_tracking.MAX_VERIFICATION_ATTEMPTS))
+                WHERE state='AMBIGUOUS' AND json_extract(payload, '$.manual_review')=1
+            """, (int(time.time()*1000),))
             conn.execute("""
                 UPDATE chat_plans SET payload = json_set(
                     json_remove(payload, '$.manual_review', '$.retry_at'),
@@ -147,14 +144,13 @@ class PoolStore:
                 WHERE state='AMBIGUOUS' AND json_extract(payload, '$.ambiguity_reason')=?
             """, ("Aynı milisaniyede farklı işlem fiyatları",))
 
-            # Recover a previously archived open position only when this revision is
+            # Recover a previously archived check only when this revision is
             # still the current follow and the subscriber did not remove it.
             conn.execute("""
                 UPDATE chat_plans AS p SET state='AMBIGUOUS', payload=json_set(
                     json_remove(payload,'$.retry_count','$.retry_at','$.resolved_at','$.manual_review'),
-                    '$.status','PENDING', '$.ambiguity_reason','Açık işlem geçmişi yeniden doğrulanacak')
-                WHERE state='UNVERIFIED' AND COALESCE(json_extract(payload,'$.entry_reached'), 0)=1
-                  AND COALESCE(json_extract(payload,'$.entry_reached_at'), 0) > 0
+                    '$.status','PENDING', '$.ambiguity_reason','İşlem geçmişi yeniden kontrol edilecek')
+                WHERE state='UNVERIFIED'
                   AND EXISTS (SELECT 1 FROM chat_follows f WHERE f.chat=p.chat AND f.symbol=p.symbol
                               AND f.revision=p.revision)
                   AND NOT EXISTS (SELECT 1 FROM chat_tracking_preferences f WHERE f.chat=p.chat AND f.symbol=p.symbol
@@ -511,15 +507,22 @@ class PoolStore:
                          "WHERE chat=? AND symbol=? AND revision=? AND cursor_ms=?",
                          (end, json.dumps(sorted(hits)), int(incomplete), int(remaining <= hits), now+MINUTE, *key))
 
-    def advance_tracking(self, symbol, candles=None, *, history=None):
+    def advance_tracking(self, symbol, candles=None, *, history=None, stop_event=None):
         now = int(time.time() * 1000)
         rows = self._thread_conn().execute(
             "SELECT chat,revision,state,payload FROM chat_plans WHERE symbol=? "
             "AND state IN ('ACTIVE','WAITING','AMBIGUOUS')", (symbol,)).fetchall()
         for row in rows:
+            if stop_event is not None and stop_event.is_set():
+                return
             if row[2] == "AMBIGUOUS" and history is None:
                 continue
-            result = telegram_tracking.evaluate(symbol, row[2], row[3], now, candles, history)
+            if history is not None and stop_event is not None:
+                result = telegram_tracking.evaluate_with_rechecks(
+                    symbol, row[2], row[3], now, history, stop_event
+                )
+            else:
+                result = telegram_tracking.evaluate(symbol, row[2], row[3], now, candles, history)
             if result:
                 # Network and replay run outside the writer lock. CAS rejects stale snapshots.
                 with self._transaction() as conn:
