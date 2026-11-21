@@ -26,7 +26,7 @@ def generate(data, regime):
     atr = _atr(candles)
     bands = _bollinger(closes)
     rsi = _rsi(closes)
-    if regime.get("label") not in {"RANGE", "TRANSITION"} or (regime.get("label") == "TRANSITION" and float(regime.get("adx") or 0.0) > 20.0) or len(candles) < 25 or atr is None or bands is None or rsi is None:
+    if len(candles) < 25 or atr is None or bands is None or rsi is None:
         return None
     previous_bands = _bollinger(closes[:-1])
     previous_rsi = _rsi(closes[:-1])
@@ -66,6 +66,13 @@ def generate(data, regime):
             return None
     extremity = max(0.0, 42.0 - rsi) if direction == "LONG" else max(0.0, rsi - 58.0)
     strength = min(88.0, 65.0 + min(extremity * 0.5, 12.0) + min(abs(close - prev_close) / atr * 4.0, 8.0))
+    # Regime is supporting context: the native Bollinger re-entry and RSI
+    # reversal remain mandatory, while trending markets reduce conviction.
+    regime_label = str((regime or {}).get("label") or "").upper()
+    if regime_label not in {"RANGE", "TRANSITION"}:
+        strength = max(0.0, strength - 12.0)
+    elif regime_label == "TRANSITION" and float((regime or {}).get("adx") or 0.0) > 20.0:
+        strength = max(0.0, strength - 6.0)
     # _valid_plan in common filter computes structural stop; pass dummy stop (ignored)
     dummy_stop = entry - atr if direction == "LONG" else entry + atr
     plan = _raw_candidate(direction, entry, dummy_stop, atr, "mean_reversion", strength, entry_reference=_entry_reference(data))
