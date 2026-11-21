@@ -135,7 +135,26 @@ def generate(data):
 
     # _valid_plan in common filter computes structural stop; pass dummy stop (ignored)
     dummy_stop = entry - atr if direction == "LONG" else entry + atr
-    strength = min(90.0, 64.0 + min(abs(residual_alpha) * 450.0, 22.0) + min(abs(beta) * 2.0, 4.0))
+    stability = beta_stability(asset_returns, benchmark_returns, 24)
+    volume_evidence = relative_volume(
+        _value(candles[-1], "volume"),
+        [_value(x, "volume") for x in candles[-21:-1]],
+    )
+    # These are quality evidence, not mandatory entry conditions.
+    # Unavailable observations are neutral rather than fabricated.
+    evidence_delta = 0.0
+    if stability.get("state") == "UNSTABLE":
+        evidence_delta -= 9.0
+    elif stability.get("state") == "STABLE":
+        evidence_delta += 3.0
+    if volume_evidence.get("state") == "LOW":
+        evidence_delta -= 5.0
+    elif volume_evidence.get("state") == "HIGH":
+        evidence_delta += 3.0
+    # A recent alpha close to zero is weaker than one that persists.
+    if abs(residual_alpha_6) < abs(residual_alpha) * 0.15:
+        evidence_delta -= 5.0
+    strength = max(0.0, min(90.0, 64.0 + min(abs(residual_alpha) * 450.0, 22.0) + min(abs(beta) * 2.0, 4.0) + evidence_delta))
     plan = _raw_candidate(direction, entry, dummy_stop, atr, "relative_strength", strength, entry_reference=_entry_reference(data))
     if plan:
         benchmark_label = "/".join(benchmark_keys)
@@ -155,8 +174,9 @@ def generate(data):
             "residual_volatility_4h": round(residual_volatility, 6),
             "market_return_12x4h": round(benchmark_return_12, 6),
             "sector_peers_used": len(sector_maps) if use_sector else 0,
-            "beta_stability": beta_stability(asset_returns, benchmark_returns, 24),
-            "relative_volume": relative_volume(_value(candles[-1], "volume"), [_value(x, "volume") for x in candles[-21:-1]]),
+            "beta_stability": stability,
+            "relative_volume": volume_evidence,
+            "evidence_strength_adjustment": evidence_delta,
             "volatility_regime": volatility_regime(candles),
         }
     if plan:
