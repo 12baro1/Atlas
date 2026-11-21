@@ -95,6 +95,8 @@ def _mandatory_confluence_reason(analysis, direction, entry):
     if not zones:
         return "SMC_REQUIRED_VALID_OB_OR_FVG_MISSING"
     if not any(low <= entry <= high for _, low, high in zones):
+        # A LIMIT entry can be placed at the nearest active OB/FVG boundary.
+        # A MARKET entry outside the zone is not an SMC POI entry.
         return "SMC_ENTRY_OUTSIDE_VALID_OB_FVG"
 
     # OTE is advisory only: malformed or absent OTE must not veto the setup.
@@ -141,6 +143,7 @@ def generate(result, data=None):
             for key in ("tp1", "tp2", "tp3")
         ]
     except (TypeError, ValueError, OverflowError):
+        analysis["smc_mandatory_gate_reason"] = "SMC_MISSING_ENTRY_STOP_OR_THREE_TARGETS"
         return None
     if direction not in {"LONG", "SHORT"} or not all(
         math.isfinite(value) and value > 0 for value in (entry, stop, *target_values)
@@ -152,8 +155,10 @@ def generate(result, data=None):
         return None
     analysis.pop("smc_mandatory_gate_reason", None)
     if direction == "LONG" and not (stop < entry < target_values[0] <= target_values[1] <= target_values[2]):
+        analysis["smc_mandatory_gate_reason"] = "SMC_INVALID_LONG_ENTRY_STOP_TARGET_ORDER"
         return None
     if direction == "SHORT" and not (target_values[0] >= target_values[1] >= target_values[2] and target_values[0] < entry < stop):
+        analysis["smc_mandatory_gate_reason"] = "SMC_INVALID_SHORT_ENTRY_STOP_TARGET_ORDER"
         return None
     risk_distance = abs(entry - stop)
     if risk_distance <= 0:
