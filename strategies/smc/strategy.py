@@ -38,6 +38,17 @@ def _mandatory_confluence_reason(analysis, direction, entry):
         i for i in range(len(structure) - 1, -1, -1)
         if isinstance(structure[i], dict) and structure[i].get("choch") is True
     )
+    # If the producer supplies 4H candle indices, avoid trading a CHoCH
+    # whose age is no longer relevant. Unknown ages are not guessed.
+    latest_choch = structure[last_choch_index]
+    age_bars = latest_choch.get("age_bars")
+    if age_bars is not None:
+        try:
+            age = float(age_bars)
+            if not math.isfinite(age) or age < 0 or age > 30:
+                return "SMC_CHoCH_STALE"
+        except (TypeError, ValueError, OverflowError):
+            return "SMC_CHoCH_STALE"
     opposite = "BEARISH" if expected == "BULLISH" else "BULLISH"
     for event in structure[last_choch_index + 1:]:
         if not isinstance(event, dict):
