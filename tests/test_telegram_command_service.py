@@ -454,9 +454,11 @@ def test_pool_status_shows_only_persistent_pool_contents(monkeypatch):
     pool = SimpleNamespace(
         get_stats=lambda: {"candidates": 3, "validated": 2, "active": 1, "history": 4},
         get_best_setups=lambda **kwargs: [],
+        tracking=SimpleNamespace(get_meta=lambda _: None),
     )
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
     message = TelegramCommandService(SimpleNamespace(), "token", "chat").handle_pool_status()
+    assert "Son tarama yayını: Henüz kayıt yok" in message
     assert "ATLAS | FIRSAT HAVUZU" in message
     assert "Aday: 3" in message
     assert "Doğrulanmış: 2" in message

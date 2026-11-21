@@ -103,6 +103,60 @@ def test_300_worker_jobs_restart_publish_then_resume(tmp_path, pool):
     scan.queue.close()
 
 
+def test_short_generation_publishes_last_batch_and_reports_it(tmp_path, pool):
+    import json
+
+    queue = ScanQueue(tmp_path / "queue")
+    try:
+        generation = queue.rebuild([BTC])["generation"]
+        job = queue.claim_next()
+        queue.complete(BTC, True, claim=job, result=observation())
+        runtime, inventory = MagicMock(), MagicMock()
+        runtime._opportunity_pool.return_value = pool
+        inventory.get_ranked_symbols.return_value = []
+        ScanService(runtime, queue, inventory, continuous=True).roll_cycle()
+
+        assert pool.get_best_setups()[0].symbol == BTC
+        assert pool.tracking.get_meta("published_generation") == str(generation)
+        assert not queue.cycle_results(generation)
+        report = json.loads(pool.tracking.get_meta("last_scan_publication"))
+        assert report["at_ms"] > 0 and report["analyzed"] == report["selected"] == 1
+        assert "Son grup: 1 analiz · 1 setup seçildi" in service().execute_command("/havuzdurum")
+    finally:
+        queue.close()
+
+
+def test_notification_retry_only_blocks_same_symbol_unless_rate_limited(pool, monkeypatch):
+    import time
+    from telegram_tracking import event
+
+    now = [1_800_000_000]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    store = pool.tracking
+    bnb = "BNB/USDT:USDT"
+    plan = dict(entry=100, stop_loss=90, tp1=110, tp2=120, tp3=130)
+    with store._transaction() as conn:
+        event(conn, "chat", BTC, 1, "TP1", "BTC TP1", plan)
+        event(conn, "chat", BTC, 1, "STOP", "BTC STOP", plan)
+        event(conn, "chat", bnb, 1, "STOP", "BNB STOP", plan)
+
+    first, message, attempt = store.claim_notification("chat")
+    assert "BTC TP1" in message
+    store.finish_notification("chat", first, attempt, "retry", retry_after=60)
+    other, message, attempt = store.claim_notification("chat")
+    assert "BNB STOP" in message
+    store.finish_notification("chat", other, attempt, "retry", retry_after=90, rate_limit_seconds=90)
+    now[0] += 60
+    assert store.claim_notification("chat") is None
+
+    now[0] += 30
+    retry, _, attempt = store.claim_notification("chat")
+    assert retry == first and attempt == 2
+    store.finish_notification("chat", retry, attempt, "sent", message_id=1)
+    _, message, _ = store.claim_notification("chat")
+    assert "BTC STOP" in message
+
+
 def test_restart_checks_published_batch_before_claiming_next_symbol(tmp_path, pool):
     queue = ScanQueue(tmp_path/"queue")
     symbols = [BTC] + [f"S{i}/USDT:USDT" for i in range(299)]
