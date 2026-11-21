@@ -144,7 +144,7 @@ def _market_entry_risk_valid(plan, entry):
         if distance <= 0 or distance / entry < float(getattr(Config, "MIN_STOP_PERCENT", 0.0005)):
             return False
         # A market reference cannot drift arbitrarily from the approved setup.
-        if abs(entry - planned) / planned > float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PCT", 0.003)):
+        if abs(entry - planned) / planned > float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PCT", 0.05)):
             return False
         costs = plan["payload"]["execution_costs"]
         stop_cost = estimate_stop_cost(
