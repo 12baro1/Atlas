@@ -130,9 +130,9 @@ def generate(data):
     # can still report its relative-strength evidence, but entry timing must
     # remain near the trend baseline; the common selector handles final risk.
     extension_atr = abs(entry - e20) / atr if atr > 0 else float("inf")
-    if extension_atr > 2.0:
-        return None
-
+    # Overextension is advisory: preserve independent setup generation and
+    # let the common quality gate and final selector decide execution.
+    
     # _valid_plan in common filter computes structural stop; pass dummy stop (ignored)
     dummy_stop = entry - atr if direction == "LONG" else entry + atr
     stability = beta_stability(asset_returns, benchmark_returns, 24)
@@ -142,7 +142,7 @@ def generate(data):
     )
     # These are quality evidence, not mandatory entry conditions.
     # Unavailable observations are neutral rather than fabricated.
-    evidence_delta = 0.0
+    evidence_delta = -min(18.0, max(0.0, extension_atr - 2.0) * 6.0)
     if stability.get("state") == "UNSTABLE":
         evidence_delta -= 9.0
     elif stability.get("state") == "STABLE":
