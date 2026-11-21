@@ -38,8 +38,7 @@ def generate(data):
         return None
     prior_width = (prior_band[2] - prior_band[0]) / max(prior_band[1], 1e-12)
     compression_threshold = sorted(bandwidths)[max(0, int((len(bandwidths) - 1) * 0.50))]
-    if prior_width > compression_threshold:
-        return None
+    compressed = prior_width <= compression_threshold
     previous = candles[-21:-1]
     last = candles[-1]
     prior_highs = [_value(item, "high") for item in previous]
@@ -54,12 +53,12 @@ def generate(data):
         return None
     upper_boundary, lower_boundary = max(prior_highs), min(prior_lows)
     direction = None
-    if (close > upper_boundary and breakout_evidence.get("state") == "ACCEPTED" and breakout_evidence.get("direction") == "LONG" and entry >= close and entry <= upper_boundary + atr
+    if (close > upper_boundary and entry >= close and entry <= upper_boundary + atr
             and volume_ratio >= 1.15 and quality["direction"] == "BULLISH"
             and quality["body_ratio"] >= 0.40 and quality["close_location"] >= 0.65
             and quality["range"] >= 0.60 * atr):
         direction = "LONG"
-    elif (close < lower_boundary and breakout_evidence.get("state") == "ACCEPTED" and breakout_evidence.get("direction") == "SHORT" and entry <= close and entry >= lower_boundary - atr
+    elif (close < lower_boundary and entry <= close and entry >= lower_boundary - atr
             and volume_ratio >= 1.30 and quality["direction"] == "BEARISH"
             and quality["body_ratio"] >= 0.50 and quality["close_location"] <= 0.35
             and quality["range"] >= 0.75 * atr):
@@ -71,6 +70,11 @@ def generate(data):
     strength = min(93.0, 61.0 + min(max(0.0, volume_ratio - 1.15) * 10.0, 15.0)
                    + min(quality["body_ratio"] * 10.0, 8.0)
                    + min(quality["range"] / atr * 5.0, 7.0))
+    # Compression and acceptance increase confidence but are not standalone
+    # mandatory conditions for a decisive 20-candle price breakout.
+    strength = max(0.0, strength + (3.0 if compressed else -5.0))
+    if breakout_evidence.get("state") != "ACCEPTED" or breakout_evidence.get("direction") != direction:
+        strength = max(0.0, strength - 5.0)
     # _valid_plan in common filter computes structural stop; pass dummy stop (ignored)
     dummy_stop = entry - atr if direction == "LONG" else entry + atr
     plan = _raw_candidate(direction, entry, dummy_stop, atr, "volatility_breakout", strength, entry_reference=_entry_reference(data))
