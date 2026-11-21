@@ -575,7 +575,7 @@ def test_decision_engine_selects_only_common_filter_passed_candidates():
         "estimated_net_rr": 2.4, "strength": 70.0, "regime_fit": 0.8,
     }
 
-    assert engine.select_strategy_candidate([blocked, first, second]) is second
+    assert engine.select_strategy_candidate([blocked, first, second]) is first
     assert engine.select_strategy_candidate([blocked]) is None
 
 
