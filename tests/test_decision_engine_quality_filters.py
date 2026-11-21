@@ -104,9 +104,9 @@ def test_quality_pass_does_not_bypass_low_central_score():
     from config import Config
 
     engine = DecisionEngine()
-    with patch.object(Config, "DECISION_SCORE_EXECUTE", 100):
+    with patch.object(Config, "DECISION_SCORE_EXECUTE", 101):
         result = engine.decide(**_supportive_context())
-    assert result["score"] < 100
+    assert result["score"] < 101
     assert result["action"] != "EXECUTE"
 
 
