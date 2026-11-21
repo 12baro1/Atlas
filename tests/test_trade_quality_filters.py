@@ -478,9 +478,9 @@ def test_filters_disabled_pass_through(monkeypatch):
     "direction,stop,blocked",
     [
         ("LONG", 98.95, True),
-        ("LONG", 98.7, False),
+        ("LONG", 98.4, False),
         ("SHORT", 101.05, True),
-        ("SHORT", 101.3, False),
+        ("SHORT", 101.6, False),
     ],
 )
 def test_stop_respects_poi_invalidation_with_atr_buffer(direction, stop, blocked):
