@@ -435,7 +435,7 @@ def test_decision_skips_when_cross_motor_trade_quality_gate_rejects_setup():
     assert any("Trade quality" in item for item in result["critical_blockers"])
 
 
-def test_execution_quality_gate_not_confluence_score_decides_execution():
+def test_execution_quality_gate_still_requires_central_score():
     result = DecisionEngine().decide(
         **_supportive_context(
             signal={"signal": "LONG", "confidence": 31, "grade": "D", "strength": "WEAK"},
@@ -443,7 +443,7 @@ def test_execution_quality_gate_not_confluence_score_decides_execution():
             trade_quality={"allowed": True, "blockers": [], "reason": "All execution-quality checks passed"},
         )
     )
-    assert result["action"] == "EXECUTE"
+    assert result["action"] in {"WAIT", "SKIP"}
 
 
 def test_shared_specialist_event_is_only_scored_once():

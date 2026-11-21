@@ -312,15 +312,15 @@ class AtlasMainEngine:
                 return (
                     candidate.get("projected_target") is not None,
                     candidate.get("execution_economics_valid", False),
-                    first_rr,
-                    net_rr,
                     bool(candidate.get("structure_aligned")),
-                    candidate.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL",
-                    bool(candidate.get("ote_confluence")),
                     support - opposition,
                     bool(candidate.get("orderflow_supportive")),
+                    candidate.get("direction_source") == "CONFIRMED_SWEEP_REVERSAL",
+                    bool(candidate.get("ote_confluence")),
                     candidate.get("poi_source") in {"ORDER_BLOCK", "HTF_ORDER_BLOCK"},
                     -distance,
+                    first_rr,
+                    net_rr,
                 )
             selected = dict(max(eligible, key=candidate_rank))
             selected["selected_by"] = "ATLAS_MAIN_ENGINE"

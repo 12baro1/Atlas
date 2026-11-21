@@ -32,6 +32,32 @@ def _mandatory_confluence_reason(analysis, direction, entry):
     if str(choch_events[-1].get("direction") or "").upper() != expected:
         return "SMC_REQUIRED_CHoCH_DIRECTION_MISMATCH"
 
+    # An intervening opposite structural break invalidates the older CHoCH.
+    # Preserve compatibility when structure evidence has no ordered break events.
+    last_choch_index = next(
+        i for i in range(len(structure) - 1, -1, -1)
+        if isinstance(structure[i], dict) and structure[i].get("choch") is True
+    )
+    # If the producer supplies 4H candle indices, avoid trading a CHoCH
+    # whose age is no longer relevant. Unknown ages are not guessed.
+    latest_choch = structure[last_choch_index]
+    age_bars = latest_choch.get("age_bars")
+    if age_bars is not None:
+        try:
+            age = float(age_bars)
+            if not math.isfinite(age) or age < 0 or age > 30:
+                return "SMC_CHoCH_STALE"
+        except (TypeError, ValueError, OverflowError):
+            return "SMC_CHoCH_STALE"
+    opposite = "BEARISH" if expected == "BULLISH" else "BULLISH"
+    for event in structure[last_choch_index + 1:]:
+        if not isinstance(event, dict):
+            continue
+        if (event.get("bos") is True or event.get("choch") is True) and (
+            str(event.get("direction") or "").upper() == opposite
+        ):
+            return "SMC_CHoCH_INVALIDATED_BY_OPPOSITE_BREAK"
+
     try:
         entry = float(entry)
     except (TypeError, ValueError, OverflowError):

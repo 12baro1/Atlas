@@ -82,3 +82,27 @@ def test_smc_does_not_reject_invalid_ote():
     analysis = _analysis()
     analysis["smc_ote"] = {"fib62": "bad", "fib79": None}
     assert _mandatory_confluence_reason(analysis, "LONG", 100.0) is None
+
+
+def test_smc_rejects_opposite_break_after_choch():
+    analysis = _analysis()
+    analysis["smc_h4_structure"].append({"bos": True, "direction": "BEARISH"})
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) == "SMC_CHoCH_INVALIDATED_BY_OPPOSITE_BREAK"
+
+
+def test_smc_keeps_same_direction_break_after_choch():
+    analysis = _analysis()
+    analysis["smc_h4_structure"].append({"bos": True, "direction": "BULLISH"})
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) is None
+
+
+def test_smc_rejects_explicitly_stale_choch():
+    analysis = _analysis()
+    analysis["smc_h4_structure"][0]["age_bars"] = 31
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) == "SMC_CHoCH_STALE"
+
+
+def test_smc_accepts_recent_choch():
+    analysis = _analysis()
+    analysis["smc_h4_structure"][0]["age_bars"] = 4
+    assert _mandatory_confluence_reason(analysis, "LONG", 100.0) is None

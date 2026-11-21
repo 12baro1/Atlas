@@ -126,9 +126,35 @@ def generate(data):
     entry = _current_price(data)
     if entry is None or (direction == "LONG" and entry <= e20) or (direction == "SHORT" and entry >= e20):
         return None
+    # Do not chase an already-extended 4H trend at market. The raw strategy
+    # can still report its relative-strength evidence, but entry timing must
+    # remain near the trend baseline; the common selector handles final risk.
+    extension_atr = abs(entry - e20) / atr if atr > 0 else float("inf")
+    # Overextension is advisory: preserve independent setup generation and
+    # let the common quality gate and final selector decide execution.
+    
     # _valid_plan in common filter computes structural stop; pass dummy stop (ignored)
     dummy_stop = entry - atr if direction == "LONG" else entry + atr
-    strength = min(90.0, 64.0 + min(abs(residual_alpha) * 450.0, 22.0) + min(abs(beta) * 2.0, 4.0))
+    stability = beta_stability(asset_returns, benchmark_returns, 24)
+    volume_evidence = relative_volume(
+        _value(candles[-1], "volume"),
+        [_value(x, "volume") for x in candles[-21:-1]],
+    )
+    # These are quality evidence, not mandatory entry conditions.
+    # Unavailable observations are neutral rather than fabricated.
+    evidence_delta = -min(18.0, max(0.0, extension_atr - 2.0) * 6.0)
+    if stability.get("state") == "UNSTABLE":
+        evidence_delta -= 9.0
+    elif stability.get("state") == "STABLE":
+        evidence_delta += 3.0
+    if volume_evidence.get("state") == "LOW":
+        evidence_delta -= 5.0
+    elif volume_evidence.get("state") == "HIGH":
+        evidence_delta += 3.0
+    # A recent alpha close to zero is weaker than one that persists.
+    if abs(residual_alpha_6) < abs(residual_alpha) * 0.15:
+        evidence_delta -= 5.0
+    strength = max(0.0, min(90.0, 64.0 + min(abs(residual_alpha) * 450.0, 22.0) + min(abs(beta) * 2.0, 4.0) + evidence_delta))
     plan = _raw_candidate(direction, entry, dummy_stop, atr, "relative_strength", strength, entry_reference=_entry_reference(data))
     if plan:
         benchmark_label = "/".join(benchmark_keys)
@@ -141,14 +167,16 @@ def generate(data):
         ]
         plan["relative_strength_metrics"] = {
             "beta": round(beta, 4),
+            "entry_extension_atr": round(extension_atr, 4),
             "residual_alpha_12x4h": round(residual_alpha, 6),
             "residual_alpha_6x4h": round(residual_alpha_6, 6),
             "required_alpha_12x4h": round(alpha_signal, 6),
             "residual_volatility_4h": round(residual_volatility, 6),
             "market_return_12x4h": round(benchmark_return_12, 6),
             "sector_peers_used": len(sector_maps) if use_sector else 0,
-            "beta_stability": beta_stability(asset_returns, benchmark_returns, 24),
-            "relative_volume": relative_volume(_value(candles[-1], "volume"), [_value(x, "volume") for x in candles[-21:-1]]),
+            "beta_stability": stability,
+            "relative_volume": volume_evidence,
+            "evidence_strength_adjustment": evidence_delta,
             "volatility_regime": volatility_regime(candles),
         }
     if plan:

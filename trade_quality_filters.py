@@ -760,6 +760,29 @@ class TradeQualityFilters:
         stop_atr = abs(entry_price - stop) / atr
         detail["stop_atr"] = round(stop_atr, 3)
 
+        # A stop must invalidate the selected POI, not merely satisfy an
+        # arbitrary ATR distance. Only enforce when trustworthy zone bounds
+        # are explicitly present; legacy setups remain backward-compatible.
+        zone = entry.get("poi_zone")
+        if isinstance(zone, dict):
+            low = self._safe_float(zone.get("low"))
+            high = self._safe_float(zone.get("high"))
+            if low is not None and high is not None and 0 < low < high:
+                buffer_atr = max(0.0, float(getattr(Config, "STOP_STRUCTURE_BUFFER_ATR", 0.10)))
+                buffer_price = atr * buffer_atr
+                invalidation = low - buffer_price if direction == "LONG" else high + buffer_price
+                detail["structural_invalidation"] = invalidation
+                if (direction == "LONG" and stop > invalidation) or (
+                    direction == "SHORT" and stop < invalidation
+                ):
+                    detail["passed"] = False
+                    detail["severity"] = "critical"
+                    detail["reason"] = "Stop is inside the selected POI invalidation boundary"
+                    detail["critical_blockers"].append(
+                        "Stop inside structural invalidation: POI boundary plus ATR buffer"
+                    )
+                    return detail
+
         if stop_atr < min_stop_atr:
             detail["passed"] = False
             detail["severity"] = "critical"
