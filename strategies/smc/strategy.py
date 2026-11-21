@@ -138,10 +138,37 @@ def generate(result, data=None):
             stop_value = entry_state.get("stop_loss")
         entry = float(entry_value)
         stop = float(stop_value)
-        target_values = [
-            float(source_risk.get(key) if source_risk.get(key) is not None else dynamic_tp.get(key))
-            for key in ("tp1", "tp2", "tp3")
-        ]
+        target_values = []
+        for key in ("tp1", "tp2", "tp3"):
+            value = source_risk.get(key)
+            if value is None:
+                value = dynamic_tp.get(key)
+            try:
+                value = float(value)
+            except (TypeError, ValueError, OverflowError):
+                value = None
+            target_values.append(value)
+        # Missing upstream TP geometry may be recovered only from confirmed
+        # opposing swing levels in the independent shared geometry service.
+        # Never synthesize arbitrary R-multiple or ATR targets.
+        if any(value is None or not math.isfinite(value) or value <= 0 for value in target_values):
+            from strategy_lab import _finalize_candidate_geometry
+            from shared.analysis_services import _atr
+            data_sets = [
+                (data or {}).get(tf) or [] for tf in ("15m", "1h", "4h", "1d", "1w")
+                if (data or {}).get(tf)
+            ] if isinstance(data, dict) else []
+            atr = source_risk.get("atr")
+            if atr is None and isinstance(data, dict):
+                atr = _atr(data.get("15m") or [])
+            fallback = {"direction": direction, "entry": entry,
+                        "stop_loss": stop, "atr": atr}
+            reason = _finalize_candidate_geometry(fallback, data_sets)
+            if reason:
+                analysis["smc_mandatory_gate_reason"] = f"SMC_STRUCTURAL_TARGET_RECOVERY:{reason}"
+                return None
+            stop = fallback["stop_loss"]
+            target_values = [fallback[key] for key in ("tp1", "tp2", "tp3")]
     except (TypeError, ValueError, OverflowError):
         analysis["smc_mandatory_gate_reason"] = "SMC_MISSING_ENTRY_STOP_OR_THREE_TARGETS"
         return None
