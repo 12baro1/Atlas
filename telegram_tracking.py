@@ -1,9 +1,12 @@
 """Chat-scoped theoretical signals. All transitions share the pool transaction."""
 import json
+import math
 import time
 
 import requests
 
+from config import Config
+from execution_costs import estimate_stop_cost
 from core.candle import Candle
 from tracking_history import BAR, MINUTE, QUARTER_HOUR, EvidenceMissing, indexed, matches, trades_match
 from telegram_prices import confirmed_target_levels, tracked_levels
@@ -129,6 +132,36 @@ def _exit_levels_in_bar(plan, candle):
     return targets, touched, stopped
 
 
+def _market_entry_risk_valid(plan, entry):
+    """Recheck stop economics against the actual theoretical MARKET entry."""
+    try:
+        stop = float(plan["stop_loss"])
+        entry = float(entry)
+        planned = float(plan["entry"])
+        if not all(math.isfinite(x) and x > 0 for x in (entry, stop, planned)):
+            return False
+        distance = abs(stop - entry)
+        if distance <= 0 or distance / entry < float(getattr(Config, "MIN_STOP_PERCENT", 0.0005)):
+            return False
+        # A market reference cannot drift arbitrarily from the approved setup.
+        if abs(entry - planned) / planned > float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PCT", 0.05)):
+            return False
+        costs = plan["payload"]["execution_costs"]
+        stop_cost = estimate_stop_cost(
+            entry, stop, entry_type="MARKET",
+            maker_fee_rate=costs.get("maker_fee_rate", 0.0002),
+            taker_fee_rate=costs.get("taker_fee_rate", 0.00055),
+            spread_rate=costs.get("spread_rate", 0.0002),
+            slippage_rate=costs.get("slippage_rate", 0.0003),
+        )
+        max_cost_r = float(getattr(Config, "MAX_STOP_EXECUTION_COST_R", 0.5))
+        if max_cost_r <= 0 or stop_cost["total"] / distance > max_cost_r:
+            return False
+        return True
+    except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
+        return False
+
+
 def apply_bar(plan, candle, width):
     """Return False without mutating the plan if OHLC cannot order its events."""
     if getattr(candle, "volume", None) == 0:
@@ -143,6 +176,9 @@ def apply_bar(plan, candle, width):
         if market:
             if not (stop < entry < targets[0] if long else stop > entry > targets[0]):
                 return False
+            if not _market_entry_risk_valid(plan, entry):
+                plan.update(status="ENTRY_REJECTED", resolved_at=candle.time)
+                return True
         elif not candle.low <= entry <= candle.high:
             plan["last_processed_candle_time"] = candle.time
             return True
@@ -292,7 +328,7 @@ def evaluate_live(symbol, state, raw, now, read_trades):
         plan["next_bar_time"] = plan["verified_until"] // BAR * BAR
         plan["live_price"] = price
         if plan["status"] != "PENDING":
-            return "CLOSED", plan
+            return ("INVALIDATED" if plan["status"] == "ENTRY_REJECTED" else "CLOSED"), plan
     if plan.get("verified_until", 0) > cursor:
         if plan["entry_reached"] and previous is not None:
             mark_position(plan, previous, plan["verified_until"] - 1)
@@ -352,7 +388,7 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
             for key in ("ambiguity_reason", "blocked_at", "retry_at", "retry_count", "network_failures"):
                 plan.pop(key, None)
             if plan["status"] != "PENDING":
-                return "CLOSED", plan
+                return ("INVALIDATED" if plan["status"] == "ENTRY_REJECTED" else "CLOSED"), plan
             if plan["entry_reached"]:
                 mark_position(plan, candle.close, stamp + width)
             if recovered or refined or (not history and stamp == last_available):
@@ -410,6 +446,8 @@ def save(conn, symbol, row, result):
         record(f"TP{level}", f"Sinyal takibi: TP{level} alındı.")
     if plan["status"] == "SL":
         record("STOP", "Sinyal takibi: stop görüldü.")
+    if new_state == "INVALIDATED" and plan.get("status") == "ENTRY_REJECTED":
+        record("ENTRY_REJECTED", "MARKET giriş reddedildi: stop mesafesi veya işlem maliyeti güvenli değil.")
     if new_state == "CLOSED":
         watch_closed_targets(conn, chat, symbol, revision, plan)
         record("CLOSED", f"Sinyal kapandı | {plan['realized_r']:+.2f}R")
