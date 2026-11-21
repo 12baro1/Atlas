@@ -32,6 +32,21 @@ def _mandatory_confluence_reason(analysis, direction, entry):
     if str(choch_events[-1].get("direction") or "").upper() != expected:
         return "SMC_REQUIRED_CHoCH_DIRECTION_MISMATCH"
 
+    # An intervening opposite structural break invalidates the older CHoCH.
+    # Preserve compatibility when structure evidence has no ordered break events.
+    last_choch_index = next(
+        i for i in range(len(structure) - 1, -1, -1)
+        if isinstance(structure[i], dict) and structure[i].get("choch") is True
+    )
+    opposite = "BEARISH" if expected == "BULLISH" else "BULLISH"
+    for event in structure[last_choch_index + 1:]:
+        if not isinstance(event, dict):
+            continue
+        if (event.get("bos") is True or event.get("choch") is True) and (
+            str(event.get("direction") or "").upper() == opposite
+        ):
+            return "SMC_CHoCH_INVALIDATED_BY_OPPOSITE_BREAK"
+
     try:
         entry = float(entry)
     except (TypeError, ValueError, OverflowError):
