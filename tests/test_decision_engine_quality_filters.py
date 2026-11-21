@@ -97,3 +97,25 @@ def test_decision_treats_short_and_long_equally():
         )
         assert result["action"] == "EXECUTE", direction
         assert result["signal"] == direction
+
+
+def test_quality_pass_does_not_bypass_low_central_score():
+    from unittest.mock import patch
+    from config import Config
+
+    engine = DecisionEngine()
+    with patch.object(Config, "DECISION_SCORE_EXECUTE", 100):
+        result = engine.decide(**_supportive_context())
+    assert result["score"] < 100
+    assert result["action"] != "EXECUTE"
+
+
+def test_strategy_candidate_prefers_regime_adjusted_strength_over_raw_rr():
+    engine = DecisionEngine()
+    selected = engine.select_strategy_candidate([
+        {"status": "FILTERED_SETUP", "strategy_id": "high_rr",
+         "estimated_net_rr": 8.0, "strength": 0.3, "regime_fit": 0.2},
+        {"status": "FILTERED_SETUP", "strategy_id": "better_fit",
+         "estimated_net_rr": 2.5, "strength": 0.9, "regime_fit": 0.9},
+    ])
+    assert selected["strategy_id"] == "better_fit"
