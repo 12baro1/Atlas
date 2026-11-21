@@ -1431,6 +1431,7 @@ class TelegramCommandService:
             "ACTIVE": ("🟢 AÇIK İŞLEMLER", []),
             "WAITING": ("🟡 GİRİŞ BEKLEYENLER", []),
             "AMBIGUOUS": ("🟠 DOĞRULAMA BEKLİYOR", []),
+            "UNVERIFIED": ("🔴 DOĞRULANAMAYAN İŞLEMLER", []),
             "CLOSED": ("📊 BUGÜN KAPANANLAR", []),
             "INVALIDATED": ("⚪ BUGÜN GEÇERSİZLEŞENLER", []),
         }
@@ -1443,6 +1444,8 @@ class TelegramCommandService:
             if state == "AMBIGUOUS" and not entry_confirmed(plan):
                 state = "WAITING"
             if state not in sections:
+                continue
+            if state == "UNVERIFIED" and not (entry_confirmed(plan) or confirmed_target_levels(plan)):
                 continue
             if state == "CLOSED":
                 net = plan.get("realized_r", 0)
@@ -1515,8 +1518,15 @@ class TelegramCommandService:
                     elif plan.get("retry_at"):
                         retry = datetime.fromtimestamp(plan["retry_at"] / 1000, tz)
                         card.append(f"Sonraki kontrol {retry:%H:%M} TSİ")
+                if state == "UNVERIFIED":
+                    card.append("Takip durdu · Çıkış teyit edilemedi")
+                    if plan.get("ambiguity_reason"):
+                        card.append(plan["ambiguity_reason"])
+                    if plan.get("resolved_at"):
+                        archived = datetime.fromtimestamp(plan["resolved_at"] / 1000, tz)
+                        card.append(f"Takibin durduğu zaman {archived:%d.%m %H:%M} TSİ")
                 blocks.append("\n".join(card))
-        if not count:
+        if count == len(sections["UNVERIFIED"][1]):
             blocks.append("Takipte güncel setup yok.")
         if earlier_targets:
             shown = sorted(earlier_targets, reverse=True)
