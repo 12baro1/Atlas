@@ -41,8 +41,8 @@ class DecisionEngine:
             strength = finite(item.get("strength"))
             regime_fit = finite(item.get("regime_fit"))
             return (
-                round(net_rr, 6),
                 round(strength * regime_fit, 4),
+                round(net_rr, 6),
                 str(item.get("strategy_id") or ""),
             )
 
@@ -202,9 +202,12 @@ class DecisionEngine:
         elif critical_blockers:
             action = self.ACTION_SKIP
         elif quality_gate_active:
-            # The score is retained for reporting, but cannot promote or reject
-            # a setup once all execution-quality checks have been evaluated.
-            action = self.ACTION_EXECUTE
+            # Structural validity is necessary but not sufficient: the central
+            # decision authority must also reject weak confluence. Do not let
+            # an already-passed geometry gate bypass the decision score.
+            action = (self.ACTION_EXECUTE if total_score >= execute_threshold
+                      else self.ACTION_WAIT if total_score >= wait_threshold
+                      else self.ACTION_SKIP)
         elif override_applies:
             action = self.ACTION_EXECUTE
         elif total_score >= execute_threshold:
