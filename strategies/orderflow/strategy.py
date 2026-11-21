@@ -126,8 +126,8 @@ def generate(data):
         footprint_directional_evidence(footprint, aggressor_direction)
         if aggressor_direction else {"state": "UNAVAILABLE", "confirmed": False}
     )
-    if not footprint_confirmation.get("confirmed"):
-        return None
+    # Footprint is supporting evidence, not a mandatory data dependency.
+    footprint_supported = bool(footprint_confirmation.get("confirmed"))
 
     liquidation = liquidation_pressure(liquidation_events, trades)
     direction = None
@@ -165,6 +165,8 @@ def generate(data):
                    + min(abs(trade_delta) * 25.0, 10.0))
     if absorption or liquidation.get("confirmed"):
         strength = min(94.0, strength + 2.0)
+    if not footprint_supported:
+        strength = max(0.0, strength - 8.0)
     # _valid_plan in common filter computes structural stop; pass dummy stop (ignored)
     dummy_stop = entry - atr if direction == "LONG" else entry + atr
     plan = _raw_candidate(
