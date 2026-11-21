@@ -472,3 +472,29 @@ def test_filters_disabled_pass_through(monkeypatch):
     assert result["enabled"] is False
     assert result["allowed"] is True
     assert result["critical_blockers"] == []
+
+
+@pytest.mark.parametrize(
+    "direction,stop,blocked",
+    [
+        ("LONG", 98.95, True),
+        ("LONG", 98.7, False),
+        ("SHORT", 101.05, True),
+        ("SHORT", 101.3, False),
+    ],
+)
+def test_stop_respects_poi_invalidation_with_atr_buffer(direction, stop, blocked):
+    filters = TradeQualityFilters()
+    entry = {
+        "entry": 100.0, "poi_zone": {"low": 99.0, "high": 101.0},
+    }
+    detail = filters._filter_stop_quality(
+        direction=direction,
+        entry=entry,
+        risk={"stop_loss": stop},
+        atr=2.0,
+        entry_structure={},
+    )
+    assert bool(detail["critical_blockers"]) is blocked
+    if blocked:
+        assert "structural invalidation" in detail["critical_blockers"][0].lower()
