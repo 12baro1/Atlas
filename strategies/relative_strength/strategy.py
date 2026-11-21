@@ -126,6 +126,13 @@ def generate(data):
     entry = _current_price(data)
     if entry is None or (direction == "LONG" and entry <= e20) or (direction == "SHORT" and entry >= e20):
         return None
+    # Do not chase an already-extended 4H trend at market. The raw strategy
+    # can still report its relative-strength evidence, but entry timing must
+    # remain near the trend baseline; the common selector handles final risk.
+    extension_atr = abs(entry - e20) / atr if atr > 0 else float("inf")
+    if extension_atr > 2.0:
+        return None
+
     # _valid_plan in common filter computes structural stop; pass dummy stop (ignored)
     dummy_stop = entry - atr if direction == "LONG" else entry + atr
     strength = min(90.0, 64.0 + min(abs(residual_alpha) * 450.0, 22.0) + min(abs(beta) * 2.0, 4.0))
@@ -141,6 +148,7 @@ def generate(data):
         ]
         plan["relative_strength_metrics"] = {
             "beta": round(beta, 4),
+            "entry_extension_atr": round(extension_atr, 4),
             "residual_alpha_12x4h": round(residual_alpha, 6),
             "residual_alpha_6x4h": round(residual_alpha_6, 6),
             "required_alpha_12x4h": round(alpha_signal, 6),
