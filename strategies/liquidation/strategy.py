@@ -85,13 +85,11 @@ def generate(data):
     # negative funding supports short-squeeze longs.
     if (oi_change <= -0.010 and close > opened and entry > opened and impulse >= 0.75
             and quality["direction"] == "BULLISH" and quality["close_location"] >= 0.60
-            and relative_volume >= 1.15 and buy_ratio is not None and buy_ratio >= 0.53
-            and funding <= 0.0003):
+            and relative_volume >= 1.15):
         direction = "LONG"
     elif (oi_change <= -0.015 and close < opened and entry < opened and impulse >= 1.0
             and quality["direction"] == "BEARISH" and quality["close_location"] <= 0.40
-            and relative_volume >= 1.25 and buy_ratio is not None and buy_ratio <= 0.47
-            and funding >= -0.0003):
+            and relative_volume >= 1.25):
         direction = "SHORT"
     else:
         return None
@@ -109,6 +107,11 @@ def generate(data):
             event_alignment = "ALIGNED" if event_direction == direction else "OPPOSING"
 
     strength = min(92.0, 65.0 + min(abs(oi_change) * 400.0, 15.0) + min(impulse * 5.0, 10.0))
+    # Funding and taker flow support confidence; OI contraction and impulse
+    # remain mandatory. Missing flow must not disable the entire strategy.
+    flow_aligned = buy_ratio is not None and (buy_ratio >= 0.53 if direction == "LONG" else buy_ratio <= 0.47)
+    funding_aligned = funding <= 0.0003 if direction == "LONG" else funding >= -0.0003
+    strength = max(0.0, strength + (3.0 if flow_aligned else -5.0) + (2.0 if funding_aligned else -3.0))
     if event_alignment == "ALIGNED":
         strength = min(95.0, strength + 3.0)
     elif event_alignment == "OPPOSING":
@@ -120,7 +123,7 @@ def generate(data):
         plan["reasons"] = [
             f"Open interest contraction={oi_change * 100:.2f}% over timestamped observations",
             f"1H impulse={impulse:.2f} ATR; relative volume={relative_volume:.2f}x",
-            f"Taker buy-notional ratio={buy_ratio:.2f}; funding={funding:.5f}",
+            f"Taker buy-notional ratio={buy_ratio if buy_ratio is not None else 'unavailable'}; funding={funding:.5f}",
             f"Impulse candle close-location={quality['close_location']:.2f}",
             "Liquidation-side interpretation is an OI/flow proxy, not exchange liquidation-event data",
         ]
