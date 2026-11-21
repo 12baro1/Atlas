@@ -161,6 +161,15 @@ class PoolStore:
                                   AND (f.muted=1 OR f.changed_at >= json_extract(p.payload,'$.resolved_at')))
             """)
 
+            # Existing open Telegram plans may have moved their stop to TP1 at TP2.
+            conn.execute("""
+                UPDATE chat_plans SET payload=json_set(payload, '$.trailing_stop', json_extract(payload, '$.entry'))
+                WHERE state IN ('ACTIVE','AMBIGUOUS') AND json_extract(payload, '$.status')='PENDING'
+                  AND json_type(payload, '$.entry') IN ('integer','real')
+                  AND json_extract(payload, '$.trailing_stop') IS NOT json_extract(payload, '$.entry')
+                  AND EXISTS (SELECT 1 FROM json_each(payload, '$.tps_hit') WHERE value=1)
+            """)
+
             if not conn.execute("SELECT 1 FROM pool_meta WHERE key='post_exit_watch_seeded'").fetchone():
                 for chat, symbol, revision, raw in conn.execute(
                         "SELECT chat,symbol,revision,payload FROM chat_plans WHERE state='CLOSED'"):

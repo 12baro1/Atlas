@@ -295,8 +295,11 @@ def test_background_worker_continues_targets_after_tp1_and_restart(tmp_path, mon
         pool.stop()
         pool = OpportunityPool(base_path=path, auto_persist=False)
         assert BTC in pool.tracking.open_symbols()
-        assert refresh(2, 51500, 52100)[3]["tps_hit"] == [1, 2]
-        state = refresh(3, 52500, 53100) if finish == "TP3" else refresh(3, 50500, 51200)
+        _, _, state, partial = refresh(2, 51500, 52100)
+        assert state == "ACTIVE" and partial["tps_hit"] == [1, 2]
+        assert partial["trailing_stop"] == partial["entry"]
+        assert refresh(3, 50500, 51200)[2] == "ACTIVE"
+        state = refresh(4, 52500, 53100) if finish == "TP3" else refresh(4, 49900, 50200)
         assert state[2] == "CLOSED" and state[3]["status"] == finish
         monkeypatch.setattr(opportunity_pool, "_pool_instance", pool)
         bot = service("chat")
@@ -377,11 +380,12 @@ def test_bnb_short_keeps_partial_position_until_verified_stop(tmp_path, monkeypa
     try:
         assert store.tracked("chat")[0][2] == "AMBIGUOUS"
         history.candles.side_effect = lambda _, start, width, count: [
-            bar(start, 85, 88, 79, 82), bar(start + width, 82, 91, 81, 90)
+            bar(start, 85, 88, 79, 82), bar(start + width, 82, 101, 81, 98)
         ]
         store.advance_tracking(symbol, history=history)
         _, _, state, closed = store.tracked("chat")[0]
         assert (state, closed["status"], closed["tps_hit"]) == ("CLOSED", "SL", [1, 2])
+        assert closed["trailing_stop"] == closed["entry"]
         messages = [message for _, message in store.pending_notifications("chat")]
         assert any("TP2 alındı" in message for message in messages)
         assert any("stop görüldü" in message for message in messages)
@@ -494,13 +498,36 @@ def test_live_trades_advance_before_bar_closes_and_resume_after_restart(tmp_path
     try:
         clock[0] += 5000
         feed.trade_range.return_value += [TradeGroup(START+8000, {109}, 1),
+                                         TradeGroup(START+8500, {100}, 1),
                                          TradeGroup(START+9000, {131}, 1)]
         store.refresh_live_trades(feed, stop)
         store.refresh_live_trades(feed, stop)
         _, _, state, result = store.tracked("chat")[0]
         assert (state, result["status"], result["tps_hit"]) == ("CLOSED", "SL", [1, 2])
+        assert result["trailing_stop"] == result["entry"] and result["resolved_at"] == START+8501
         events = [r[0] for r in store._thread_conn().execute("SELECT event FROM chat_events ORDER BY id")]
         assert events == ["ENTRY", "TP1", "TP2", "STOP", "CLOSED"]
+    finally:
+        store.close()
+
+
+def test_restart_moves_existing_live_stop_from_tp1_back_to_entry(tmp_path):
+    from pool_store import PoolStore
+
+    store = PoolStore(str(tmp_path))
+    partial = plan(tps_hit=[1, 2], trailing_stop=110)
+    with store._transaction() as conn:
+        conn.executemany(
+            "INSERT INTO chat_plans VALUES(?,?,?,?,?,?)",
+            [("chat", BTC, 1, "old", "CLOSED", json.dumps(dict(partial, status="SL"))),
+             ("chat", BTC, 2, "current", "ACTIVE", json.dumps(partial))],
+        )
+    store.close()
+    store = PoolStore(str(tmp_path))
+    try:
+        current, old = store.tracked("chat")
+        assert current[3]["trailing_stop"] == partial["entry"]
+        assert old[3]["trailing_stop"] == partial["tp1"]
     finally:
         store.close()
 
