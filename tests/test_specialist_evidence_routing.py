@@ -110,3 +110,12 @@ def test_specialist_metrics_never_fabricate_missing_data():
             "open_interest": {"state": "FRESH", "change_pct": -2.0},
         }
     })["source"] == "OI_PROXY_NOT_LIQUIDATION_EVENTS"
+
+
+def test_shared_analysis_service_owns_both_specialist_calculations():
+    from shared.market_data_services import build_shared_analysis_evidence
+    market, analyses = build_shared_analysis_evidence({"symbol": "BTC/USDT:USDT"})
+    assert market["sources"]["ohlcv"]["state"] == "UNAVAILABLE"
+    assert set(analyses) == {"relative_strength", "liquidation_cascade"}
+    assert all(row["role"] == "SHARED_ANALYSIS" for row in analyses.values())
+    assert all(row["setup_generation"] is False for row in analyses.values())
