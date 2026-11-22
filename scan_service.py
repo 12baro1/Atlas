@@ -170,7 +170,7 @@ class ScanService:
         )
         universe = self.inventory.get_symbols()
         ranker = getattr(self.inventory, "get_ranked_symbols", None)
-        ranked = list(ranker(limit=limit, require_volume=True) or []) if universe and callable(ranker) else sorted(universe)[:limit]
+        ranked = list(ranker(limit=limit, require_volume=True) or []) if universe and callable(ranker) else []
         if not ranked:
             return {"synchronized": False, "reason": "empty_universe"}
 
@@ -264,11 +264,16 @@ class ScanService:
         universe = self.inventory.get_symbols()
         ranker = getattr(self.inventory, "get_ranked_symbols", None)
         if universe and callable(ranker):
-            ranked_symbols = list(ranker(limit=limit) or [])
+            ranked_symbols = list(ranker(limit=limit, require_volume=True) or [])
         else:
-            ranked_symbols = sorted(universe)
-            if limit is not None:
-                ranked_symbols = ranked_symbols[:max(0, int(limit))]
+            ranked_symbols = []
+        if not ranked_symbols and not has_unfinished:
+            return {
+                "started": False,
+                "reason": "volume_ranking_unavailable",
+                "message": "Gate.io 24 saatlik hacim sıralaması henüz hazır değil.",
+                "progress": progress_before,
+            }
         # Revalidation cannot expand the scheduled scan beyond the ranked
         # market universe. Existing user trades are followed separately.
         ranked_set = set(ranked_symbols)
