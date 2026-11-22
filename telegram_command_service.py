@@ -1359,7 +1359,7 @@ class TelegramCommandService:
             return "ATLAS | TARAMA BAŞLATILAMADI\nMevcut tarama kuyruğu değiştirilmedi. /taramadurum ile durumu kontrol et."
         if result.get("continuous"):
             progress = result["progress"]
-            return (f"300 sembollük tarama | Döngü {progress['generation']}\n"
+            return (f"En fazla 50 hacimli coin | Döngü {progress['generation']}\n"
                     f"Öncelik: hacim sıralamasındaki ilk {result['selected']} sembolün bekleyen işleri.\n"
                     f"Başarılı: {progress['done']} | Başarısız: {progress['failed']} | Bekleyen: {progress['pending']}")
         return self._format_scan_progress(result)
