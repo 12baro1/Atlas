@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 
-DEFAULT_MAX_SYMBOLS = 300
+DEFAULT_MAX_SYMBOLS = 50
 DEFAULT_SCAN_INTERVAL_SECONDS = 900
 
 
@@ -29,7 +29,7 @@ def notify_systemd(message):
 
 
 def configured_max_symbols(raw_value: str | None) -> int:
-    """Return the scanner cap; legacy zero/unlimited settings are clamped to 300."""
+    """Return the scanner cap; legacy zero/unlimited settings are clamped to the top 50."""
     if raw_value is None or not str(raw_value).strip():
         return DEFAULT_MAX_SYMBOLS
     try:
@@ -115,10 +115,14 @@ def load_startup_symbols(
         try:
             last_status = inventory.refresh(force=True) or {}
             if not last_status.get("last_error") and int(last_status.get("symbol_count") or 0) > 0:
-                symbols = inventory.get_ranked_symbols(limit=max_symbols)
-                if symbols:
+                symbols = inventory.get_ranked_symbols(limit=max_symbols, require_volume=True)
+                required = min(max_symbols, int(last_status.get("symbol_count") or 0))
+                if len(symbols) >= required and symbols:
                     return symbols, inventory.status()
-                logger.warning("Gate.io inventory returned no ranked USDT perpetuals; retrying")
+                logger.warning(
+                    "Gate.io 24h USDT volume ranking incomplete (%s/%s); retrying",
+                    len(symbols), required,
+                )
             else:
                 logger.warning(
                     "Gate.io inventory unavailable; keeping Atlas alive and retrying | error=%s",
@@ -199,7 +203,7 @@ def main() -> int:
     auto_register_on_startup()
 
     # The durable ScanService is the only background analysis pipeline.
-    # The legacy full_scan loop would analyze the same 300 symbols a second time.
+    # The legacy full_scan loop would analyze the same 50 symbols a second time.
     runtime = AtlasRuntime(symbols=symbols, logger=logger, full_scan=False)
     telegram_commands = create_telegram_command_service(runtime, logger=logger)
     if telegram_commands is not None:
@@ -215,6 +219,14 @@ def main() -> int:
         selection_stats.get("ranking_source", "unknown"),
     )
     logger.info("Selected symbols: %s", ", ".join(symbols))
+
+    # Migration: old persisted 300-symbol queues must not resume after this
+    # service switches to the top-50 market universe. Older generations remain
+    # intact in SQLite, and Telegram trade tracking is not touched.
+    migrated = runtime._scan_service.enforce_universe_limit()
+    if (migrated is not None and not migrated.get("rebuilt")
+            and int(runtime._scan_queue.progress().get("total") or 0) > max_symbols):
+        raise RuntimeError("Cannot migrate legacy scan queue to top-50 volume ranking")
 
     runtime.start(daemon=True)
     if telegram_commands is not None:
