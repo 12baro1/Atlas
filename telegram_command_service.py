@@ -31,6 +31,7 @@ from types import SimpleNamespace
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from strategy_catalog import TRADE_STRATEGY_LABELS, SPECIALIST_LABELS
 from telegram_prices import confirmed_target_levels, format_price as _format_price, format_plan_levels, tracked_levels
 
 import requests
@@ -1248,34 +1249,39 @@ class TelegramCommandService:
         return "\n".join(lines)
 
     def handle_motors(self) -> str:
-        """Report all seven independent strategy generation counters."""
+        """Show five setup generators separately from two read-only specialists."""
         status = self.runtime.scan_status()
         telemetry = status.get("strategy_telemetry") or {}
         validations = status.get("pool_validations") or {}
         rows = telemetry.get("per_strategy") or {}
-        strategies = (
-            ("smc", "SMC"),
-            ("trend_pullback", "TREND PULLBACK"),
-            ("volatility_breakout", "VOLATILITY BREAKOUT"),
-            ("mean_reversion", "MEAN REVERSION"),
-            ("liquidation_cascade", "LIQUIDATION CASCADE"),
-            ("orderflow_momentum", "ORDERFLOW MOMENTUM"),
-            ("relative_strength", "RELATIVE STRENGTH"),
-        )
-        lines = ["ATLAS | 7 BAĞIMSIZ STRATEJİ", f"Toplam analiz: {telemetry.get('analyses', 0)}"]
-        for key, label in strategies:
+        specialists = telemetry.get("specialists") or {}
+        lines = [
+            "ATLAS | 5 İŞLEM STRATEJİSİ + 2 ANALİZ UZMANI",
+            f"Toplam analiz: {telemetry.get('analyses', 0)}",
+            "",
+            "İŞLEM STRATEJİLERİ — setup üretir",
+        ]
+        for key, label in TRADE_STRATEGY_LABELS.items():
             item = rows.get(key) or {}
-            no_setup = sum(item.get(field, 0) for field in (
-                "no_setup", "condition_not_met", "missing_data", "insufficient_history", "errors", "other_no_setup"))
+            no_setup = sum(int(item.get(field, 0) or 0) for field in (
+                "no_setup", "condition_not_met", "missing_data",
+                "insufficient_history", "errors", "other_no_setup"))
             lines.extend([
                 "",
-                label,
+                label.upper(),
                 f"Analiz: {item.get('analyses', 0)} | LONG: {item.get('long', 0)} | SHORT: {item.get('short', 0)}",
-                f"Karara ulaşan: {item.get('passed', 0)} | Havuz doğrulaması (kalıcı): {validations.get(key, 0)}",
+                f"Karara ulaşan: {item.get('passed', 0)} | Havuz doğrulaması: {validations.get(key, 0)}",
                 f"Setup: {item.get('setups', 0)} | Filtreyi geçti: {item.get('passed', 0)} | Elendi: {item.get('rejected', 0)}",
                 f"Setup yok: {no_setup} | Veri eksik: {item.get('missing_data', 0)} | Hata: {item.get('errors', 0)}",
             ])
-        lines.extend(["", "Ayrıntılı ortak filtre istatistiği: /istatistik"])
+        lines.extend(["", "ANALİZ UZMANLARI — yalnızca kanıt üretir"])
+        for key, label in SPECIALIST_LABELS.items():
+            item = specialists.get(key) or {}
+            lines.append(
+                f"{label.upper()}: analiz={item.get('analyses', 0)} | "
+                f"son veri durumu={item.get('last_state') or 'HENÜZ ÖLÇÜLMEDİ'} | işlem setup'ı=YOK"
+            )
+        lines.extend(["", "Ortak filtre istatistiği: /istatistik"])
         return "\n".join(lines)
 
     def handle_data_status(self) -> str:
@@ -1705,45 +1711,41 @@ class TelegramCommandService:
         return "\n".join(lines)
 
     def handle_statistics(self) -> str:
-        """Show seven-strategy generation and common-filter statistics."""
+        """Show only live setup generators in trade counters."""
         status = self.runtime.scan_status()
         telemetry = status.get("strategy_telemetry") or {}
         rows = telemetry.get("per_strategy") or {}
-        names = (
-            ("smc", "SMC"),
-            ("relative_strength", "RELATIVE STRENGTH"),
-            ("trend_pullback", "TREND PULLBACK"),
-            ("orderflow_momentum", "ORDERFLOW MOMENTUM"),
-            ("mean_reversion", "MEAN REVERSION"),
-            ("liquidation_cascade", "LIQUIDATION CASCADE"),
-            ("volatility_breakout", "VOLATILITY BREAKOUT"),
-        )
+        specialists = telemetry.get("specialists") or {}
         lines = [
-            "ATLAS | STRATEJİ İSTATİSTİĞİ",
+            "ATLAS | 5 STRATEJİ + 2 ANALİZ UZMANI",
             "",
             f"Analiz: {telemetry.get('analyses', 0)}",
             f"Ham setup: {telemetry.get('raw_setups_generated', 0)}",
             "",
+            "İŞLEM STRATEJİLERİ",
         ]
-        for key, label in names:
+        for key, label in TRADE_STRATEGY_LABELS.items():
             item = rows.get(key) or {}
             no_setup = sum(int(item.get(k, 0) or 0) for k in (
                 "no_setup", "condition_not_met", "missing_data",
                 "insufficient_history", "errors", "other_no_setup",
             ))
             lines.append(
-                f"{label}: {item.get('setups', 0)} setup | "
+                f"{label.upper()}: {item.get('setups', 0)} setup | "
                 f"{item.get('passed', 0)} geçti | {item.get('rejected', 0)} elendi | "
                 f"{no_setup} setup yok"
             )
             for reason in (item.get("top_reasons") or [])[:1]:
                 lines.append(f"  {reason['count']} kez · {reason['reason']}")
+        lines.extend(["", "ANALİZ UZMANLARI (setup üretmez)"])
+        for key, label in SPECIALIST_LABELS.items():
+            item = specialists.get(key) or {}
+            lines.append(f"{label}: {item.get('last_state') or 'HENÜZ ÖLÇÜLMEDİ'} | analiz={item.get('analyses', 0)}")
         lines.extend([
-            "",
-            "ORTAK FİLTRE",
+            "", "ORTAK FİLTRE",
             f"Geçen: {telemetry.get('common_filter_passed', 0)}",
             f"Elenen: {telemetry.get('common_filter_rejected', 0)}",
-            "Not: Strateji setup üretimi ile nihai seçim ayrı aşamalardır.",
+            "Not: Uzman verisi işlem kararı değildir; nihai seçim tek karar motorundadır.",
         ])
         reasons = telemetry.get("rejection_reasons") or {}
         for reason, count in sorted(reasons.items(), key=lambda pair: -pair[1])[:3]:
