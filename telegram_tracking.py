@@ -66,6 +66,24 @@ def event(conn, chat, symbol, revision, kind, message, plan):
                  (chat, symbol, revision, kind, f"{symbol.replace(':USDT', '')} — {message}"))
 
 
+def _same_trade_setup(previous, setup, previous_id):
+    """Closed plans must not be reopened by republishing identical trade geometry."""
+    if previous_id == setup.get("setup_id"):
+        return True
+    if previous.get("strategy_id") != setup.get("strategy_id"):
+        return False
+    if previous.get("direction") != setup.get("direction"):
+        return False
+    levels = (("entry", "entry_price"), ("stop_loss", "stop_loss"),
+              ("tp1", "tp1"), ("tp2", "tp2"), ("tp3", "tp3"))
+    try:
+        return all(math.isclose(float(previous[old]), float(setup[new]),
+                                rel_tol=1e-9, abs_tol=0.0)
+                   for old, new in levels)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+
+
 def transition(conn, chat, symbol, revision, setup, *, announce):
     current = conn.execute("SELECT setup_id,state,payload FROM chat_plans WHERE chat=? AND symbol=? AND revision=?",
                            (chat, symbol, revision)).fetchone()
@@ -83,6 +101,15 @@ def transition(conn, chat, symbol, revision, setup, *, announce):
             if announce and not setup:
                 event(conn, chat, symbol, revision, "INVALIDATED", "SETUP KALDIRILDI\nNeden: Strateji yapısı bozuldu. Yeni setup bekleniyor.", old)
     if not setup:
+        return
+    # A closed trade is immutable. Pool refreshes may publish a different ID
+    # for the same geometry; neither must create another virtual entry.
+    closed = conn.execute(
+        "SELECT setup_id,payload FROM chat_plans WHERE chat=? AND symbol=? AND state='CLOSED'",
+        (chat, symbol),
+    ).fetchall()
+    if any(_same_trade_setup(json.loads(raw), setup, previous_id)
+           for previous_id, raw in closed):
         return
     revision += 1
     costs = dict(setup.get("execution_costs") or {}, entry_type=setup["entry_type"])
