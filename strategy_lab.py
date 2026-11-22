@@ -1,6 +1,6 @@
-"""Seven raw setup generators, one shared eligibility filter, one final selector.
+"""Five raw setup generators, one shared eligibility filter, one final selector.
 
-The seven sources include one integrated SMC setup assembled by Atlas's SMC
+The five sources include one integrated SMC setup assembled by Atlas's SMC
 specialist world. Specialist motors are evidence producers inside that SMC world,
 not additional strategy candidates or independent trade-decision authorities.
 """
@@ -741,7 +741,7 @@ def _strategy_data_usage(strategy_id, data, smc_result=None):
 
 
 class SevenStrategyLab:
-    """Run six independent generators plus one integrated SMC setup generator."""
+    """Run five independent setup generators with two evidence specialists."""
 
     def __init__(self, decision_engine=None):
         # The main engine injects its one decision authority. Standalone use
@@ -755,7 +755,7 @@ class SevenStrategyLab:
 
     @analysis_scope
     def analyze(self, data, smc_result=None, performance_by_strategy=None):
-        """Run seven independent setup generators, one shared filter, one selector."""
+        """Run five independent setup generators, one shared filter, one selector."""
         ensure_trace(data)
         if not isinstance(data.get("shared_market_evidence"), dict):
             from shared.market_data_services import build_shared_market_evidence
@@ -779,10 +779,18 @@ class SevenStrategyLab:
             "trend_pullback": lambda: _trend_pullback(data),
             "volatility_breakout": lambda: _volatility_breakout(data),
             "mean_reversion": lambda: _mean_reversion(data, regime),
-            "liquidation_cascade": lambda: _liquidation_cascade(data),
             "orderflow_momentum": lambda: _orderflow_momentum(data),
-            "relative_strength": lambda: _relative_strength(data),
             "smc": lambda: _smc_candidate(smc_result, data),
+        }
+
+        # Analysis-only specialists: retain input provenance without issuing trade candidates.
+        specialist_evidence = {
+            specialist_id: {
+                "role": "SHARED_SPECIALIST",
+                "setup_generation": False,
+                "data_usage": _strategy_data_usage(specialist_id, data, smc_result),
+            }
+            for specialist_id in ("relative_strength", "liquidation_cascade")
         }
 
         # Stage 1: each strategy only creates its own setup. No common risk,
@@ -867,7 +875,7 @@ class SevenStrategyLab:
                     filter_result="NOT_REACHED",
                 )
 
-        # Stage 2: the only shared eligibility gate. All seven strategies
+        # Stage 2: the only shared eligibility gate. All five strategies
         # arrive here under identical rules. It owns geometry, stop-risk,
         # execution friction, and minimum net-RR checks.
         def _record_common_filter(candidate, filter_result, reason=None):
@@ -888,7 +896,7 @@ class SevenStrategyLab:
 
         eligible = []
         for candidate in generated:
-            # All seven strategies share one structural geometry filter.
+            # All five strategies share one structural geometry filter.
             # Raw candidates must have valid entry/stop/three targets after
             # applying confirmed swing invalidation and opposing liquidity targets.
             if not all(
@@ -1053,12 +1061,13 @@ class SevenStrategyLab:
             "version": 3,
             "symbol": data.get("symbol"),
             "trace_id": trace_id(data),
-            "pipeline": ["SEVEN_INDEPENDENT_GENERATORS", "ONE_COMMON_FILTER", "ONE_FINAL_DECISION"],
+            "pipeline": ["FIVE_INDEPENDENT_GENERATORS", "ONE_COMMON_FILTER", "ONE_FINAL_DECISION"],
             "diagnostics": {
                 "strategy_count": len(diagnostic_rows),
                 "raw_setup_count": len(generated),
                 "common_filter_passed_count": len(eligible),
-                "candidate_count": len(generated),
+                "specialist_evidence": specialist_evidence,
+            "candidate_count": len(generated),
                 "validated_candidate_count": len(eligible),
                 "selected_strategy_id": selected.get("strategy_id") if selected else None,
                 "status_counts": status_counts,
