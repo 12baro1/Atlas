@@ -84,7 +84,7 @@ def _same_trade_setup(previous, setup, previous_id):
         return False
 
 
-def transition(conn, chat, symbol, revision, setup, *, announce):
+def transition(conn, chat, symbol, revision, setup, *, announce, user_requested=False):
     current = conn.execute("SELECT setup_id,state,payload FROM chat_plans WHERE chat=? AND symbol=? AND revision=?",
                            (chat, symbol, revision)).fetchone()
     if current:
@@ -101,6 +101,11 @@ def transition(conn, chat, symbol, revision, setup, *, announce):
             if announce and not setup:
                 event(conn, chat, symbol, revision, "INVALIDATED", "SETUP KALDIRILDI\nNeden: Strateji yapısı bozuldu. Yeni setup bekleniyor.", old)
     if not setup:
+        return
+    # Pool publications are informational. Only a user-requested command may
+    # start tracking an untracked symbol or restart after a terminal plan.
+    # A still-WAITING user-selected plan may be replaced as its setup evolves.
+    if not user_requested and (not current or state != "WAITING"):
         return
     # A closed trade is immutable. Pool refreshes may publish a different ID
     # for the same geometry; neither must create another virtual entry.
