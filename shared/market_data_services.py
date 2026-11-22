@@ -286,3 +286,23 @@ def build_shared_market_evidence(data):
             key: len((value or {}).get("4h") or []) for key, value in (data.get("sector_peer_universe") or {}).items()
         },
     }
+
+
+def build_shared_analysis_evidence(data):
+    """Combine common market evidence with read-only relative-strength and OI pressure.
+
+    Runs once per analysis snapshot before any independent trade strategy.
+    """
+    from shared.specialist_metrics import analyze_relative_strength, analyze_liquidation_pressure
+
+    prepared = dict(data)
+    if not isinstance(prepared.get("shared_market_evidence"), dict):
+        prepared["shared_market_evidence"] = build_shared_market_evidence(prepared)
+    analysis = {
+        "relative_strength": analyze_relative_strength(prepared),
+        "liquidation_cascade": analyze_liquidation_pressure(prepared),
+    }
+    for result in analysis.values():
+        result["role"] = "SHARED_ANALYSIS"
+        result["setup_generation"] = False
+    return prepared["shared_market_evidence"], analysis
