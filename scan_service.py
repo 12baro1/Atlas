@@ -262,6 +262,13 @@ class ScanService:
             progress_before["pending"] > 0 or progress_before["running"] > 0
         )
         universe = self.inventory.get_symbols()
+        if not universe and not has_unfinished:
+            return {
+                "started": False,
+                "reason": "empty_universe",
+                "message": "Gate.io evreni boş; envanter yenilenemedi.",
+                "progress": progress_before,
+            }
         ranker = getattr(self.inventory, "get_ranked_symbols", None)
         if universe and callable(ranker):
             ranked_symbols = list(ranker(limit=limit, require_volume=True) or [])
