@@ -92,7 +92,7 @@ def engine(tmp_path, monkeypatch):
     return eng
 
 
-def test_active_setup_does_not_block_fresh_seven_strategy_analysis(engine):
+def test_active_setup_does_not_block_fresh_five_strategy_analysis(engine):
     symbol = "BTC/USDT:USDT"
     engine.state_engine.store_active_setup(symbol, executable_active_setup())
     engine._test_store_calls["store"] = 0
@@ -104,7 +104,7 @@ def test_active_setup_does_not_block_fresh_seven_strategy_analysis(engine):
     assert result["decision"]["decision_authority"] == "SEVEN_STRATEGY_SELECTOR"
     assert result["decision"]["action"] == "EXECUTE"
     report = result["strategy_lab"]
-    assert len(report["diagnostics"]["strategies"]) == 7
+    assert len(report["diagnostics"]["strategies"]) == 5
     assert report["selected"]["strategy_id"] == "trend_pullback"
 
     # Aktif setup ayrı blokta korunur; yeni sonuçla değiştirilmez.
