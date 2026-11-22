@@ -407,7 +407,7 @@ def test_start_scan_enqueues_and_processes(tmp_path):
     service.stop_scan()
 
 
-def test_start_scan_requeues_completed_symbols_that_still_have_live_setups():
+def test_top_50_scan_does_not_requeue_out_of_universe_completed_setups():
     runtime = FakeRuntime()
     runtime.live_setups = [SimpleNamespace(symbol="OLD/USDT:USDT")]
     service = make_service(runtime, ["NEW/USDT:USDT"], workers=1)
@@ -420,9 +420,9 @@ def test_start_scan_requeues_completed_symbols_that_still_have_live_setups():
     result = service.start_scan(limit=1)
 
     assert result["resumed"] is True
-    assert result["revalidation_symbols"] == 1
-    assert result["requeued_setup_symbols"] == 1
-    assert service.queue.jobs["OLD/USDT:USDT"]["state"] == "pending"
+    assert result["revalidation_symbols"] == 0
+    assert result["requeued_setup_symbols"] == 0
+    assert service.queue.jobs["OLD/USDT:USDT"]["state"] == "done"
     assert "NEW/USDT:USDT" in service.queue.jobs
     service.stop_scan()
 
