@@ -59,13 +59,13 @@ TELEGRAM_COMMANDS = [
 
     # Performans ve öğrenme
     TelegramCommand("performans", "Otomatik sinyal ve manuel işlem performansı", "handle_performance", "performance"),
-    TelegramCommand("istatistik", "Yedi strateji ve ortak filtre istatistikleri", "handle_statistics", "performance"),
+    TelegramCommand("istatistik", "Beş işlem stratejisi, iki uzman ve ortak filtre", "handle_statistics", "performance"),
     TelegramCommand("ogrenme", "Öğrenme motoru verisi", "handle_learning", "performance"),
 
     # Sistem ve yardım
     TelegramCommand("start", "Atlas komutlarını göster", "handle_start", "system"),
     TelegramCommand("durum", "Bot ve servis durumu (VPS, tarama, bağlantı)", "handle_status", "system"),
-    TelegramCommand("motorlar", "Yedi stratejinin üretim ve filtre durumları", "handle_motors", "system"),
+    TelegramCommand("motorlar", "Beş işlem stratejisi ve iki kanıt uzmanı", "handle_motors", "system"),
     TelegramCommand("veri", "Gate.io piyasa envanteri ve veri bağlantısı", "handle_data_status", "system"),
     TelegramCommand("sistem", "Sunucu CPU, RAM ve disk kullanımı", "handle_system", "system"),
     TelegramCommand("yardim", "Komut listesi ve kullanım", "handle_help", "system"),
@@ -141,7 +141,7 @@ def format_help_text() -> str:
         "KULLANIM NOTLARI",
         "• /eniyi5 ve /eniyi10 mevcut havuzu okur; yeni tarama başlatmaz.",
         "• /taramadurum yalnızca tarama kuyruğunu gösterir.",
-        "• /havuzdurum havuz sayılarını, /istatistik yedi stratejiyi gösterir.",
+        "• /havuzdurum havuz sayılarını, /istatistik 5 strateji ve 2 analiz uzmanını gösterir.",
         "• /islemler bu sohbetin çağırdığı setupları ve sinyal sonuçlarını gösterir.",
         "• /performans toplam kazanç, toplam kayıp ve net sonucu R cinsinden raporlar.",
         "• Atlas otomatik emir göndermez.",
