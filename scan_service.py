@@ -170,7 +170,7 @@ class ScanService:
         )
         universe = self.inventory.get_symbols()
         ranker = getattr(self.inventory, "get_ranked_symbols", None)
-        ranked = list(ranker(limit=limit) or []) if universe and callable(ranker) else sorted(universe)[:limit]
+        ranked = list(ranker(limit=limit, require_volume=True) or []) if universe and callable(ranker) else sorted(universe)[:limit]
         if not ranked:
             return {"synchronized": False, "reason": "empty_universe"}
 
