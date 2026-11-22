@@ -118,7 +118,7 @@ def generate(result, data=None):
     This adapter reads the pre-selector SMC entry/risk geometry. It deliberately
     does not inspect the legacy signal or decision verdict: those are downstream
     gates and must not suppress an otherwise valid SMC setup before the shared
-    seven-strategy filter gets to evaluate it.
+    five-strategy filter gets to evaluate it.
     """
     if not isinstance(result, dict):
         return None
