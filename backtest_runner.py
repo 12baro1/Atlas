@@ -242,15 +242,13 @@ def simulate_trade_partial(
             hit_levels.add(level_no)
             reached_order.append(level_no)
 
-            # Koruyucu stop taşıma: journal kuralı (ilk TP1 → breakeven,
-            # TP2 sonrası → TP1 seviyesi; aksi halde stop korunur).
-            if level_no == 1:
+            # TP1 leaves the original stop intact; TP2 moves it to entry.
+            stop_moved_this_target = level_no == 2 and 3 not in hit_levels
+            if stop_moved_this_target:
                 if is_long:
                     trailing_stop = max(carried_stop if carried_stop is not None else stop, entry)
                 else:
                     trailing_stop = min(carried_stop if carried_stop is not None else stop, entry)
-            elif level_no == 2 and 3 not in hit_levels and 1 in tp_by_level:
-                trailing_stop = tp_by_level[1]
 
             if closed_frac >= 1.0 - 1e-9:
                 exit_reason = f"TP{reached_tp}"
@@ -260,7 +258,7 @@ def simulate_trade_partial(
             # Journalın aynı-mum konservatif kontrolü: taşınan stop bu mumun
             # aralığında ise kalan pay burada, stop fiyatından kapanır.
             remaining = 1.0 - closed_frac
-            moved_stop_hit = remaining > 0.0 and (
+            moved_stop_hit = stop_moved_this_target and remaining > 0.0 and (
                 (is_long and low <= trailing_stop)
                 or (not is_long and high >= trailing_stop)
             )

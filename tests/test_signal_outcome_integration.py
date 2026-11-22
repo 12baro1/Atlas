@@ -53,16 +53,16 @@ def test_signal_outcome_resolves_tp1_to_sl(tmp_path):
     candles = [
         _precise_candle(1, high=100.4, low=99.6, close=100.0),  # TP1/SL yok
         _precise_candle(2, high=101.2, low=100.1, close=101.2),  # TP1 hit -> BE
-        _precise_candle(3, high=100.6, low=99.3, close=99.5),    # BE(100) stop hit
+        _precise_candle(3, high=100.6, low=98.9, close=99.5),    # BE(100) stop hit
     ]
     resolved = journal.resolve_signal_outcome(outcome, candles)
     assert resolved is not None
     assert resolved["status"] == "SL"
     assert len(resolved.get("tps_hit") or []) == 1
     # Default 50/30/20 weights: TP1 closes half the position.
-    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(0.0, abs=1e-4)
     assert resolved["fee_rr"] == pytest.approx(0.2, abs=1e-4)
-    assert resolved["realized_r"] == pytest.approx(0.5 - 0.2, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(0.0 - 0.2, abs=1e-4)
 
 
 def test_signal_outcome_expires_after_expiry(tmp_path, monkeypatch):
@@ -616,7 +616,7 @@ def test_signal_outcome_normalizes_custom_partial_weights(tmp_path):
     outcome["partial_weights"] = [0.5, 0.3, 0.2]
     candles = [
         _precise_candle(1, high=101.2, low=100.1, close=101.0),
-        _precise_candle(2, high=100.5, low=99.8, close=100.0),
+        _precise_candle(2, high=100.5, low=98.9, close=100.0),
     ]
 
     resolved = journal.resolve_signal_outcome(outcome, candles)
@@ -624,8 +624,8 @@ def test_signal_outcome_normalizes_custom_partial_weights(tmp_path):
     assert resolved is not None
     assert resolved["status"] == "SL"
     assert resolved["tps_hit"] == [1]
-    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
-    assert resolved["realized_r"] == pytest.approx(0.3, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(0.0, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(-0.2, abs=1e-4)
 
 
 def test_signal_outcome_normalizes_weights_over_only_present_tp_levels(tmp_path):
@@ -666,10 +666,10 @@ def test_signal_outcome_does_not_count_later_tp_after_same_candle_breakeven_stop
     resolved = journal.resolve_signal_outcome(outcome, [candle])
 
     assert resolved is not None
-    assert resolved["tps_hit"] == [1]
+    assert resolved["tps_hit"] == [1, 2]
     assert resolved["hit_sl"] is True
-    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
-    assert resolved["realized_r"] == pytest.approx(0.5 - 0.2, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(1.1, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(1.1 - 0.2, abs=1e-4)
 
 
 
@@ -815,17 +815,17 @@ def test_signal_outcome_applies_captured_spread_and_slippage_costs(tmp_path, mon
     )
     candles = [
         _precise_candle(1, high=101.2, low=100.1, close=101.1),
-        _precise_candle(2, high=100.5, low=99.9, close=100.0),
+        _precise_candle(2, high=100.5, low=98.9, close=100.0),
     ]
 
     resolved = journal.resolve_signal_outcome(outcome, candles)
 
     assert resolved is not None
-    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(0.0, abs=1e-4)
     assert resolved["fee_rr"] == pytest.approx(0.2, abs=1e-4)
     assert resolved["spread_slippage_rr"] == pytest.approx(0.05, abs=1e-4)
     assert resolved["execution_cost_rr"] == pytest.approx(0.25, abs=1e-4)
-    assert resolved["realized_r"] == pytest.approx(0.25, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(-0.25, abs=1e-4)
 
 
 def test_signal_outcome_uses_per_fill_costs_for_tp_then_trailing_stop(tmp_path):
@@ -854,18 +854,18 @@ def test_signal_outcome_uses_per_fill_costs_for_tp_then_trailing_stop(tmp_path):
     candles = [
         _precise_candle(1, high=101.2, low=100.1, close=101.1),
         # Entry is first touched here; this candle must not also count TP/SL.
-        _precise_candle(2, high=100.5, low=99.9, close=100.0),
+        _precise_candle(2, high=100.5, low=98.9, close=100.0),
         # Only the following closed candle can resolve the entered position.
-        _precise_candle(3, high=101.2, low=100.0, close=100.2),
+        _precise_candle(3, high=101.2, low=98.9, close=99.0),
     ]
     resolved = journal.resolve_signal_outcome(outcome, candles)
-    expected_cost = 100.0 * 0.0002 + 101.0 * 0.5 * 0.0002 + 100.0 * 0.5 * (
+    expected_cost = 100.0 * 0.0002 + 99.0 * (
         0.00055 + 0.0002 + 0.0003
     )
     assert resolved is not None
-    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(-1.0, abs=1e-4)
     assert resolved["execution_cost_rr"] == pytest.approx(expected_cost, abs=1e-4)
-    assert resolved["realized_r"] == pytest.approx(0.5 - expected_cost, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(-1.0 - expected_cost, abs=1e-4)
 
 
 def test_manual_trade_net_r_uses_explicit_actual_fees_and_fill_size(tmp_path):

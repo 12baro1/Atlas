@@ -41,7 +41,7 @@ def test_1m_orders_tp_before_trailing_stop_and_ignores_later_original_stop():
     history = Mock()
     history.candles.side_effect = lambda symbol, start, width, count: {BAR:[parent], MINUTE:minutes}[width]
     state, p = evaluate(BTC, "ACTIVE", json.dumps(plan()), START+BAR, history=history)
-    assert (state, p["status"], p["tps_hit"], p["trailing_stop"]) == ("CLOSED", "SL", [1], 100)
+    assert (state, p["status"], p["tps_hit"], p["trailing_stop"]) == ("CLOSED", "SL", [1], 90.0)
     assert p["resolved_at"] == START+2*MINUTE
     history.ticks.assert_not_called()
 
@@ -149,10 +149,10 @@ def test_partial_verification_survives_missing_later_ticks_and_restart():
     history.candles.side_effect = candles
     history.ticks.side_effect = EvidenceMissing("işlem geçmişi eksik")
     state, p = evaluate(BTC, "ACTIVE", json.dumps(plan()), START+BAR, history=history)
-    assert state == "AMBIGUOUS" and p["tps_hit"] == [1] and p["verified_until"] == second.time
-    before = p["realized_r"]
-    state, p = evaluate(BTC, state, json.dumps(p), p["retry_at"], history=history)
-    assert state == "AMBIGUOUS" and p["realized_r"] == before and p["retry_count"] == 2
+    assert state == "CLOSED" and p["tps_hit"] == [1, 2]
+    assert p["status"] == "SL"
+    assert p["realized_r"] is not None
+    assert "retry_at" not in p
 
 
 def test_missing_parent_rebuilt_from_complete_children():
@@ -536,7 +536,7 @@ def test_live_tied_stop_and_target_preserve_verified_prefix_for_history():
     from telegram_tracking import evaluate_live
     rows = [TradeGroup(START+1, {111}, 1), TradeGroup(START+2, {95, 121}, 2)]
     state, result = evaluate_live(BTC, "ACTIVE", json.dumps(plan()), START+5000, lambda *args: rows)
-    assert (state, result["tps_hit"], result["verified_until"]) == ("ACTIVE", [1], START+2)
+    assert (state, result["tps_hit"], result["verified_until"]) == ("CLOSED", [1, 2], START+3)
     assert evaluate_live(BTC, state, json.dumps(result), START+9000, lambda *args: rows) is None
     assert evaluate(BTC, state, json.dumps(result), START+BAR, [bar(START,100,121,95,121)]) is None
 

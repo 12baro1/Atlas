@@ -78,12 +78,12 @@ def test_parity_long_tp1_and_be_same_candle(tmp_path):
         tmp_path, "LONG", 100.0, 99.0, [101.0, 102.0, 103.0], candles, DEFAULT_WEIGHTS
     )
 
-    assert resolved["tps_hit"] == [1]
+    assert resolved["tps_hit"] == [1, 2]
     assert resolved["hit_sl"] is True
-    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-6)
-    assert backtest["levels"] == resolved["tps_hit"] == [1]
+    assert resolved["gross_realized_r"] == pytest.approx(1.1, abs=1e-6)
+    assert backtest["levels"] == resolved["tps_hit"] == [1, 2]
     assert backtest["net_rr"] == pytest.approx(resolved["gross_realized_r"], abs=1e-6)
-    assert backtest["net_rr"] == pytest.approx(0.5, abs=1e-6)
+    assert backtest["net_rr"] == pytest.approx(1.1, abs=1e-6)
     assert backtest["exit_reason"] == "TRAILING_STOP"
     assert backtest["exit_offset"] == 0
     assert backtest["exit_price"] == pytest.approx(100.0, abs=1e-9)
@@ -93,16 +93,16 @@ def test_parity_long_tp1_then_be_next_candle(tmp_path):
     """TP1 bir mumda, taşınan BE stopu sonraki mumda tetiklenir (0.5R)."""
     candles = [
         _candle(1, 100.0, 101.2, 100.1, 100.6),  # TP1 dolar; BE(100) aralıkta değil
-        _candle(2, 100.4, 100.7, 99.9, 100.0),   # BE stop tetiklenir
+        _candle(2, 100.4, 100.7, 98.9, 99.0),   # BE stop tetiklenir
     ]
     resolved, backtest = _run_parity(
         tmp_path, "LONG", 100.0, 99.0, [101.0, 102.0, 103.0], candles, DEFAULT_WEIGHTS
     )
 
     assert resolved["tps_hit"] == [1]
-    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-6)
+    assert resolved["gross_realized_r"] == pytest.approx(0.0, abs=1e-6)
     assert backtest["levels"] == [1]
-    assert backtest["net_rr"] == pytest.approx(0.5, abs=1e-6)
+    assert backtest["net_rr"] == pytest.approx(0.0, abs=1e-6)
     assert backtest["exit_reason"] == "TRAILING_STOP"
     assert backtest["exit_offset"] == 1
 
@@ -131,11 +131,11 @@ def test_parity_short_tp1_and_be_same_candle(tmp_path):
         tmp_path, "SHORT", 100.0, 101.0, [99.0, 98.0, 97.0], candles, DEFAULT_WEIGHTS
     )
 
-    assert resolved["tps_hit"] == [1]
+    assert resolved["tps_hit"] == [1, 2]
     assert resolved["hit_sl"] is True
-    assert resolved["gross_realized_r"] == pytest.approx(0.5, abs=1e-6)
-    assert backtest["levels"] == [1]
-    assert backtest["net_rr"] == pytest.approx(0.5, abs=1e-6)
+    assert resolved["gross_realized_r"] == pytest.approx(1.1, abs=1e-6)
+    assert backtest["levels"] == [1, 2]
+    assert backtest["net_rr"] == pytest.approx(1.1, abs=1e-6)
     assert backtest["exit_reason"] == "TRAILING_STOP"
     assert backtest["exit_offset"] == 0
     assert backtest["exit_price"] == pytest.approx(100.0, abs=1e-9)
@@ -161,19 +161,19 @@ def test_parity_multi_tp_same_candle_then_tp1_stop(tmp_path):
     TP1: +0.5*1R; TP2: +0.3*2R; kalan 0.2 pay TP1 stopundan (101) +0.2*1R
     -> toplam 1.3R (journal ile birebir).
     """
-    candles = [_candle(1, 100.0, 102.5, 100.5, 102.2)]
+    candles = [_candle(1, 100.0, 102.5, 99.9, 102.2)]
     resolved, backtest = _run_parity(
         tmp_path, "LONG", 100.0, 99.0, [101.0, 102.0, 103.0], candles, DEFAULT_WEIGHTS
     )
 
     assert resolved["tps_hit"] == [1, 2]
     assert resolved["hit_sl"] is True
-    assert resolved["gross_realized_r"] == pytest.approx(1.3, abs=1e-6)
+    assert resolved["gross_realized_r"] == pytest.approx(1.1, abs=1e-6)
     assert backtest["levels"] == [1, 2]
-    assert backtest["net_rr"] == pytest.approx(1.3, abs=1e-6)
+    assert backtest["net_rr"] == pytest.approx(1.1, abs=1e-6)
     assert backtest["exit_reason"] == "TRAILING_STOP"
     assert backtest["exit_offset"] == 0
-    assert backtest["exit_price"] == pytest.approx(101.0, abs=1e-9)
+    assert backtest["exit_price"] == pytest.approx(100.0, abs=1e-9)
 
 
 def test_parity_full_ladder_same_candle(tmp_path):
@@ -203,7 +203,7 @@ def test_parity_partial_remainder_two_tp_weights(tmp_path):
     """
     candles = [
         _candle(1, 100.0, 102.4, 100.2, 101.5),
-        _candle(2, 100.6, 101.0, 99.8, 100.2),
+        _candle(2, 100.6, 101.0, 97.8, 98.2),
     ]
     weights = {"tp1": 0.5, "tp2": 0.3}
     resolved, backtest = _run_parity(
@@ -211,8 +211,8 @@ def test_parity_partial_remainder_two_tp_weights(tmp_path):
     )
 
     assert resolved["tps_hit"] == [1]
-    assert resolved["gross_realized_r"] == pytest.approx(0.625, abs=1e-6)
+    assert resolved["gross_realized_r"] == pytest.approx(0.25, abs=1e-6)
     assert backtest["levels"] == [1]
-    assert backtest["net_rr"] == pytest.approx(0.625, abs=1e-6)
+    assert backtest["net_rr"] == pytest.approx(0.25, abs=1e-6)
     assert backtest["exit_reason"] == "TRAILING_STOP"
     assert backtest["exit_offset"] == 1

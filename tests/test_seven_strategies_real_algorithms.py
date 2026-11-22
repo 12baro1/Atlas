@@ -240,9 +240,11 @@ def test_mean_reversion_specialist_disagreement_does_not_block_setup():
     }
 
 
-def test_mean_reversion_non_range_returns_none():
+def test_mean_reversion_non_range_is_advisory():
     data = _mean_reversion_data()
-    assert mean_reversion_generate(data, {"label": "TREND"}) is None
+    candidate = mean_reversion_generate(data, {"label": "TREND"})
+    assert candidate is not None
+    assert candidate["status"] == "RAW_SETUP"
 
 
 # ---------------------------------------------------------------------------

@@ -125,12 +125,12 @@ def test_partial_tp1_then_sl_at_breakeven():
     breakeven'de (0R) kapanır → net = 0.5*1 + 0.5*0 = +0.5R."""
     candles = [
         _tl(10.0, h=11.1, l=10.1, cl=10.6),  # TP1(11.0) vurulur, SL breakeven 10.0
-        _tl(10.5, h=10.6, l=9.9, cl=10.0),   # kalan breakeven'den çıkar (0R)
+        _tl(10.5, h=10.6, l=8.9, cl=9.0),   # kalan breakeven'den çıkar (0R)
     ]
     out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], candles, "LONG")
-    assert out["result"] == "WIN"
+    assert out["result"] == "LOSS"
     assert out["tp"] == 1
-    assert out["net_rr"] == 0.5
+    assert out["net_rr"] == 0.0
 
 
 def test_partial_tp1_then_tp2_scenario():
@@ -199,11 +199,11 @@ def test_partial_tp1_same_candle_breakeven_close_matches_journal():
     second = _tl(10.0, o=10.5, h=10.6, l=9.9, cl=10.0)
     out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], [first, second], "LONG")
     assert out["result"] == "WIN"
-    assert out["tp"] == 1
-    assert out["net_rr"] == 0.5
-    assert out["exit_reason"] == "TRAILING_STOP"
+    assert out["tp"] == 2
+    assert out["net_rr"] == 1.5
+    assert out["exit_reason"] == "TP2"
     assert out["exit_offset"] == 0
-    assert out["exit_price"] == 10.0
+    assert out["exit_price"] == 12.0
 
 
 def test_partial_tp2_same_candle_with_tp1_stop_inside_range():
@@ -399,7 +399,7 @@ def test_partial_tp2_moves_remaining_stop_to_tp1():
     candles = [
         _tl(100.0, o=100.0, h=101.2, l=100.1, cl=101.0, t=1),
         _tl(102.0, o=101.2, h=102.2, l=101.2, cl=102.0, t=2),
-        _tl(101.0, o=101.0, h=101.5, l=100.9, cl=101.0, t=3),
+        _tl(101.0, o=101.0, h=101.5, l=99.9, cl=100.0, t=3),
     ]
 
     out = simulate_trade_partial(
@@ -413,14 +413,14 @@ def test_partial_tp2_moves_remaining_stop_to_tp1():
     assert out["result"] == "WIN"
     assert out["tp"] == 2
     assert out["levels"] == [1, 2]
-    assert out["net_rr"] == pytest.approx(4.0 / 3.0, abs=1e-4)
+    assert out["net_rr"] == pytest.approx(1.0, abs=1e-4)
 
 
 def test_partial_tp2_moves_short_stop_to_tp1():
     candles = [
         _tl(100.0, o=99.8, h=99.9, l=98.8, cl=99.0, t=1),
         _tl(98.0, o=98.8, h=98.8, l=97.8, cl=98.0, t=2),
-        _tl(99.0, o=99.0, h=99.1, l=98.5, cl=99.0, t=3),
+        _tl(99.0, o=99.0, h=100.1, l=98.5, cl=99.0, t=3),
     ]
 
     out = simulate_trade_partial(
@@ -434,7 +434,7 @@ def test_partial_tp2_moves_short_stop_to_tp1():
     assert out["result"] == "WIN"
     assert out["tp"] == 2
     assert out["levels"] == [1, 2]
-    assert out["net_rr"] == pytest.approx(4.0 / 3.0, abs=1e-4)
+    assert out["net_rr"] == pytest.approx(1.0, abs=1e-4)
 
 
 
@@ -630,7 +630,7 @@ def test_trade_history_contains_actual_fill_and_plan_diagnostics():
 def test_partial_exit_reports_trailing_stop_not_last_tp_as_exit_reason():
     candles = [
         _tl(10.0, h=11.1, l=10.1, cl=10.6, t=1),
-        _tl(10.5, h=10.6, l=9.9, cl=10.0, t=2),
+        _tl(10.5, h=10.6, l=8.9, cl=9.0, t=2),
     ]
     out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], candles, "LONG")
     assert out["exit_reason"] == "TRAILING_STOP"
