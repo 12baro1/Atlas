@@ -613,3 +613,31 @@ def test_unranked_or_rejected_plan_needs_fresh_selection_to_be_displayed(pool):
     rejected = dict(row, observed=5, setup=None, blocked_strategies=[row["setup"]["strategy_id"]])
     pool.publish_cycle(5, [rejected], [BTC])
     assert not pool.get_best_setups() and pool.get_stats()["validated_stored"] == 1
+
+
+def test_closed_setup_cannot_reenter_from_pool_refresh_even_with_new_id(pool):
+    """Repeated publication of a stopped trade is not a new entry."""
+    row = observation(stamp=10)
+    setup = row["setup"]
+    chat = "-10"
+    pool.tracking.follow_analysis(chat, row)
+    original = pool.tracking.tracked(chat)
+    assert len(original) == 1
+    with pool.tracking._transaction() as conn:
+        conn.execute(
+            "UPDATE chat_plans SET state='CLOSED', "
+            "payload=json_set(payload,'$.status','SL','$.resolved_at',12345) "
+            "WHERE chat=? AND symbol=?", (chat, BTC),
+        )
+    refreshed = dict(row, cutoff=11, observed=11,
+                     setup=dict(setup, setup_id=setup["setup_id"] + "-republished"))
+    pool.tracking.follow_analysis(chat, refreshed)
+    assert len(pool.tracking.tracked(chat)) == 1
+    assert pool.tracking.tracked(chat)[0][2] == "CLOSED"
+
+    # A genuinely different entry/stop/target geometry may be followed.
+    changed = dict(refreshed, cutoff=12, observed=12,
+                   setup=dict(refreshed["setup"], entry_price=setup["entry_price"] * 1.01))
+    pool.tracking.follow_analysis(chat, changed)
+    assert len(pool.tracking.tracked(chat)) == 2
+    assert pool.tracking.tracked(chat)[0][2] == "WAITING"
