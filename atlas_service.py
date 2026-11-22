@@ -1,6 +1,6 @@
 """Headless long-running Atlas market-analysis service.
 
-This service runs the same seven-strategy AtlasRuntime used by the terminal UI.
+This service runs the same five-strategy + two-specialist AtlasRuntime used by the terminal UI.
 It only reads public Gate.io market data and never submits exchange orders.
 """
 from __future__ import annotations

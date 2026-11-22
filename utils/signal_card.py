@@ -277,7 +277,7 @@ def build_selected_strategy_card(result):
             "tp_levels": [],
             "rr": None,
             "net_rr": None,
-            "reason": "Yedi strateji içinde seçilebilir, doğrulanmış bir işlem planı yok.",
+            "reason": "Beş işlem stratejisi içinde seçilebilir, doğrulanmış bir işlem planı yok.",
             "critical_blocks": ["NO_SELECTED_STRATEGY_PLAN"],
             "strategy_diagnostics": [
                 {

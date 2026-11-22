@@ -11,6 +11,7 @@ import traceback
 from weakref import WeakValueDictionary
 import time
 from collections import defaultdict, deque
+from strategy_catalog import TRADE_STRATEGY_IDS, SPECIALIST_IDS
 from typing import Any, Dict, Optional
 from config import Config
 from data_engine import exchange, get_correlation_universe, get_market_data, get_smt_universe
@@ -100,6 +101,7 @@ class AtlasRuntime:
                 "insufficient_history": 0, "errors": 0, "other_no_setup": 0,
                 "reason_counts": defaultdict(int),
             }),
+            "specialists": {},
         }
         # Scan infrastructure: Gate.io inventory, durable queue, background
         # workers and the 00:00 Istanbul daily refresh. All independent of
@@ -291,7 +293,7 @@ class AtlasRuntime:
     def scan_status(self):
         status = self.scan_progress()
         # Queue progress alone cannot explain an empty setup pool. Expose the
-        # seven-strategy generation funnel and validated pool alongside it.
+        # five-strategy setup funnel, two evidence specialists and validated pool.
         status["strategy_telemetry"] = self.strategy_telemetry()
         pool = self._opportunity_pool()
         status["pool"] = pool.get_stats()
@@ -318,6 +320,8 @@ class AtlasRuntime:
     def _strategy_telemetry_locked(self):
         per_strategy = {}
         for strategy_id, raw_counts in self._strategy_telemetry["per_strategy"].items():
+            if strategy_id not in TRADE_STRATEGY_IDS:
+                continue
             counts = {
                 key: value for key, value in raw_counts.items()
                 if key != "reason_counts"
@@ -337,6 +341,11 @@ class AtlasRuntime:
             "common_filter_rejected": self._strategy_telemetry["common_filter_rejected"],
             "rejection_reasons": dict(self._strategy_telemetry["rejection_reasons"]),
             "per_strategy": per_strategy,
+            "specialists": {
+                key: dict(value)
+                for key, value in self._strategy_telemetry.get("specialists", {}).items()
+                if key in SPECIALIST_IDS
+            },
         }
 
     @property
@@ -1116,8 +1125,19 @@ class AtlasRuntime:
                 telemetry["common_filter_passed"] += passed
                 raw = int(diagnostics.get("raw_setup_count") or 0)
                 telemetry["common_filter_rejected"] += max(0, raw - passed)
+                for specialist_id in SPECIALIST_IDS:
+                    evidence = (lab.get("specialist_evidence") or {}).get(specialist_id)
+                    if not isinstance(evidence, dict):
+                        continue
+                    counts = telemetry.setdefault("specialists", {}).setdefault(
+                        specialist_id, {"analyses": 0, "last_state": None}
+                    )
+                    counts["analyses"] += 1
+                    counts["last_state"] = str(evidence.get("state") or "UNKNOWN")
                 for row in diagnostics.get("strategies") or []:
                     strategy_id = str(row.get("strategy_id") or "unknown")
+                    if strategy_id not in TRADE_STRATEGY_IDS:
+                        continue
                     counts = telemetry["per_strategy"][strategy_id]
                     counts["analyses"] = counts.get("analyses", 0) + 1
                     status = str(row.get("status") or "")

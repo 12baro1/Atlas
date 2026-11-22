@@ -1,7 +1,7 @@
 import math
 
 
-"""Independent liquidation_cascade setup generator."""
+"""Deprecated research-only setup generator; live Atlas uses read-only specialist metrics."""
 
 from shared.analysis_services import (
     _value,
@@ -17,6 +17,12 @@ from shared.specialist_evidence import evidence_for_strategy, attach_strategy_ev
 
 
 def generate(data):
+    """Live-compatibility entry point: Liquidation Cascade is evidence-only."""
+    return None
+
+
+def generate_research_candidate(data):
+    """Historical research fixture only; never registered in live trade selection."""
     # Specialist outputs are optional analysis context/provenance. The native
     # OI, impulse, volume, taker-flow and funding rules below define eligibility.
     specialist_evidence = evidence_for_strategy(data, "liquidation_cascade")

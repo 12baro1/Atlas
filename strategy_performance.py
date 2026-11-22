@@ -1,4 +1,4 @@
-"""Conservative, strategy-specific edge validation for the seven-strategy selector.
+"""Conservative, strategy-specific edge validation for the five-strategy selector.
 
 A candidate strength score is not a probability of winning. Experimental engines
 are eligible for selection only after independent, cost-adjusted, out-of-sample

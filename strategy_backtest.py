@@ -548,14 +548,14 @@ def run_seven_strategy_backtest(symbol, days=30, step=1, max_holding_bars=32,
             "Walk-forward uses anchored expanding training windows and sequential test folds; it does not auto-tune parameters.",
             "Funding costs are applied only at historical settlement timestamps returned by the exchange; if funding history is unavailable, outcomes must not be treated as fully cost-complete.",
             "Order-flow replay requires previously archived timestamped order-book/trade snapshots. No historical book is fabricated or backfilled.",
-            "Liquidation cascade uses historical OI/funding plus archived trade flow where available; it remains a proxy, not an exchange liquidation-event feed.",
+            "Liquidation-pressure specialist is evidence-only; historical OI/funding proxy is not an exchange liquidation-event feed.",
             "Fees, spread and slippage remain configurable execution assumptions, not actual exchange fills.",
         ],
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Atlas 7 strateji tarihsel replay")
+    parser = argparse.ArgumentParser(description="Atlas 5 işlem stratejisi tarihsel replay")
     parser.add_argument("--symbol", default="BTC/USDT:USDT")
     parser.add_argument("--days", type=int, default=30)
     parser.add_argument("--step", type=int, default=1, help="Her kaç 15m mumda bir analiz")
@@ -572,7 +572,7 @@ def main():
         persist_outcomes=args.persist,
     )
     print(
-        f"7 STRATEJİ BACKTEST | {report['symbol']} | istenen={report['days']} gün | "
+        f"5 STRATEJİ BACKTEST | {report['symbol']} | istenen={report['days']} gün | "
         f"gerçekleşen={report['effective_days']} gün | analiz={report['analysis_calls']}"
     )
     print(f"{'STRATEJİ':<24} {'BÖLÜM':<5} {'İŞLEM':>6} {'WR':>8} {'PF':>8} {'EXP R':>9} {'NET R':>9}")

@@ -530,7 +530,7 @@ class BacktestRunner:
         )
 
     def _record_strategy_diagnostics(self, result):
-        """Accumulate the live seven-strategy report without changing its decision."""
+        """Accumulate the live five-strategy report without changing its decision."""
         if not isinstance(result, dict):
             return
         report = result.get("strategy_lab")

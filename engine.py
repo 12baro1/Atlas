@@ -259,7 +259,7 @@ class AtlasEngine:
         candles = data["15m"]
         # Aktif setup yaşam döngüsü (TP1/SL/timeout) state engine tarafından
         # değerlendirilir; ama varlığı artık yeni analizi DURDURMAZ. Aşağıda
-        # yedi strateji, ortak filtre ve tek karar mekanizması yeniden çalışır.
+        # beş işlem stratejisi, ortak filtre ve tek karar mekanizması yeniden çalışır.
         active_setup = None
         if bool(getattr(Config, "STATE_ENGINE_ENABLED", True)):
             active_setup = self.state_engine.get_active_setup(
@@ -276,7 +276,7 @@ class AtlasEngine:
         # Do not restore a candle-only cache when order flow, derivatives, news or
         # cross-market context is present, even if the order-book request failed.
         # Aktif setup varken önbellek geri yükleme atlanır: yeni analiz her zaman
-        # yedi stratejiyi yeniden çalıştırmalı.
+        # beş işlem stratejisiyi yeniden çalıştırmalı.
         if (
             active_setup is None
             and (not _has_dynamic_market_context(data))
@@ -518,7 +518,7 @@ class AtlasEngine:
                 "entry_type": selected["entry_type"],
                 "entry": selected["entry"],
                 "stop_loss": selected["stop_loss"],
-                "reason": "Selected by the shared seven-strategy decision",
+                "reason": "Selected by the shared five-strategy decision",
                 "entry_reason_code": "SHARED_STRATEGY_SELECTION",
                 "setup_reasoning": {
                     "selected_id": selected.get("strategy_id"),
@@ -565,7 +565,7 @@ class AtlasEngine:
             decision_state = {
                 "action": "EXECUTE", "signal": selected["direction"],
                 "reason": "Best setup selected after the shared filter",
-                "decision_authority": "SEVEN_STRATEGY_SELECTOR",
+                "decision_authority": "FIVE_STRATEGY_SELECTOR",
                 "selected_strategy_id": selected.get("strategy_id"),
             }
         else:
@@ -585,7 +585,7 @@ class AtlasEngine:
             decision_state = {
                 "action": "SKIP", "signal": "WAIT",
                 "reason": "No setup passed the shared filter",
-                "decision_authority": "SEVEN_STRATEGY_SELECTOR",
+                "decision_authority": "FIVE_STRATEGY_SELECTOR",
                 "selected_strategy_id": None,
             }
         record_stage(

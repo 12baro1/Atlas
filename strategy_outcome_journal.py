@@ -11,12 +11,12 @@ import math
 import os
 import threading
 from collections import defaultdict
+from strategy_catalog import TRADE_STRATEGY_IDS
 
 
-VALID_STRATEGIES = {
-    "trend_pullback", "volatility_breakout", "mean_reversion",
-    "liquidation_cascade", "orderflow_momentum", "relative_strength", "smc",
-}
+# Legacy specialist outcomes may remain in old JSONL files, but they must
+# never enter the live performance gate or be written as new trade outcomes.
+VALID_STRATEGIES = TRADE_STRATEGY_IDS
 
 
 class StrategyOutcomeJournal:

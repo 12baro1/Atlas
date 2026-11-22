@@ -11,6 +11,7 @@ from statistics import median
 
 from strategies.orderflow.strategy import _ORDERBOOK_ENGINE
 from strategies.candidate import STRATEGY_NAMES, _configured_partial_tp_weights, _raw_candidate
+from strategy_catalog import TRADE_STRATEGY_IDS, SPECIALIST_IDS
 from shared.analysis_services import _current_price, _entry_reference
 from shared.microstructure_services import _trade_flow
 from risk_engine import RiskEngine
@@ -283,6 +284,8 @@ def _orderflow_momentum(data):
     from strategies.orderflow.strategy import generate
     return generate(data)
 
+# Backward-compatible research hooks; intentionally absent from the live
+# five-generator registry. These may never enter the shared trade selector.
 def _liquidation_cascade(data):
     from strategies.liquidation.strategy import generate
     return generate(data)
@@ -783,12 +786,17 @@ class SevenStrategyLab:
             "smc": lambda: _smc_candidate(smc_result, data),
         }
 
+        if set(evaluators) != TRADE_STRATEGY_IDS:
+            raise RuntimeError("Trade generator registry does not match the five approved strategies.")
+
         # Evidence-only specialists never return trade candidates.
         from shared.specialist_metrics import analyze_relative_strength, analyze_liquidation_pressure
         specialist_evidence = {
             "relative_strength": analyze_relative_strength(data),
             "liquidation_cascade": analyze_liquidation_pressure(data),
         }
+        if set(specialist_evidence) != SPECIALIST_IDS:
+            raise RuntimeError("Evidence-only specialist registry is inconsistent.")
         for specialist_id, evidence in specialist_evidence.items():
             evidence["role"] = "SHARED_SPECIALIST"
             evidence["setup_generation"] = False

@@ -1,5 +1,8 @@
 # Atlas uçtan uca denetimi
 
+> **Archived audit snapshot.** The earlier seven-generator model below is not the active live contract. See [Current Architecture](CURRENT_ARCHITECTURE.md) for five trade strategies plus two read-only specialists.
+
+
 Referans sürüm `952dad8`. İnceleme önceliği kalıcı iş kaybı, zaman hizalaması ve setup yaşam döngüsüydü. Aşağıdaki tablonun ardından 326 izlenen Python dosyasının statik bağımlılık envanteri yer alır. Envanterdeki çağrılar import edilen isimlere AST üzerinden çözülebilen çağrılardır. MotorProxy, nesne enjeksiyonu, callback ve koşullu importların çalışma sırasını tek başına kanıtlamaz.
 
 ## Replay ve strateji paketleri için takip denetimi

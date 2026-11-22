@@ -48,7 +48,8 @@ def test_relative_strength_uses_beta_adjusted_sector_peer_residual():
         TimedCandle(1_700_000_000_000 + index * 24 * 60 * 60 * 1000, 109, high, low, 109)
         for index, (high, low) in enumerate(zip(daily_highs, daily_lows))
     ]
-    plan = strategy_lab._relative_strength({
+    from strategies.relative_strength.strategy import generate_research_candidate
+    plan = generate_research_candidate({
         "symbol": "SOL/USDT:USDT",
         "4h": own,
         "1d": daily_structure,

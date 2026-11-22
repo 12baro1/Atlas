@@ -28,10 +28,10 @@ import time
 import pytest
 
 from strategies.breakout.strategy import generate as breakout_generate
-from strategies.liquidation.strategy import generate as liquidation_generate
+from strategies.liquidation.strategy import generate as liquidation_live_generate, generate_research_candidate as liquidation_generate
 from strategies.mean_reversion.strategy import generate as mean_reversion_generate
 from strategies.orderflow.strategy import generate as orderflow_generate
-from strategies.relative_strength.strategy import generate as relative_strength_generate
+from strategies.relative_strength.strategy import generate as relative_strength_live_generate, generate_research_candidate as relative_strength_generate
 from strategies.smc.strategy import generate as smc_generate
 from strategies.trend.strategy import generate as trend_generate
 
@@ -518,7 +518,7 @@ def test_smc_invalid_geometry_returns_none():
 # Cross-cutting: strategy independence
 # ---------------------------------------------------------------------------
 
-def test_all_seven_strategies_have_independent_generators():
+def test_five_live_and_two_archived_research_algorithms_are_importable():
     """Yedi stratejinin generator fonksiyonu bağımsız ve import edilebilir."""
     generators = {
         "trend_pullback": trend_generate,
@@ -564,3 +564,11 @@ def test_native_price_and_flow_direction_reversal(fixture, generate):
         data["funding_rate"] = [-value for value in data["funding_rate"]]
     data["current_price"] = 200-data["current_price"]
     assert generate(data)["direction"] == "SHORT"
+
+
+def test_specialist_entrypoints_do_not_generate_trades_even_with_valid_research_fixtures():
+    """Old imports must not create a trade candidate after 5+2 migration."""
+    assert liquidation_generate(_liquidation_cascade_data()) is not None
+    assert relative_strength_generate(_relative_strength_data()) is not None
+    assert liquidation_live_generate(_liquidation_cascade_data()) is None
+    assert relative_strength_live_generate(_relative_strength_data()) is None

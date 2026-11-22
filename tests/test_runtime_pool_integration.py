@@ -144,7 +144,7 @@ def test_strategy_telemetry_accumulates_funnel(tmp_path):
     assert per_strategy["mean_reversion"]["condition_not_met"] == 1
     assert per_strategy["mean_reversion"]["top_reasons"][0]["count"] == 1
     assert "REGIME_MISMATCH" in per_strategy["mean_reversion"]["top_reasons"][0]["reason"]
-    assert per_strategy["liquidation_cascade"]["missing_data"] == 1
+    assert "liquidation_cascade" not in per_strategy  # evidence-only
 
 
 def test_second_analysis_of_same_setup_is_idempotent(tmp_path):

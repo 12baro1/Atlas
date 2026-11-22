@@ -1,5 +1,8 @@
 # Atlas System Audit Report
 
+> **Archived audit snapshot.** This report describes an older seven-generator revision. The current live contract is five trade strategies plus two evidence-only specialists; see [Current Architecture](docs/CURRENT_ARCHITECTURE.md).
+
+
 **Date:** 2026-11-17  
 **Scope:** Full system audit from Gate.io data provider through 7 strategies, common filters, decision engine, opportunity pool, Telegram commands, and operational reliability.
 

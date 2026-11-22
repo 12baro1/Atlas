@@ -1,6 +1,6 @@
 # Atlas
 
-Atlas, Gate.io USDT perpetual piyasalarını terminal üzerinden analiz eder. Tek coin analizinde 7 ayrı stratejiyi çalıştırır: Trend Following + Pullback, Volatility Breakout, Mean Reversion, Liquidation Cascade (açık pozisyon daralması proxy'si), Order Flow Momentum, Relative Strength ve mevcut SMC motoru. Android UserLAnd/Ubuntu ve Linux üzerinde kullanılabilir.
+Atlas, Gate.io USDT perpetual piyasalarını terminal üzerinden analiz eder. Beş işlem stratejisi (Trend Pullback, Volatility Breakout, Mean Reversion, Order Flow Momentum, SMC) setup üretir. İki salt-okunur uzman (Relative Strength ve Liquidation Cascade) piyasa kanıtı sağlar, bağımsız işlem açmaz. Android UserLAnd/Ubuntu ve Linux üzerinde kullanılabilir.
 
 **Bu sürüm analiz aracıdır; otomatik al-sat yapmaz.** Borsaya emir veya pozisyon göndermez. Analiz için herkese açık piyasa verilerini kullanır. Gate.io public futures API anahtarı gerekmez.
 
@@ -57,7 +57,7 @@ Belirli bir sembolle doğrudan açmak için:
 
 ## VPS üzerinde sürekli canlı analiz servisi
 
-Sunucu servisi, terminal arayüzünü açmadan aynı `AtlasRuntime` ve `AtlasEngine` analiz hattını arka planda çalıştırır. Tek coin analizindeki yedi strateji, ortak analiz servisleri ve tek karar mekanizması değiştirilmez. Varsayılan sembol sınırı yoktur; Gate.io'teki desteklenen aktif USDT perpetual piyasalarının tamamı taranır. İstersen `.env` içinde `ATLAS_MAX_SYMBOLS` ile kendin sınır koyabilirsin.
+Sunucu servisi, terminal arayüzünü açmadan aynı `AtlasRuntime` ve `AtlasEngine` analiz hattını arka planda çalıştırır. Beş strateji, iki kanıt uzmanı, ortak analiz servisleri ve tek karar mekanizması korunur. Varsayılan sembol sınırı yoktur; Gate.io'teki desteklenen aktif USDT perpetual piyasalarının tamamı taranır. İstersen `.env` içinde `ATLAS_MAX_SYMBOLS` ile kendin sınır koyabilirsin.
 
 ### Otomatik kurulum (önerilen)
 
@@ -102,7 +102,7 @@ journalctl --user -u atlas.service -n 100 --no-pager
 systemctl --user restart atlas.service
 ```
 
-Servis, yedi stratejili analiz hattını değiştirmez. VPS modunda eski otomatik Telegram sinyal bildirimi ve eski Telegram polling kapalı tutulur; yeni Telegram entegrasyonu yalnızca tanınan grup komutlarına cevap verir, kendi kendine sinyal göndermez. Otomatik emir gönderimi de kapalıdır.
+Servis, beş stratejili işlem hattını ve iki kanıt uzmanını değiştirmez. VPS modunda eski otomatik Telegram sinyal bildirimi ve eski Telegram polling kapalı tutulur; yeni Telegram entegrasyonu yalnızca tanınan grup komutlarına cevap verir, kendi kendine sinyal göndermez. Otomatik emir gönderimi de kapalıdır.
 
 BotFather komut menüsü servis başlangıcında `setMyCommands` API'si ile otomatik yüklenir. Elle doğrulamak için:
 ```bash
@@ -170,7 +170,7 @@ Atlas açıldığında komut alanına sembol veya desteklenen komutlardan birini
 
 | Komut | İşlev |
 |---|---|
-| `BTC`, `ETH`, `SOL` | İlgili piyasayı 7 stratejiyle analiz eder; adayları karşılaştırıp tek plan seçer |
+| `BTC`, `ETH`, `SOL` | İlgili piyasayı 5 strateji + 2 uzmanla analiz eder; tek plan seçer |
 | `işlem ver` | Varsayılan taramayı çalıştırır ve uygun kurulum arar |
 | `50 analiz et` | 50 piyasayı tarar |
 | `100 analiz et` | 100 piyasayı tarar |
@@ -195,11 +195,11 @@ Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Ge
 - WebSocket verisi yoksa Gate.io REST verisi kullanılabilir. Gate.io erişilemezse başka borsaya geçilmez; ilgili feed `UNAVAILABLE` kalır.
 - Absorption ve liquidity wall sonuçları kesin emir niyeti değildir: absorption bir çıkarım, wall ise iptal edilebilir görüntülenen derinliktir.
 
-## 7 strateji analizi
+## 5 işlem stratejisi + 2 kanıt uzmanı
 
-Tek coin analizinde ve 300 sembollük taramada yedi strateji kendi ham planını üretir. Ortak filtre giriş yönünü, yapısal stop ve hedefleri, işlem maliyetlerini ve maliyet sonrası net RR eşiğini (varsayılan 2,0) kontrol eder. Merkezi karar motoru uygun adayları önce net RR, ardından güç ve rejim uyumu ile sıralar. SMC diğer altı stratejiyle aynı seçim aşamasına girer. `/motorlar` üretim sayaçlarını, `/istatistik` sık görülen eleme nedenlerini gösterir.
+Tek coin analizinde ve 300 sembollük taramada yalnızca beş işlem stratejisi kendi ham planını üretir. Relative Strength ve Liquidation Cascade yalnızca analiz kanıtı üretir; filtreye aday göndermez. Ortak filtre giriş yönünü, yapısal stop ve hedefleri, işlem maliyetlerini ve maliyet sonrası net RR eşiğini (varsayılan 2,0) kontrol eder. Merkezi karar motoru uygun adayları önce net RR, ardından güç ve rejim uyumu ile sıralar. SMC diğer dört işlem stratejisiyle aynı seçim aşamasına girer. `/motorlar` üretim sayaçlarını, `/istatistik` sık görülen eleme nedenlerini gösterir.
 
-**Önemli doğrulama sınırı:** 6 yeni strateji deneysel aday üreticilerdir. Strateji replay'i kronolojik IS/OOS ayrımı ve 5 anchored walk-forward penceresi kullanır; maliyetler ve tarihsel funding verisi mevcut olduğunda aynı yürütme simülatöründen geçirilir. Bunlar gerçek borsa dolumu değildir. Eksik veya kısmi OI/funding verisi açıkça raporlanır; funding geçmişi tam kapsama sahip değilse --persist performans günlüğüne sonuç yazmaz. Order Flow Momentum yalnızca karar zamanından önce arşivlenmiş, taze order-book/trade örnekleri varsa tarihsel olarak ölçülebilir. Liquidation Cascade gerçek likidasyon akışı değil, OI/funding/işlem akışı proxy'sidir. Performans günlüğü aynı kod revizyonu, sembol ve rejim için IS/OOS sonuçlarını ayrı izler. Atlas emir göndermez.
+**Önemli doğrulama sınırı:** SMC dışındaki dört işlem stratejisi deneysel aday üreticilerdir. Strateji replay'i kronolojik IS/OOS ayrımı ve 5 anchored walk-forward penceresi kullanır; maliyetler ve tarihsel funding verisi mevcut olduğunda aynı yürütme simülatöründen geçirilir. Bunlar gerçek borsa dolumu değildir. Eksik veya kısmi OI/funding verisi açıkça raporlanır; funding geçmişi tam kapsama sahip değilse --persist performans günlüğüne sonuç yazmaz. Order Flow Momentum yalnızca karar zamanından önce arşivlenmiş, taze order-book/trade örnekleri varsa tarihsel olarak ölçülebilir. Liquidation Cascade gerçek likidasyon akışı değil, OI/funding/işlem akışı proxy'sidir. Performans günlüğü aynı kod revizyonu, sembol ve rejim için IS/OOS sonuçlarını ayrı izler. Atlas emir göndermez.
 
 ## Backtest
 
@@ -225,9 +225,9 @@ Walk-forward raporunda parametreler değiştirilmez. Eski parçalar eğitim/IS, 
 
 Backtest geçmiş veriyi simüle eder; gerçek piyasa dolumunu veya gelecekteki performansı garanti etmez.
 
-## 7 strateji backtesti
+## 5 strateji backtesti
 
-Yedi motoru ayrı ayrı tarihsel replay ile ölçmek için:
+Beş işlem üreticisini ayrı ayrı tarihsel replay ile ölçmek için:
 
 ```bash
 python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30 --max-holding-bars 32 --limit-expiry-bars 8
@@ -297,7 +297,7 @@ Backtest ve motor ablation raporları gerçek zamanlı forward test yerine geçm
 
 ## Tarihsel doğrulama, funding ve mikro yapı arşivi
 
-Yedi stratejinin tarihsel karşılaştırması:
+Beş işlem stratejisinin tarihsel karşılaştırması:
 
 ```bash
 python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
@@ -307,11 +307,11 @@ python3 strategy_backtest.py --symbol BTC/USDT:USDT --days 30
 - Gate.io'in tarihsel OI ve funding uç noktaları destekleniyorsa zaman damgalı seriler yüklenir. Funding ödemesi pozisyon yönüne göre net R'ye yansıtılır.
 - Funding geçmişi alınamazsa `--persist` sonuçları performans günlüğüne yazmaz. Eksik maliyetli örnekler strateji seçiminde kullanılamaz.
 - Canlı order-book ve recent-trade örnekleri yerel olarak `data/microstructure/` altında JSONL arşivine kaydedilir.
-- Relative Strength, BTC/ETH beta-adjusted residual alpha kullanır. İsteğe bağlı sektör/peer grubu `ATLAS_SECTOR_PEERS_JSON` ile tanımlanır; örnek: `{"SOL":["AVAX/USDT:USDT","ADA/USDT:USDT"]}`. Bilinmeyen coinlere otomatik sektör etiketi uydurulmaz.
+- Salt-okunur Relative Strength uzmanı, BTC/ETH beta-adjusted residual alpha kullanır. İsteğe bağlı sektör/peer grubu `ATLAS_SECTOR_PEERS_JSON` ile tanımlanır; örnek: `{"SOL":["AVAX/USDT:USDT","ADA/USDT:USDT"]}`. Bilinmeyen coinlere otomatik sektör etiketi uydurulmaz.
 - Order Flow Momentum, agresif alış/satış akışı fiyatı ilerletemediğinde ve karşı tarafta derinlik varsa absorption proxy üretir. Bu, gerçek kuyruk yenilenmesi veya gizli emir kanıtı değildir. Kapatmak için `ATLAS_MICROSTRUCTURE_ARCHIVE_ENABLED=0` ayarlayın.
 - Geçmiş order-book verisi geriye dönük üretilemez. Order-flow replay yalnızca karar zamanından önce arşivlenmiş ve tazeliği doğrulanmış örnekleri kullanır. Arşiv oluşana kadar bu motorun tarihsel performansı ölçülmüş sayılmaz.
 - Arşiv her sembol için varsayılan 5 MiB ve 7 gün ile sınırlandırılır. İhtiyaca göre ATLAS_MICROSTRUCTURE_ARCHIVE_MAX_BYTES ve ATLAS_MICROSTRUCTURE_ARCHIVE_RETENTION_DAYS ayarlanabilir.
-- Liquidation Cascade, gerçek liquidation-event akışı değildir; tarihsel OI/funding ve varsa arşivlenmiş trade-flow ile sınırlı bir proxy'dir.
+- Salt-okunur Liquidation Cascade uzmanı, gerçek liquidation-event akışı değildir; tarihsel OI/funding ve varsa arşivlenmiş trade-flow ile sınırlı bir proxy'dir.
 
 Komisyon, spread ve slippage hâlâ parametreli yürütme varsayımlarıdır; gerçek emir gerçekleşme fiyatı değildir. Walk-forward çıktısı kârlılık garantisi veya parametre optimizasyonu anlamına gelmez.
 
