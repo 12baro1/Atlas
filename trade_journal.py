@@ -1378,7 +1378,9 @@ class TradeJournal:
 
     def _finalize_signal_outcome(self, outcome):
         """TP/sl ile kapanmış sinyali kalıcı duruma geçirir."""
-        gross_realized = float(outcome.get("realized_r") or 0.0)
+        # Never charge execution costs twice if a terminal outcome is finalized again.
+        finalized = outcome.get("status") in {"SL", "TP1", "TP2", "TP3"} and outcome.get("gross_realized_r") is not None
+        gross_realized = float((outcome.get("gross_realized_r") if finalized else outcome.get("realized_r")) or 0.0)
         entry = self._num(outcome.get("entry"))
         stop_loss = self._num(outcome.get("stop_loss"))
         risk_distance = abs(entry - stop_loss) if entry is not None and stop_loss is not None else 0.0
@@ -1429,6 +1431,8 @@ class TradeJournal:
             fee_rr = fee_cost / risk_distance if entry is not None and risk_distance > 0 else 0.0
             spread_slippage_rr = spread_slippage_cost / risk_distance if risk_distance > 0 else 0.0
             execution_cost_rr = fee_rr + spread_slippage_rr
+        outcome["initial_risk_distance"] = round(risk_distance, 12)
+        outcome["cost_model"] = cost_model or "legacy_round_trip"
         outcome["gross_realized_r"] = round(gross_realized, 4)
         outcome["fee_rr"] = round(fee_rr, 4)
         outcome["spread_slippage_rr"] = round(spread_slippage_rr, 4)
