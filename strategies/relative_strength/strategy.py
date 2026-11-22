@@ -1,7 +1,7 @@
 import math
 
 
-"""Independent beta-adjusted relative_strength setup generator."""
+"""Deprecated research-only setup generator; live Atlas uses read-only specialist metrics."""
 
 from shared.analysis_services import (
     _value,
@@ -18,6 +18,12 @@ from shared.specialist_evidence import evidence_for_strategy, attach_strategy_ev
 
 
 def generate(data):
+    """Live-compatibility entry point: Relative Strength is evidence-only."""
+    return None
+
+
+def generate_research_candidate(data):
+    """Historical research fixture only; never registered in live trade selection."""
     specialist_evidence = evidence_for_strategy(data, "relative_strength")
     """Beta-adjusted relative strength versus market and optional sector peers."""
     candles = data.get("4h") or []
