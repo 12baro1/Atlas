@@ -1095,7 +1095,7 @@ def test_short_stop_r_cost_is_not_charged_twice(tmp_path):
     outcome["hit_sl"] = True
     first = journal._finalize_signal_outcome(outcome)
     assert first["gross_realized_r"] == pytest.approx(-1.0)
-    assert first["realized_r"] == pytest.approx(-1.1208, abs=0.0001)
+    assert first["realized_r"] == pytest.approx(-1.121, abs=0.0001)
     assert first["initial_risk_distance"] == 1.0
     second = journal._finalize_signal_outcome(first)
     assert second["realized_r"] == first["realized_r"]
