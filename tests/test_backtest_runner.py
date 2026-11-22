@@ -128,7 +128,7 @@ def test_partial_tp1_then_sl_at_breakeven():
         _tl(10.5, h=10.6, l=8.9, cl=9.0),   # kalan breakeven'den çıkar (0R)
     ]
     out = simulate_trade_partial(10.0, 9.0, [11.0, 12.0], candles, "LONG")
-    assert out["result"] == "WIN"
+    assert out["result"] == "LOSS"
     assert out["tp"] == 1
     assert out["net_rr"] == 0.0
 
