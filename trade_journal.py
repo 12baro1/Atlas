@@ -1288,18 +1288,13 @@ class TradeJournal:
                 realized += weight * rr_tp
                 reached.append(level_no)
                 # Koruma stopunu taşı
-                if len(reached) == 1 and 1 in reached:
+                # TP1 alone does not move the stop. After TP2, protect
+                # the remaining position at the actual filled entry.
+                if 2 in reached and 3 not in reached:
                     if side == "LONG":
                         trailing_stop = max(current_stop if current_stop is not None else stop_loss, entry)
                     else:
                         trailing_stop = min(current_stop if current_stop is not None else stop_loss, entry)
-                elif self._MOVE_STOP_TO_TP1_AT_TP2:
-                    if 2 in reached and 3 not in reached:
-                        tp1 = self._num(outcome.get("tp1"))
-                        if tp1 is not None:
-                            trailing_stop = tp1
-                    else:
-                        trailing_stop = current_stop
 
                 if len(reached) >= len(tps):
                     closed_all = True
