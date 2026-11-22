@@ -757,10 +757,10 @@ class SevenStrategyLab:
     def analyze(self, data, smc_result=None, performance_by_strategy=None):
         """Run five independent setup generators, one shared filter, one selector."""
         ensure_trace(data)
-        if not isinstance(data.get("shared_market_evidence"), dict):
-            from shared.market_data_services import build_shared_market_evidence
-            data = dict(data)
-            data["shared_market_evidence"] = build_shared_market_evidence(data)
+        from shared.market_data_services import build_shared_analysis_evidence
+        shared_market_evidence, specialist_evidence = build_shared_analysis_evidence(data)
+        data = dict(data, shared_market_evidence=shared_market_evidence,
+                    shared_specialist_evidence=specialist_evidence)
         regime = _regime(data)
         record_stage(
             data,
@@ -783,17 +783,10 @@ class SevenStrategyLab:
             "smc": lambda: _smc_candidate(smc_result, data),
         }
 
-        # Evidence-only specialists never return trade candidates.
-        from shared.specialist_metrics import analyze_relative_strength, analyze_liquidation_pressure
-        specialist_evidence = {
-            "relative_strength": analyze_relative_strength(data),
-            "liquidation_cascade": analyze_liquidation_pressure(data),
-        }
+        # The two specialist calculations have already run in the common
+        # analysis service, before any independent strategy generator.
         for specialist_id, evidence in specialist_evidence.items():
-            evidence["role"] = "SHARED_SPECIALIST"
-            evidence["setup_generation"] = False
             evidence["data_usage"] = _strategy_data_usage(specialist_id, data, smc_result)
-        data = dict(data, shared_specialist_evidence=specialist_evidence)
 
         # Stage 1: each strategy only creates its own setup. No common risk,
         # edge, ranking, fee, or portfolio gate runs in these evaluators.
