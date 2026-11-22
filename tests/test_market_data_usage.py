@@ -145,7 +145,7 @@ def test_data_usage_lists_only_fields_the_strategy_reads():
     # Orderflow orderbook okur; eksikse durum açıkça raporlanır.
     assert rows["orderflow_momentum"]["generator_inputs"]["orderbook"] == "UNAVAILABLE"
     # Liquidation OI okur: tek snapshot INSUFFICIENT_HISTORY olarak raporlanır.
-    assert rows["liquidation_cascade"]["generator_inputs"]["open_interest"] == "INSUFFICIENT_HISTORY"
+    assert report["specialist_evidence"]["liquidation_cascade"]["data_usage"]["generator_inputs"]["open_interest"] == "INSUFFICIENT_HISTORY"
 
 
 def test_data_usage_rows_carry_status_filter_result_and_trace_id():
@@ -154,7 +154,7 @@ def test_data_usage_rows_carry_status_filter_result_and_trace_id():
     data = {"symbol": SYMBOL, "trace_id": new_trace_id(), "15m": [], "1h": [], "4h": []}
     report = SevenStrategyLab().analyze(data)
 
-    assert len(report["data_usage"]) == 7
+    assert len(report["data_usage"]) == 5
     for row in report["data_usage"]:
         assert row["trace_id"] == data["trace_id"]
         assert isinstance(row["setup_produced"], bool)
@@ -261,13 +261,10 @@ def test_liquidation_diagnostic_names_single_snapshot_limit(monkeypatch):
 
     report = SevenStrategyLab().analyze(data)
 
-    liquidation = next(
-        item for item in report["strategies"] if item["strategy_id"] == "liquidation_cascade"
-    )
-    assert liquidation["status"] == "MISSING_DATA"
-    assert "INSUFFICIENT_OI_HISTORY" in liquidation["reason"]
-    assert "open_interest_timestamps_ms" in liquidation["reason"]
-    assert "timestamped observation(s)" in liquidation["reason"]
+    specialist = report["specialist_evidence"]["liquidation_cascade"]
+    assert specialist["state"] == "UNAVAILABLE"
+    assert specialist["setup_generation"] is False
+    assert specialist["data_usage"]["generator_inputs"]["open_interest_timestamps_ms"] == "INSUFFICIENT_HISTORY"
 
 
 def test_liquidation_setup_passes_common_filter_and_is_selected(monkeypatch):
@@ -284,24 +281,14 @@ def test_liquidation_setup_passes_common_filter_and_is_selected(monkeypatch):
 
     report = SevenStrategyLab().analyze(data)
 
-    selected = report["selected"]
-    assert selected is not None
-    assert selected["strategy_id"] == "liquidation_cascade"
-    assert selected["status"] == "SELECTED"
-    assert selected["setup_id"].startswith("setup-liquidation_cascade-")
-    # Ortak filtre sonucu aday bazlı trace'e yazılır.
-    filter_stages = [entry for entry in data["trace"]["stages"] if entry["stage"] == "COMMON_FILTER"]
-    assert filter_stages
-    passed = [entry for entry in filter_stages if entry["filter_result"] == "PASSED"]
-    assert any(entry["strategy"] == "liquidation_cascade" for entry in passed)
-    # Veri kullanım satırı setup üretimini ve filtre sonucunu taşır.
-    row = next(r for r in report["data_usage"] if r["strategy_id"] == "liquidation_cascade")
-    assert row["setup_produced"] is True
-    assert row["common_filter_result"] == "PASSED"
-    assert row["generator_inputs"]["open_interest"] == "AVAILABLE"
+    # The OI specialist reports pressure but can never select a trade.
+    assert report["selected"] is None
+    specialist = report["specialist_evidence"]["liquidation_cascade"]
+    assert specialist["state"] == "AVAILABLE"
+    assert specialist["oi_change_pct"] == pytest.approx(-5.0)
+    assert specialist["setup_generation"] is False
+    assert not any(row["strategy_id"] == "liquidation_cascade" for row in report["strategies"])
 
-
-# --- TUI section -----------------------------------------------------------------
 
 def _usage_row(strategy_id, strategy, **overrides):
     row = {
