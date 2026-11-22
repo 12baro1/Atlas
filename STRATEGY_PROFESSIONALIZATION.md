@@ -1,5 +1,8 @@
 # Seven Strategy Professionalization Contract
 
+> **Historical specification — superseded.** The live architecture now has five trade setup generators and two read-only specialists (Relative Strength and Liquidation Cascade). This document preserves the earlier seven-generator research specification; do not use it as the active runtime contract. See [Current Architecture](docs/CURRENT_ARCHITECTURE.md).
+
+
 Status: implementation specification. This document is not a claim that the strategies are already production-grade.
 
 ## Non-negotiable architecture
