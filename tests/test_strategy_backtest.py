@@ -72,7 +72,7 @@ def test_two_replays_pass_identical_closed_primary_benchmark_and_sector_bars():
 def test_market_fill_uses_next_open_and_shifts_plan_geometry():
     outcome = simulate_candidate(
         candidate(),
-        [Bar(101, 101.5, 100.5, 101.2), Bar(101.2, 104, 101, 103)],
+        [Bar(101, 101.5, 100.5, 101.2), Bar(101.2, 104, 101, 103), Bar(103, 103, 98.5, 99)],
         maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
     )
     assert outcome["entry"] == 101.0
@@ -92,7 +92,7 @@ def test_limit_order_is_not_filled_without_price_touch():
 def test_costs_reduce_gross_expectancy():
     outcome = simulate_candidate(
         candidate(),
-        [Bar(100, 103, 99.5, 102.5)],
+        [Bar(100, 103, 99.5, 102.5), Bar(102.5, 103, 97.5, 98)],
         maker_fee=0.0002, taker_fee=0.00055,
         spread_rate=0.0002, slippage_rate=0.0003,
     )
@@ -104,7 +104,7 @@ def test_costs_reduce_gross_expectancy():
 def test_short_targets_are_directionally_simulated():
     outcome = simulate_candidate(
         candidate("SHORT"),
-        [Bar(100, 100.5, 97, 98)],
+        [Bar(100, 100.5, 97, 98), Bar(98, 102.5, 97, 102)],
         maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
     )
     assert outcome is not None
@@ -115,21 +115,23 @@ from strategy_backtest import _walk_forward_summary
 
 def test_funding_cost_is_applied_at_historical_settlement():
     bar = Bar(100, 103, 99.5, 102.5, time=1_700_000_000_000)
+    closing_long = Bar(102.5, 103, 97.5, 98, time=1_700_000_900_000)
+    closing_short = Bar(98, 102.5, 97, 102, time=1_700_000_900_000)
     funding = [{"timestamp": 1_700_000_450_000, "value": 0.001}]
     long_result = simulate_candidate(
-        candidate("LONG"), [bar],
+        candidate("LONG"), [bar, closing_long],
         maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
         funding_events=funding,
     )
     short_result = simulate_candidate(
-        candidate("SHORT"), [Bar(100, 100.5, 97, 98, time=1_700_000_000_000)],
+        candidate("SHORT"), [Bar(100, 100.5, 97, 98, time=1_700_000_000_000), closing_short],
         maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
         funding_events=funding,
     )
     assert long_result["funding_pnl_r"] < 0
     assert short_result["funding_pnl_r"] == 0
     short_pays = simulate_candidate(
-        candidate("SHORT"), [Bar(100, 100.5, 97, 98, time=1_700_000_000_000)],
+        candidate("SHORT"), [Bar(100, 100.5, 97, 98, time=1_700_000_000_000), closing_short],
         maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
         funding_events=[{"timestamp": 1_700_000_450_000, "value": -0.001}],
     )
@@ -157,7 +159,7 @@ def test_walk_forward_uses_expanding_train_and_sequential_test_windows():
 def test_limit_gap_through_fills_at_open_as_marketable_limit():
     outcome = simulate_candidate(
         candidate(entry_type="LIMIT"),
-        [Bar(99.0, 103.0, 98.5, 102.0)],
+        [Bar(99.0, 103.0, 98.5, 102.0), Bar(102, 103, 96.5, 97)],
         maker_fee=0.0002, taker_fee=0.00055, spread_rate=0.0002, slippage_rate=0.0003,
     )
     assert outcome is not None
@@ -172,7 +174,7 @@ def test_intrabar_limit_fill_excludes_fill_candle_targets():
         [
             Bar(101.0, 102.0, 99.5, 101.5),
             Bar(101.5, 103.0, 100.5, 102.8),
-            Bar(102.8, 103.0, 99.5, 100.0),
+            Bar(102.8, 103.0, 97.5, 98.0),
         ],
         maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
     )
@@ -211,6 +213,7 @@ def test_smc_and_strategy_replays_share_marketable_limit_fill_cost_and_funding()
     bars = [
         Bar(99.0, 99.5, 98.5, 99.2, time=bar_time),
         Bar(99.2, 103.0, 98.5, 102.0, time=bar_time + 900_000),
+        Bar(102.0, 103.0, 96.5, 97.0, time=bar_time + 1_800_000),
     ]
     funding = [{"timestamp": bar_time + 1_800_000, "value": 0.001}]
     fees = {
