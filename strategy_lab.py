@@ -837,7 +837,11 @@ class SevenStrategyLab:
                     )
                     continue
                 candidate = dict(candidate)
-                candidate["shared_specialist_evidence"] = {\n                    key: {field: value for field, value in evidence.items() if field != "data_usage"}\n                    for key, evidence in specialist_evidence.items()\n                }\n                candidate["strategy_id"] = strategy_id
+                candidate["shared_specialist_evidence"] = {
+                    key: {field: value for field, value in evidence.items() if field != "data_usage"}
+                    for key, evidence in specialist_evidence.items()
+                }
+                candidate["strategy_id"] = strategy_id
                 candidate["strategy"] = STRATEGY_NAMES[strategy_id]
                 candidate["status"] = "RAW_SETUP"
                 # Gözlemlenebilirlik: adayın kurulum kimliği (aynı analizde benzersiz).
