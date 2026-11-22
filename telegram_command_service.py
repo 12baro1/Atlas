@@ -1740,7 +1740,7 @@ class TelegramCommandService:
         lines.extend(["", "ANALİZ UZMANLARI (setup üretmez)"])
         for key, label in SPECIALIST_LABELS.items():
             item = specialists.get(key) or {}
-            lines.append(f"{label}: {item.get('last_state') or 'HENÜZ ÖLÇÜLMEDİ'} | analiz={item.get('analyses', 0)}")
+            lines.append(f"{label.upper()}: {item.get('last_state') or 'HENÜZ ÖLÇÜLMEDİ'} | analiz={item.get('analyses', 0)}")
         lines.extend([
             "", "ORTAK FİLTRE",
             f"Geçen: {telemetry.get('common_filter_passed', 0)}",
