@@ -101,7 +101,7 @@ def test_active_setup_does_not_block_fresh_five_strategy_analysis(engine):
 
     # Sonuç, eski aktif setup DEĞİL: taze analiz üretildi.
     assert result.get("analysis") is not None
-    assert result["decision"]["decision_authority"] == "SEVEN_STRATEGY_SELECTOR"
+    assert result["decision"]["decision_authority"] == "FIVE_STRATEGY_SELECTOR"
     assert result["decision"]["action"] == "EXECUTE"
     report = result["strategy_lab"]
     assert len(report["diagnostics"]["strategies"]) == 5
