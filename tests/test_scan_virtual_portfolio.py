@@ -641,3 +641,27 @@ def test_closed_setup_cannot_reenter_from_pool_refresh_even_with_new_id(pool):
     pool.tracking.follow_analysis(chat, changed)
     assert len(pool.tracking.tracked(chat)) == 2
     assert pool.tracking.tracked(chat)[0][2] == "WAITING"
+
+
+def test_pool_updates_do_not_create_new_trade_after_followed_trade_closes(pool):
+    bot = service()
+    pool.publish_cycle(1, [observation()])
+    assert not pool.tracking.tracked(bot.chat_id)
+    bot.execute_command("/eniyi5")
+    assert len(pool.tracking.tracked(bot.chat_id)) == 1
+    with pool.tracking._transaction() as conn:
+        conn.execute("UPDATE chat_plans SET state='CLOSED' WHERE chat=? AND symbol=?", (bot.chat_id, BTC))
+    newer = observation(stamp=2)
+    newer["setup"].update(setup_id="new-market-opportunity", tp3=54000)
+    pool.publish_cycle(2, [newer])
+    assert [state for _, _, state, _ in pool.tracking.tracked(bot.chat_id)] == ["CLOSED"]
+    # Only another explicit user command can subscribe to the newly displayed plan.
+    bot.execute_command("/eniyi5")
+    assert [state for _, _, state, _ in pool.tracking.tracked(bot.chat_id)] == ["WAITING", "CLOSED"]
+
+
+def test_unrequested_pool_publication_never_creates_trade_from_subscription_alone(pool):
+    bot = service()
+    pool.tracking.set_symbol_tracking(bot.chat_id, BTC, enabled=True)
+    pool.publish_cycle(1, [observation()])
+    assert not pool.tracking.tracked(bot.chat_id)
