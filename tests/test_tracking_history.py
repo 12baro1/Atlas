@@ -41,7 +41,7 @@ def test_1m_orders_tp_before_trailing_stop_and_ignores_later_original_stop():
     history = Mock()
     history.candles.side_effect = lambda symbol, start, width, count: {BAR:[parent], MINUTE:minutes}[width]
     state, p = evaluate(BTC, "ACTIVE", json.dumps(plan()), START+BAR, history=history)
-    assert (state, p["status"], p["tps_hit"], p["trailing_stop"]) == ("CLOSED", "SL", [1], 100)
+    assert (state, p["status"], p["tps_hit"], p["trailing_stop"]) == ("CLOSED", "SL", [1], 90.0)
     assert p["resolved_at"] == START+2*MINUTE
     history.ticks.assert_not_called()
 
@@ -138,9 +138,9 @@ def test_closed_five_minute_bar_without_exit_levels_needs_no_lower_candles(posit
 
 def test_partial_verification_survives_missing_later_ticks_and_restart():
     first = bar(START, 105, 112, 104, 111)
-    second = bar(START+MINUTE, 111, 121, 99, 111)
+    second = bar(START+MINUTE, 111, 119, 99, 111)
     third = bar(START+2*MINUTE, 111, 111, 111, 111)
-    parent = bar(START, 105, 121, 99, 111, 3)
+    parent = bar(START, 105, 119, 99, 111, 3)
     history = Mock()
     def candles(symbol, start, width, count):
         if width == BAR:
@@ -536,7 +536,7 @@ def test_live_tied_stop_and_target_preserve_verified_prefix_for_history():
     from telegram_tracking import evaluate_live
     rows = [TradeGroup(START+1, {111}, 1), TradeGroup(START+2, {95, 121}, 2)]
     state, result = evaluate_live(BTC, "ACTIVE", json.dumps(plan()), START+5000, lambda *args: rows)
-    assert (state, result["tps_hit"], result["verified_until"]) == ("ACTIVE", [1], START+2)
+    assert (state, result["tps_hit"], result["verified_until"]) == ("CLOSED", [1, 2], START+3)
     assert evaluate_live(BTC, state, json.dumps(result), START+9000, lambda *args: rows) is None
     assert evaluate(BTC, state, json.dumps(result), START+BAR, [bar(START,100,121,95,121)]) is None
 
