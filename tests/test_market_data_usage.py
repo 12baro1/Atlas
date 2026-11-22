@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 
 from shared.market_data_services import build_shared_market_evidence
-from strategies.liquidation.strategy import generate as liquidation_generate
+from strategies.liquidation.strategy import generate_research_candidate as liquidation_generate
 from strategy_lab import SevenStrategyLab, _setup_diagnostic
 from atlas_tui import _add_data_usage_section
 
