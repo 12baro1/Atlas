@@ -58,6 +58,10 @@ class TrackingHistory:
         self.candles = lru_cache(maxsize=32)(self._candles)
         self.ticks = lru_cache(maxsize=16)(self._ticks)
 
+    def clear_cached_evidence(self):
+        self.candles.cache_clear()
+        self.ticks.cache_clear()
+
     def _get(self, endpoint, symbol, start, end, **params):
         sleep(max(0, self.last_request + 0.25 - monotonic()))
         self.last_request = monotonic()

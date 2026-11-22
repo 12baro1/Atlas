@@ -587,7 +587,7 @@ def test_priority_tracking_checks_waiting_structure_outside_scan_queue(pool, mon
     runtime.analyze_for_cycle = MagicMock(return_value={"ok": True, "cycle_result": evidence})
     stop_event = threading.Event()
     runtime._refresh_tracked_setups(stop_event)
-    advance.assert_called_once_with(BTC, history=history)
+    advance.assert_called_once_with(BTC, history=history, stop_event=stop_event)
     runtime.analyze_for_cycle.assert_called_once_with(BTC)
     assert pool.tracking.tracked("chat")[0][2] == "WAITING"
     runtime._refresh_tracked_setups(stop_event)
