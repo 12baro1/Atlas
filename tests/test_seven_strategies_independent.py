@@ -20,7 +20,7 @@ import strategy_lab
 
 ALL_STRATEGY_IDS = {
     "trend_pullback", "volatility_breakout", "mean_reversion",
-    "liquidation_cascade", "orderflow_momentum", "relative_strength", "smc",
+    "orderflow_momentum", "smc",
 }
 
 
@@ -189,12 +189,12 @@ def test_decision_engine_is_single_authority(monkeypatch):
         assert selected["strategy_id"] in ALL_STRATEGY_IDS
 
 
-def test_all_seven_strategies_independent_registry():
+def test_all_five_strategies_independent_registry():
     """Yedi strateji ba\u015f\u0131ms\u0131r, ortak analiz servisleri kullanmadan kendi setup'ini \u00fcreter."""
     report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT"})
     ids = {r["strategy_id"] for r in report["strategies"]}
     assert ids == ALL_STRATEGY_IDS
-    assert report["diagnostics"]["strategy_count"] == 7
+    assert report["diagnostics"]["strategy_count"] == 5
     for row in report["strategies"]:
         assert row["strategy_id"] in ALL_STRATEGY_IDS
         assert row["strategy"] == STRATEGY_NAMES[row["strategy_id"]]

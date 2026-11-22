@@ -1,4 +1,4 @@
-"""Historical replay for all seven independent Atlas strategies.
+"""Historical replay for the five independent Atlas setup strategies.
 
 Signals are evaluated only on closed candles. Market candidates enter at the
 next 15m open; limits fill only on touch, with gap-through fills treated as
@@ -315,7 +315,7 @@ def _walk_forward_summary(rows, start_ms, end_ms, folds=5):
 
 STRATEGY_IDS = (
     "trend_pullback", "volatility_breakout", "mean_reversion",
-    "liquidation_cascade", "orderflow_momentum", "relative_strength", "smc",
+    "orderflow_momentum", "smc",
 )
 
 

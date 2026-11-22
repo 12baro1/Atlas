@@ -73,7 +73,7 @@ def test_engine_analysis_carries_one_trace_id_across_all_stages(engine):
     strategy_stage_symbols = {
         entry["strategy"] for entry in trace["stages"] if entry["stage"] == "STRATEGY_SETUP"
     }
-    assert len(strategy_stage_symbols) == 7
+    assert len(strategy_stage_symbols) == 5
 
 
 def test_each_fresh_analysis_gets_a_new_trace_id(engine):
@@ -94,13 +94,13 @@ def test_trace_id_from_data_engine_is_kept_not_regenerated(engine):
     assert all(entry["trace_id"] == preset for entry in result["trace"]["stages"])
 
 
-def test_strategy_report_exposes_trace_id_and_seven_data_usage_rows(engine):
+def test_strategy_report_exposes_trace_id_and_five_data_usage_rows(engine):
     result = engine.analyze(synthetic_data())
     report = result["strategy_lab"]
 
     assert report["trace_id"] == result["trace_id"]
     rows = report["data_usage"]
-    assert len(rows) == 7
+    assert len(rows) == 5
     for row in rows:
         assert row["status"] in {
             "SELECTED", "FILTERED_NOT_SELECTED", "BLOCKED_COMMON_FILTER", "RAW_SETUP",
