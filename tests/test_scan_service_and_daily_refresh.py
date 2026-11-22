@@ -75,6 +75,9 @@ class FakeInventory:
     def get_symbols(self):
         return list(self._symbols)
 
+    def get_ranked_symbols(self, limit=None, *, require_volume=False):
+        return self._symbols if limit is None else self._symbols[:limit]
+
     def status(self):
         return {"last_refresh_ms": 1700000000000}
 
@@ -706,7 +709,8 @@ def test_oversized_legacy_queue_is_superseded_by_top_50_without_deleting_history
     migration = service.enforce_universe_limit()
     assert migration["rebuilt"] is True
     assert queue.current_generation() == old["generation"] + 1
-    assert queue.generation_symbols() == ranked[:50]
+    assert set(queue.generation_symbols()) == set(ranked[:50])
+    assert queue.generation_ranking()["symbols"] == ranked[:50]
     assert queue.progress()["total"] == 50
     assert queue.progress(old["generation"])["total"] == 80
     queue.close()
