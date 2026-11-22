@@ -161,6 +161,9 @@ def test_chat_lifecycle_cleanup_outbox_and_restart(pool):
     assert "GİRİŞ BEKLEYENLER" not in chat.execute_command("/islemler")
     recovered = observation(stamp=4)
     pool.publish_cycle(4,[recovered])
+    # Pool recovery alone must not re-enroll an invalidated trade.
+    assert "GİRİŞ BEKLEYENLER" not in chat.execute_command("/islemler")
+    assert "BTC" in chat.execute_command("/eniyi5")
     assert "GİRİŞ BEKLEYENLER" in chat.execute_command("/islemler")
     assert "BTC" not in other.execute_command("/islemler")
     chat._api = MagicMock(return_value={"message_id": 1, "chat":{"id":chat.chat_id}})
