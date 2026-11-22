@@ -16,6 +16,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from scan_service import DEFAULT_SCAN_UNIVERSE_LIMIT
 
 try:
     from zoneinfo import ZoneInfo
@@ -93,9 +94,9 @@ class DailyPoolRefresh:
                 inventory = self.market_inventory.status()
                 ranker = getattr(self.market_inventory, "get_ranked_symbols", None)
                 if callable(ranker):
-                    universe = list(ranker(limit=300) or [])
+                    universe = list(ranker(limit=DEFAULT_SCAN_UNIVERSE_LIMIT) or [])
                 else:
-                    universe = sorted(self.market_inventory.get_symbols())[:300]
+                    universe = sorted(self.market_inventory.get_symbols())[:DEFAULT_SCAN_UNIVERSE_LIMIT]
                 if not universe:
                     return None
                 counts = self.pool.archive_and_reset_scan_pools(today)
