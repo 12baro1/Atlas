@@ -783,15 +783,18 @@ class SevenStrategyLab:
             "smc": lambda: _smc_candidate(smc_result, data),
         }
 
-        # Analysis-only specialists: retain input provenance without issuing trade candidates.
+        # Evidence-only specialists never return trade candidates.
+        from shared.market_data_services import build_shared_market_evidence
+        from shared.specialist_metrics import analyze_relative_strength, analyze_liquidation_pressure
         specialist_evidence = {
-            specialist_id: {
-                "role": "SHARED_SPECIALIST",
-                "setup_generation": False,
-                "data_usage": _strategy_data_usage(specialist_id, data, smc_result),
-            }
-            for specialist_id in ("relative_strength", "liquidation_cascade")
+            "relative_strength": analyze_relative_strength(data),
+            "liquidation_cascade": analyze_liquidation_pressure(data),
         }
+        for specialist_id, evidence in specialist_evidence.items():
+            evidence["role"] = "SHARED_SPECIALIST"
+            evidence["setup_generation"] = False
+            evidence["data_usage"] = _strategy_data_usage(specialist_id, data, smc_result)
+        data = dict(data, shared_specialist_evidence=specialist_evidence)
 
         # Stage 1: each strategy only creates its own setup. No common risk,
         # edge, ranking, fee, or portfolio gate runs in these evaluators.
@@ -1066,8 +1069,8 @@ class SevenStrategyLab:
                 "strategy_count": len(diagnostic_rows),
                 "raw_setup_count": len(generated),
                 "common_filter_passed_count": len(eligible),
-                "specialist_evidence": specialist_evidence,
-            "candidate_count": len(generated),
+                "specialist_count": len(specialist_evidence),
+                "candidate_count": len(generated),
                 "validated_candidate_count": len(eligible),
                 "selected_strategy_id": selected.get("strategy_id") if selected else None,
                 "status_counts": status_counts,
@@ -1075,6 +1078,7 @@ class SevenStrategyLab:
                 "strategies": diagnostic_rows,
             },
             "regime": regime,
+            "specialist_evidence": specialist_evidence,
             "strategies": results,
             "data_usage": data_usage,
             "candidate_count": len(generated),
