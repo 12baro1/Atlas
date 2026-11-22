@@ -10,13 +10,13 @@ class Candle:
         self.volume = volume
 
 
-def test_lab_always_reports_all_seven_strategies():
+def test_lab_reports_five_trade_strategies_and_two_specialists():
     report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT", "15m": [], "1h": [], "4h": []})
 
-    assert len(report["strategies"]) == 7
+    assert len(report["strategies"]) == 5
     assert {item["strategy_id"] for item in report["strategies"]} == {
         "trend_pullback", "volatility_breakout", "mean_reversion",
-        "liquidation_cascade", "orderflow_momentum", "relative_strength", "smc",
+        "orderflow_momentum", "smc",
     }
     assert report["selected"] is None
     assert report["performance_status"] == "OBSERVATIONAL_ONLY_NOT_AN_ELIGIBILITY_GATE"
@@ -43,10 +43,10 @@ def test_lab_isolates_strategy_errors_and_keeps_full_registry(monkeypatch):
 
     trend = next(item for item in report["strategies"] if item["strategy_id"] == "trend_pullback")
     assert trend["status"] == "ERROR"
-    assert len(report["strategies"]) == 7
+    assert len(report["strategies"]) == 5
 
 
-def test_smc_is_kept_as_independent_seventh_strategy(monkeypatch):
+def test_smc_is_kept_as_independent_trade_strategy(monkeypatch):
     import strategy_lab
 
     smc_plan = {
@@ -215,19 +215,19 @@ def test_diagnostics_report_every_strategy_and_status_counts():
     report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT", "15m": [], "1h": [], "4h": []})
 
     diagnostics = report["diagnostics"]
-    assert diagnostics["strategy_count"] == 7
+    assert diagnostics["strategy_count"] == 5
     assert diagnostics["candidate_count"] == 0
     assert diagnostics["validated_candidate_count"] == 0
     assert diagnostics["selected_strategy_id"] is None
-    assert len(diagnostics["strategies"]) == 7
+    assert len(diagnostics["strategies"]) == 5
     assert diagnostics["status_counts"] == {
         "INSUFFICIENT_HISTORY": 3,
-        "MISSING_DATA": 4,
+        "MISSING_DATA": 2,
     }
     by_id = {item["strategy_id"]: item for item in report["strategies"]}
-    assert "open_interest_timestamps_ms" in by_id["liquidation_cascade"]["reason"]
+    assert report["specialist_evidence"]["liquidation_cascade"]["setup_generation"] is False
     assert "orderbook" in by_id["orderflow_momentum"]["reason"]
-    assert "correlation_universe" in by_id["relative_strength"]["reason"]
+    assert report["specialist_evidence"]["relative_strength"]["setup_generation"] is False
 
 
 def test_risk_rejection_is_visible_in_strategy_diagnostics(monkeypatch):
@@ -336,10 +336,10 @@ def test_diagnostics_distinguish_missing_live_inputs_from_pattern_mismatch():
     })
     by_id = {item["strategy_id"]: item for item in report["strategies"]}
 
-    assert by_id["liquidation_cascade"]["status"] == "MISSING_DATA"
-    assert "timestamped observations" in by_id["liquidation_cascade"]["reason"]
+    assert report["specialist_evidence"]["liquidation_cascade"]["state"] == "UNAVAILABLE"
+    assert report["specialist_evidence"]["liquidation_cascade"]["setup_generation"] is False
     assert by_id["orderflow_momentum"]["status"] == "MISSING_DATA"
-    assert by_id["relative_strength"]["status"] == "MISSING_DATA"
+    assert report["specialist_evidence"]["relative_strength"]["state"] == "INSUFFICIENT_HISTORY"
 
 def test_strategy_evidence_helpers_are_scale_invariant_and_directional():
     import strategy_lab
@@ -595,8 +595,8 @@ def test_each_strategy_reports_its_own_market_input_availability():
 
     assert by_id["trend_pullback"]["data_usage"]["generator_inputs"]["4h"] == "AVAILABLE"
     assert by_id["orderflow_momentum"]["data_usage"]["generator_inputs"]["orderbook"] == "UNAVAILABLE"
-    assert by_id["liquidation_cascade"]["data_usage"]["generator_inputs"]["open_interest_timestamps_ms"] == "INSUFFICIENT_HISTORY"
-    assert by_id["relative_strength"]["data_usage"]["generator_inputs"]["correlation_universe"] == "UNAVAILABLE"
+    assert report["specialist_evidence"]["liquidation_cascade"]["data_usage"]["generator_inputs"]["open_interest_timestamps_ms"] == "INSUFFICIENT_HISTORY"
+    assert report["specialist_evidence"]["relative_strength"]["data_usage"]["generator_inputs"]["correlation_universe"] == "UNAVAILABLE"
     assert all("shared_source_status" in item["data_usage"] for item in report["strategies"])
     assert any(
         "Executed footprint" in feature
@@ -604,7 +604,7 @@ def test_each_strategy_reports_its_own_market_input_availability():
     )
     assert any(
         "sector-peer returns" in feature
-        for feature in by_id["relative_strength"]["data_usage"]["analysis_features"]
+        for feature in report["specialist_evidence"]["relative_strength"]["data_usage"]["analysis_features"]
     )
 
 
