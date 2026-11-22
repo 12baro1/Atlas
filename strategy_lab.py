@@ -784,7 +784,6 @@ class SevenStrategyLab:
         }
 
         # Evidence-only specialists never return trade candidates.
-        from shared.market_data_services import build_shared_market_evidence
         from shared.specialist_metrics import analyze_relative_strength, analyze_liquidation_pressure
         specialist_evidence = {
             "relative_strength": analyze_relative_strength(data),
@@ -838,7 +837,7 @@ class SevenStrategyLab:
                     )
                     continue
                 candidate = dict(candidate)
-                candidate["strategy_id"] = strategy_id
+                candidate["shared_specialist_evidence"] = {\n                    key: {field: value for field, value in evidence.items() if field != "data_usage"}\n                    for key, evidence in specialist_evidence.items()\n                }\n                candidate["strategy_id"] = strategy_id
                 candidate["strategy"] = STRATEGY_NAMES[strategy_id]
                 candidate["status"] = "RAW_SETUP"
                 # Gözlemlenebilirlik: adayın kurulum kimliği (aynı analizde benzersiz).
