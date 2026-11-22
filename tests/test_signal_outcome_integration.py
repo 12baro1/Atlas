@@ -1076,3 +1076,27 @@ def test_signal_performance_reports_cumulative_profit_loss_r(tmp_path):
     assert performance["positive_r"] == 1.75
     assert performance["negative_r"] == -1.0
     assert performance["net_r"] == 0.75
+
+
+def test_short_stop_r_cost_is_not_charged_twice(tmp_path):
+    journal = TradeJournal(db_path=tmp_path / "stop_r.sqlite")
+    outcome = journal.register_signal_outcome(
+        symbol="BTC/USDT:USDT", direction="SHORT", entry=100.0,
+        stop_loss=101.0, tp1=98.0, opened_at=1_700_000_000_000,
+        payload={"execution_costs": {
+            "model": "per_fill_maker_taker_with_market_friction",
+            "entry_type": "LIMIT", "maker_fee_rate": 0.0002,
+            "taker_fee_rate": 0.0005, "spread_rate": 0.0002,
+            "slippage_rate": 0.0003,
+        }},
+    )
+    outcome["entry_reached"] = True
+    outcome["realized_r"] = -1.0
+    outcome["hit_sl"] = True
+    first = journal._finalize_signal_outcome(outcome)
+    assert first["gross_realized_r"] == pytest.approx(-1.0)
+    assert first["realized_r"] == pytest.approx(-1.1208, abs=0.0001)
+    assert first["initial_risk_distance"] == 1.0
+    second = journal._finalize_signal_outcome(first)
+    assert second["realized_r"] == first["realized_r"]
+    assert second["gross_realized_r"] == -1.0
