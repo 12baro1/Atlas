@@ -251,7 +251,7 @@ def test_smc_and_strategy_replays_share_bounded_market_fallback():
     bars = [
         Bar(100.1, 100.5, 100.2, 100.3, time=bar_time),
         Bar(100.3, 106.5, 100.2, 105.0, time=bar_time + 900_000),
-        Bar(105.0, 105.5, 99.9, 101.0, time=bar_time + 1_800_000),
+        Bar(105.0, 105.5, 97.9, 98.0, time=bar_time + 1_800_000),
     ]
     plan = candidate(entry_type="LIMIT")
     plan.update({"tp1": 106.0, "tp2": 108.0, "tp3": 110.0, "atr": 1.0})
