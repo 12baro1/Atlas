@@ -268,7 +268,7 @@ class PoolStore:
                     for chat,revision in followers:
                         self._apply_observation(conn, chat, revision, row, announce=True)
 
-    def _apply_observation(self, conn, chat, revision, row, *, announce, structure_only=False, requested_at=None):
+    def _apply_observation(self, conn, chat, revision, row, *, announce, structure_only=False, requested_at=None, user_requested=False):
         symbol = row["symbol"]
         preference = conn.execute("SELECT muted,changed_at FROM chat_tracking_preferences WHERE chat=? AND symbol=?",
                                   (chat, symbol)).fetchone()
@@ -299,7 +299,7 @@ class PoolStore:
                 return
         if structure_only:
             conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", (key,json.dumps(stamp)))
-        telegram_tracking.transition(conn, chat, symbol, revision, setup, announce=announce)
+        telegram_tracking.transition(conn, chat, symbol, revision, setup, announce=announce, user_requested=user_requested)
 
     def follow_analysis(self, chat, row):
         self.follow_delivered(chat, [row])
@@ -315,7 +315,7 @@ class PoolStore:
                 if not member:
                     continue
                 self._apply_observation(
-                    conn, chat, member[0], row, announce=member[0]>0, requested_at=requested_at
+                    conn, chat, member[0], row, announce=member[0]>0, requested_at=requested_at, user_requested=True
                 )
                 if not row.get("setup"):
                     continue
