@@ -600,7 +600,7 @@ def test_scan_defers_claim_until_tracking_releases_even_on_data_failure(monkeypa
     refresh = DailyPoolRefresh(pool, queue, Mock(), continuous=True)
     runtime = Mock()
     runtime._opportunity_pool.return_value = pool
-    pool.tracking.get_meta.return_value = "0"
+    pool.tracking.get_meta.return_value = "1"
     queue.progress.return_value = {"generation": 1, "total": 1, "complete": False}
     scanner = ScanService(runtime, queue, Mock(), continuous=True, scan_allowed=refresh.scan_allowed)
     release = threading.Event()

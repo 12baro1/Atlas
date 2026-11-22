@@ -19,6 +19,7 @@ Legacy plain-text commands (e.g., "btc", "en iyi 5 işlem") are preserved for ba
 from __future__ import annotations
 
 import heapq
+import json
 import logging
 import math
 import os
@@ -738,7 +739,10 @@ class TelegramCommandService:
                 state = exc.state
                 self.logger.warning("Telegram notification delivery | event=%d attempt=%d state=%s", event_id, attempt, state)
                 delay = max(exc.retry_after, min(600, 2 ** min(attempt, 10))) if state == "retry" else 0
-                tracking.finish_notification(self.chat_id,event_id,attempt,state,retry_after=delay)
+                tracking.finish_notification(
+                    self.chat_id, event_id, attempt, state, retry_after=delay,
+                    rate_limit_seconds=exc.retry_after if state == "retry" else 0,
+                )
                 return
             except Exception:
                 tracking.finish_notification(self.chat_id,event_id,attempt,"uncertain")
@@ -1315,6 +1319,14 @@ class TelegramCommandService:
         waiting = stats.get("validated_stored", stats.get("validated", 0)) - stats.get("validated", 0)
         if waiting:
             lines.append(f"Yeniden doğrulama bekleyen: {waiting}")
+        publication = pool.tracking.get_meta("last_scan_publication")
+        if publication:
+            report = json.loads(publication)
+            published = datetime.fromtimestamp(report["at_ms"] / 1000, ZoneInfo("Europe/Istanbul"))
+            lines.append(f"Son tarama yayını: {published:%d.%m %H:%M} TSİ")
+            lines.append(f"Son grup: {report['analyzed']} analiz · {report['selected']} setup seçildi")
+        else:
+            lines.append("Son tarama yayını: Henüz kayıt yok")
         if best:
             item = best[0]
             entry_type = str(getattr(item, "entry_type", "") or getattr(item, "setup_type", "—")).upper()
@@ -1353,7 +1365,7 @@ class TelegramCommandService:
             return "ATLAS | TARAMA BAŞLATILAMADI\nMevcut tarama kuyruğu değiştirilmedi. /taramadurum ile durumu kontrol et."
         if result.get("continuous"):
             progress = result["progress"]
-            return (f"300 sembollük tarama | Döngü {progress['generation']}\n"
+            return (f"{progress['total']} sembollük tarama | Döngü {progress['generation']}\n"
                     f"Öncelik: hacim sıralamasındaki ilk {result['selected']} sembolün bekleyen işleri.\n"
                     f"Başarılı: {progress['done']} | Başarısız: {progress['failed']} | Bekleyen: {progress['pending']}")
         return self._format_scan_progress(result)

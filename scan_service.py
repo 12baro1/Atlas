@@ -354,7 +354,8 @@ class ScanService:
             rows = self.queue.staged_batch(generation, cursor, SCAN_PUBLICATION_BATCH_SIZE)
             if not rows or (len(rows) < SCAN_PUBLICATION_BATCH_SIZE and not complete):
                 if complete:
-                    pool.publish_cycle(generation, [], self.queue.generation_symbols(generation))
+                    universe = self.queue.generation_symbols(generation)
+                    pool.publish_cycle(generation, [], universe if len(universe) == DEFAULT_SCAN_UNIVERSE_LIMIT else None)
                 return complete
             cursor = rows[-1][0]
             pool.publish_cycle(generation, [row for _, row in rows], batch_cursor=cursor)
@@ -379,7 +380,7 @@ class ScanService:
             status = self.queue.progress()
             gen = status["generation"]
             published = int(pool.tracking.get_meta("published_generation", "0"))
-            if status["total"] == DEFAULT_SCAN_UNIVERSE_LIMIT and gen > published:
+            if status["total"] and gen > published:
                 if status["complete"] and self.queue.restore_unstaged_jobs(gen):
                     return
                 finalized = self._publish_scan_batches(pool, gen, complete=status["complete"])
@@ -392,9 +393,9 @@ class ScanService:
             if time.monotonic() - self._last_rank_attempt < 30:
                 return
             self._last_rank_attempt = time.monotonic()
-            ranked = self.inventory.get_ranked_symbols(limit=DEFAULT_SCAN_UNIVERSE_LIMIT, require_volume=True)
-            if len(set(ranked)) == DEFAULT_SCAN_UNIVERSE_LIMIT:
-                self.queue.rebuild(ranked, batch_tag="continuous_300", preserve_unfinished=True,
+            ranked = list(self.inventory.get_ranked_symbols(limit=DEFAULT_SCAN_UNIVERSE_LIMIT, require_volume=True))
+            if ranked:
+                self.queue.rebuild(ranked, batch_tag=f"continuous_{len(ranked)}", preserve_unfinished=True,
                                    ranking_source="gateio_24h_quote_volume")
 
     def _worker_loop(self):
