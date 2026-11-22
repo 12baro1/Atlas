@@ -94,9 +94,9 @@ class DailyPoolRefresh:
                 inventory = self.market_inventory.status()
                 ranker = getattr(self.market_inventory, "get_ranked_symbols", None)
                 if callable(ranker):
-                    universe = list(ranker(limit=DEFAULT_SCAN_UNIVERSE_LIMIT) or [])
+                    universe = list(ranker(limit=DEFAULT_SCAN_UNIVERSE_LIMIT, require_volume=True) or [])
                 else:
-                    universe = sorted(self.market_inventory.get_symbols())[:DEFAULT_SCAN_UNIVERSE_LIMIT]
+                    universe = []
                 if not universe:
                     return None
                 counts = self.pool.archive_and_reset_scan_pools(today)
