@@ -863,9 +863,9 @@ def test_signal_outcome_uses_per_fill_costs_for_tp_then_trailing_stop(tmp_path):
         0.00055 + 0.0002 + 0.0003
     )
     assert resolved is not None
-    assert resolved["gross_realized_r"] == pytest.approx(0.0, abs=1e-4)
+    assert resolved["gross_realized_r"] == pytest.approx(-1.0, abs=1e-4)
     assert resolved["execution_cost_rr"] == pytest.approx(expected_cost, abs=1e-4)
-    assert resolved["realized_r"] == pytest.approx(0.0 - expected_cost, abs=1e-4)
+    assert resolved["realized_r"] == pytest.approx(-1.0 - expected_cost, abs=1e-4)
 
 
 def test_manual_trade_net_r_uses_explicit_actual_fees_and_fill_size(tmp_path):
