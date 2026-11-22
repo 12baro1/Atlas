@@ -103,7 +103,7 @@ def test_parity_long_tp1_then_be_next_candle(tmp_path):
     assert resolved["gross_realized_r"] == pytest.approx(0.0, abs=1e-6)
     assert backtest["levels"] == [1]
     assert backtest["net_rr"] == pytest.approx(0.0, abs=1e-6)
-    assert backtest["exit_reason"] == "STOP"
+    assert backtest["exit_reason"] == "TRAILING_STOP"
     assert backtest["exit_offset"] == 1
 
 
@@ -214,5 +214,5 @@ def test_parity_partial_remainder_two_tp_weights(tmp_path):
     assert resolved["gross_realized_r"] == pytest.approx(0.25, abs=1e-6)
     assert backtest["levels"] == [1]
     assert backtest["net_rr"] == pytest.approx(0.25, abs=1e-6)
-    assert backtest["exit_reason"] == "STOP"
+    assert backtest["exit_reason"] == "TRAILING_STOP"
     assert backtest["exit_offset"] == 1
