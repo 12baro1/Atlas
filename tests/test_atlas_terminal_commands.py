@@ -110,3 +110,15 @@ def test_parse_everyday_turkish_scan_phrases():
     assert atlas_tui._parse_scan_command("50 tane analiz et") == (50, 5)
     assert atlas_tui._parse_scan_command("en iyi 5 işlemi ver") == (50, 5)
     assert atlas_tui._parse_scan_command("5 tane işlem ver") == (50, 5)
+
+
+def test_terminal_scan_all_stays_top_50_by_real_quote_volume(monkeypatch):
+    symbols = [f"COIN{i:03d}/USDT:USDT" for i in range(80)]
+    markets = {symbol: {"active": True, "swap": True} for symbol in symbols}
+    tickers = {symbol: {"quoteVolume": i + 1} for i, symbol in enumerate(symbols)}
+    monkeypatch.setattr(atlas_tui.exchange, "load_markets", lambda: markets)
+    monkeypatch.setattr(atlas_tui.exchange, "fetch_tickers", lambda requested: tickers)
+
+    selected = atlas_tui._best_symbols(limit=None)
+    assert len(selected) == 50
+    assert selected == list(reversed(symbols))[:50]
