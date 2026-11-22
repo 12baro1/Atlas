@@ -57,7 +57,7 @@ Belirli bir sembolle doğrudan açmak için:
 
 ## VPS üzerinde sürekli canlı analiz servisi
 
-Sunucu servisi, terminal arayüzünü açmadan aynı `AtlasRuntime` ve `AtlasEngine` analiz hattını arka planda çalıştırır. Beş strateji, iki kanıt uzmanı, ortak analiz servisleri ve tek karar mekanizması korunur. Varsayılan sembol sınırı yoktur; Gate.io'teki desteklenen aktif USDT perpetual piyasalarının tamamı taranır. İstersen `.env` içinde `ATLAS_MAX_SYMBOLS` ile kendin sınır koyabilirsin.
+Sunucu servisi, terminal arayüzünü açmadan aynı `AtlasRuntime` ve `AtlasEngine` analiz hattını arka planda çalıştırır. Beş strateji, iki kanıt uzmanı, ortak analiz servisleri ve tek karar mekanizması korunur. Varsayılan tarama sınırı 50 coindir; sıralama Gate.io 24 saatlik USDT işlem hacmine göredir. `.env` içindeki `ATLAS_MAX_SYMBOLS` daha küçük bir sınır belirleyebilir, 50'yi aşamaz. Eski 300'lük tarama kuyruğu yeni 50'lik nesle taşınır; işlem takip kayıtlarına dokunulmaz.
 
 ### Otomatik kurulum (önerilen)
 
@@ -197,7 +197,7 @@ Tarama süresi piyasa sayısına ve internet bağlantısına göre değişir. Ge
 
 ## 5 işlem stratejisi + 2 kanıt uzmanı
 
-Tek coin analizinde ve 300 sembollük taramada yalnızca beş işlem stratejisi kendi ham planını üretir. Relative Strength ve Liquidation Cascade yalnızca analiz kanıtı üretir; filtreye aday göndermez. Ortak filtre giriş yönünü, yapısal stop ve hedefleri, işlem maliyetlerini ve maliyet sonrası net RR eşiğini (varsayılan 2,0) kontrol eder. Merkezi karar motoru uygun adayları önce net RR, ardından güç ve rejim uyumu ile sıralar. SMC diğer dört işlem stratejisiyle aynı seçim aşamasına girer. `/motorlar` üretim sayaçlarını, `/istatistik` sık görülen eleme nedenlerini gösterir.
+Tek coin analizinde ve en yüksek 24 saatlik USDT işlem hacmine sahip 50 Gate.io perpetual coin taramasında yalnızca beş işlem stratejisi kendi ham planını üretir. Relative Strength ve Liquidation Cascade yalnızca analiz kanıtı üretir; filtreye aday göndermez. Ortak filtre giriş yönünü, yapısal stop ve hedefleri, işlem maliyetlerini ve maliyet sonrası net RR eşiğini (varsayılan 2,0) kontrol eder. Merkezi karar motoru uygun adayları önce net RR, ardından güç ve rejim uyumu ile sıralar. SMC diğer dört işlem stratejisiyle aynı seçim aşamasına girer. `/motorlar` üretim sayaçlarını, `/istatistik` sık görülen eleme nedenlerini gösterir.
 
 **Önemli doğrulama sınırı:** SMC dışındaki dört işlem stratejisi deneysel aday üreticilerdir. Strateji replay'i kronolojik IS/OOS ayrımı ve 5 anchored walk-forward penceresi kullanır; maliyetler ve tarihsel funding verisi mevcut olduğunda aynı yürütme simülatöründen geçirilir. Bunlar gerçek borsa dolumu değildir. Eksik veya kısmi OI/funding verisi açıkça raporlanır; funding geçmişi tam kapsama sahip değilse --persist performans günlüğüne sonuç yazmaz. Order Flow Momentum yalnızca karar zamanından önce arşivlenmiş, taze order-book/trade örnekleri varsa tarihsel olarak ölçülebilir. Liquidation Cascade gerçek likidasyon akışı değil, OI/funding/işlem akışı proxy'sidir. Performans günlüğü aynı kod revizyonu, sembol ve rejim için IS/OOS sonuçlarını ayrı izler. Atlas emir göndermez.
 

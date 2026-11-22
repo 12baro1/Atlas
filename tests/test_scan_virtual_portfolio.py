@@ -37,8 +37,8 @@ def service(chat="-10"):
     return telegram.TelegramCommandService(MagicMock(), "offline", chat)
 
 
-def test_300_worker_jobs_restart_publish_then_resume(tmp_path, pool):
-    symbols = [BTC] + [f"S{i}/USDT:USDT" for i in range(299)]
+def test_50_worker_jobs_restart_publish_then_resume(tmp_path, pool):
+    symbols = [BTC] + [f"S{i}/USDT:USDT" for i in range(49)]
     inventory = MagicMock()
     inventory.get_ranked_symbols.return_value = symbols
     runtime = MagicMock()
@@ -67,14 +67,14 @@ def test_300_worker_jobs_restart_publish_then_resume(tmp_path, pool):
             assert not pool.get_best_setups()
         else:
             assert checked_at[-1] == done - done % 10
-        if done == 298:
+        if done == 48:
             scan._stop_event.set()
         row = observation(symbol, setup=symbol==BTC)
         return {"ok":True, "cycle_result":row}
     runtime.analyze_for_cycle.side_effect = analyze
     scan._worker_loop()
-    assert scan.queue.progress()["done"] == 299 and retry
-    assert checked_at == list(range(10, 300, 10))
+    assert scan.queue.progress()["done"] == 49 and retry
+    assert checked_at == list(range(10, 50, 10))
     assert pool.get_best_setups()[0].symbol == BTC
     assert not pool.tracking.tracked("-10")
     scan.queue.close()
@@ -90,9 +90,9 @@ def test_300_worker_jobs_restart_publish_then_resume(tmp_path, pool):
         return {"ok":False, "error":"temporary"}
     runtime.analyze_for_cycle.side_effect = finish
     scan._worker_loop()
-    assert scan.queue.progress(gen)["done"] == 300
-    assert checked_at == list(range(10, 301, 10))
-    assert scan.queue.current_generation() == gen+1 and scan.queue.progress()["total"] == 300
+    assert scan.queue.progress(gen)["done"] == 50
+    assert checked_at == list(range(10, 51, 10))
+    assert scan.queue.current_generation() == gen+1 and scan.queue.progress()["total"] == 50
     assert pool.get_best_setups()[0].symbol == BTC
     assert not pool.publish_cycle(gen, [])
     bot = service()
@@ -105,7 +105,7 @@ def test_300_worker_jobs_restart_publish_then_resume(tmp_path, pool):
 
 def test_restart_checks_published_batch_before_claiming_next_symbol(tmp_path, pool):
     queue = ScanQueue(tmp_path/"queue")
-    symbols = [BTC] + [f"S{i}/USDT:USDT" for i in range(299)]
+    symbols = [BTC] + [f"S{i}/USDT:USDT" for i in range(49)]
     generation = queue.rebuild(symbols)["generation"]
     for _ in range(10):
         claim = queue.claim_next()
@@ -432,7 +432,7 @@ def test_published_rr_requires_finite_cost_adjusted_reward():
 
 def test_pr219_jobs_without_staged_evidence_are_repaired_before_publication(tmp_path,pool):
     queue=ScanQueue(tmp_path/"old")
-    symbols=[BTC]+[f"T{i}/USDT:USDT" for i in range(299)]
+    symbols=[BTC]+[f"T{i}/USDT:USDT" for i in range(49)]
     generation=queue.rebuild(symbols)["generation"]
     while (claim:=queue.claim_next()):
         symbol=claim["symbol"]
@@ -442,7 +442,7 @@ def test_pr219_jobs_without_staged_evidence_are_repaired_before_publication(tmp_
     runtime._opportunity_pool.return_value=pool
     scanner=ScanService(runtime,queue,MagicMock(),continuous=True)
     scanner.roll_cycle()
-    assert queue.current_generation()==generation and queue.progress()["done"]==299
+    assert queue.current_generation()==generation and queue.progress()["done"]==49
     assert not pool.tracking.get_meta("published_generation")
     claim=queue.claim_next()
     assert claim["symbol"]==BTC

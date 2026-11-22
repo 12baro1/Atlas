@@ -121,6 +121,7 @@ class AtlasRuntime:
             runtime=self, queue=self._scan_queue, inventory=self._market_inventory, continuous=True,
             worker_count=1, analysis_gap_seconds=5, scan_allowed=self._daily_refresh.scan_allowed,
             refresh_tracked_setups=self._refresh_tracked_setups,
+            universe_limit=min(len(self.symbols), 50) if self.symbols else 50,
         )
 
         with self._journal_lock:

@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("atlas.scan_service")
 
 # Hard ceiling shared by Telegram scan commands and the durable scan queue.
-DEFAULT_SCAN_UNIVERSE_LIMIT = 300
+DEFAULT_SCAN_UNIVERSE_LIMIT = 50
 SCAN_PUBLICATION_BATCH_SIZE = 10
 
 
@@ -40,7 +40,9 @@ class ScanService:
         continuous=False,
         scan_allowed=None,
         refresh_tracked_setups=None,
+        universe_limit: int = DEFAULT_SCAN_UNIVERSE_LIMIT,
     ):
+        self.universe_limit = min(max(1, int(universe_limit)), DEFAULT_SCAN_UNIVERSE_LIMIT)
         self.continuous = continuous
         self.scan_allowed = scan_allowed
         self.refresh_tracked_setups = refresh_tracked_setups
@@ -127,34 +129,34 @@ class ScanService:
     # ------------------------------------------------------------------
 
     def enforce_universe_limit(self) -> Optional[Dict[str, Any]]:
-        """Move oversized persisted queues to a new top-300 generation.
+        """Migrate oversized legacy generations to the top volume-ranked N.
 
-        The previous generation remains in SQLite as history; no queue or
-        opportunity-pool records are deleted.
+        Historical generations remain in SQLite. We deliberately supersede
+        unfinished jobs from the old 300-coin scan: processing them after
+        switching the cap to 50 would violate the new contract. The setup
+        pool and user-owned trade tracking are not deleted.
         """
         progress = self.queue.progress()
-        if int(progress.get("total") or 0) <= DEFAULT_SCAN_UNIVERSE_LIMIT:
+        if int(progress.get("total") or 0) <= self.universe_limit:
             return None
         universe = self.inventory.get_symbols()
         ranker = getattr(self.inventory, "get_ranked_symbols", None)
-        if universe and callable(ranker):
-            symbols = list(ranker(limit=DEFAULT_SCAN_UNIVERSE_LIMIT) or [])
-        else:
-            symbols = sorted(universe)[:DEFAULT_SCAN_UNIVERSE_LIMIT]
-        if not symbols:
-            return None
+        if not universe or not callable(ranker):
+            return {"rebuilt": False, "reason": "volume_ranking_unavailable"}
+        symbols = list(ranker(limit=self.universe_limit, require_volume=True) or [])
+        if len(symbols) < min(self.universe_limit, len(universe)):
+            return {"rebuilt": False, "reason": "insufficient_24h_volume_data"}
+
         result = self.queue.rebuild(
-            symbols, batch_tag=f"top_{DEFAULT_SCAN_UNIVERSE_LIMIT}_{int(time.time())}",
-            preserve_unfinished=True, ranking_source=self.inventory.status().get("ranking_source", "unknown"),
+            symbols, batch_tag=f"top_{self.universe_limit}_{int(time.time())}",
+            preserve_unfinished=False, ranking_source="gateio_24h_quote_volume",
         )
-        if not result["rebuilt"]:
-            return result
-        logger.warning(
-            "Oversized persisted scan generation replaced by bounded generation | "
-            "previous_total=%s new_total=%s ranking=%s",
-            progress.get("total"), len(symbols),
-            self.inventory.status().get("ranking_source", "alphabetical_fallback"),
-        )
+        if result.get("rebuilt"):
+            logger.warning(
+                "Legacy scan generation superseded by top-volume universe | "
+                "previous_total=%s new_total=%s ranking=gateio_24h_quote_volume",
+                progress.get("total"), len(symbols),
+            )
         return result
 
     def synchronize_ranked_universe(self, limit: Optional[int] = None) -> Dict[str, Any]:
@@ -163,12 +165,12 @@ class ScanService:
         A changed membership takes effect after unfinished work drains.
         Pending jobs are reordered by turnover while completed/running states stay intact.
         """
-        limit = DEFAULT_SCAN_UNIVERSE_LIMIT if limit is None else min(
-            max(0, int(limit)), DEFAULT_SCAN_UNIVERSE_LIMIT
+        limit = self.universe_limit if limit is None else min(
+            max(0, int(limit)), self.universe_limit
         )
         universe = self.inventory.get_symbols()
         ranker = getattr(self.inventory, "get_ranked_symbols", None)
-        ranked = list(ranker(limit=limit) or []) if universe and callable(ranker) else sorted(universe)[:limit]
+        ranked = list(ranker(limit=limit, require_volume=True) or []) if universe and callable(ranker) else []
         if not ranked:
             return {"synchronized": False, "reason": "empty_universe"}
 
@@ -228,7 +230,7 @@ class ScanService:
     def start_scan(self, limit: Optional[int] = None) -> Dict[str, Any]:
         """Enqueue the requested scan and make sure workers are running.
 
-        - limit=None scans the top 300 Gate.io contracts by 24h quote turnover.
+        - limit=None scans the top 50 Gate.io contracts by 24h quote turnover.
         - If the current scan generation still has unfinished work, the
           command resumes it instead of restarting — even when the inventory
           is temporarily unavailable.
@@ -239,35 +241,54 @@ class ScanService:
         generation without resetting completed jobs or checkpoints.
         """
         # "Scan all" means all of the configured liquid universe. Preserve
-        # smaller requests and clamp unbounded/larger requests to top 300.
+        # smaller requests and clamp unbounded/larger requests to top 50.
         if self.continuous:
             # The worker owns network ranking and publication; commands read the durable queue.
             ranking = self.queue.generation_ranking()
-            ranked = ranking.get("symbols") or []
-            selected = ranked[:limit]
+            ranked = (ranking.get("symbols") or [])[:self.universe_limit]
+            requested = self.universe_limit if limit is None else min(max(0, int(limit)), self.universe_limit)
+            selected = ranked[:requested]
             self.queue.reorder_pending(selected + ranked[len(selected):])
             self.ensure_workers()
             return {"started": bool(ranked), "selected": len(selected), "universe_size": len(ranked),
                     "continuous": True, "ranking_source": ranking.get("ranking_source"), "progress": self.queue.progress()}
         if limit is None:
-            limit = DEFAULT_SCAN_UNIVERSE_LIMIT
+            limit = self.universe_limit
         else:
-            limit = min(max(0, int(limit)), DEFAULT_SCAN_UNIVERSE_LIMIT)
+            limit = min(max(0, int(limit)), self.universe_limit)
 
         progress_before = self.queue.progress()
         has_unfinished = (
             progress_before["pending"] > 0 or progress_before["running"] > 0
         )
         universe = self.inventory.get_symbols()
+        if not universe and not has_unfinished:
+            return {
+                "started": False,
+                "reason": "empty_universe",
+                "message": "Gate.io evreni boş; envanter yenilenemedi.",
+                "progress": progress_before,
+            }
         ranker = getattr(self.inventory, "get_ranked_symbols", None)
         if universe and callable(ranker):
-            ranked_symbols = list(ranker(limit=limit) or [])
+            ranked_symbols = list(ranker(limit=limit, require_volume=True) or [])
         else:
-            ranked_symbols = sorted(universe)
-            if limit is not None:
-                ranked_symbols = ranked_symbols[:max(0, int(limit))]
-        revalidation_symbols = self._setup_symbols_for_revalidation()
-        scan_symbols = list(dict.fromkeys(ranked_symbols + revalidation_symbols))
+            ranked_symbols = []
+        if not ranked_symbols and not has_unfinished:
+            return {
+                "started": False,
+                "reason": "volume_ranking_unavailable",
+                "message": "Gate.io 24 saatlik hacim sıralaması henüz hazır değil.",
+                "progress": progress_before,
+            }
+        # Revalidation cannot expand the scheduled scan beyond the ranked
+        # market universe. Existing user trades are followed separately.
+        ranked_set = set(ranked_symbols)
+        revalidation_symbols = [
+            symbol for symbol in self._setup_symbols_for_revalidation()
+            if symbol in ranked_set
+        ]
+        scan_symbols = list(dict.fromkeys(ranked_symbols))
         if not universe and not has_unfinished and not revalidation_symbols:
             return {
                 "started": False,
@@ -379,7 +400,7 @@ class ScanService:
             status = self.queue.progress()
             gen = status["generation"]
             published = int(pool.tracking.get_meta("published_generation", "0"))
-            if status["total"] == DEFAULT_SCAN_UNIVERSE_LIMIT and gen > published:
+            if status["total"] == self.universe_limit and gen > published:
                 if status["complete"] and self.queue.restore_unstaged_jobs(gen):
                     return
                 finalized = self._publish_scan_batches(pool, gen, complete=status["complete"])
@@ -392,9 +413,9 @@ class ScanService:
             if time.monotonic() - self._last_rank_attempt < 30:
                 return
             self._last_rank_attempt = time.monotonic()
-            ranked = self.inventory.get_ranked_symbols(limit=DEFAULT_SCAN_UNIVERSE_LIMIT, require_volume=True)
-            if len(set(ranked)) == DEFAULT_SCAN_UNIVERSE_LIMIT:
-                self.queue.rebuild(ranked, batch_tag="continuous_300", preserve_unfinished=True,
+            ranked = self.inventory.get_ranked_symbols(limit=self.universe_limit, require_volume=True)
+            if len(set(ranked)) == self.universe_limit:
+                self.queue.rebuild(ranked, batch_tag=f"continuous_{self.universe_limit}", preserve_unfinished=True,
                                    ranking_source="gateio_24h_quote_volume")
 
     def _worker_loop(self):

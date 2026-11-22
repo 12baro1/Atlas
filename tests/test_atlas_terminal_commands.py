@@ -66,14 +66,14 @@ def test_supported_input_rejects_unknown_free_text():
 
 def test_parse_numeric_scan_commands():
     assert atlas_tui._parse_scan_command("50 analiz et") == (50, 5)
-    assert atlas_tui._parse_scan_command("100 tara") == (100, 5)
-    assert atlas_tui._parse_scan_command("ilk 75 piyasayı tara") == (75, 5)
+    assert atlas_tui._parse_scan_command("100 tara") == (50, 5)
+    assert atlas_tui._parse_scan_command("ilk 75 piyasayı tara") == (50, 5)
 
 
 def test_parse_top_n_commands():
-    assert atlas_tui._parse_scan_command("en iyi 5 işlem") == (100, 5)
-    assert atlas_tui._parse_scan_command("10 işlem") == (100, 10)
-    assert atlas_tui._parse_scan_command("en iyi 25 işlem") == (100, 20)
+    assert atlas_tui._parse_scan_command("en iyi 5 işlem") == (50, 5)
+    assert atlas_tui._parse_scan_command("10 işlem") == (50, 10)
+    assert atlas_tui._parse_scan_command("en iyi 25 işlem") == (50, 20)
 
 
 def test_parse_full_market_commands():
@@ -83,10 +83,10 @@ def test_parse_full_market_commands():
 
 
 def test_parse_scan_command_caps_numeric_requests(monkeypatch):
-    assert atlas_tui._parse_scan_command("999 analiz et") == (500, 5)
+    assert atlas_tui._parse_scan_command("999 analiz et") == (50, 5)
 
 
-def test_best_symbols_can_return_entire_eligible_universe(monkeypatch):
+def test_best_symbols_scan_all_returns_entire_eligible_universe_if_below_50(monkeypatch):
     markets = {
         "BTC/USDT:USDT": {"active": True, "swap": True},
         "ETH/USDT:USDT": {"active": True, "swap": True},
@@ -108,5 +108,17 @@ def test_best_symbols_can_return_entire_eligible_universe(monkeypatch):
 
 def test_parse_everyday_turkish_scan_phrases():
     assert atlas_tui._parse_scan_command("50 tane analiz et") == (50, 5)
-    assert atlas_tui._parse_scan_command("en iyi 5 işlemi ver") == (100, 5)
-    assert atlas_tui._parse_scan_command("5 tane işlem ver") == (100, 5)
+    assert atlas_tui._parse_scan_command("en iyi 5 işlemi ver") == (50, 5)
+    assert atlas_tui._parse_scan_command("5 tane işlem ver") == (50, 5)
+
+
+def test_terminal_scan_all_stays_top_50_by_real_quote_volume(monkeypatch):
+    symbols = [f"COIN{i:03d}/USDT:USDT" for i in range(80)]
+    markets = {symbol: {"active": True, "swap": True} for symbol in symbols}
+    tickers = {symbol: {"quoteVolume": i + 1} for i, symbol in enumerate(symbols)}
+    monkeypatch.setattr(atlas_tui.exchange, "load_markets", lambda: markets)
+    monkeypatch.setattr(atlas_tui.exchange, "fetch_tickers", lambda requested: tickers)
+
+    selected = atlas_tui._best_symbols(limit=None)
+    assert len(selected) == 50
+    assert selected == list(reversed(symbols))[:50]

@@ -10,15 +10,15 @@ from atlas_service import (
 )
 
 
-def test_default_symbol_cap_is_top_300():
-    assert configured_max_symbols(None) == DEFAULT_MAX_SYMBOLS == 300
-    assert configured_max_symbols("") == 300
+def test_default_symbol_cap_is_top_50():
+    assert configured_max_symbols(None) == DEFAULT_MAX_SYMBOLS == 50
+    assert configured_max_symbols("") == 50
 
 
 def test_symbol_cap_accepts_positive_values_and_clamps_unlimited():
     assert configured_max_symbols("12") == 12
-    assert configured_max_symbols("0") == 300
-    assert configured_max_symbols("500") == 300
+    assert configured_max_symbols("0") == 50
+    assert configured_max_symbols("500") == 50
 
 
 @pytest.mark.parametrize("value", ["-1", "many", "1.5"])
@@ -101,7 +101,8 @@ def test_startup_inventory_retries_until_gateio_recovers():
                 return {"symbol_count": 0, "last_error": "temporary timeout"}
             return {"symbol_count": 2, "last_error": None}
 
-        def get_ranked_symbols(self, limit=None):
+        def get_ranked_symbols(self, limit=None, *, require_volume=False):
+            assert require_volume is True
             assert limit == 2
             return ["BTC/USDT:USDT", "ETH/USDT:USDT"]
 
