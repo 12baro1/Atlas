@@ -640,7 +640,7 @@ def test_raw_strategy_setup_reaches_common_filter_before_geometry():
 
     from strategy_lab import _finalize_candidate_geometry
     reason = _finalize_candidate_geometry(dict(raw), [])
-    assert reason == "NO_CONFIRMED_STOP_INVALIDATION"
+    assert reason == "INVALID_OHLC_IN_STRUCTURE_DATA"
 
 
 def test_strategy_native_setup_is_counted_before_common_geometry_rejection(monkeypatch):
@@ -660,7 +660,7 @@ def test_strategy_native_setup_is_counted_before_common_geometry_rejection(monke
     assert report["validated_candidate_count"] == 0
     assert trend["status"] == "BLOCKED_COMMON_FILTER"
     assert trend["rejection_stage"] == "COMMON_FILTER"
-    assert trend["rejection_reasons"] == ["NO_CONFIRMED_STOP_INVALIDATION"]
+    assert trend["rejection_reasons"] == ["INVALID_OHLC_IN_STRUCTURE_DATA"]
     usage = next(item for item in report["data_usage"] if item["strategy_id"] == "trend_pullback")
     assert usage["setup_produced"] is True
     assert usage["common_filter_result"] == "REJECTED"
