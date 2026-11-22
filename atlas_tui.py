@@ -18,6 +18,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from strategy_catalog import TRADE_STRATEGY_LABELS, SPECIALIST_LABELS
 from data_engine import exchange
 from universe_engine import select_symbols
 from utils.signal_card import build_signal_card, build_selected_strategy_card, format_card_text
@@ -229,7 +230,7 @@ class AtlasTUIApp(App):
     """One screen, one command input, output shown locally only."""
 
     TITLE = "ATLAS"
-    SUB_TITLE = "7-strategy terminal | local-only | no AI | no Telegram"
+    SUB_TITLE = "5 trade strategies + 2 specialists | local-only | no AI"
 
     CSS = """
     Screen { background: #05080d; color: #dce6ef; }
@@ -296,7 +297,7 @@ class AtlasTUIApp(App):
             yield Static(
                 Panel(
                     Text("ATLAS  /  LIVE MARKET & STRATEGY TERMINAL", style="bold bright_cyan"),
-                    subtitle="GATE.IO PUBLIC DATA  •  7 STRATEGIES  •  ONE DECISION",
+                    subtitle="GATE.IO PUBLIC DATA  •  5 TRADE STRATEGIES  •  2 SPECIALISTS  •  ONE DECISION",
                     border_style="bright_cyan",
                     box=box.DOUBLE,
                     padding=(0, 1),
@@ -334,24 +335,25 @@ class AtlasTUIApp(App):
 
     @staticmethod
     def _motors_renderable(state):
-        names = (
-            "Trend Pullback", "Volatility Breakout", "Mean Reversion",
-            "Order-flow Momentum", "Liquidation Cascade",
-            "Relative Strength", "Integrated SMC",
-        )
+        """Overall analysis-cycle state, never fictional per-engine progress."""
         table = Table(box=box.SIMPLE, expand=True, show_header=False, pad_edge=False)
         table.add_column("ENGINE", ratio=4)
         table.add_column("LED", justify="right", ratio=2)
-        for name in names:
-            if state == "RUNNING":
-                led = "[bold bright_green]● RUN[/bold bright_green]"
-            elif state == "DONE":
-                led = "[bright_cyan]● DONE[/bright_cyan]"
-            else:
-                led = "[dim]○ IDLE[/dim]"
-            table.add_row(name, led)
-        return Panel(table, title="[bold bright_green]7 STRATEGY MOTORS[/bold bright_green]",
-                     subtitle="Green LED = analysis active", border_style="green", box=box.ROUNDED)
+        cycle_label = (
+            "[bold yellow]● CYCLE[/bold yellow]" if state == "RUNNING"
+            else "[bright_cyan]● DONE[/bright_cyan]" if state == "DONE"
+            else "[dim]○ IDLE[/dim]"
+        )
+        for name in TRADE_STRATEGY_LABELS.values():
+            table.add_row(name, cycle_label)
+        for name in SPECIALIST_LABELS.values():
+            table.add_row(name + " [dim](evidence)[/dim]", "[dim]◇ READ ONLY[/dim]")
+        return Panel(
+            table,
+            title="[bold bright_green]5 SETUP ENGINES + 2 SPECIALISTS[/bold bright_green]",
+            subtitle="LED = overall analysis cycle, not individual motor execution",
+            border_style="green", box=box.ROUNDED,
+        )
 
     @staticmethod
     def _pipeline_renderable(state):
@@ -359,13 +361,15 @@ class AtlasTUIApp(App):
         color = "bright_green" if active else "bright_cyan"
         return Panel(
             Group(
-                Text("01  SEVEN SETUP GENERATORS", style=f"bold {color}"),
+                Text("01  SHARED MARKET + SPECIALIST EVIDENCE", style=f"bold {color}"),
                 Text("             ↓", style="dim"),
-                Text("02  SHARED FILTER / RISK GATE", style="bold yellow"),
+                Text("02  FIVE TRADE SETUP GENERATORS", style=f"bold {color}"),
                 Text("             ↓", style="dim"),
-                Text("03  SINGLE FINAL SELECTOR", style="bold bright_magenta"),
+                Text("03  SHARED FILTER / RISK GATE", style="bold yellow"),
                 Text("             ↓", style="dim"),
-                Text("04  EXECUTABLE SETUP / NO TRADE", style="bold white"),
+                Text("04  SINGLE FINAL SELECTOR", style="bold bright_magenta"),
+                Text("             ↓", style="dim"),
+                Text("05  EXECUTABLE SETUP / NO TRADE", style="bold white"),
             ),
             title="[bold bright_blue]DECISION PIPELINE[/bold bright_blue]",
             border_style="blue", box=box.ROUNDED,
@@ -627,7 +631,7 @@ class AtlasTUIApp(App):
             self._show(
                 "KOMUTLAR\n"
                 "TEK COIN\n"
-                "• BTC / ETH / BRC — 7 stratejiyi çalıştır, tek plan seç\n\n"
+                "• BTC / ETH / BRC — 5 strateji + 2 uzman, tek plan seç\n\n"
                 "PIYASA TARAMA\n"
                 "• işlem ver — 30 piyasayı tara, en iyi 1 kurulumu göster\n"
                 "• 50 analiz et — 50 piyasayı tara, en iyi 5 kurulumu göster\n"
@@ -729,7 +733,7 @@ class AtlasTUIApp(App):
         regime = report.get("regime") or {}
         trace = result.get("trace_id") or report.get("trace_id")
         lines = [
-            f"7 STRATEJİ ANALİZİ | {result.get('symbol') or outcome.get('symbol') or 'UNKNOWN'}",
+            f"5 STRATEJİ + 2 UZMAN ANALİZİ | {result.get('symbol') or outcome.get('symbol') or 'UNKNOWN'}",
             f"Trace: {trace or 'yok'}",
             f"Piyasa rejimi: {regime.get('label', 'UNKNOWN')} | Yön: {regime.get('trend', 'NEUTRAL')}",
             "",
@@ -754,6 +758,11 @@ class AtlasTUIApp(App):
                 lines.append(f"• {name}: {status} | {reason}")
             else:
                 lines.append(f"• {name}: {status or 'NO_SETUP'} | {item.get('reason') or 'Ayrıntı yok'}")
+        lines.extend(["", "ANALİZ UZMANLARI (işlem setup'ı üretmez)"])
+        specialists = report.get("specialist_evidence") or {}
+        for key, name in SPECIALIST_LABELS.items():
+            evidence = specialists.get(key) or {}
+            lines.append(f"• {name}: {evidence.get('state') or 'VERİ YOK'} | sadece kanıt")
         selected = report.get("selected")
         lines.extend(["", "SEÇİLEN STRATEJİ"])
         if not isinstance(selected, dict):
@@ -980,7 +989,7 @@ class AtlasTUIApp(App):
         if getattr(self, "_motor_cycle_active", False):
             self.query_one("#motors", Static).update(self._motors_renderable("DONE"))
             self.query_one("#pipeline", Static).update(self._pipeline_renderable("DONE"))
-            self._log_event("ANALYSIS COMPLETE  |  Seven strategy generators finished.")
+            self._log_event("ANALYSIS COMPLETE  |  Five setup generators and two specialists evaluated.")
         self._set_status("ANALYSIS COMPLETE  |  MARKET FEED CONTINUES")
         self._busy = False
         self._trace_active = False
