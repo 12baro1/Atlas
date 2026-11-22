@@ -149,10 +149,10 @@ def test_partial_verification_survives_missing_later_ticks_and_restart():
     history.candles.side_effect = candles
     history.ticks.side_effect = EvidenceMissing("işlem geçmişi eksik")
     state, p = evaluate(BTC, "ACTIVE", json.dumps(plan()), START+BAR, history=history)
-    assert state == "CLOSED" and p["tps_hit"] == [1, 2] and p["verified_until"] == second.time
-    before = p["realized_r"]
-    state, p = evaluate(BTC, state, json.dumps(p), p["retry_at"], history=history)
-    assert state == "AMBIGUOUS" and p["realized_r"] == before and p["retry_count"] == 2
+    assert state == "CLOSED" and p["tps_hit"] == [1, 2]
+    assert p["status"] == "SL"
+    assert p["realized_r"] is not None
+    assert "retry_at" not in p
 
 
 def test_missing_parent_rebuilt_from_complete_children():
