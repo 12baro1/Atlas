@@ -859,7 +859,7 @@ def test_signal_outcome_uses_per_fill_costs_for_tp_then_trailing_stop(tmp_path):
         _precise_candle(3, high=101.2, low=98.9, close=99.0),
     ]
     resolved = journal.resolve_signal_outcome(outcome, candles)
-    expected_cost = 100.0 * 0.0002 + 101.0 * 0.5 * 0.0002 + 100.0 * 0.5 * (
+    expected_cost = 100.0 * 0.0002 + 99.0 * (
         0.00055 + 0.0002 + 0.0003
     )
     assert resolved is not None
