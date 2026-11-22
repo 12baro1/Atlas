@@ -27,8 +27,8 @@ from utils.signal_card import build_signal_card, build_selected_strategy_card, f
 _SYMBOL_INPUT_RE = re.compile(r"[A-Z0-9]{2,24}(?:/USDT(?::USDT)?)?\Z")
 _BEST_TRADE_COMMANDS = {"işlem ver", "islem ver", "en iyi işlem", "en iyi islem", "best", "best trade"}
 DEFAULT_SCAN_LIMIT = 30
-DEFAULT_RANK_SCAN_LIMIT = 100
-MAX_SCAN_LIMIT = 500
+DEFAULT_RANK_SCAN_LIMIT = 50
+MAX_SCAN_LIMIT = 50
 
 
 def _configured_scan_limit(default=DEFAULT_SCAN_LIMIT):
@@ -203,14 +203,15 @@ def _add_data_usage_section(lines, report):
 
 
 def _best_symbols(limit=DEFAULT_SCAN_LIMIT):
-    if limit is not None:
-        limit = _normalize_scan_limit(limit)
+    # Even 'scan all' means the top 50 liquid perpetual contracts.
+    limit = MAX_SCAN_LIMIT if limit is None else _normalize_scan_limit(limit)
     markets = exchange.load_markets()
     symbols, _ = select_symbols(
         markets=markets,
         suffix="/USDT:USDT",
         require_active=True,
-        require_swap=False,
+        require_swap=True,
+        require_crypto=True,
         max_symbols=0,
     )
     tickers = exchange.fetch_tickers(symbols)
