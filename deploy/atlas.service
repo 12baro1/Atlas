@@ -1,5 +1,5 @@
 [Unit]
-Description=Atlas seven-strategy live market analysis
+Description=Atlas five-strategy + two-specialist market analysis
 Documentation=https://github.com/12baro1/Atlas
 Wants=network-online.target
 After=network-online.target
