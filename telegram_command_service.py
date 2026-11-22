@@ -1416,7 +1416,7 @@ class TelegramCommandService:
         symbol = f"{base}/USDT:USDT"
         changed = get_opportunity_pool().tracking.set_symbol_tracking(self.chat_id, symbol, enabled=enabled)
         if enabled:
-            return (f"{base} için takip tercihi açıldı. İşlem eklemek için /analiz {base} kullan." if changed
+            return (f"{base} için takip açıldı (tercih). İşlem eklemek için /analiz {base} kullan." if changed
                     else f"{base} bu sohbette zaten takipte.")
         return (f"{base} bu sohbetin işlem takibinden çıkarıldı. Yeniden takip için /ekle {base}"
                 if changed else f"{base} bu sohbetin takip listesinde yok.")
