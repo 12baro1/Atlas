@@ -88,3 +88,25 @@ def test_strategy_data_usage_reports_shared_motor_availability():
 
     assert usage["specialist_motor_inputs"]["orderbook"]["state"] == "AVAILABLE"
     assert usage["specialist_motor_inputs"]["liquidity"]["state"] == "NOT_INVOKED_OR_UNAVAILABLE"
+
+
+def test_five_strategy_lab_exposes_two_read_only_specialists():
+    from strategy_lab import SevenStrategyLab
+    report = SevenStrategyLab().analyze({"symbol": "BTC/USDT:USDT"})
+    assert len(report["strategies"]) == 5
+    assert set(report["specialist_evidence"]) == {"relative_strength", "liquidation_cascade"}
+    assert all(row["setup_generation"] is False for row in report["specialist_evidence"].values())
+    assert not {"relative_strength", "liquidation_cascade"} & {
+        row["strategy_id"] for row in report["strategies"]
+    }
+
+
+def test_specialist_metrics_never_fabricate_missing_data():
+    from shared.specialist_metrics import analyze_relative_strength, analyze_liquidation_pressure
+    assert analyze_relative_strength({})["state"] == "INSUFFICIENT_HISTORY"
+    assert analyze_liquidation_pressure({})["state"] == "UNAVAILABLE"
+    assert analyze_liquidation_pressure({
+        "shared_market_evidence": {
+            "open_interest": {"state": "FRESH", "change_pct": -2.0},
+        }
+    })["source"] == "OI_PROXY_NOT_LIQUIDATION_EVENTS"
