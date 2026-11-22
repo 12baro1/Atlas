@@ -1290,7 +1290,8 @@ class TradeJournal:
                 # Koruma stopunu taşı
                 # TP1 alone does not move the stop. After TP2, protect
                 # the remaining position at the actual filled entry.
-                if 2 in reached and 3 not in reached:
+                stop_moved_this_target = level_no == 2 and 3 not in reached
+                if stop_moved_this_target:
                     if side == "LONG":
                         trailing_stop = max(current_stop if current_stop is not None else stop_loss, entry)
                     else:
@@ -1309,7 +1310,8 @@ class TradeJournal:
                     1.0 - sum(self._weight_for(weights, level) for level in reached),
                 )
                 moved_stop_hit = (
-                    remaining > 0.0
+                    stop_moved_this_target
+                    and remaining > 0.0
                     and (
                         (side == "LONG" and trailing_stop is not None and low <= trailing_stop)
                         or (side != "LONG" and trailing_stop is not None and high >= trailing_stop)
