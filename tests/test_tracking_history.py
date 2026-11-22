@@ -138,9 +138,9 @@ def test_closed_five_minute_bar_without_exit_levels_needs_no_lower_candles(posit
 
 def test_partial_verification_survives_missing_later_ticks_and_restart():
     first = bar(START, 105, 112, 104, 111)
-    second = bar(START+MINUTE, 111, 119, 99, 111)
+    second = bar(START+MINUTE, 111, 121, 99, 111)
     third = bar(START+2*MINUTE, 111, 111, 111, 111)
-    parent = bar(START, 105, 119, 99, 111, 3)
+    parent = bar(START, 105, 121, 99, 111, 3)
     history = Mock()
     def candles(symbol, start, width, count):
         if width == BAR:
@@ -149,7 +149,7 @@ def test_partial_verification_survives_missing_later_ticks_and_restart():
     history.candles.side_effect = candles
     history.ticks.side_effect = EvidenceMissing("işlem geçmişi eksik")
     state, p = evaluate(BTC, "ACTIVE", json.dumps(plan()), START+BAR, history=history)
-    assert state == "AMBIGUOUS" and p["tps_hit"] == [1] and p["verified_until"] == second.time
+    assert state == "CLOSED" and p["tps_hit"] == [1, 2] and p["verified_until"] == second.time
     before = p["realized_r"]
     state, p = evaluate(BTC, state, json.dumps(p), p["retry_at"], history=history)
     assert state == "AMBIGUOUS" and p["realized_r"] == before and p["retry_count"] == 2
