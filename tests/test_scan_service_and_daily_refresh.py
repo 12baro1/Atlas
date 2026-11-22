@@ -375,7 +375,7 @@ class FakeInv:
     def get_symbols(self):
         return list(self._symbols)
 
-    def get_ranked_symbols(self, limit=None):
+    def get_ranked_symbols(self, limit=None, *, require_volume=False):
         ranked = list(self._ranked_symbols)
         return ranked if limit is None else ranked[:max(0, int(limit))]
 
@@ -566,7 +566,7 @@ def test_stop_scan_does_not_orphan_or_revive_inflight_worker(tmp_path):
 
 
 
-def test_unbounded_scan_command_is_capped_to_top_300(tmp_path):
+def test_unbounded_scan_command_is_capped_to_top_50(tmp_path):
     symbols = [f"COIN{i:03d}/USDT:USDT" for i in range(350)]
     ranked = list(reversed(symbols))
     service = ScanService(
@@ -575,7 +575,7 @@ def test_unbounded_scan_command_is_capped_to_top_300(tmp_path):
     )
     service.ensure_workers = lambda: False
     result = service.start_scan()
-    assert result["selected"] == 300
+    assert result["selected"] == 50
     assert result["selected_preview"] == ranked[:5]
     assert result["ranking_source"] == "fake_24h_quote_volume"
 
@@ -687,3 +687,40 @@ def test_stall_requires_two_lease_periods_without_gate_progress(tmp_path, monkey
         assert "stalled_symbol" not in scanner.status()
     finally:
         scanner.queue.close()
+
+
+def test_oversized_legacy_queue_is_superseded_by_top_50_without_deleting_history(tmp_path):
+    from scan_queue import ScanQueue
+
+    queue = ScanQueue(tmp_path / "legacy-queue")
+    symbols = [f"COIN{i:03d}/USDT:USDT" for i in range(80)]
+    ranked = list(reversed(symbols))
+    old = queue.rebuild(symbols, batch_tag="legacy_80")
+    assert old["progress"]["total"] == 80
+    assert queue.progress()["pending"] == 80
+
+    service = ScanService(
+        FakeRuntime(), queue, FakeInv(symbols, ranked_symbols=ranked),
+        worker_count=1, analysis_gap_seconds=0,
+    )
+    migration = service.enforce_universe_limit()
+    assert migration["rebuilt"] is True
+    assert queue.current_generation() == old["generation"] + 1
+    assert queue.generation_symbols() == ranked[:50]
+    assert queue.progress()["total"] == 50
+    assert queue.progress(old["generation"])["total"] == 80
+    queue.close()
+
+
+def test_requested_scan_cannot_exceed_50_volume_ranked_coins():
+    symbols = [f"COIN{i:03d}/USDT:USDT" for i in range(80)]
+    ranked = list(reversed(symbols))
+    service = ScanService(
+        FakeRuntime(), FakeQ(), FakeInv(symbols, ranked_symbols=ranked),
+        worker_count=1, analysis_gap_seconds=0,
+    )
+    service.ensure_workers = lambda: False
+    result = service.start_scan(limit=500)
+    assert result["selected"] == 50
+    assert result["selected_preview"] == ranked[:5]
+    assert set(service.queue.generation_symbols()) == set(ranked[:50])
