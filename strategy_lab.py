@@ -32,6 +32,32 @@ from shared.analysis_services import (
     _vwap, _bollinger,
 )
 
+def _ensure_observed_atr(candidate, data):
+    """Use actual 15m volatility when an upstream strategy omitted its ATR.
+
+    This never decreases the minimum stop distance: a valid ATR is still
+    required by the shared 0.75-ATR floor. No synthetic volatility is used.
+    """
+    try:
+        existing = float(candidate.get("atr"))
+    except (TypeError, ValueError, OverflowError):
+        existing = None
+    if existing is not None and math.isfinite(existing) and existing > 0:
+        return existing
+    observed = _atr((data or {}).get("15m") or [])
+    if observed is None:
+        return None
+    try:
+        observed = float(observed)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(observed) or observed <= 0:
+        return None
+    candidate["atr"] = observed
+    candidate["atr_source"] = "OBSERVED_CLOSED_15M"
+    return observed
+
+
 def _risk_validate_candidate(candidate):
     """Apply the same final RR and execution-friction model used by SMC risk."""
     try:
@@ -994,6 +1020,10 @@ class SevenStrategyLab:
                 _record_common_filter(candidate, "REJECTED", execution_rejection)
                 continue
 
+            # SMC can carry fully verified structural levels without an ATR
+            # field in its legacy risk payload. Recover volatility only from
+            # the actual closed 15m candles; do not bypass the ATR floor.
+            _ensure_observed_atr(candidate, data)
             candidate["_market_maker_fee_rate"] = data.get("maker_fee_rate")
             candidate["_market_taker_fee_rate"] = data.get("taker_fee_rate")
             validation = _risk_validate_candidate(candidate)
