@@ -1323,8 +1323,9 @@ class TelegramCommandService:
             "ATLAS | FIRSAT HAVUZU",
             "",
             f"Aday: {stats.get('candidates', 0)}",
+            f"Doğrulanmış: {stats.get('validated', 0)}",
             f"Şimdi girilebilir: {stats.get('validated', 0)}",
-            f"Doğrulanmış kayıt (toplam): {stats.get('validated_stored', 0)}",
+            f"Doğrulanmış kayıt (toplam): {stats.get('validated_stored', stats.get('validated', 0))}",
             f"Aktif takip: {stats.get('active', 0)}",
             f"Arşiv: {stats.get('history', 0)}",
         ]
