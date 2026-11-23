@@ -771,10 +771,12 @@ class OpportunityPool:
         rank="composite" (default) uses a transparent heuristic score built
         ONLY from stored, evidence-backed fields — this is a ranking score,
         never a win probability:
-          - net RR after costs (dominant, already cost-adjusted)
-          - decision-engine strength (confidence)
-          - mid-target richness (rr_tp2), TP structure is monotonic by design
-          - setup age penalty (older setups carry staler market data)
+          - decision-engine strength (confidence): 60% of the base score
+          - net RR after costs: 20% of the base score
+          - mid-target richness (rr_tp2): 10% of the base score
+          - setup age/freshness: 10% of the base score
+        Confidence is a heuristic setup-strength score, NOT an empirically
+        calibrated probability of success. Cost-adjusted RR remains mandatory.
         rank="net_rr" keeps the simple cost-adjusted RR ordering.
 
         Strategy-native invalidation is handled when a fresh analysis reports
@@ -816,7 +818,7 @@ class OpportunityPool:
                     if c.created_at_ms:
                         age_hours = max(0.0, (now_ms - c.created_at_ms) / 3_600_000.0)
                     age_component = math.exp(-age_hours / 48.0)
-                    score = 0.45 * rr_component + 0.20 * confidence_component + 0.15 * mid_target + 0.20 * age_component
+                    score = 0.20 * rr_component + 0.60 * confidence_component + 0.10 * mid_target + 0.10 * age_component
 
                     # Only recent observed entry distance may influence the score.
                     # A saved entry distance can be obsolete after a few minutes.
