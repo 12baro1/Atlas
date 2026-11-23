@@ -1491,9 +1491,10 @@ class TelegramCommandService:
         for symbol, _, state, plan in rows:
             has_rows = True
             entry_type = str((plan.get("payload") or {}).get("execution_costs", {}).get("entry_type") or "").upper()
-            if state == "AMBIGUOUS" and not entry_confirmed(plan) and entry_type != "MARKET":
-                state = "WAITING"
-            elif state == "WAITING" and entry_type == "MARKET":
+            # An ambiguous entry must remain visible as ambiguous. Previously
+            # unconfirmed LIMIT plans were silently displayed as plain WAITING,
+            # hiding missing Gate history and retry state from the user.
+            if state == "WAITING" and entry_type == "MARKET":
                 # MARKET is an executable signal, not a pending LIMIT order;
                 # no live fill is claimed until the price reference is verified.
                 state = "MARKET"
@@ -1566,7 +1567,16 @@ class TelegramCommandService:
                 if state == "CLOSED" and (note := _post_exit_note(plan)):
                     card.append(note)
                 if state == "AMBIGUOUS":
-                    card.append(plan.get("ambiguity_reason") or "Geçmiş mumlar doğrulanacak")
+                    card.append(
+                        "Giriş henüz teyit edilmedi; SL/TP sonucu yazılmadı."
+                        if not entry_confirmed(plan)
+                        else "Giriş teyitli; kalan stop/TP sırası doğrulanıyor."
+                    )
+                    card.append("Neden: " + str(plan.get("ambiguity_reason") or "Geçmiş mumlar doğrulanacak"))
+                    attempts = int(plan.get("retry_count") or 0)
+                    if attempts:
+                        from telegram_tracking import MAX_VERIFICATION_ATTEMPTS
+                        card.append(f"Doğrulama denemesi: {attempts}/{MAX_VERIFICATION_ATTEMPTS}")
                     if plan.get("history_checked_at"):
                         checked = datetime.fromtimestamp(plan["history_checked_at"] / 1000, tz)
                         card.append(f"Son arka plan kontrolü {checked:%d.%m %H:%M} TSİ")
