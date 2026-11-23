@@ -1410,8 +1410,14 @@ class TelegramCommandService:
             except Exception as exc:
                 self.logger.warning("Opportunity correlation snapshot unavailable | type=%s", type(exc).__name__)
             requested_at = int(time.time() * 1000)
-            best, shown = pool.prepare_best_reply(self.chat_id, count,
-                                                   performance=performance, correlations=correlations)
+            # Preserve the historical two-argument pool contract when no
+            # additional evidence is available (e.g. offline adapters).
+            if performance is None and correlations is None:
+                best, shown = pool.prepare_best_reply(self.chat_id, count)
+            else:
+                best, shown = pool.prepare_best_reply(
+                    self.chat_id, count, performance=performance, correlations=correlations
+                )
             if best:
                 # Persist the user's explicit selection before replying. The
                 # portfolio must not disappear if Telegram delivery fails after
@@ -1502,7 +1508,9 @@ class TelegramCommandService:
         active, waiting, verifying = (len(sections[state][1]) for state in ("ACTIVE", "WAITING", "AMBIGUOUS"))
         market = len(sections["MARKET"][1])
         blocks = [f"ATLAS · İŞLEMLERİM — {count}\n"
-                  f"{active} açık · {waiting} limit bekliyor · {market} market referansı · {verifying} doğrulanıyor"]
+                  f"{active} açık · {waiting} giriş bekliyor · {verifying} doğrulanıyor"]
+        if market:
+            blocks[0] += f"\nMARKET sinyali, sanal referans bekleyen: {market}"
         for state, (heading, items) in sections.items():
             if not items:
                 continue
