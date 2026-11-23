@@ -1244,10 +1244,21 @@ class OpportunityPool:
         """Get pool statistics."""
         now_ms = int(time.time()*1000)
         with self._lock:
+            from market_plan_safety import MAX_MARKET_SIGNAL_AGE_MS
+            validated_now = sum(self._fresh_validation(c, now_ms) for c in self._validated.values())
+            expired_market = sum(
+                c.entry_type == "MARKET"
+                and int(c.created_at_ms or 0) > 0
+                and now_ms - int(c.created_at_ms) > MAX_MARKET_SIGNAL_AGE_MS
+                for c in self._validated.values()
+            )
+            unverified_evidence = sum(bool(c.requires_revalidation) for c in self._validated.values())
             return {
                 "candidates": len(self._candidates),
-                "validated": sum(self._fresh_validation(c, now_ms) for c in self._validated.values()),
+                "validated": validated_now,
                 "validated_stored": len(self._validated),
+                "market_expired": expired_market,
+                "needs_revalidation": unverified_evidence,
                 "active": len(self._active),
                 "history": len(self._history),
                 "by_symbol": {s: len(ids) for s, ids in self._by_symbol.items()},
