@@ -1323,13 +1323,20 @@ class TelegramCommandService:
             "ATLAS | FIRSAT HAVUZU",
             "",
             f"Aday: {stats.get('candidates', 0)}",
-            f"Doğrulanmış: {stats.get('validated', 0)}",
+            f"Şimdi girilebilir: {stats.get('validated', 0)}",
+            f"Doğrulanmış kayıt (toplam): {stats.get('validated_stored', 0)}",
             f"Aktif takip: {stats.get('active', 0)}",
             f"Arşiv: {stats.get('history', 0)}",
         ]
         waiting = stats.get("validated_stored", stats.get("validated", 0)) - stats.get("validated", 0)
-        if waiting:
-            lines.append(f"Yeniden doğrulama bekleyen: {waiting}")
+        if stats.get("market_expired"):
+            lines.append(f"MARKET süresi dolan: {stats['market_expired']} (2 dakika sonra yeni giriş değildir)")
+        if stats.get("needs_revalidation"):
+            lines.append(f"Verisi yeniden doğrulanacak: {stats['needs_revalidation']}")
+        other_waiting = max(0, waiting - int(stats.get("market_expired") or 0) -
+                            int(stats.get("needs_revalidation") or 0))
+        if other_waiting:
+            lines.append(f"Güncel kanıtı bulunmayan: {other_waiting}")
         if best:
             item = best[0]
             entry_type = str(getattr(item, "entry_type", "") or getattr(item, "setup_type", "—")).upper()
@@ -1343,7 +1350,10 @@ class TelegramCommandService:
                 f"Net RR: {_format_rr(item.net_rr_after_costs)}",
             ])
         else:
-            lines.extend(["", "Doğrulanmış setup bulunmuyor."])
+            lines.extend(["", "Şu an girilebilir doğrulanmış setup yok."])
+            if stats.get("validated_stored"):
+                lines.append("Havuzda eski kayıtlar var; bunlar yeni MARKET giriş talimatı değildir.")
+            lines.append("Nedenler: /istatistik | Tarama: /taramadurum | Veri: /veri")
         lines.extend([
             "",
             "İşlem ve setup listesi: /islemler",
@@ -1814,6 +1824,13 @@ class TelegramCommandService:
         reasons = telemetry.get("rejection_reasons") or {}
         for reason, count in sorted(reasons.items(), key=lambda pair: -pair[1])[:3]:
             lines.append(f"{count} kez · {reason}")
+        preflight = telemetry.get("market_preflight_rejections") or {}
+        if preflight:
+            lines.append("")
+            lines.append("MARKET CANLI GİRİŞ KONTROLÜ")
+            for reason, count in sorted(preflight.items(), key=lambda pair: -pair[1])[:5]:
+                lines.append(f"{count} kez · {reason}")
+            lines.append("Bu retler strateji filtresinden sonra oluşur; havuza girmez.")
         return "\n".join(lines)
 
     def handle_learning(self) -> str:
