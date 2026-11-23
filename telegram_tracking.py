@@ -13,7 +13,10 @@ from telegram_prices import confirmed_target_levels, tracked_levels
 from trade_journal import TradeJournal
 
 
-MAX_VERIFICATION_ATTEMPTS = 3
+# Gate history and websocket backfill can lag behind 5m candle closure.
+# Do not declare an unconfirmed entry permanently unverifiable in ~3 minutes.
+# The retry schedule is bounded (up to 16m), preserving eventual termination.
+MAX_VERIFICATION_ATTEMPTS = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chat_follows(
