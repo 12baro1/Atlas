@@ -63,7 +63,10 @@ def _risk_validate_candidate(candidate):
     try:
         entry = float(candidate.get("entry"))
         stop = float(candidate.get("stop_loss"))
-        atr = float(candidate.get("atr"))
+        atr_value = candidate.get("atr")
+        if atr_value is None:
+            return {"eligible": False, "reason": "STOP_ATR_UNAVAILABLE", "weighted_net_rr": None, "risk_plan": None}
+        atr = float(atr_value)
         if not math.isfinite(atr) or atr <= 0:
             return {"eligible": False, "reason": "STOP_ATR_UNAVAILABLE", "weighted_net_rr": None, "risk_plan": None}
         minimum_stop = atr * float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75))
