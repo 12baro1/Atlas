@@ -191,8 +191,9 @@ def test_worker_recovers_delayed_data_and_updates_telegram_once(tmp_path, monkey
         history.candles.side_effect = TimeoutError()
         worker.refresh_virtual_positions()
         report = bot.handle_islemler()
-        assert "GİRİŞ BEKLEYENLER" in report and "Son takip kontrolü" in report
-        assert "DOĞRULAMA BEKLİYOR" not in report
+        assert "DOĞRULAMA BEKLİYOR" in report and "Son arka plan kontrolü" in report
+        assert "Giriş henüz teyit edilmedi" in report
+        assert "TimeoutError" in report
         assert not pool.tracking.pending_notifications(bot.chat_id)
         assert pool.tracking.tracked(bot.chat_id)[0][3]["history_checked_at"] == clock[0]
         history.candles.side_effect = None
