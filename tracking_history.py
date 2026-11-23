@@ -8,6 +8,7 @@ from core.candle import convert
 from gateio_futures import GateFuturesExchange, trade_timestamp_ms
 
 MINUTE = 60_000
+TEN_SECONDS = 10_000
 BAR = 5 * MINUTE
 QUARTER_HOUR = 15 * MINUTE
 
@@ -50,7 +51,8 @@ def indexed(candles, width, now):
 def matches(parent, children):
     return bool(children and children[0].open == parent.open and children[-1].close == parent.close
                 and max(c.high for c in children) == parent.high and min(c.low for c in children) == parent.low
-                and sum(c.volume for c in children) == parent.volume)
+                and isclose(sum(c.volume for c in children), parent.volume,
+                            rel_tol=1e-9, abs_tol=1e-8))
 
 
 class TrackingHistory:
@@ -68,7 +70,8 @@ class TrackingHistory:
         return self.exchange._get('/futures/usdt/' + endpoint, query)
 
     def _candles(self, symbol, start, width, count):
-        rows = self._get('candlesticks', symbol, start, start + count * width, interval=f'{width // MINUTE}m')
+        interval = "10s" if width == TEN_SECONDS else f"{width // MINUTE}m"
+        rows = self._get('candlesticks', symbol, start, start + count * width, interval=interval)
         return convert([[int(r['t']) * 1000, r['o'], r['h'], r['l'], r['c'], r['v']] for r in rows])
 
     def _ticks(self, symbol, candle_time):
