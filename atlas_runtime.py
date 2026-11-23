@@ -704,6 +704,42 @@ class AtlasRuntime:
                     correlations[frozenset((left, right))] = max(-1.0, min(1.0, corr))
         return correlations
 
+    def prune_market_opportunities(self, limit=5):
+        """Verify pending MARKETs with fresh Gate.io data before Telegram ranking.
+
+        No other strategy is rescanned. Missing evidence hides a MARKET until
+        its next full validation; only a proven stop touch invalidates the
+        tracked hypothetical setup. This avoids unbounded API calls.
+        """
+        from market_plan_safety import check_market_plan
+        from data_engine import exchange as market_exchange
+        pool = self._opportunity_pool()
+        candidates = pool.get_best_setups(limit=max(5, min(int(limit) * 3, 30)))
+        for candidate in candidates:
+            if candidate.entry_type != "MARKET":
+                continue
+            valid, reason = check_market_plan(
+                market_exchange, candidate.symbol, candidate.direction,
+                candidate.entry_price, candidate.stop_loss, candidate.created_at_ms,
+            )
+            if valid:
+                continue
+            if reason == "MARKET_STOP_ALREADY_HIT":
+                pool.invalidate_setup(candidate.setup_id, reason)
+                pool.tracking.invalidate_unentered_setup(candidate.setup_id, reason)
+            else:
+                # A stale or unavailable feed is not evidence that the stop
+                # was hit. Do not report an invented loss.
+                with pool._lock:
+                    current = pool._validated.get(candidate.setup_id)
+                    if current is not None:
+                        current.requires_revalidation = True
+                        pool.save_all()
+            self.logger.warning(
+                "MARKET opportunity hidden | symbol=%s reason=%s",
+                candidate.symbol, reason,
+            )
+
     def strategy_performance(self, symbol=None, regime=None):
         """Return independently aggregated, cost-adjusted IS/OOS results per strategy."""
         return self.strategy_outcome_journal.performance_snapshot(
@@ -877,6 +913,18 @@ class AtlasRuntime:
                                                          regime=strategy_lab.get("regime")) if selected else None
                     if selected and not candidate:
                         return {"ok": False, "error": "invalid_selected_plan"}
+                    if (candidate is not None and candidate.entry_type == "MARKET"
+                            and isinstance(data.get("data_provenance"), dict)):
+                        from market_plan_safety import check_market_plan
+                        from data_engine import exchange as market_exchange
+                        safe, reason = check_market_plan(
+                            market_exchange, symbol, candidate.direction, candidate.entry_price,
+                            candidate.stop_loss, data.get("snapshot_timestamp_ms"),
+                        )
+                        if not safe:
+                            self._inc("skipped")
+                            self._log(f"SKIP {symbol} MARKET: {reason}")
+                            return {"ok": False, "symbol": symbol, "error": reason}
                     evidence = {"structure_close": closed_15m[-1].close, "symbol": symbol, "cutoff": int(closed_15m[-1].time),
                                 "observed": started, "setup": candidate.to_dict() if candidate else None,
                                 "blocked_strategies": [row["strategy_id"] for row in diagnostics["strategies"]
