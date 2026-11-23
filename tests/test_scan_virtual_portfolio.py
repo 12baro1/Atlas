@@ -274,12 +274,15 @@ def test_menu_group_dispatch_arguments_and_service_failure(cmd, monkeypatch):
 
 
 
-def test_failed_telegram_delivery_keeps_chat_unsubscribed(pool):
+def test_failed_telegram_delivery_keeps_explicit_selection_durable(pool):
     bot = service()
     pool.publish_cycle(1, [observation()])
     bot._api = MagicMock(side_effect=RuntimeError("transport"))
     bot._command_and_reply("/eniyi5")
-    assert not pool.tracking.tracked(bot.chat_id)
+    # The command was accepted even when Telegram's outbound delivery failed.
+    # Never lose the requested portfolio as a side effect of a network error.
+    assert len(pool.tracking.tracked(bot.chat_id)) == 1
+    assert "BTC" in bot.handle_islemler()
     bot._api.side_effect = None
     bot._command_and_reply("/eniyi5")
     assert len(pool.tracking.tracked(bot.chat_id)) == 1
@@ -530,8 +533,13 @@ def test_delivered_top_ten_tracks_current_setups_after_explicit_reenable(pool, m
 
     bot._api = MagicMock(side_effect=send)
     bot._command_and_reply("/eniyi10")
-    assert [(row[0], row[2]) for row in pool.tracking.tracked(bot.chat_id)] == [(tut, "WAITING")]
+    # The user muted MORPHO during reply delivery; it must not remain an
+    # actionable trade even if the request had already been registered.
+    active = [(row[0], row[2]) for row in pool.tracking.tracked(bot.chat_id)
+              if row[2] in {"WAITING", "ACTIVE", "AMBIGUOUS"}]
+    assert active == [(tut, "WAITING")]
     assert "TUT/USDT" in bot.execute_command("/islemler")
+    assert "MORPHO/USDT" not in bot.execute_command("/islemler")
 
 
 def test_no_new_trigger_preserves_setup_until_evidence_breaks_its_stop(tmp_path, monkeypatch):

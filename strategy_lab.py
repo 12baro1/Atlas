@@ -955,11 +955,15 @@ class SevenStrategyLab:
             # MARKET entry is rejected here for every strategy by identical rules.
             entry_type = str(candidate.get("entry_type") or "MARKET").upper()
             current_price = _current_price(data)
+            # Preserve observable regime and proximity evidence for ranking.
+            # These are heuristic context features, not win probabilities.
+            candidate["regime_fit"] = _regime_fit(candidate.get("strategy_id"), regime)
             execution_rejection = None
             if entry_type not in {"MARKET", "LIMIT"}:
                 execution_rejection = "UNSUPPORTED_ENTRY_TYPE"
             elif current_price is not None:
                 distance_pct = abs(entry - current_price) / current_price
+                candidate["entry_distance_pct"] = distance_pct
                 if entry_type == "MARKET":
                     max_market_distance = float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003))
                     if distance_pct > max_market_distance:

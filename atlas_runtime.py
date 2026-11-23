@@ -71,6 +71,10 @@ class AtlasRuntime:
         self._last_results = []
         self._latest_analysis_by_symbol = {}
         self._latest_analysis_at = {}
+        # 4h closed candles only: bounded, observed market-correlation evidence.
+        # No extra network requests and no second analysis worker.
+        self._h4_close_cache = {}
+        self._h4_close_lock = threading.Lock()
         self._market_symbols = None
         self._scanner_stats = {
             "processed": 0,
@@ -633,6 +637,73 @@ class AtlasRuntime:
         with self._journal_lock:
             return dict(self.engine.trade_journal.setup_statistics())
 
+    def _remember_h4(self, symbol, candles, now_ms):
+        """Cache at most 73 fully closed 4h observations per symbol."""
+        if not candles:
+            return
+        from timing import closed_htf_candles
+        valid = closed_htf_candles(candles, now_ms, "4h")
+        values = {}
+        for candle in valid[-73:]:
+            try:
+                stamp, close = int(candle.time), float(candle.close)
+            except (TypeError, ValueError, OverflowError, AttributeError):
+                continue
+            if math.isfinite(close) and close > 0:
+                values[stamp] = close
+        if len(values) < 21:
+            return
+        lock = getattr(self, "_h4_close_lock", None)
+        if lock is None:
+            return
+        with lock:
+            self._h4_close_cache[symbol] = (now_ms, values)
+            if len(self._h4_close_cache) > 80:
+                oldest = min(self._h4_close_cache, key=lambda key: self._h4_close_cache[key][0])
+                self._h4_close_cache.pop(oldest, None)
+
+    def market_correlations(self):
+        """Observed 4h-return correlations, aligned in time, with minimum sample count.
+
+        Missing, stale, or constant-price series are excluded (unknown risk).
+        No market API calls are allowed in this read-only Telegram path.
+        """
+        now_ms = int(time.time() * 1000)
+        lock = getattr(self, "_h4_close_lock", None)
+        if lock is None:
+            return {}
+        with lock:
+            source = {symbol: dict(values) for symbol, (observed, values)
+                      in self._h4_close_cache.items()
+                      if 0 <= now_ms - observed <= 8 * 3_600_000}
+        period = 4 * 3_600_000
+        returns = {}
+        for symbol, prices in source.items():
+            if not prices or now_ms - max(prices) > 8 * 3_600_000:
+                continue
+            values = {stamp: price / prices[stamp - period] - 1.0
+                      for stamp, price in prices.items() if stamp - period in prices}
+            if len(values) >= 20:
+                returns[symbol] = values
+        correlations = {}
+        symbols = sorted(returns)
+        for i, left in enumerate(symbols):
+            for right in symbols[i + 1:]:
+                common = sorted(returns[left].keys() & returns[right].keys())
+                if len(common) < 20:
+                    continue
+                x = [returns[left][t] for t in common]
+                y = [returns[right][t] for t in common]
+                avg_x, avg_y = sum(x) / len(x), sum(y) / len(y)
+                dx, dy = [v - avg_x for v in x], [v - avg_y for v in y]
+                variance = sum(v * v for v in dx) * sum(v * v for v in dy)
+                if variance <= 0:
+                    continue
+                corr = sum(a * b for a, b in zip(dx, dy)) / math.sqrt(variance)
+                if math.isfinite(corr):
+                    correlations[frozenset((left, right))] = max(-1.0, min(1.0, corr))
+        return correlations
+
     def strategy_performance(self, symbol=None, regime=None):
         """Return independently aggregated, cost-adjusted IS/OOS results per strategy."""
         return self.strategy_outcome_journal.performance_snapshot(
@@ -760,6 +831,10 @@ class AtlasRuntime:
                     }
                 data = dict(data)
                 data["15m"] = closed_15m
+                try:
+                    self._remember_h4(symbol, data.get("4h") or data.get("4H") or [], now_ms)
+                except (ValueError, TypeError, AttributeError) as exc:
+                    self._log(f"WARN optional correlation cache unavailable: {type(exc).__name__}")
                 if universe:
                     data["correlation_universe"] = universe
                 try:
@@ -1063,6 +1138,16 @@ class AtlasRuntime:
         if not math.isfinite(confidence):
             confidence = 0.0
 
+        def observed_optional(value, lower, upper):
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            return number if math.isfinite(number) and lower <= number <= upper else None
+
+        distance = observed_optional(selected.get("entry_distance_pct"), 0.0, 10.0)
+        fit = observed_optional(selected.get("regime_fit"), 0.0, 1.0)
+
         # Deterministic id: re-scans of an unchanged setup produce the same id,
         # so the pool stays idempotent and dedup can never merge two strategies.
         setup_id = "setup:{}:{}:{}:{}:{}:{}:{}:{}:{}".format(
@@ -1109,6 +1194,8 @@ class AtlasRuntime:
             updated_at_ms=int(time.time() * 1000),
             evidence_at_ms=int(time.time() * 1000),
             validated_at_ms=0,  # Set by validate_candidate
+            entry_distance_pct=distance,
+            regime_fit=fit,
             trace_id=trace_id,
         )
         return candidate
