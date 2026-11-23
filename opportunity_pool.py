@@ -127,6 +127,9 @@ class SetupCandidate:
     setup_version: int = 1
     evidence_at_ms: int = 0
     requires_revalidation: bool = False
+    # Optional, observed at the analysis timestamp; never fabricate missing inputs.
+    entry_distance_pct: Optional[float] = None
+    regime_fit: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -369,9 +372,10 @@ class OpportunityPool:
             self.add_candidate(candidate)
             self.validate_candidate(candidate.setup_id)
 
-    def prepare_best_reply(self, chat, count):
+    def prepare_best_reply(self, chat, count, *, performance=None, correlations=None):
         with self._lock:
-            items = self.follow_best(chat, count, subscribe=False)
+            items = self.follow_best(chat, count, subscribe=False,
+                                     performance=performance, correlations=correlations)
             return items, self.tracking.displayed_observations(items)
 
     def follow_best_reply(self, chat, displayed, requested_at):
@@ -388,14 +392,31 @@ class OpportunityPool:
                 rows.append(row)
             self.tracking.follow_delivered(chat, rows, requested_at=requested_at)
 
-    def follow_best(self, chat, count, symbol=None, setup_id=None, *, subscribe=True):
+    def follow_best(self, chat, count, symbol=None, setup_id=None, *, subscribe=True,
+                    performance=None, correlations=None):
         with self._lock:
-            ranked = self.get_best_setups(limit=len(self._validated))
+            ranked = self.get_best_setups(limit=len(self._validated), performance=performance)
             selected = {}
             for item in ranked:
-                if symbol and item.symbol != symbol or setup_id and item.setup_id != setup_id:
+                if (symbol and item.symbol != symbol) or (setup_id and item.setup_id != setup_id):
                     continue
-                selected.setdefault(item.symbol, item)
+                if item.symbol in selected:
+                    continue
+                # Diversification uses actual aligned 4h-return correlations
+                # only. Missing correlations are unknown, never invented.
+                if isinstance(correlations, dict):
+                    same_risk = False
+                    for other in selected.values():
+                        corr = correlations.get(frozenset((item.symbol, other.symbol)))
+                        if not isinstance(corr, (int, float)) or not math.isfinite(corr):
+                            continue
+                        signed = corr if item.direction == other.direction else -corr
+                        if signed >= 0.90:
+                            same_risk = True
+                            break
+                    if same_risk:
+                        continue
+                selected[item.symbol] = item
                 if len(selected) >= count:
                     break
             if subscribe:
@@ -744,7 +765,7 @@ class OpportunityPool:
             candidates.sort(key=lambda c: (c.net_rr_after_costs, c.confidence), reverse=True)
             return candidates[:limit]
     
-    def get_best_setups(self, limit: int = 5, rank: str = "composite") -> List[SetupCandidate]:
+    def get_best_setups(self, limit: int = 5, rank: str = "composite", *, performance=None) -> List[SetupCandidate]:
         """Read-only ranking of the validated pool.
 
         rank="composite" (default) uses a transparent heuristic score built
@@ -777,22 +798,56 @@ class OpportunityPool:
                     continue
                 candidates.append(c)
             if rank == "composite":
+                from strategy_performance import evaluate_strategy_edge
+
+                def finite(value):
+                    try:
+                        number = float(value)
+                    except (TypeError, ValueError, OverflowError):
+                        return None
+                    return number if math.isfinite(number) else None
+
                 def composite(c: SetupCandidate) -> float:
                     net_rr = min(float(c.net_rr_after_costs or 0.0), 6.0)
                     rr_component = net_rr / 6.0
-                    confidence_component = max(0.0, min(float(c.confidence or 0.0), 100.0)) / 100.0
-                    mid_target = min(max(float(c.rr_tp2 or 0.0), 0.0), 6.0) / 6.0
+                    confidence_component = max(0.0, min(finite(c.confidence) or 0.0, 100.0)) / 100.0
+                    mid_target = min(max(finite(c.rr_tp2) or 0.0, 0.0), 6.0) / 6.0
                     age_hours = 0.0
                     if c.created_at_ms:
                         age_hours = max(0.0, (now_ms - c.created_at_ms) / 3_600_000.0)
-                    age_component = 2.718281828 ** (-age_hours / 48.0)
-                    return (
-                        0.45 * rr_component
-                        + 0.20 * confidence_component
-                        + 0.15 * mid_target
-                        + 0.20 * age_component
-                    )
-                candidates.sort(key=composite, reverse=True)
+                    age_component = math.exp(-age_hours / 48.0)
+                    score = 0.45 * rr_component + 0.20 * confidence_component + 0.15 * mid_target + 0.20 * age_component
+
+                    # Only recent observed entry distance may influence the score.
+                    # A saved entry distance can be obsolete after a few minutes.
+                    distance = finite(c.entry_distance_pct)
+                    evidence_age = now_ms - int(c.evidence_at_ms or c.validated_at_ms or 0)
+                    if distance is not None and distance >= 0 and 0 <= evidence_age <= 5 * 60_000:
+                        score += 0.08 * max(0.0, 1.0 - distance / 0.03)
+
+                    fit = finite(c.regime_fit)
+                    if fit is not None and 0 <= fit <= 1:
+                        score += 0.08 * fit
+
+                    # Historical performance is only a ranking adjustment
+                    # after independent cost-adjusted IS/OOS validation.
+                    stats = performance.get(c.strategy_id) if isinstance(performance, dict) else None
+                    if isinstance(stats, dict):
+                        edge = evaluate_strategy_edge(stats)
+                        if edge.get("eligible"):
+                            quality = finite(edge.get("selection_quality"))
+                            if quality is not None:
+                                score += 0.16 * min(max(quality, 0.0) / 3.0, 1.0)
+                        else:
+                            # Evidence-backed negative OOS outcomes can reduce
+                            # rank, but a missing/small sample is always neutral.
+                            count = finite(stats.get("oos_trades"))
+                            expectancy = finite(stats.get("oos_expectancy_r"))
+                            if count is not None and count >= 15 and expectancy is not None and expectancy < 0:
+                                score -= 0.10
+                    return score
+
+                candidates.sort(key=lambda c: (composite(c), str(c.symbol), str(c.setup_id)), reverse=True)
             else:
                 # Sort by net RR after costs desc, then confidence desc, then RR desc
                 candidates.sort(key=lambda c: (c.net_rr_after_costs or 0, c.confidence or 0, c.net_rr or 0), reverse=True)
