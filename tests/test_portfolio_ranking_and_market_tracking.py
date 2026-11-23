@@ -199,3 +199,30 @@ def test_scan_limit_is_explicit_about_clamping():
     assert "İstenen: 200" in reply
     assert "En fazla 50" in reply
     bot.runtime.start_scan.assert_called_once_with(200)
+
+
+
+def test_best_opportunities_prioritize_60_percent_confidence_over_higher_rr(portfolio):
+    """Higher validated setup strength outranks speculative high RR.
+
+    This is an ordering check, not a claim of empirical win probability.
+    """
+    high_confidence = candidate("HIGHCONF", rr=2.1)
+    high_confidence.confidence = 96.0
+    high_rr = candidate("HIGHRR", rr=5.5)
+    high_rr.confidence = 55.0
+    publish(portfolio, high_confidence, high_rr)
+
+    ranked = portfolio.get_best_setups(limit=2)
+    assert [row.symbol for row in ranked] == [
+        high_confidence.symbol, high_rr.symbol
+    ]
+
+
+def test_net_rr_still_breaks_ties_at_equal_confidence(portfolio):
+    """Cost-adjusted RR still matters; this is not confidence-only ranking."""
+    better = candidate("BETTERR", rr=4.0)
+    lower = candidate("LOWERRR", rr=2.1)
+    publish(portfolio, better, lower)
+    ranked = portfolio.get_best_setups(limit=2)
+    assert [row.symbol for row in ranked] == [better.symbol, lower.symbol]
