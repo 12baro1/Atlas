@@ -37,6 +37,21 @@ def _risk_validate_candidate(candidate):
     try:
         entry = float(candidate.get("entry"))
         stop = float(candidate.get("stop_loss"))
+        atr = float(candidate.get("atr"))
+        if not math.isfinite(atr) or atr <= 0:
+            return {"eligible": False, "reason": "STOP_ATR_UNAVAILABLE", "weighted_net_rr": None, "risk_plan": None}
+        minimum_stop = atr * float(getattr(Config, "MIN_STOP_ATR_MULTIPLIER", 0.75))
+        distance = abs(entry - stop)
+        tick = candidate.get("tick_size")
+        try:
+            tick = float(tick) if tick is not None else 0.0
+        except (TypeError, ValueError, OverflowError):
+            tick = 0.0
+        # The swing stop was finalized / tick-snapped upstream. Enforce
+        # the ATR floor on that *final* geometry; reconciliation alone checks
+        # net RR/costs and previously let sub-ATR stops slip through.
+        if not math.isfinite(distance) or distance + max(0.0, tick) * 0.5 < minimum_stop:
+            return {"eligible": False, "reason": "STOP_BELOW_ATR_FLOOR", "weighted_net_rr": None, "risk_plan": None}
         targets = {key: float(candidate.get(key)) for key in ("tp1", "tp2", "tp3")}
         risk = {
             "entry_type": str(candidate.get("entry_type") or "MARKET").upper(),

@@ -1077,6 +1077,15 @@ class TelegramCommandService:
             symbol, force_refresh=True, track_signal=True
         )
         if not outcome.get("ok"):
+            reason = str(outcome.get("error") or "")
+            if reason.startswith("MARKET_"):
+                detail = {
+                    "MARKET_STOP_ALREADY_HIT": "Stop seviyesi daha önce görüldü.",
+                    "MARKET_ENTRY_PRICE_STALE": "Giriş fiyatı güncel piyasa fiyatından uzaklaştı.",
+                    "MARKET_SIGNAL_EXPIRED": "MARKET sinyalinin süresi doldu.",
+                    "MARKET_VERIFICATION_UNAVAILABLE": "Güncel fiyat doğrulanamadı.",
+                }.get(reason, "Girişin güncelliği ve fiyat geçmişi doğrulanamadı.")
+                return f"ATLAS | {symbol.upper()}\nMARKET GİRİŞİ REDDEDİLDİ\nNeden: {detail}\nKarar: İŞLEME GİRME"
             return (
                 f"ATLAS | {symbol.upper()}\n"
                 "ANALİZ TAMAMLANAMADI\n"
@@ -1390,6 +1399,13 @@ class TelegramCommandService:
     def _format_best_setups(self, count: int) -> str:
         """Read-only report of complete, validated trade plans from the pool."""
         pool = get_opportunity_pool()
+        if count != 20:
+            try:
+                self.runtime.prune_market_opportunities(count)
+            except Exception as exc:
+                # Verification failure must not bypass the pool's own age
+                # guard; never fabricate an entry price on network errors.
+                self.logger.warning("MARKET pre-display check unavailable | type=%s", type(exc).__name__)
         # Performance snapshots are revision-scoped, cost-adjusted IS/OOS
         # samples. Unknown/sparse history is neutral rather than a win-rate.
         performance = None
