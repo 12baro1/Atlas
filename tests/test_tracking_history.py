@@ -77,11 +77,12 @@ def test_delayed_backfill_and_restart_retains_retry_and_stops_polling(tmp_path, 
     pool.stop()
     pool = OpportunityPool(base_path=path, auto_persist=False)
     try:
-        for attempt in range(1,4):
+        from telegram_tracking import MAX_VERIFICATION_ATTEMPTS
+        for attempt in range(1, MAX_VERIFICATION_ATTEMPTS + 1):
             p = pool.tracking.tracked("1")[0][3]
             assert p["retry_count"] == attempt and p["blocked_at"] == START
             assert pool.tracking.open_symbols() == []
-            if attempt < 3:
+            if attempt < MAX_VERIFICATION_ATTEMPTS:
                 clock[0] = p["retry_at"]
                 assert pool.tracking.open_symbols() == [BTC]
                 pool.tracking.advance_tracking(BTC, history=history)
@@ -94,7 +95,7 @@ def test_delayed_backfill_and_restart_retains_retry_and_stops_polling(tmp_path, 
         assert "BTC" not in bot.handle_islemler()
         assert "Doğrulanamadı · takipten kaldırıldı" in bot.handle_history()
         pool.tracking.advance_tracking(BTC, history=history)
-        assert history.candles.call_count == 3 * 2
+        assert history.candles.call_count == MAX_VERIFICATION_ATTEMPTS * 2
         messages = [text for _, text in pool.tracking.pending_notifications("1")]
         assert len(messages) == 1 and "GİRİŞ TAKİBİ SONLANDI" in messages[0]
     finally:
@@ -566,3 +567,71 @@ def test_pinned_legacy_parent_finishes_before_switching_to_five_minutes():
     state, result = evaluate(BTC, state, json.dumps(result), START+span+BAR, history=history)
     assert result["tps_hit"] == [1,2]
     assert [call.args[2] for call in history.candles.call_args_list] == [span, 5*MINUTE, 5*MINUTE]
+
+
+def test_gate_trade_history_pages_full_time_range_without_fabricated_order(monkeypatch):
+    """One busy minute can contain >1000 fills; offset pages must be complete."""
+    history = TrackingHistory()
+    first = [dict(id=i + 1, create_time_ms=START + i, price="100.0", size="1")
+             for i in range(1000)]
+    second = [dict(id=1001, create_time_ms=START + 1000, price="101.0", size="1")]
+    get = Mock(side_effect=[first, second])
+    monkeypatch.setattr(history, "_get", get)
+    groups = history.trade_range(BTC, START, START + MINUTE)
+    assert len(groups) == 1001 and groups[-1].time == START + 1000
+    assert get.call_count == 2
+    assert get.call_args_list[0].kwargs == {"limit": 1000}
+    assert get.call_args_list[1].kwargs == {"limit": 1000, "offset": 1000}
+
+
+def test_gate_trade_history_refuses_overlapping_pages(monkeypatch):
+    """An endpoint ignoring offset must never duplicate fills."""
+    history = TrackingHistory()
+    page = [dict(id=i, create_time_ms=START + i, price="100.0", size="1")
+            for i in range(1000)]
+    monkeypatch.setattr(history, "_get", Mock(side_effect=[page, page]))
+    with pytest.raises(EvidenceMissing, match="örtüşüyor"):
+        history.trade_range(BTC, START, START + MINUTE)
+
+
+def test_gate_trade_history_refuses_unbounded_pagination(monkeypatch):
+    history = TrackingHistory()
+    def get(*args, **kwargs):
+        offset = kwargs.get("offset", 0)
+        return [dict(id=offset+i, create_time_ms=START + i,
+                     price="100.0", size="1") for i in range(1000)]
+    monkeypatch.setattr(history, "_get", get)
+    with pytest.raises(EvidenceMissing, match="sayfa sınırını"):
+        history.trade_range(BTC, START, START + MINUTE)
+
+
+def test_trade_candle_volume_allows_only_tiny_float_rounding():
+    from tracking_history import trades_match
+    complete = [TradeGroup(START, {100.0}, 0.1),
+                TradeGroup(START+1, {101.0}, 0.2)]
+    assert trades_match(bar(START, 100.0, 101.0, 100.0, 101.0, 0.3), complete)
+    assert not trades_match(bar(START, 100.0, 101.0, 100.0, 101.0, 0.31), complete)
+    assert not trades_match(bar(START, 100.0, 102.0, 100.0, 101.0, 0.3), complete)
+
+
+def test_ambiguous_unfilled_limit_is_visible_with_diagnostic(tmp_path, monkeypatch):
+    import opportunity_pool
+    from tests.test_scan_virtual_portfolio import service
+    pool = OpportunityPool(base_path=tmp_path/"pool", auto_persist=False)
+    monkeypatch.setattr(opportunity_pool, "_pool_instance", pool)
+    try:
+        pool.tracking.follow_analysis("chat", observation())
+        with pool.tracking._transaction() as conn:
+            conn.execute(
+                "UPDATE chat_plans SET state='AMBIGUOUS', "
+                "payload=json_set(payload,'$.ambiguity_reason','Gate geçmişi eksik',"
+                "'$.retry_count',2,'$.retry_at',?) WHERE chat=?",
+                (START + MINUTE, "chat"),
+            )
+        result = service("chat").handle_islemler()
+        assert "DOĞRULAMA BEKLİYOR" in result
+        assert "Gate geçmişi eksik" in result
+        assert "Giriş henüz teyit edilmedi" in result
+        assert "Doğrulama denemesi: 2/8" in result
+    finally:
+        pool.stop()
