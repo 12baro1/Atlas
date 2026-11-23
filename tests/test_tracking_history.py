@@ -636,3 +636,49 @@ def test_ambiguous_unfilled_limit_is_visible_with_diagnostic(tmp_path, monkeypat
         assert "Doğrulama denemesi: 2/8" in result
     finally:
         pool.stop()
+
+
+def test_ambiguous_one_minute_uses_complete_ten_second_candles_first():
+    from telegram_tracking import resolve_bar
+    from tracking_history import TEN_SECONDS
+
+    minute = bar(START, 105, 112, 89, 96, 6)
+    parts = [
+        bar(START, 105, 112, 104, 111),
+        bar(START + TEN_SECONDS, 111, 111, 89, 96),
+        *[bar(START + i * TEN_SECONDS, 96, 96, 96, 96) for i in range(2, 6)],
+    ]
+    history = Mock()
+    history.candles.return_value = parts
+    position = plan()
+    resolve_bar(position, BTC, minute, MINUTE, history, START + MINUTE)
+    assert position["status"] == "SL"
+    assert position["tps_hit"] == [1]
+    history.candles.assert_called_once_with(BTC, START, TEN_SECONDS, 6)
+    history.ticks.assert_not_called()
+    history.trade_range.assert_not_called()
+
+
+def test_ten_second_candles_reject_incomplete_aggregation_and_use_trade_evidence():
+    from telegram_tracking import resolve_bar
+    from tracking_history import TEN_SECONDS
+
+    minute = bar(START, 105, 112, 89, 96, 5)
+    history = Mock()
+    history.candles.return_value = [
+        bar(START + i * TEN_SECONDS, 105, 106, 104, 105) for i in range(5)
+    ]
+    history.ticks.side_effect = EvidenceMissing("tam işlem geçmişi alınamadı")
+    with pytest.raises(EvidenceMissing, match="tam işlem geçmişi alınamadı"):
+        resolve_bar(plan(), BTC, minute, MINUTE, history, START + MINUTE)
+    history.ticks.assert_called_once_with(BTC, START)
+
+
+def test_gate_ten_second_history_uses_supported_interval(monkeypatch):
+    from tracking_history import TEN_SECONDS
+    history = TrackingHistory()
+    get = Mock(return_value=[dict(o="100", v="2", t=START // 1000,
+                                 c="101", l="100", h="101")])
+    monkeypatch.setattr(history.exchange, "_get", get)
+    assert history.candles(BTC, START, TEN_SECONDS, 1) == [bar(START,100,101,100,101,2)]
+    assert get.call_args.args[1]["interval"] == "10s"
