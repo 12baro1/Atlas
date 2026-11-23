@@ -1390,11 +1390,28 @@ class TelegramCommandService:
     def _format_best_setups(self, count: int) -> str:
         """Read-only report of complete, validated trade plans from the pool."""
         pool = get_opportunity_pool()
+        # Performance snapshots are revision-scoped, cost-adjusted IS/OOS
+        # samples. Unknown/sparse history is neutral rather than a win-rate.
+        performance = None
+        try:
+            snapshot = self.runtime.strategy_performance()
+            if isinstance(snapshot, dict):
+                performance = snapshot
+        except Exception as exc:
+            self.logger.warning("Opportunity performance snapshot unavailable | type=%s", type(exc).__name__)
         if count == 20:
-            best = pool.get_best_setups(limit=pool.max_validated)
+            best = pool.get_best_setups(limit=pool.max_validated, performance=performance)
         else:
+            correlations = None
+            try:
+                snapshot = self.runtime.market_correlations()
+                if isinstance(snapshot, dict):
+                    correlations = snapshot
+            except Exception as exc:
+                self.logger.warning("Opportunity correlation snapshot unavailable | type=%s", type(exc).__name__)
             requested_at = int(time.time() * 1000)
-            best, shown = pool.prepare_best_reply(self.chat_id, count)
+            best, shown = pool.prepare_best_reply(self.chat_id, count,
+                                                   performance=performance, correlations=correlations)
             if best:
                 # Persist the user's explicit selection before replying. The
                 # portfolio must not disappear if Telegram delivery fails after
