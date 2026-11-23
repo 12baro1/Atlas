@@ -50,6 +50,12 @@ def test_historical_trades_required_for_same_minute_entry_and_tp():
     parent = bar(START, 105, 112, 99, 111, 5)
     history = Mock()
     def candles(symbol, start, width, count):
+        # This test verifies the raw-trade fallback: the 10s endpoint has
+        # no complete evidence, so it must not return the 1m parent as a
+        # forged shorter candle.
+        from tracking_history import TEN_SECONDS
+        if width == TEN_SECONDS:
+            return []
         return [parent] + [bar(start+i*width, 111, 111, 111, 111, 0) for i in range(1,count)]
     history.candles.side_effect = candles
     raw = json.dumps(plan(entry_reached=False))
