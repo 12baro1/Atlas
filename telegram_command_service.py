@@ -1359,7 +1359,9 @@ class TelegramCommandService:
             return "ATLAS | TARAMA BAŞLATILAMADI\nMevcut tarama kuyruğu değiştirilmedi. /taramadurum ile durumu kontrol et."
         if result.get("continuous"):
             progress = result["progress"]
-            return (f"En fazla 50 hacimli coin | Döngü {progress['generation']}\n"
+            limit_note = (f"İstenen: {limit} | En fazla 50 coin taranabilir.\n"
+                          if limit is not None and int(limit) > 50 else "")
+            return (limit_note + f"En fazla 50 hacimli coin | Döngü {progress['generation']}\n"
                     f"Öncelik: hacim sıralamasındaki ilk {result['selected']} sembolün bekleyen işleri.\n"
                     f"Başarılı: {progress['done']} | Başarısız: {progress['failed']} | Bekleyen: {progress['pending']}")
         return self._format_scan_progress(result)
@@ -1394,10 +1396,11 @@ class TelegramCommandService:
             requested_at = int(time.time() * 1000)
             best, shown = pool.prepare_best_reply(self.chat_id, count)
             if best:
-                if hasattr(self._delivery, "actions"):
-                    self._delivery.actions.append(lambda: pool.follow_best_reply(self.chat_id, shown, requested_at))
-                else:
-                    pool.follow_best_reply(self.chat_id, shown, requested_at)
+                # Persist the user's explicit selection before replying. The
+                # portfolio must not disappear if Telegram delivery fails after
+                # Atlas has acknowledged the command. Duplicate requests are
+                # idempotent in the shared tracking transaction.
+                pool.follow_best_reply(self.chat_id, shown, requested_at)
         title = "HAVUZ" if count == 20 else f"EN İYİ {count} SETUP"
         if not best:
             return f"{title}\nDoğrulanmış setup havuzu boş."
@@ -1435,9 +1438,11 @@ class TelegramCommandService:
         today = datetime.now(tz).date()
         sections = {
             "ACTIVE": ("🟢 AÇIK İŞLEMLER", []),
-            "WAITING": ("🟡 GİRİŞ BEKLEYENLER", []),
+            "MARKET": ("🔵 MARKET SİNYALİ — REFERANS DOĞRULANIYOR", []),
+            "WAITING": ("🟡 LIMIT GİRİŞ BEKLEYENLER", []),
             "AMBIGUOUS": ("🟠 DOĞRULAMA BEKLİYOR", []),
             "CLOSED": ("📊 BUGÜN KAPANANLAR", []),
+            "UNVERIFIED": ("⚪ GİRİŞİ DOĞRULANAMAYANLAR", []),
             "INVALIDATED": ("⚪ BUGÜN GEÇERSİZLEŞENLER", []),
         }
         closed_count = wins = losses = target_count = 0
@@ -1446,8 +1451,13 @@ class TelegramCommandService:
         earlier_targets = []
         for symbol, _, state, plan in rows:
             has_rows = True
-            if state == "AMBIGUOUS" and not entry_confirmed(plan):
+            entry_type = str((plan.get("payload") or {}).get("execution_costs", {}).get("entry_type") or "").upper()
+            if state == "AMBIGUOUS" and not entry_confirmed(plan) and entry_type != "MARKET":
                 state = "WAITING"
+            elif state == "WAITING" and entry_type == "MARKET":
+                # MARKET is an executable signal, not a pending LIMIT order;
+                # no live fill is claimed until the price reference is verified.
+                state = "MARKET"
             if state not in sections:
                 continue
             if state == "CLOSED":
@@ -1458,7 +1468,7 @@ class TelegramCommandService:
                 losses += net < 0
             if plan.get("tracking_muted"):
                 continue
-            if state in {"CLOSED", "INVALIDATED"}:
+            if state in {"CLOSED", "INVALIDATED", "UNVERIFIED"}:
                 resolved = datetime.fromtimestamp((plan.get("resolved_at") or 0) / 1000, tz)
                 if resolved.date() != today:
                     if state == "CLOSED" and plan.get("resolved_at") and resolved.date() < today and _confirmed_targets(plan):
@@ -1473,8 +1483,9 @@ class TelegramCommandService:
 
         count = sum(len(items) for _, items in sections.values())
         active, waiting, verifying = (len(sections[state][1]) for state in ("ACTIVE", "WAITING", "AMBIGUOUS"))
+        market = len(sections["MARKET"][1])
         blocks = [f"ATLAS · İŞLEMLERİM — {count}\n"
-                  f"{active} açık · {waiting} giriş bekliyor · {verifying} doğrulanıyor"]
+                  f"{active} açık · {waiting} limit bekliyor · {market} market referansı · {verifying} doğrulanıyor"]
         for state, (heading, items) in sections.items():
             if not items:
                 continue
@@ -1499,8 +1510,10 @@ class TelegramCommandService:
                         card.append(f"✓ {progress}")
                 else:
                     card.append(f"{label} · {progress}" if progress else label)
-                if state in {"ACTIVE", "WAITING", "AMBIGUOUS"}:
+                if state in {"ACTIVE", "WAITING", "MARKET", "AMBIGUOUS"}:
                     card.extend(_format_islemler_levels(plan, state))
+                    if state == "MARKET":
+                        card.append("Emir gönderilmedi; sanal MARKET referansı henüz doğrulanmadı.")
                 else:
                     card.append(tracked_levels(plan))
                 if state in {"ACTIVE", "WAITING"} and plan.get("live_price") is not None and plan.get("verified_until"):
