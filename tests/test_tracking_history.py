@@ -50,6 +50,12 @@ def test_historical_trades_required_for_same_minute_entry_and_tp():
     parent = bar(START, 105, 112, 99, 111, 5)
     history = Mock()
     def candles(symbol, start, width, count):
+        # This test verifies the raw-trade fallback: the 10s endpoint has
+        # no complete evidence, so it must not return the 1m parent as a
+        # forged shorter candle.
+        from tracking_history import TEN_SECONDS
+        if width == TEN_SECONDS:
+            return []
         return [parent] + [bar(start+i*width, 111, 111, 111, 111, 0) for i in range(1,count)]
     history.candles.side_effect = candles
     raw = json.dumps(plan(entry_reached=False))
@@ -77,11 +83,12 @@ def test_delayed_backfill_and_restart_retains_retry_and_stops_polling(tmp_path, 
     pool.stop()
     pool = OpportunityPool(base_path=path, auto_persist=False)
     try:
-        for attempt in range(1,4):
+        from telegram_tracking import MAX_VERIFICATION_ATTEMPTS
+        for attempt in range(1, MAX_VERIFICATION_ATTEMPTS + 1):
             p = pool.tracking.tracked("1")[0][3]
             assert p["retry_count"] == attempt and p["blocked_at"] == START
             assert pool.tracking.open_symbols() == []
-            if attempt < 3:
+            if attempt < MAX_VERIFICATION_ATTEMPTS:
                 clock[0] = p["retry_at"]
                 assert pool.tracking.open_symbols() == [BTC]
                 pool.tracking.advance_tracking(BTC, history=history)
@@ -94,7 +101,7 @@ def test_delayed_backfill_and_restart_retains_retry_and_stops_polling(tmp_path, 
         assert "BTC" not in bot.handle_islemler()
         assert "Doğrulanamadı · takipten kaldırıldı" in bot.handle_history()
         pool.tracking.advance_tracking(BTC, history=history)
-        assert history.candles.call_count == 3 * 2
+        assert history.candles.call_count == MAX_VERIFICATION_ATTEMPTS * 2
         messages = [text for _, text in pool.tracking.pending_notifications("1")]
         assert len(messages) == 1 and "GİRİŞ TAKİBİ SONLANDI" in messages[0]
     finally:
@@ -190,8 +197,9 @@ def test_worker_recovers_delayed_data_and_updates_telegram_once(tmp_path, monkey
         history.candles.side_effect = TimeoutError()
         worker.refresh_virtual_positions()
         report = bot.handle_islemler()
-        assert "GİRİŞ BEKLEYENLER" in report and "Son takip kontrolü" in report
-        assert "DOĞRULAMA BEKLİYOR" not in report
+        assert "DOĞRULAMA BEKLİYOR" in report and "Son arka plan kontrolü" in report
+        assert "Giriş henüz teyit edilmedi" in report
+        assert "TimeoutError" in report
         assert not pool.tracking.pending_notifications(bot.chat_id)
         assert pool.tracking.tracked(bot.chat_id)[0][3]["history_checked_at"] == clock[0]
         history.candles.side_effect = None
@@ -566,3 +574,117 @@ def test_pinned_legacy_parent_finishes_before_switching_to_five_minutes():
     state, result = evaluate(BTC, state, json.dumps(result), START+span+BAR, history=history)
     assert result["tps_hit"] == [1,2]
     assert [call.args[2] for call in history.candles.call_args_list] == [span, 5*MINUTE, 5*MINUTE]
+
+
+def test_gate_trade_history_pages_full_time_range_without_fabricated_order(monkeypatch):
+    """One busy minute can contain >1000 fills; offset pages must be complete."""
+    history = TrackingHistory()
+    first = [dict(id=i + 1, create_time_ms=START + i, price="100.0", size="1")
+             for i in range(1000)]
+    second = [dict(id=1001, create_time_ms=START + 1000, price="101.0", size="1")]
+    get = Mock(side_effect=[first, second])
+    monkeypatch.setattr(history, "_get", get)
+    groups = history.trade_range(BTC, START, START + MINUTE)
+    assert len(groups) == 1001 and groups[-1].time == START + 1000
+    assert get.call_count == 2
+    assert get.call_args_list[0].kwargs == {"limit": 1000}
+    assert get.call_args_list[1].kwargs == {"limit": 1000, "offset": 1000}
+
+
+def test_gate_trade_history_refuses_overlapping_pages(monkeypatch):
+    """An endpoint ignoring offset must never duplicate fills."""
+    history = TrackingHistory()
+    page = [dict(id=i, create_time_ms=START + i, price="100.0", size="1")
+            for i in range(1000)]
+    monkeypatch.setattr(history, "_get", Mock(side_effect=[page, page]))
+    with pytest.raises(EvidenceMissing, match="örtüşüyor"):
+        history.trade_range(BTC, START, START + MINUTE)
+
+
+def test_gate_trade_history_refuses_unbounded_pagination(monkeypatch):
+    history = TrackingHistory()
+    def get(*args, **kwargs):
+        offset = kwargs.get("offset", 0)
+        return [dict(id=offset+i, create_time_ms=START + i,
+                     price="100.0", size="1") for i in range(1000)]
+    monkeypatch.setattr(history, "_get", get)
+    with pytest.raises(EvidenceMissing, match="sayfa sınırını"):
+        history.trade_range(BTC, START, START + MINUTE)
+
+
+def test_trade_candle_volume_allows_only_tiny_float_rounding():
+    from tracking_history import trades_match
+    complete = [TradeGroup(START, {100.0}, 0.1),
+                TradeGroup(START+1, {101.0}, 0.2)]
+    assert trades_match(bar(START, 100.0, 101.0, 100.0, 101.0, 0.3), complete)
+    assert not trades_match(bar(START, 100.0, 101.0, 100.0, 101.0, 0.31), complete)
+    assert not trades_match(bar(START, 100.0, 102.0, 100.0, 101.0, 0.3), complete)
+
+
+def test_ambiguous_unfilled_limit_is_visible_with_diagnostic(tmp_path, monkeypatch):
+    import opportunity_pool
+    from tests.test_scan_virtual_portfolio import service
+    pool = OpportunityPool(base_path=tmp_path/"pool", auto_persist=False)
+    monkeypatch.setattr(opportunity_pool, "_pool_instance", pool)
+    try:
+        pool.tracking.follow_analysis("chat", observation())
+        with pool.tracking._transaction() as conn:
+            conn.execute(
+                "UPDATE chat_plans SET state='AMBIGUOUS', "
+                "payload=json_set(payload,'$.ambiguity_reason','Gate geçmişi eksik',"
+                "'$.retry_count',2,'$.retry_at',?) WHERE chat=?",
+                (START + MINUTE, "chat"),
+            )
+        result = service("chat").handle_islemler()
+        assert "DOĞRULAMA BEKLİYOR" in result
+        assert "Gate geçmişi eksik" in result
+        assert "Giriş henüz teyit edilmedi" in result
+        assert "Doğrulama denemesi: 2/8" in result
+    finally:
+        pool.stop()
+
+
+def test_ambiguous_one_minute_uses_complete_ten_second_candles_first():
+    from telegram_tracking import resolve_bar
+    from tracking_history import TEN_SECONDS
+
+    minute = bar(START, 105, 112, 89, 96, 6)
+    parts = [
+        bar(START, 105, 112, 104, 111),
+        bar(START + TEN_SECONDS, 111, 111, 89, 96),
+        *[bar(START + i * TEN_SECONDS, 96, 96, 96, 96) for i in range(2, 6)],
+    ]
+    history = Mock()
+    history.candles.return_value = parts
+    position = plan()
+    resolve_bar(position, BTC, minute, MINUTE, history, START + MINUTE)
+    assert position["status"] == "SL"
+    assert position["tps_hit"] == [1]
+    history.candles.assert_called_once_with(BTC, START, TEN_SECONDS, 6)
+    history.ticks.assert_not_called()
+    history.trade_range.assert_not_called()
+
+
+def test_ten_second_candles_reject_incomplete_aggregation_and_use_trade_evidence():
+    from telegram_tracking import resolve_bar
+    from tracking_history import TEN_SECONDS
+
+    minute = bar(START, 105, 112, 89, 96, 5)
+    history = Mock()
+    history.candles.return_value = [
+        bar(START + i * TEN_SECONDS, 105, 106, 104, 105) for i in range(5)
+    ]
+    history.ticks.side_effect = EvidenceMissing("tam işlem geçmişi alınamadı")
+    with pytest.raises(EvidenceMissing, match="tam işlem geçmişi alınamadı"):
+        resolve_bar(plan(), BTC, minute, MINUTE, history, START + MINUTE)
+    history.ticks.assert_called_once_with(BTC, START)
+
+
+def test_gate_ten_second_history_uses_supported_interval(monkeypatch):
+    from tracking_history import TEN_SECONDS
+    history = TrackingHistory()
+    get = Mock(return_value=[dict(o="100", v="2", t=START // 1000,
+                                 c="101", l="100", h="101")])
+    monkeypatch.setattr(history.exchange, "_get", get)
+    assert history.candles(BTC, START, TEN_SECONDS, 1) == [bar(START,100,101,100,101,2)]
+    assert get.call_args.args[1]["interval"] == "10s"

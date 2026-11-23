@@ -8,12 +8,15 @@ import requests
 from config import Config
 from execution_costs import estimate_stop_cost
 from core.candle import Candle
-from tracking_history import BAR, MINUTE, QUARTER_HOUR, EvidenceMissing, indexed, matches, trades_match
+from tracking_history import BAR, MINUTE, TEN_SECONDS, QUARTER_HOUR, EvidenceMissing, indexed, matches, trades_match
 from telegram_prices import confirmed_target_levels, tracked_levels
 from trade_journal import TradeJournal
 
 
-MAX_VERIFICATION_ATTEMPTS = 3
+# Gate history and websocket backfill can lag behind 5m candle closure.
+# Do not declare an unconfirmed entry permanently unverifiable in ~3 minutes.
+# The retry schedule is bounded (up to 16m), preserving eventual termination.
+MAX_VERIFICATION_ATTEMPTS = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chat_follows(
@@ -261,10 +264,28 @@ def resolve_bar(plan, symbol, candle, width, history, now):
             return False
     if history is None:
         raise EvidenceMissing("Mum içinde giriş, hedef veya stop sırası belirsiz")
-    if width == MINUTE:
-        children = history.ticks(symbol, candle.time)
+    if width in (MINUTE, TEN_SECONDS):
+        if width == MINUTE:
+            # Gate futures publishes 10s candles. These can prove entry and
+            # exit order within a conflicting 1m candle without downloading
+            # thousands of individual fills. Verify the complete 1m aggregate
+            # before trusting the subdivision; otherwise fall back to trades.
+            try:
+                fine = child_range(history, symbol, candle.time, MINUTE, TEN_SECONDS, now)
+            except (EvidenceMissing, KeyError, TypeError, ValueError, AttributeError):
+                fine = []
+            if len(fine) == MINUTE // TEN_SECONDS and all(fine) and matches(candle, fine):
+                for child in fine:
+                    resolve_bar(plan, symbol, child, TEN_SECONDS, history, now)
+                    if plan["status"] != "PENDING":
+                        break
+                return True
+        children = (history.ticks(symbol, candle.time) if width == MINUTE
+                    else history.trade_range(symbol, candle.time, candle.time + width))
         if not trades_match(candle, children):
-            raise EvidenceMissing("İşlem geçmişi 1m mumun fiyat ve hacmini doğrulamıyor")
+            raise EvidenceMissing(
+                f"İşlem geçmişi {width // 1000}s mumun fiyat ve hacmini doğrulamıyor"
+            )
         previous_low = previous_high = candle.open
         for index, group in enumerate(children):
             low, high = min(group.prices), max(group.prices)
