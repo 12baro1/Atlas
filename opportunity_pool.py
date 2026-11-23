@@ -734,6 +734,13 @@ class OpportunityPool:
 
     def _fresh_validation(self, candidate, now_ms):
         stamp = candidate.evidence_at_ms or candidate.validated_at_ms
+        if candidate.entry_type == "MARKET":
+            # A MARKET instruction is immediate, unlike an unfilled LIMIT.
+            # Re-validating an old geometry must not reset its entry clock.
+            from market_plan_safety import MAX_MARKET_SIGNAL_AGE_MS
+            created = int(candidate.created_at_ms or 0)
+            if not created or not 0 <= now_ms - created <= MAX_MARKET_SIGNAL_AGE_MS:
+                return False
         return not candidate.requires_revalidation and bool(stamp) and 0 <= now_ms - stamp <= self.freshness_hours * 3_600_000
 
     def get_validated_setups(
