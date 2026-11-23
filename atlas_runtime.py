@@ -99,6 +99,7 @@ class AtlasRuntime:
             "common_filter_passed": 0,
             "common_filter_rejected": 0,
             "rejection_reasons": defaultdict(int),
+            "market_preflight_rejections": defaultdict(int),
             "per_strategy": defaultdict(lambda: {
                 "setups": 0, "passed": 0, "rejected": 0, "selected": 0,
                 "no_setup": 0, "condition_not_met": 0, "missing_data": 0,
@@ -345,6 +346,7 @@ class AtlasRuntime:
             "common_filter_passed": self._strategy_telemetry["common_filter_passed"],
             "common_filter_rejected": self._strategy_telemetry["common_filter_rejected"],
             "rejection_reasons": dict(self._strategy_telemetry["rejection_reasons"]),
+            "market_preflight_rejections": dict(self._strategy_telemetry.get("market_preflight_rejections") or {}),
             "per_strategy": per_strategy,
             "specialists": {
                 key: dict(value)
@@ -922,6 +924,9 @@ class AtlasRuntime:
                             candidate.stop_loss, data.get("snapshot_timestamp_ms"),
                         )
                         if not safe:
+                            with self._lock:
+                                counter = self._strategy_telemetry.setdefault("market_preflight_rejections", defaultdict(int))
+                                _count_reason(counter, reason, 32)
                             self._inc("skipped")
                             self._log(f"SKIP {symbol} MARKET: {reason}")
                             return {"ok": False, "symbol": symbol, "error": reason}
