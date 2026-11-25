@@ -739,7 +739,10 @@ class TelegramCommandService:
                 state = exc.state
                 self.logger.warning("Telegram notification delivery | event=%d attempt=%d state=%s", event_id, attempt, state)
                 delay = max(exc.retry_after, min(600, 2 ** min(attempt, 10))) if state == "retry" else 0
-                tracking.finish_notification(self.chat_id,event_id,attempt,state,retry_after=delay)
+                tracking.finish_notification(
+                    self.chat_id, event_id, attempt, state, retry_after=delay,
+                    rate_limit_seconds=exc.retry_after if state == "retry" else 0,
+                )
                 return
             except Exception:
                 tracking.finish_notification(self.chat_id,event_id,attempt,"uncertain")
@@ -811,19 +814,23 @@ class TelegramCommandService:
         # concurrently, so serialize access to the dedicated reply session.
         with self._reply_lock:
             for part in split_message(message):
-                try:
-                    self._api(
-                        "sendMessage",
-                        {"chat_id": self.chat_id, "text": part, "disable_web_page_preview": True},
-                        timeout=10,
-                        session=self._reply_session,
-                    )
-                except TelegramDeliveryError as exc:
-                    self.logger.warning("Telegram command delivery | state=%s retry_after=%s", exc.state, exc.retry_after)
-                    return False
-                except Exception:
-                    self.logger.exception("Telegram command reply could not be sent")
-                    return False
+                for attempt in range(2):
+                    try:
+                        self._api(
+                            "sendMessage",
+                            {"chat_id": self.chat_id, "text": part, "disable_web_page_preview": True},
+                            timeout=10,
+                            session=self._reply_session,
+                        )
+                        break
+                    except TelegramDeliveryError as exc:
+                        self.logger.warning("Telegram command delivery | state=%s retry_after=%s", exc.state, exc.retry_after)
+                        if (attempt or exc.state != "retry" or exc.retry_after > 2
+                                or self.stop_flag.wait(max(0.25, exc.retry_after))):
+                            return False
+                    except Exception:
+                        self.logger.exception("Telegram command reply could not be sent")
+                        return False
         return True
 
     def _command_and_reply(self, command):
@@ -1586,8 +1593,7 @@ class TelegramCommandService:
                     card.append("Neden: " + str(plan.get("ambiguity_reason") or "Geçmiş mumlar doğrulanacak"))
                     attempts = int(plan.get("retry_count") or 0)
                     if attempts:
-                        from telegram_tracking import MAX_VERIFICATION_ATTEMPTS
-                        card.append(f"Doğrulama denemesi: {attempts}/{MAX_VERIFICATION_ATTEMPTS}")
+                        card.append(f"Doğrulama denemesi: {attempts}")
                     if plan.get("history_checked_at"):
                         checked = datetime.fromtimestamp(plan["history_checked_at"] / 1000, tz)
                         card.append(f"Son arka plan kontrolü {checked:%d.%m %H:%M} TSİ")
@@ -1616,7 +1622,8 @@ class TelegramCommandService:
             summary.append(f"Kapanan net: {total:+.2f}R")
             blocks.append("\n".join(summary))
 
-            live = [p for state in ("ACTIVE", "AMBIGUOUS") for _, p in sections[state][1]]
+            live = [plan for _, plan in sections["ACTIVE"][1]]
+            live.extend(plan for _, plan in sections["AMBIGUOUS"][1] if entry_confirmed(plan))
             if live:
                 partial = sum(p.get("realized_r", 0) for p in live)
                 marks = [p.get("open_r") for p in live]

@@ -613,7 +613,7 @@ def test_scan_defers_claim_until_tracking_releases_even_on_data_failure(monkeypa
     monkeypatch.setattr("tracking_history.TrackingHistory", lambda: history)
     pool.tracking.open_symbols.return_value = ["BTC"]
 
-    def track(symbol, history):
+    def track(symbol, history, stop_event):
         checking.set()
         assert release.wait(3)
         raise TimeoutError()

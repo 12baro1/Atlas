@@ -17,6 +17,27 @@ from strategies.candidate import _raw_candidate
 from shared.specialist_evidence import evidence_for_strategy, attach_strategy_evidence
 
 
+FOUR_HOURS_MS = 4 * 60 * 60 * 1000
+
+
+def _four_hour_returns(series):
+    output = {}
+    for previous, current in zip(series, series[1:]):
+        previous_close = _value(previous, "close")
+        current_close = _value(current, "close")
+        try:
+            timestamp = int(current.time)
+            if timestamp - int(previous.time) != FOUR_HOURS_MS:
+                continue
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            continue
+        if previous_close and current_close and previous_close > 0:
+            value = current_close / previous_close - 1.0
+            if math.isfinite(value):
+                output[timestamp] = value
+    return output
+
+
 def generate(data):
     """Live-compatibility entry point: Relative Strength is evidence-only."""
     return None
@@ -35,32 +56,22 @@ def generate_research_candidate(data):
     universe = data.get("correlation_universe") or {}
     benchmark_keys = ["ETH"] if symbol.startswith("BTC/") else ["BTC"] if symbol.startswith("ETH/") else ["BTC", "ETH"]
 
-    def returns_by_time(series):
-        output = {}
-        for previous, current in zip(series, series[1:]):
-            previous_close = _value(previous, "close")
-            current_close = _value(current, "close")
-            try:
-                timestamp = int(current.time)
-            except (AttributeError, TypeError, ValueError, OverflowError):
-                continue
-            if previous_close and current_close and previous_close > 0:
-                value = current_close / previous_close - 1.0
-                if math.isfinite(value):
-                    output[timestamp] = value
-        return output
-
-    own_returns = returns_by_time(candles)
+    own_returns = _four_hour_returns(candles)
     benchmark_maps = []
     for benchmark_key in benchmark_keys:
         benchmark_candles = universe.get(benchmark_key) or []
         if len(benchmark_candles) < 55:
             return None
-        benchmark_maps.append(returns_by_time(benchmark_candles))
+        benchmark_maps.append(_four_hour_returns(benchmark_candles))
     common_times = set(own_returns)
     for values in benchmark_maps:
         common_times.intersection_update(values)
-    if len(common_times) < 48:
+    try:
+        latest = int(candles[-1].time)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+    recent_times = {latest - offset * FOUR_HOURS_MS for offset in range(12)}
+    if len(common_times) < 48 or not recent_times <= common_times:
         return None
 
     market_by_time = {
@@ -71,14 +82,14 @@ def generate_research_candidate(data):
     for frames in (data.get("sector_peer_universe") or {}).values():
         peer_candles = frames.get("4h") if isinstance(frames, dict) else frames
         if peer_candles and len(peer_candles) >= 55:
-            sector_maps.append(returns_by_time(peer_candles))
+            sector_maps.append(_four_hour_returns(peer_candles))
     sector_coverage = {}
     if len(sector_maps) >= 2:
         for timestamp in common_times:
             peer_values = [values[timestamp] for values in sector_maps if timestamp in values]
             if len(peer_values) >= 2:
                 sector_coverage[timestamp] = sum(peer_values) / len(peer_values)
-    use_sector = len(sector_maps) >= 2 and len(sector_coverage) >= int(len(common_times) * 0.70)
+    use_sector = recent_times <= sector_coverage.keys() and len(sector_coverage) >= int(len(common_times) * 0.70)
     aligned_times = sorted(
         timestamp for timestamp in common_times
         if not use_sector or timestamp in sector_coverage

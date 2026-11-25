@@ -103,6 +103,38 @@ def test_50_worker_jobs_restart_publish_then_resume(tmp_path, pool):
     scan.queue.close()
 
 
+def test_notification_retry_only_blocks_same_symbol_unless_rate_limited(pool, monkeypatch):
+    import time
+    from telegram_tracking import event
+
+    now = [1_800_000_000]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    store = pool.tracking
+    bnb = "BNB/USDT:USDT"
+    plan = dict(entry=100, stop_loss=90, tp1=110, tp2=120, tp3=130)
+    with store._transaction() as conn:
+        event(conn, "chat", BTC, 1, "TP1", "BTC TP1", plan)
+        event(conn, "chat", BTC, 1, "STOP", "BTC STOP", plan)
+        event(conn, "chat", bnb, 1, "STOP", "BNB STOP", plan)
+
+    first, message, attempt = store.claim_notification("chat")
+    assert "BTC TP1" in message
+    store.finish_notification("chat", first, attempt, "retry", retry_after=60)
+    other, message, attempt = store.claim_notification("chat")
+    assert "BNB STOP" in message
+    store.finish_notification("chat", other, attempt, "retry", retry_after=90, rate_limit_seconds=90)
+    now[0] += 60
+    assert store.claim_notification("chat") is None
+
+    now[0] += 30
+    retry, _, attempt = store.claim_notification("chat")
+    assert retry == first and attempt == 2
+    store.finish_notification("chat", retry, attempt, "sent", message_id=1)
+    _, message, _ = store.claim_notification("chat")
+    assert "BTC STOP" in message
+
+
+
 def test_restart_checks_published_batch_before_claiming_next_symbol(tmp_path, pool):
     queue = ScanQueue(tmp_path/"queue")
     symbols = [BTC] + [f"S{i}/USDT:USDT" for i in range(49)]
@@ -598,7 +630,7 @@ def test_priority_tracking_checks_waiting_structure_outside_scan_queue(pool, mon
     runtime.analyze_for_cycle = MagicMock(return_value={"ok": True, "cycle_result": evidence})
     stop_event = threading.Event()
     runtime._refresh_tracked_setups(stop_event)
-    advance.assert_called_once_with(BTC, history=history)
+    advance.assert_called_once_with(BTC, history=history, stop_event=stop_event)
     runtime.analyze_for_cycle.assert_called_once_with(BTC)
     assert pool.tracking.tracked("chat")[0][2] == "WAITING"
     runtime._refresh_tracked_setups(stop_event)

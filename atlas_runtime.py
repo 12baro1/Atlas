@@ -253,7 +253,7 @@ class AtlasRuntime:
                     if stop_event.is_set():
                         return
                     try:
-                        tracking.advance_tracking(symbol, history=history)
+                        tracking.advance_tracking(symbol, history=history, stop_event=stop_event)
                     except Exception as exc:
                         self.logger.warning(
                             "Tracked setup data unavailable for %s (%s)", symbol, type(exc).__name__

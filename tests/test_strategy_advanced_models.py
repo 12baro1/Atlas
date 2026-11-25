@@ -25,6 +25,17 @@ def _price_series(returns, start=100.0, start_time=1_700_000_000_000):
     return candles
 
 
+def test_relative_strength_excludes_an_eight_hour_return_from_four_hour_alignment():
+    from strategies.relative_strength.strategy import _four_hour_returns
+
+    candles = _price_series([0.05, 0.05, 0.01])
+    complete = _four_hour_returns(candles)
+    missing_middle = _four_hour_returns([candles[0], candles[2], candles[3]])
+    assert candles[2].time in complete
+    assert candles[2].time not in missing_middle
+    assert missing_middle == {candles[3].time: complete[candles[3].time]}
+
+
 def test_relative_strength_uses_beta_adjusted_sector_peer_residual():
     market_returns = [
         0.0004 + (index % 5) * 0.00025
