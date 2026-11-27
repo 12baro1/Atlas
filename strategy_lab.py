@@ -83,6 +83,16 @@ def _risk_validate_candidate(candidate):
         if not math.isfinite(distance) or distance + max(0.0, tick) * 0.5 < minimum_stop:
             return {"eligible": False, "reason": "STOP_BELOW_ATR_FLOOR", "weighted_net_rr": None, "risk_plan": None}
         targets = {key: float(candidate.get(key)) for key in ("tp1", "tp2", "tp3")}
+        atr = float(candidate.get("atr") or 0.0)
+        if math.isfinite(atr) and atr > 0:
+            minimum_stop = atr * Config.MIN_STOP_ATR_MULTIPLIER
+            rounding_tolerance = max(math.ulp(entry), math.ulp(stop))
+            if abs(entry - stop) + rounding_tolerance < minimum_stop:
+                return {
+                    "eligible": False, "reason": "STOP_TOO_TIGHT_FOR_ATR",
+                    "weighted_net_rr": None, "risk_plan": None,
+                }
+
         risk = {
             "entry_type": str(candidate.get("entry_type") or "MARKET").upper(),
             "side": str(candidate.get("direction") or "").upper(),

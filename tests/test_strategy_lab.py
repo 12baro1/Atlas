@@ -666,6 +666,27 @@ def test_strategy_native_setup_is_counted_before_common_geometry_rejection(monke
     assert usage["common_filter_result"] == "REJECTED"
 
 
+def test_common_filter_rejects_high_rr_plan_with_tight_volatility_stop(monkeypatch):
+    import strategy_lab
+
+    monkeypatch.setattr(strategy_lab.Config, "MIN_STOP_ATR_MULTIPLIER", 0.75)
+    plan = {
+        "direction": "LONG", "entry_type": "MARKET", "entry": 100.0,
+        "tp1": 105.0, "tp2": 110.0, "tp3": 115.0, "atr": 2.0, "strength": 80.0,
+    }
+    monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(plan, stop_loss=99.5))
+    monkeypatch.setattr(strategy_lab, "_relative_strength", lambda data: dict(plan, stop_loss=98.5))
+    report = SevenStrategyLab().analyze(
+        {"symbol": "BTC/USDT:USDT", "current_price": 100.0, "tick_size": 0.01}
+    )
+
+    trend = next(row for row in report["strategies"] if row["strategy_id"] == "trend_pullback")
+    assert trend["rejection_reasons"] == ["STOP_TOO_TIGHT_FOR_ATR"]
+    assert trend["rejection_stage"] == "COMMON_FILTER"
+    assert report["selected"]["strategy_id"] == "relative_strength"
+    assert report["selected"]["stop_loss"] == 98.5
+
+
 def test_common_filter_finalizes_raw_strategy_geometry_and_selects_complete_plan(monkeypatch):
     import strategy_lab
 
