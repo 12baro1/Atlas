@@ -730,3 +730,63 @@ def test_gate_ten_second_history_uses_supported_interval(monkeypatch):
     monkeypatch.setattr(history.exchange, "_get", get)
     assert history.candles(BTC, START, TEN_SECONDS, 1) == [bar(START,100,101,100,101,2)]
     assert get.call_args.args[1]["interval"] == "10s"
+
+
+def _gate_retention_error():
+    import requests
+
+    response = requests.Response()
+    response.status_code = 400
+    response._content = json.dumps({
+        "label": "INVALID_PARAM_VALUE",
+        "message": "Candlestick too long ago. Maximum 10000 points recently are allowed",
+    }).encode("utf-8")
+    return requests.HTTPError(response=response)
+
+
+@pytest.mark.parametrize("matching_volume", [True, False])
+def test_expired_one_minute_history_replays_only_trades_verified_by_parent(matching_volume):
+    history = Mock()
+    parent = bar(START, 105, 111, 100, 106, 4 if matching_volume else 5)
+    history.candles.side_effect = [[parent], _gate_retention_error()]
+    history.trade_range.return_value = [
+        TradeGroup(START + offset, {price}, 1)
+        for offset, price in enumerate((105, 100, 111, 106))
+    ]
+    state, tracked = evaluate(
+        BTC, "WAITING", json.dumps(plan(entry_reached=False, entry_reached_at=None)),
+        START + BAR, history=history,
+    )
+    history.trade_range.assert_called_once_with(BTC, START, START + BAR)
+    if matching_volume:
+        assert state == "ACTIVE"
+        assert tracked["entry_reached_at"] == START + 1
+        assert tracked["tps_hit"] == [1]
+    else:
+        assert state == "AMBIGUOUS"
+        assert tracked["entry_reached"] is False
+        assert not tracked.get("tps_hit")
+
+
+def test_expired_ten_second_history_uses_trades_verified_by_one_minute_candle():
+    from telegram_tracking import resolve_bar
+
+    history = Mock()
+    history.candles.side_effect = _gate_retention_error()
+    history.ticks.return_value = [
+        TradeGroup(START + offset, {price}, 1)
+        for offset, price in enumerate((105, 100, 111, 106))
+    ]
+    tracked = plan(entry_reached=False, entry_reached_at=None)
+    assert resolve_bar(tracked, BTC, bar(START, 105, 111, 100, 106, 4), MINUTE, history, START + MINUTE)
+    history.ticks.assert_called_once_with(BTC, START)
+    assert tracked["entry_reached_at"] == START + 1 and tracked["tps_hit"] == [1]
+
+
+def test_primary_candle_retention_error_keeps_http_status_in_tracking_reason():
+    history = Mock()
+    history.candles.side_effect = _gate_retention_error()
+    state, tracked = evaluate(BTC, "ACTIVE", json.dumps(plan()), START + BAR, history=history)
+    assert state == "AMBIGUOUS"
+    assert tracked["ambiguity_reason"] == "Gate.io mum geçmişi saklama sınırının dışında (HTTP 400)"
+    assert tracked["entry_reached"]

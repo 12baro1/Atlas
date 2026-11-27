@@ -13,6 +13,18 @@ BAR = 5 * MINUTE
 QUARTER_HOUR = 15 * MINUTE
 
 
+def candle_history_expired(error):
+    response = error.response
+    if response is None or response.status_code != 400:
+        return False
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    return (isinstance(body, dict) and body.get("label") == "INVALID_PARAM_VALUE"
+            and "candlestick too long ago" in str(body.get("message", "")).lower())
+
+
 class EvidenceMissing(ValueError):
     pass
 

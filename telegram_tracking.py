@@ -6,7 +6,7 @@ import time
 import requests
 
 from core.candle import Candle
-from tracking_history import BAR, MINUTE, TEN_SECONDS, QUARTER_HOUR, EvidenceMissing, indexed, matches, trades_match
+from tracking_history import BAR, MINUTE, TEN_SECONDS, QUARTER_HOUR, EvidenceMissing, candle_history_expired, indexed, matches, trades_match
 from market_plan_safety import market_entry_risk_valid
 from telegram_prices import confirmed_target_levels, tracked_levels
 from trade_journal import TradeJournal
@@ -247,6 +247,10 @@ def resolve_bar(plan, symbol, candle, width, history, now):
             # before trusting the subdivision; otherwise fall back to trades.
             try:
                 fine = child_range(history, symbol, candle.time, MINUTE, TEN_SECONDS, now)
+            except requests.HTTPError as exc:
+                if not candle_history_expired(exc):
+                    raise
+                fine = []
             except (EvidenceMissing, KeyError, TypeError, ValueError, AttributeError):
                 fine = []
             if len(fine) == MINUTE // TEN_SECONDS and all(fine) and matches(candle, fine):
@@ -257,47 +261,60 @@ def resolve_bar(plan, symbol, candle, width, history, now):
                 return True
         children = (history.ticks(symbol, candle.time) if width == MINUTE
                     else history.trade_range(symbol, candle.time, candle.time + width))
-        if not trades_match(candle, children):
-            raise EvidenceMissing(
-                f"İşlem geçmişi {width // 1000}s mumun fiyat ve hacmini doğrulamıyor"
-            )
-        previous_low = previous_high = candle.open
-        for index, group in enumerate(children):
-            low, high = min(group.prices), max(group.prices)
-            entry = plan["entry"]
-            skipped_entry = (entry not in group.prices
-                             and min(previous_low, low) < entry < max(previous_high, high))
-            previous_low, previous_high = low, high
-            if group.time < verified:
-                continue
-            only_price = low if low == high else None
-            first = candle.open if index == 0 else only_price
-            last = candle.close if index == len(children) - 1 else only_price
-            if not plan["entry_reached"]:
-                market = plan["payload"]["execution_costs"]["entry_type"] == "MARKET"
-                if market and first is None:
-                    raise EvidenceMissing("Aynı milisaniyede piyasa giriş fiyatı doğrulanamadı")
-                if not market and skipped_entry:
-                    raise EvidenceMissing("İşlem fiyatları giriş seviyesini atladı")
-            # Only the enclosing minute proves its endpoints. Inside a tied
-            # group the simulator can use the range if event order is immaterial.
-            tick = Candle(group.time, first, high, low, last, group.volume)
-            if not apply_bar(plan, tick, 1):
-                if low != high:
-                    raise EvidenceMissing("Aynı milisaniyede işlem seviyelerinin sırası doğrulanamadı")
-                raise EvidenceMissing("İşlem fiyatı plan seviyeleriyle uyuşmuyor")
-            plan["verified_until"] = group.time + 1
-            if plan["status"] != "PENDING":
-                break
-        return True
+        return _replay_trade_groups(plan, candle, width, verified, children)
     for step in ((5 * MINUTE, MINUTE) if width == QUARTER_HOUR else (MINUTE,)):
-        children = child_range(history, symbol, candle.time, width, step, now)
+        try:
+            children = child_range(history, symbol, candle.time, width, step, now)
+        except requests.HTTPError as exc:
+            if not candle_history_expired(exc):
+                raise
+            continue
         if all(children) and matches(candle, children):
             break
     else:
-        raise EvidenceMissing("Alt mum geçmişi eksik veya üst mumla uyuşmuyor")
+        if width == BAR and hasattr(history, "trade_range"):
+            trades = history.trade_range(symbol, candle.time, candle.time + width)
+            if isinstance(trades, list) and trades_match(candle, trades):
+                return _replay_trade_groups(plan, candle, width, verified, trades)
+        raise EvidenceMissing("Alt mum veya işlem geçmişi üst mumla doğrulanamadı")
     for child in children:
         resolve_bar(plan, symbol, child, step, history, now)
+        if plan["status"] != "PENDING":
+            break
+    return True
+
+
+def _replay_trade_groups(plan, candle, width, verified, children):
+    if not isinstance(children, list) or not trades_match(candle, children):
+        raise EvidenceMissing(
+            f"İşlem geçmişi {width // 1000}s mumun fiyat ve hacmini doğrulamıyor"
+        )
+    previous_low = previous_high = candle.open
+    for index, group in enumerate(children):
+        low, high = min(group.prices), max(group.prices)
+        entry = plan["entry"]
+        skipped_entry = (entry not in group.prices
+                         and min(previous_low, low) < entry < max(previous_high, high))
+        previous_low, previous_high = low, high
+        if group.time < verified:
+            continue
+        only_price = low if low == high else None
+        first = candle.open if index == 0 else only_price
+        last = candle.close if index == len(children) - 1 else only_price
+        if not plan["entry_reached"]:
+            market = plan["payload"]["execution_costs"]["entry_type"] == "MARKET"
+            if market and first is None:
+                raise EvidenceMissing("Aynı milisaniyede piyasa giriş fiyatı doğrulanamadı")
+            if not market and skipped_entry:
+                raise EvidenceMissing("İşlem fiyatları giriş seviyesini atladı")
+        # The enclosing candle proves its endpoints. Inside a tied
+        # group the simulator can use the range if event order is immaterial.
+        tick = Candle(group.time, first, high, low, last, group.volume)
+        if not apply_bar(plan, tick, 1):
+            if low != high:
+                raise EvidenceMissing("Aynı milisaniyede işlem seviyelerinin sırası doğrulanamadı")
+            raise EvidenceMissing("İşlem fiyatı plan seviyeleriyle uyuşmuyor")
+        plan["verified_until"] = group.time + 1
         if plan["status"] != "PENDING":
             break
     return True
@@ -437,7 +454,12 @@ def evaluate(symbol, state, raw, now, candles=None, history=None):
         plan["ambiguity_reason"] = str(exc) if isinstance(exc, EvidenceMissing) else f"Gate.io geçmiş verisi alınamadı ({type(exc).__name__})"
         temporary = isinstance(exc, (TimeoutError, ConnectionError, requests.Timeout, requests.ConnectionError))
         if isinstance(exc, requests.HTTPError) and exc.response is not None:
-            temporary = exc.response.status_code in {408, 429, 500, 502, 503, 504}
+            status = exc.response.status_code
+            temporary = status in {408, 429, 500, 502, 503, 504}
+            plan["ambiguity_reason"] = (
+                "Gate.io mum geçmişi saklama sınırının dışında (HTTP 400)"
+                if candle_history_expired(exc) else f"Gate.io geçmiş verisi alınamadı (HTTP {status})"
+            )
         if history and temporary:
             failures = plan.get("network_failures", 0) + 1
             plan["network_failures"] = failures
