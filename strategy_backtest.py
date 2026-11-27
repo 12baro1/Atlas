@@ -277,6 +277,8 @@ def _summarize(rows):
     count = len(values)
     return {
         "trades": count,
+        "full_stop_count": sum(row.get("exit_reason") == "STOP" for row in rows),
+        "partial_stop_count": sum(row.get("exit_reason") == "TRAILING_STOP" for row in rows),
         "win_rate_pct": round(100.0 * len(winners) / count, 2) if count else 0.0,
         "net_expectancy_r": round(sum(values) / count, 4) if count else 0.0,
         "net_profit_factor": round(sum(winners) / sum(losers), 4) if losers else (999.0 if winners else 0.0),
@@ -575,12 +577,15 @@ def main():
         f"5 STRATEJİ BACKTEST | {report['symbol']} | istenen={report['days']} gün | "
         f"gerçekleşen={report['effective_days']} gün | analiz={report['analysis_calls']}"
     )
-    print(f"{'STRATEJİ':<24} {'BÖLÜM':<5} {'İŞLEM':>6} {'WR':>8} {'PF':>8} {'EXP R':>9} {'NET R':>9}")
+    print("İLK SL: TP almadan stop | TP+SL: kısmi TP sonrası stop")
+    print(f"{'STRATEJİ':<24} {'BÖLÜM':<5} {'İŞLEM':>6} {'İLK SL':>6} {'TP+SL':>6} "
+          f"{'WR':>8} {'PF':>8} {'EXP R':>9} {'NET R':>9}")
     for strategy_id, payload in report["results"].items():
         for split in ("IS", "OOS"):
             item = payload[split]
             print(
                 f"{strategy_id:<24} {split:<5} {item['trades']:>6} "
+                f"{item['full_stop_count']:>6} {item['partial_stop_count']:>6} "
                 f"{item['win_rate_pct']:>7.2f}% {item['net_profit_factor']:>8.3f} "
                 f"{item['net_expectancy_r']:>9.4f} {item['net_r']:>9.3f}"
             )

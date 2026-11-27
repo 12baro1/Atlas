@@ -110,7 +110,7 @@ def test_short_targets_are_directionally_simulated():
     assert outcome is not None
     assert outcome["gross_r"] > 0
 
-from strategy_backtest import _walk_forward_summary
+from strategy_backtest import _summarize, _walk_forward_summary
 
 
 def test_funding_cost_is_applied_at_historical_settlement():
@@ -138,6 +138,19 @@ def test_funding_cost_is_applied_at_historical_settlement():
     assert short_pays["funding_pnl_r"] < 0
     assert long_result["net_r"] < long_result["gross_r"]
     assert short_pays["net_r"] < short_pays["gross_r"]
+
+
+def test_strategy_summary_separates_full_stop_from_stop_after_partial_targets():
+    summary = _summarize([
+        {"net_r": -1.15, "cost_r": 0.15, "exit_reason": "STOP"},
+        {"net_r": -0.10, "cost_r": 0.10, "exit_reason": "TRAILING_STOP"},
+        {"net_r": 0.80, "cost_r": 0.10, "exit_reason": "TRAILING_STOP"},
+        {"net_r": 1.50, "cost_r": 0.10, "exit_reason": "TP3"},
+    ])
+    assert summary["trades"] == 4
+    assert summary["full_stop_count"] == 1
+    assert summary["partial_stop_count"] == 2
+    assert summary["win_rate_pct"] == 50.0
 
 
 def test_walk_forward_uses_expanding_train_and_sequential_test_windows():

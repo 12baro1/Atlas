@@ -1147,7 +1147,7 @@ class SevenStrategyLab:
             "candidate_count": len(generated),
             "validated_candidate_count": len(eligible),
             "selected": selected,
-            "selection_method": "single_common_filter_then_net_rr_strength_regime_rank",
+            "selection_method": "single_common_filter_then_regime_adjusted_strength_net_rr_rank",
             "performance_status": "OBSERVATIONAL_ONLY_NOT_AN_ELIGIBILITY_GATE",
             "warning": (
                 "Strategy-native setup rules remain inside each generator. All shared risk, "
