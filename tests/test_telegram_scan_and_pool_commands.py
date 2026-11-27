@@ -121,28 +121,27 @@ def test_refresh_reports_inventory(pool):
 
 
 # ---------------------------------------------------------------------------
-# Best 5/10: strictly read-only
+# Best 5/10: pool reports with chat tracking
 # ---------------------------------------------------------------------------
 
-def test_best_five_read_only_from_pool(pool):
+def test_best_five_tracks_ranked_pool_setups(pool):
     make_validated(pool, "s1")
     make_validated(pool, "s2", "ETH/USDT:USDT", net_rr=3.0)
     runtime = MagicMock()
     service = make_service(runtime)
     result = service.handle_best_five()
-    # No scan, no analysis, no pool mutation was ever requested
     runtime.start_scan.assert_not_called()
     runtime.analyze_symbol.assert_not_called()
     levels = ["Giriş: 50000.0 | Stop: 49500.0", "TP1: 51000.0 | TP2: 52000.0 | TP3: 53000.0"]
-    assert result.splitlines() == ["EN İYİ 5 SETUP", "1. ETH/USDT | LONG | SMC | +3.00R", *levels,
-                                   "2. BTC/USDT | LONG | SMC | +2.50R", *levels]
+    tracked = "Bu setup /islemler listesinde takip ediliyor."
+    assert result.splitlines() == ["EN İYİ 5 SETUP", "1. ETH/USDT | LONG | SMC | +3.00R", *levels, tracked,
+                                   "2. BTC/USDT | LONG | SMC | +2.50R", *levels, tracked]
     assert len(pool.tracking.tracked(service.chat_id)) == 2
-    # Strictly read-only: pool state unchanged
     stats = pool.get_stats()
     assert stats["validated"] == 2 and stats["candidates"] == 0
 
 
-def test_best_ten_read_only(pool):
+def test_best_ten_shows_ranked_pool_setups(pool):
     for index in range(3):
         make_validated(pool, f"s{index}", f"S{index}/USDT:USDT")
     service = make_service()

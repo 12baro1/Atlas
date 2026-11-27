@@ -557,6 +557,8 @@ def test_delivered_top_ten_tracks_current_setups_after_explicit_reenable(pool, m
     def send(method, payload, **kwargs):
         for symbol in ("TUT/USDT", "UB/USDT", "MORPHO/USDT"):
             assert symbol in payload["text"]
+        assert "Bu sembolün takibi kapalı." in payload["text"]
+        assert payload["text"].count("Bu setup /islemler listesinde takip ediliyor.") == 2
         now[0] += 900
         # A newer neutral analysis should not prevent tracking the setup still in the pool.
         pool.publish_cycle(2, [observation(tut, stamp=now[0]*1000, setup=False)])
@@ -572,6 +574,42 @@ def test_delivered_top_ten_tracks_current_setups_after_explicit_reenable(pool, m
     assert active == [(tut, "WAITING")]
     assert "TUT/USDT" in bot.execute_command("/islemler")
     assert "MORPHO/USDT" not in bot.execute_command("/islemler")
+
+
+def test_top_setup_reports_older_plan_still_waiting_for_verification(pool, monkeypatch):
+    import time
+
+    bot = service()
+    now = 1_800_000_000
+    monkeypatch.setattr(time, "time", lambda: now)
+    symbol = "BULLA/USDT:USDT"
+    old = observation(symbol, stamp=now * 1000 - 1000)
+    old["setup"].update(entry_price=0.021058, stop_loss=0.01859,
+                        tp1=0.024643, tp2=0.031012, tp3=0.038026)
+    old["setup"]["execution_costs"]["entry_type"] = "MARKET"
+    pool.tracking.follow_analysis(bot.chat_id, old)
+    with pool.tracking._transaction() as conn:
+        conn.execute(
+            "UPDATE chat_plans SET state='AMBIGUOUS', payload=json_set(payload, '$.status', 'AMBIGUOUS') "
+            "WHERE chat=? AND symbol=?",
+            (bot.chat_id, symbol),
+        )
+    new = observation(symbol, stamp=now * 1000)
+    new["setup"].update(setup_id="bulla-new", entry_price=0.064748, stop_loss=0.061309,
+                        tp1=0.070325, tp2=0.0768, tp3=0.07922)
+    pool.publish_cycle(1, [new])
+
+    assert "takibe alınmadı" not in bot.execute_command("/havuz")
+    reply = bot.execute_command("/eniyi10")
+    assert "0.064748" in reply
+    assert "Yeni setup takibe alınmadı. Önceki kayıt doğrulama bekliyor." in reply
+
+    portfolio = bot.execute_command("/islemler")
+    assert "0.021058" in portfolio and "0.064748" not in portfolio
+    assert [(row[1], row[2]) for row in pool.tracking.tracked(bot.chat_id)] == [(1, "AMBIGUOUS")]
+    notification = pool.tracking.pending_notifications(bot.chat_id)[-1][1]
+    assert "HAVUZDA YENİ SETUP VAR\n" in notification
+    assert "0.021058" in notification
 
 
 def test_no_new_trigger_preserves_setup_until_evidence_breaks_its_stop(tmp_path, monkeypatch):

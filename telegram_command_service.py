@@ -1416,8 +1416,9 @@ class TelegramCommandService:
         return "\n".join(lines)
 
     def _format_best_setups(self, count: int) -> str:
-        """Read-only report of complete, validated trade plans from the pool."""
+        """Show pool plans and report the tracking result for explicit selections."""
         pool = get_opportunity_pool()
+        tracking_status = {}
         if count != 20:
             try:
                 self.runtime.prune_market_opportunities(count)
@@ -1458,7 +1459,7 @@ class TelegramCommandService:
                 # portfolio must not disappear if Telegram delivery fails after
                 # Atlas has acknowledged the command. Duplicate requests are
                 # idempotent in the shared tracking transaction.
-                pool.follow_best_reply(self.chat_id, shown, requested_at)
+                tracking_status = pool.follow_best_reply(self.chat_id, shown, requested_at) or {}
         title = "HAVUZ" if count == 20 else f"EN İYİ {count} SETUP"
         if not best:
             return f"{title}\nDoğrulanmış setup havuzu boş."
@@ -1467,6 +1468,19 @@ class TelegramCommandService:
             lines.append(f"{index}. {item.symbol.replace(':USDT','')} | {item.direction} | "
                          f"{_format_strategy_name(item.strategy_name)} | {_format_rr(item.net_rr_after_costs)}")
             lines.append(format_plan_levels(item.entry_price, item.stop_loss, item.tp1, item.tp2, item.tp3))
+            if item.symbol not in tracking_status:
+                continue
+            tracked_id, state, muted = tracking_status[item.symbol]
+            if muted:
+                lines.append("Yeni setup takibe alınmadı. Bu sembolün takibi kapalı.")
+            elif tracked_id == item.setup_id and state in {"WAITING", "ACTIVE", "AMBIGUOUS"}:
+                lines.append("Bu setup /islemler listesinde takip ediliyor.")
+            elif tracked_id != item.setup_id and state == "AMBIGUOUS":
+                lines.append("Yeni setup takibe alınmadı. Önceki kayıt doğrulama bekliyor.")
+            elif tracked_id != item.setup_id and state == "ACTIVE":
+                lines.append("Yeni setup takibe alınmadı. Önceki işlem hâlâ açık.")
+            else:
+                lines.append("Bu setup için /islemler listesinde güncel takip yok.")
         return "\n".join(lines)
 
     def handle_remove_symbol(self, raw):

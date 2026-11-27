@@ -95,13 +95,13 @@ def transition(conn, chat, symbol, revision, setup, *, announce, user_requested=
         if setup and previous_id == setup["setup_id"] and state not in {"INVALIDATED", "REMOVED"}:
             return
         if state in {"ACTIVE","AMBIGUOUS"}:
-            # Do not silently replace an entered trade with a new pool setup.
-            # Notify the follower once per distinct replacement instead.
+            # Preserve open positions and plans pending verification.
+            # Notify the follower once per distinct new pool setup.
             if setup and previous_id != setup["setup_id"] and announce:
                 kind = "SETUP_CHANGED:" + str(setup["setup_id"])
                 event(conn, chat, symbol, revision, kind,
-                      "TAKİPTEKİ İŞLEMİN SETUP'I DEĞİŞTİ\\n"
-                      "Mevcut giriş/stop/TP korunuyor; yeni havuz fırsatı otomatik işlem açmaz.",
+                      "HAVUZDA YENİ SETUP VAR\n"
+                      "Bu semboldeki mevcut takip kaydı devam ediyor.",
                       old)
             return
         if state == "WAITING":
