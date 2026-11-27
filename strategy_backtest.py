@@ -25,6 +25,7 @@ from backtest import (
     _configured_partial_tp_weights,
 )
 from engine import AtlasEngine
+from market_plan_safety import market_entry_risk_valid
 from strategy_outcome_journal import StrategyOutcomeJournal
 from historical_derivatives import load_historical_derivatives
 from microstructure_archive import snapshot_at as archived_microstructure_at
@@ -199,9 +200,12 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
         fill_open = float(fill_candle.open)
         entry = fill_open
         entry_type = "MARKET"
-        shift = fill_open - planned_entry
-        stop += shift
-        targets = [value + shift for value in targets]
+        if not market_entry_risk_valid(
+            direction, planned_entry, fill_open, stop, targets[0],
+            {"maker_fee_rate": maker_fee, "taker_fee_rate": taker_fee,
+             "spread_rate": spread_rate, "slippage_rate": slippage_rate},
+        ):
+            return None
         simulation_start_offset = 0
         simulation_candles = future_candles[:max_bars]
         simulation_horizon = max_bars
@@ -277,6 +281,8 @@ def _summarize(rows):
     count = len(values)
     return {
         "trades": count,
+        "full_stop_count": sum(row.get("exit_reason") == "STOP" for row in rows),
+        "partial_stop_count": sum(row.get("exit_reason") == "TRAILING_STOP" for row in rows),
         "win_rate_pct": round(100.0 * len(winners) / count, 2) if count else 0.0,
         "net_expectancy_r": round(sum(values) / count, 4) if count else 0.0,
         "net_profit_factor": round(sum(winners) / sum(losers), 4) if losers else (999.0 if winners else 0.0),
@@ -575,12 +581,15 @@ def main():
         f"5 STRATEJİ BACKTEST | {report['symbol']} | istenen={report['days']} gün | "
         f"gerçekleşen={report['effective_days']} gün | analiz={report['analysis_calls']}"
     )
-    print(f"{'STRATEJİ':<24} {'BÖLÜM':<5} {'İŞLEM':>6} {'WR':>8} {'PF':>8} {'EXP R':>9} {'NET R':>9}")
+    print("İLK SL: TP almadan stop | TP+SL: kısmi TP sonrası stop")
+    print(f"{'STRATEJİ':<24} {'BÖLÜM':<5} {'İŞLEM':>6} {'İLK SL':>6} {'TP+SL':>6} "
+          f"{'WR':>8} {'PF':>8} {'EXP R':>9} {'NET R':>9}")
     for strategy_id, payload in report["results"].items():
         for split in ("IS", "OOS"):
             item = payload[split]
             print(
                 f"{strategy_id:<24} {split:<5} {item['trades']:>6} "
+                f"{item['full_stop_count']:>6} {item['partial_stop_count']:>6} "
                 f"{item['win_rate_pct']:>7.2f}% {item['net_profit_factor']:>8.3f} "
                 f"{item['net_expectancy_r']:>9.4f} {item['net_r']:>9.3f}"
             )

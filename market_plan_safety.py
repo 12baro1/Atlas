@@ -10,6 +10,7 @@ import math
 import time
 
 from config import Config
+from execution_costs import estimate_plan_cost, estimate_stop_cost
 
 MINUTE = 60_000
 MAX_MARKET_SIGNAL_AGE_MS = 120_000
@@ -24,6 +25,46 @@ def _positive_number(value):
     return number if math.isfinite(number) and number > 0 else None
 
 
+def market_entry_distance_ok(planned, actual):
+    planned, actual = _positive_number(planned), _positive_number(actual)
+    limit = float(Config.MAX_MARKET_ENTRY_DISTANCE_PERCENT)
+    return planned is not None and actual is not None and abs(actual - planned) / planned <= limit
+
+
+def market_entry_risk_valid(direction, planned, actual, stop, tp1, costs):
+    """Recheck the existing stop and first target at the actual entry price."""
+    if not market_entry_distance_ok(planned, actual):
+        return False
+    actual, stop, tp1 = _positive_number(actual), _positive_number(stop), _positive_number(tp1)
+    if None in (actual, stop, tp1):
+        return False
+    if not ((direction == "LONG" and stop < actual < tp1)
+            or (direction == "SHORT" and tp1 < actual < stop)):
+        return False
+    risk = abs(actual - stop)
+    if risk / actual < float(Config.MIN_STOP_PERCENT):
+        return False
+    cost_rates = {
+        key: costs.get(key, default)
+        for key, default in (
+            ("maker_fee_rate", Config.MAKER_FEE_RATE), ("taker_fee_rate", Config.TAKER_FEE_RATE),
+            ("spread_rate", Config.STOP_SPREAD_BUFFER_RATE), ("slippage_rate", Config.STOP_SLIPPAGE_BUFFER_RATE),
+        )
+    }
+    stop_cost = estimate_stop_cost(actual, stop, entry_type="MARKET", **cost_rates)
+    max_stop_cost_r = float(Config.MAX_STOP_EXECUTION_COST_R)
+    if max_stop_cost_r > 0 and stop_cost["total"] / risk > max_stop_cost_r:
+        return False
+    if Config.MIN_TP1_RR <= 0:
+        return True
+    target_cost = estimate_plan_cost(
+        actual, {"tp1": tp1}, {"tp1": 1.0}, entry_type="MARKET", **cost_rates
+    )
+    stop_exit_cost = max(0.0, stop_cost["total"] - stop_cost["entry_fee"])
+    net_tp1_rr = (abs(tp1 - actual) - target_cost["total"]) / (risk + stop_exit_cost)
+    return net_tp1_rr >= Config.MIN_TP1_RR
+
+
 def stop_breached(direction, stop, low, high):
     """Inclusive stop touch; never infer an intraminute reversal as safe."""
     if direction == "LONG":
@@ -33,7 +74,7 @@ def stop_breached(direction, stop, low, high):
     return True
 
 
-def check_market_plan(exchange, symbol, direction, entry, stop, signal_ms, *, now_ms=None):
+def check_market_plan(exchange, symbol, direction, entry, stop, signal_ms, *, tp1=None, costs=None, now_ms=None):
     """Return (is_actionable, reason), failing closed on missing market evidence.
 
     Caller supplies a newly produced or still-actionable stored MARKET plan.
@@ -65,8 +106,7 @@ def check_market_plan(exchange, symbol, direction, entry, stop, signal_ms, *, no
             return False, "MARKET_TICKER_UNAVAILABLE"
         if stop_breached(direction, stop, latest, latest):
             return False, "MARKET_STOP_ALREADY_HIT"
-        drift = abs(latest - entry) / entry
-        if drift > float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003)):
+        if not market_entry_distance_ok(entry, latest):
             return False, "MARKET_ENTRY_PRICE_STALE"
 
         start = signal_time // MINUTE * MINUTE
@@ -88,6 +128,8 @@ def check_market_plan(exchange, symbol, direction, entry, stop, signal_ms, *, no
                 return False, "MARKET_STOP_ALREADY_HIT"
         if not valid_latest or checked - valid_latest > 2 * MINUTE:
             return False, "MARKET_1M_HISTORY_STALE"
+        if tp1 is not None and not market_entry_risk_valid(direction, entry, latest, stop, tp1, costs or {}):
+            return False, "MARKET_ENTRY_QUALITY_REJECTED"
     except Exception:
         return False, "MARKET_VERIFICATION_UNAVAILABLE"
     return True, "MARKET_FRESH_CONFIRMED"

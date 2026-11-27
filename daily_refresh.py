@@ -140,7 +140,7 @@ class DailyPoolRefresh:
                     if self._stop_event.is_set():
                         break
                     try:
-                        self.pool.tracking.advance_tracking(symbol, history=history)
+                        self.pool.tracking.advance_tracking(symbol, history=history, stop_event=self._stop_event)
                     except Exception as exc:
                         logger.warning("Virtual position data unavailable for %s (%s)", symbol, type(exc).__name__)
             finally:

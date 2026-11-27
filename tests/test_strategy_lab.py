@@ -694,3 +694,23 @@ def test_common_filter_finalizes_raw_strategy_geometry_and_selects_complete_plan
     assert selected["stop_loss"] < selected["entry"] < selected["tp1"] < selected["tp2"] < selected["tp3"]
     assert "initial_stop_loss" not in selected
 
+
+
+def test_common_filter_distant_targets_cannot_offset_weak_net_tp1(monkeypatch):
+    import strategy_lab
+
+    monkeypatch.setattr(strategy_lab.Config, "MIN_TP1_RR", 0.80)
+    monkeypatch.setattr(strategy_lab.Config, "MINIMUM_NET_RR", 2.0)
+    plan = {
+        "direction": "LONG", "entry_type": "MARKET", "entry": 100.0, "stop_loss": 98.0,
+        "tp1": 101.6, "tp2": 110.0, "tp3": 115.0, "atr": 2.0, "strength": 80.0,
+        "_market_maker_fee_rate": 0.0002, "_market_taker_fee_rate": 0.0005,
+    }
+    weak = strategy_lab._risk_validate_candidate(plan)
+    assert weak["weighted_net_rr"] >= 2.0
+    assert weak["tp1_net_rr"] < 0.80
+    assert weak["reason"] == "TP1_NET_RR_BELOW_MINIMUM" and not weak["eligible"]
+
+    strong = strategy_lab._risk_validate_candidate(dict(plan, tp1=102.0))
+    assert strong["tp1_net_rr"] > 0.80
+    assert strong["eligible"]

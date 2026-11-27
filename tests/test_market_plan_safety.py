@@ -81,6 +81,15 @@ def test_recent_market_accepts_price_and_wick_on_safe_side():
     assert check_market_plan(market, "BTC/USDT:USDT", "LONG", 100, 99, start, now_ms=now)[0]
 
 
+def test_market_preflight_blocks_degraded_tp1_before_showing_it_to_user():
+    now = int(time.time() * 1000)
+    market = FakeMarket(last=100.25, high=100.3, low=99.8, timestamp=now)
+    assert check_market_plan(
+        market, "BTC/USDT:USDT", "LONG", 100, 98, now - 10_000,
+        tp1=101.9, now_ms=now,
+    ) == (False, "MARKET_ENTRY_QUALITY_REJECTED")
+
+
 @pytest.mark.parametrize("reason,market", [
     ("MARKET_ENTRY_PRICE_STALE", FakeMarket(last=101, low=99.5)),
     ("MARKET_VERIFICATION_UNAVAILABLE", FakeMarket(fail=True)),

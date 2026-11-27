@@ -27,6 +27,24 @@ def test_reply_http_failure_keeps_token_and_private_text_out_of_logs(monkeypatch
     assert "private-test-message" not in caplog.text
 
 
+def test_command_reply_retries_only_an_explicit_short_retry(monkeypatch):
+    from unittest.mock import Mock
+    from telegram_command_service import TelegramDeliveryError
+
+    service = TelegramCommandService(None, "offline", "123")
+    wait = Mock(return_value=False)
+    monkeypatch.setattr(service.stop_flag, "wait", wait)
+    api = Mock(side_effect=[TelegramDeliveryError("retry", 1), {"message_id": 1}])
+    monkeypatch.setattr(service, "_api", api)
+    assert service._send_command_reply("ATLAS")
+    wait.assert_called_once_with(1)
+    assert api.call_count == 2
+    api.reset_mock(side_effect=True)
+    api.side_effect = TelegramDeliveryError("uncertain")
+    assert not service._send_command_reply("ATLAS")
+    assert api.call_count == 1
+
+
 def test_recognizes_terminal_commands():
     for command in (
         "/BTC",

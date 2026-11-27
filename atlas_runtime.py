@@ -253,7 +253,7 @@ class AtlasRuntime:
                     if stop_event.is_set():
                         return
                     try:
-                        tracking.advance_tracking(symbol, history=history)
+                        tracking.advance_tracking(symbol, history=history, stop_event=stop_event)
                     except Exception as exc:
                         self.logger.warning(
                             "Tracked setup data unavailable for %s (%s)", symbol, type(exc).__name__
@@ -723,6 +723,7 @@ class AtlasRuntime:
             valid, reason = check_market_plan(
                 market_exchange, candidate.symbol, candidate.direction,
                 candidate.entry_price, candidate.stop_loss, candidate.created_at_ms,
+                tp1=candidate.tp1, costs=candidate.execution_costs,
             )
             if valid:
                 continue
@@ -922,6 +923,7 @@ class AtlasRuntime:
                         safe, reason = check_market_plan(
                             market_exchange, symbol, candidate.direction, candidate.entry_price,
                             candidate.stop_loss, data.get("snapshot_timestamp_ms"),
+                            tp1=candidate.tp1, costs=candidate.execution_costs,
                         )
                         if not safe:
                             with self._lock:

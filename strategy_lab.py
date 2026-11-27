@@ -11,6 +11,7 @@ from statistics import median
 
 from strategies.orderflow.strategy import _ORDERBOOK_ENGINE
 from strategies.candidate import STRATEGY_NAMES, _configured_partial_tp_weights, _raw_candidate
+from market_plan_safety import market_entry_distance_ok
 from strategy_catalog import TRADE_STRATEGY_IDS, SPECIALIST_IDS
 from shared.analysis_services import _current_price, _entry_reference
 from shared.microstructure_services import _trade_flow
@@ -102,13 +103,23 @@ def _risk_validate_candidate(candidate):
             and net_rr >= float(Config.MINIMUM_NET_RR)
             and reconciled.get("final_geometry_reconciled") is True
         )
+        reason = None if eligible else (
+            reconciled.get("risk_setup_reason")
+            or f"Common net-RR/stop-cost gate failed (net RR={net_rr})"
+        )
+        tp1_net_rr = reconciled.get("tp1_net_rr")
+        tp1_minimum = float(Config.MIN_TP1_RR)
+        if eligible and tp1_minimum > 0 and (
+            tp1_net_rr is None or not math.isfinite(tp1_net_rr) or tp1_net_rr < tp1_minimum
+        ):
+            eligible = False
+            reason = "TP1_NET_RR_BELOW_MINIMUM"
         return {
             "eligible": bool(eligible),
-            "reason": None if eligible else (
-                reconciled.get("risk_setup_reason")
-                or f"Common net-RR/stop-cost gate failed (net RR={net_rr})"
-            ),
+            "reason": reason,
             "weighted_net_rr": net_rr,
+            "tp1_net_rr": tp1_net_rr,
+            "minimum_tp1_net_rr": tp1_minimum,
             "risk_plan": reconciled,
         }
     except Exception as exc:
@@ -1009,8 +1020,7 @@ class SevenStrategyLab:
                 distance_pct = abs(entry - current_price) / current_price
                 candidate["entry_distance_pct"] = distance_pct
                 if entry_type == "MARKET":
-                    max_market_distance = float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003))
-                    if distance_pct > max_market_distance:
+                    if not market_entry_distance_ok(entry, current_price):
                         execution_rejection = "MARKET_ENTRY_TOO_FAR"
                 elif direction == "LONG" and entry >= current_price:
                     execution_rejection = "LONG_LIMIT_NOT_BELOW_MARKET"
@@ -1147,7 +1157,7 @@ class SevenStrategyLab:
             "candidate_count": len(generated),
             "validated_candidate_count": len(eligible),
             "selected": selected,
-            "selection_method": "single_common_filter_then_net_rr_strength_regime_rank",
+            "selection_method": "single_common_filter_then_regime_adjusted_strength_net_rr_rank",
             "performance_status": "OBSERVATIONAL_ONLY_NOT_AN_ELIGIBILITY_GATE",
             "warning": (
                 "Strategy-native setup rules remain inside each generator. All shared risk, "
