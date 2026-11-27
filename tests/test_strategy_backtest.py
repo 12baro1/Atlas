@@ -37,6 +37,17 @@ def test_same_bar_stop_and_target_resolves_to_stop():
     assert outcome["net_r"] == -1.0
 
 
+def test_strategy_replay_moves_stop_to_entry_on_tp1_and_ignores_later_tp2():
+    outcome = simulate_candidate(
+        candidate(), [Bar(100, 101, 99, 101), Bar(101, 103, 101, 103),
+                      Bar(103, 103, 99.5, 100), Bar(100, 105, 100, 105)],
+        maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
+    )
+    assert outcome["exit_reason"] == "TRAILING_STOP"
+    assert outcome["bars_until_exit"] == 3
+    assert outcome["gross_r"] == 0.625
+
+
 def test_two_replays_pass_identical_closed_primary_benchmark_and_sector_bars():
     from timing import TF_PERIOD_MS
 

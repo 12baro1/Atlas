@@ -50,7 +50,8 @@ CREATE INDEX IF NOT EXISTS chat_event_pending ON chat_events(chat,delivered,id);
 
 class CandleSimulation(TradeJournal):
     """Reuse journal execution rules with persistence owned by the pool transaction."""
-    _MOVE_STOP_TO_TP1_AT_TP2 = False  # Legacy switch; journal now moves to entry only after TP2.
+    _BREAK_EVEN_TARGET = 1
+    _INCLUDE_OPENING_TIMESTAMP = True
 
     def __init__(self):
         pass

@@ -227,6 +227,7 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
         entry=entry, stop_loss=stop, targets=targets,
         future_candles=simulation_candles, direction=direction,
         tp_weights=tp_weights, max_holding_bars=simulation_horizon,
+        break_even_target=1,
     )
     if outcome.get("result") == "OPEN" or outcome.get("exit_offset") is None:
         return None
@@ -269,7 +270,7 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
         "bars_until_exit": full_exit_index + 1, "closed_at_ms": exit_time_ms,
         "cost_model_id": (
             f"shared_fill_partial{weight_label}_maker{maker_fee:.6f}_taker{taker_fee:.6f}_"
-            f"spread{spread_rate:.6f}_slip{slippage_rate:.6f}_adverse_funding_v3"
+            f"spread{spread_rate:.6f}_slip{slippage_rate:.6f}_adverse_funding_v3_be_tp1"
         ),
     }
 

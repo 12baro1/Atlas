@@ -37,8 +37,7 @@ def test_stream_tracks_entry_and_each_partial_target_before_five_minute_close():
         assert state == expected_state
         assert tracked.get("tps_hit", []) == target_levels
         if target_levels:
-            expected_stop = tracked["entry"] if 2 in target_levels else tracked["stop_loss"]
-            assert tracked["trailing_stop"] == expected_stop
+            assert tracked["trailing_stop"] == tracked["entry"]
     assert tracked["status"] == "TP3"
 
 

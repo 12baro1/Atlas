@@ -8,6 +8,8 @@ import time
 from decimal import Decimal
 from collections import deque
 
+from gateio_futures import trade_timestamp_ms
+
 
 GATE_WS_URL = "wss://fx-ws.gateio.ws/v4/ws/usdt"
 
@@ -177,10 +179,10 @@ class GatePublicStream:
                     self.__class__._shared_liquidation_ids.intersection_update(retained)
             elif channel == "futures.trades":
                 for row in rows:
+                    if not isinstance(row, dict) or row.get("is_internal") is True:
+                        continue
                     try:
-                        stamp = int(row.get("create_time_ms") or row.get("create_time") or now_ms)
-                        if stamp < 10_000_000_000:
-                            stamp *= 1000
+                        stamp = trade_timestamp_ms(row.get("create_time_ms") or row.get("create_time") or now_ms)
                         raw_size = float(row["size"])
                         price = float(row["price"])
                         if not math.isfinite(price) or price <= 0 or raw_size == 0:

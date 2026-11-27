@@ -174,6 +174,38 @@ def test_restart_checks_published_batch_before_claiming_next_symbol(tmp_path, po
     queue.close()
 
 
+def test_scan_publishes_and_checks_tracking_after_ten_terminal_jobs_including_failures(tmp_path, pool):
+    from contextlib import closing
+
+    symbols = [BTC] + [f"S{i}/USDT:USDT" for i in range(1, 12)]
+    with closing(ScanQueue(tmp_path / "queue", max_retries=1)) as queue:
+        queue.rebuild(symbols)
+        runtime = MagicMock()
+        runtime._opportunity_pool.return_value = pool
+        checkpoints = []
+
+        def refresh_tracked(_stop_event):
+            progress = queue.progress()
+            assert [candidate.symbol for candidate in pool.get_best_setups()] == [BTC]
+            checkpoints.append((progress["done"], progress["failed"]))
+
+        scanner = ScanService(runtime, queue, MagicMock(), continuous=True, universe_limit=len(symbols),
+                              analysis_gap_seconds=0, refresh_tracked_setups=refresh_tracked)
+
+        def analyze(symbol):
+            if symbol == symbols[10]:
+                assert checkpoints == [(9, 1)]
+                scanner._stop_event.set()
+            if symbol == symbols[1]:
+                return {"ok": False, "error": "missing_market_data"}
+            return {"ok": True, "cycle_result": observation(symbol, setup=symbol == BTC)}
+
+        runtime.analyze_for_cycle.side_effect = analyze
+        scanner._worker_loop()
+        assert checkpoints == [(9, 1)]
+        assert runtime.analyze_for_cycle.call_count == 12
+
+
 def test_chat_lifecycle_cleanup_outbox_and_restart(pool):
     chat = service()
     other = service("13")

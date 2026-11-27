@@ -63,6 +63,9 @@ class GateFuturesExchange:
         retry_backoff_seconds=None,
     ):
         self.session = session or requests.Session()
+        if session is None:
+            # Keep fractional contracts in REST candles, trades and depth.
+            self.session.headers["X-Gate-Size-Decimal"] = "1"
         self.timeout = float(timeout)
         self.max_retries = max(
             1,
@@ -246,6 +249,8 @@ class GateFuturesExchange:
         }) or []
         out = []
         for row in rows:
+            if not isinstance(row, dict) or row.get("is_internal") is True:
+                continue
             try:
                 stamp = trade_timestamp_ms(row["create_time_ms"])
                 if since is not None and stamp < int(since):

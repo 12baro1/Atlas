@@ -46,6 +46,18 @@ def test_future_and_nonfinite_trades_do_not_enter_cvd():
     assert snapshot["recent_trades"] == snapshot["trade_flow_history"] == []
 
 
+def test_public_trade_flow_preserves_fractional_timestamps_and_excludes_internal_trades():
+    stream = GatePublicStream("BTC/USDT:USDT")
+    now = 1700000001000
+    stream._consume({"channel": "futures.trades", "event": "update", "time_ms": now,
+                     "result": [{"price": "100", "size": "0.5", "create_time_ms": "1700000000.123"},
+                                {"price": "50", "size": "2", "create_time_ms": "1700000000.456",
+                                 "is_internal": True}]})
+    [trade] = stream.snapshot(now_ms=now)["recent_trades"]
+    assert trade["timestamp_ms"] == 1700000000123
+    assert trade["size"] == 0.5
+
+
 def test_peer_eof_invalidates_l2_before_reconnect(monkeypatch):
     import sys
     import threading

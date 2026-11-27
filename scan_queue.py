@@ -350,7 +350,7 @@ class ScanQueue:
             }
 
     def complete(self, symbol: str, ok: bool, error: Optional[str] = None,
-                 *, claim: Optional[Dict[str, Any]] = None, result=None) -> bool:
+                 *, claim: Optional[Dict[str, Any]] = None, result=None, stage_failure=False) -> bool:
         """Mark a claimed symbol done, or requeue it for a bounded retry."""
         clean = str(symbol or "").strip().upper()
         now_ms = int(time.time() * 1000)
@@ -384,6 +384,10 @@ class ScanQueue:
                     (PENDING, str(error or "unknown_error"), clean, gen),
                 )
             else:
+                if stage_failure:
+                    # This symbol reached a terminal state without an observation.
+                    conn.execute("INSERT OR IGNORE INTO cycle_results VALUES(?,?,?)",
+                                 (gen, clean, "null"))
                 conn.execute(
                     "UPDATE scan_jobs SET state = ?, last_error = ?, "
                     "lease_until_ms = NULL "
@@ -404,7 +408,7 @@ class ScanQueue:
 
     def cycle_results(self, generation):
         rows = self._thread_conn().execute(
-            "SELECT payload FROM cycle_results WHERE generation=? ORDER BY symbol", (generation,),
+            "SELECT payload FROM cycle_results WHERE generation=? AND payload!='null' ORDER BY symbol", (generation,),
         )
         return [json.loads(row[0]) for row in rows]
 
