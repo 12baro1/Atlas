@@ -111,6 +111,7 @@ class RiskEngine:
         partial_exit_weights = {}
         plan_cost = None
         fee_in_r = None
+        risk["tp1_net_rr"] = None
 
         rr_breakdown = self.rr_engine.calculate_breakdown(
             entry=entry_price,
@@ -169,6 +170,15 @@ class RiskEngine:
                     round(net_reward_quote / net_risk_quote, 4)
                     if net_risk_quote > 0 else None
                 )
+                tp1 = tp_values.get("tp1")
+                if tp1 is not None and rr_by_tp.get("tp1") is not None and net_risk_quote > 0:
+                    tp1_cost = estimate_plan_cost(
+                        entry_price=entry_price, targets={"tp1": tp1}, weights={"tp1": 1.0},
+                        entry_type=resolved_entry_type, maker_fee_rate=maker_fee_rate,
+                        taker_fee_rate=taker_fee_rate, spread_rate=spread_rate,
+                        slippage_rate=slippage_rate,
+                    )
+                    risk["tp1_net_rr"] = (abs(tp1 - entry_price) - tp1_cost["total"]) / net_risk_quote
                 net_rr = weighted_net_rr
                 risk["weighted_rr"] = round(weighted_rr, 4)
                 risk["weighted_net_rr"] = weighted_net_rr

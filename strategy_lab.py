@@ -102,13 +102,23 @@ def _risk_validate_candidate(candidate):
             and net_rr >= float(Config.MINIMUM_NET_RR)
             and reconciled.get("final_geometry_reconciled") is True
         )
+        reason = None if eligible else (
+            reconciled.get("risk_setup_reason")
+            or f"Common net-RR/stop-cost gate failed (net RR={net_rr})"
+        )
+        tp1_net_rr = reconciled.get("tp1_net_rr")
+        tp1_minimum = float(Config.MIN_TP1_RR)
+        if eligible and tp1_minimum > 0 and (
+            tp1_net_rr is None or not math.isfinite(tp1_net_rr) or tp1_net_rr < tp1_minimum
+        ):
+            eligible = False
+            reason = "TP1_NET_RR_BELOW_MINIMUM"
         return {
             "eligible": bool(eligible),
-            "reason": None if eligible else (
-                reconciled.get("risk_setup_reason")
-                or f"Common net-RR/stop-cost gate failed (net RR={net_rr})"
-            ),
+            "reason": reason,
             "weighted_net_rr": net_rr,
+            "tp1_net_rr": tp1_net_rr,
+            "minimum_tp1_net_rr": tp1_minimum,
             "risk_plan": reconciled,
         }
     except Exception as exc:
