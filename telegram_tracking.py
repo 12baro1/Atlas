@@ -95,7 +95,9 @@ def transition(conn, chat, symbol, revision, setup, *, announce, user_requested=
         old = json.loads(raw)
         if setup and previous_id == setup["setup_id"] and state not in {"INVALIDATED", "REMOVED"}:
             return
-        if state in {"ACTIVE","AMBIGUOUS"}:
+        pending_market = (state == "WAITING"
+                          and (old.get("payload") or {}).get("execution_costs", {}).get("entry_type") == "MARKET")
+        if state in {"ACTIVE","AMBIGUOUS"} or pending_market:
             # Preserve open positions and plans pending verification.
             # Notify the follower once per distinct new pool setup.
             if setup and previous_id != setup["setup_id"] and announce:
@@ -104,6 +106,8 @@ def transition(conn, chat, symbol, revision, setup, *, announce, user_requested=
                       "HAVUZDA YENİ SETUP VAR\n"
                       "Bu semboldeki mevcut takip kaydı devam ediyor.",
                       old)
+            return
+        if setup and setup.get("entry_type") == "MARKET" and not user_requested:
             return
         if state == "WAITING":
             old["resolved_at"] = int(time.time()*1000)

@@ -109,6 +109,19 @@ def test_market_signal_expires_without_network_requests():
     )
 
 
+def test_current_market_uses_all_closed_minutes_since_signal():
+    now = 1_800_000_135_000
+    start = now - 100_000
+    first_minute = start // 60_000 * 60_000
+    recent_minute = now // 60_000 * 60_000
+    market = FakeMarket(timestamp=now, bars=[[recent_minute, 100, 100.2, 99.8, 100, 1]])
+    arguments = (market, "BTC/USDT:USDT", "LONG", 100, 99, start)
+    assert check_market_plan(*arguments, now_ms=now) == (False, "MARKET_1M_HISTORY_GAP")
+    market.bars.extend([stamp, 100, 100.2, 99.8, 100, 1]
+                       for stamp in range(first_minute, recent_minute, 60_000))
+    assert check_market_plan(*arguments, now_ms=now)[0]
+
+
 def test_old_market_is_not_listed_as_new_best_opportunity(tmp_path):
     pool = opportunity_pool.OpportunityPool(base_path=str(tmp_path / "pool"), auto_persist=False)
     try:
@@ -124,7 +137,7 @@ def test_old_market_is_not_listed_as_new_best_opportunity(tmp_path):
         pool.stop()
 
 
-def test_proven_stop_removes_unentered_market_from_pool_and_tracking(tmp_path, monkeypatch):
+def test_market_wick_hides_proposal_without_guessing_existing_trade_order(tmp_path, monkeypatch):
     pool = opportunity_pool.OpportunityPool(base_path=str(tmp_path / "pool"), auto_persist=False)
     try:
         item = candidate("BTC", entry_type="MARKET")
@@ -138,12 +151,10 @@ def test_proven_stop_removes_unentered_market_from_pool_and_tracking(tmp_path, m
         runtime = AtlasRuntime.__new__(AtlasRuntime)
         runtime._opportunity_pool = lambda: pool
         runtime.logger = logging.getLogger("test.market.guard")
-        runtime.prune_market_opportunities(5)
+        assert runtime.verify_market_opportunity(item) is False
         assert pool.get_best_setups() == []
         tracked = pool.tracking.tracked(pool_chat)
-        assert tracked[0][2] == "INVALIDATED"
-        assert tracked[0][3]["invalidation_reason"] == "MARKET_STOP_ALREADY_HIT"
-        events = pool.tracking.pending_notifications(pool_chat)
-        assert any("SETUP KALDIRILDI" in message for _, message in events)
+        assert tracked[0][2] == "WAITING"
+        assert not pool.tracking.pending_notifications(pool_chat)
     finally:
         pool.stop()

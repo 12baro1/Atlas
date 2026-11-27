@@ -378,39 +378,6 @@ class PoolStore:
                              (now, chat, symbol))
             return True
 
-    def invalidate_unentered_setup(self, setup_id, reason="MARKET_STOP_ALREADY_HIT"):
-        """Stop tracking an unfilled MARKET when a real price touch is confirmed.
-
-        Never mark an already active theoretical position as a new loss; that
-        lifecycle is owned by the existing historical trade verifier.
-        """
-        now = int(time.time() * 1000)
-        with self._transaction() as conn:
-            rows = conn.execute(
-                "SELECT chat,symbol,revision,state,payload FROM chat_plans "
-                "WHERE setup_id=? AND state IN ('WAITING','AMBIGUOUS')",
-                (setup_id,),
-            ).fetchall()
-            for chat, symbol, revision, state, raw in rows:
-                plan = json.loads(raw)
-                if plan.get("entry_reached") or plan.get("entry_reached_at"):
-                    continue
-                if str(((plan.get("payload") or {}).get("execution_costs") or {}).get("entry_type")) != "MARKET":
-                    continue
-                plan.update(status="INVALIDATED", resolved_at=now,
-                            invalidation_reason=reason)
-                changed = conn.execute(
-                    "UPDATE chat_plans SET state='INVALIDATED',payload=? "
-                    "WHERE chat=? AND symbol=? AND revision=? AND state=? AND payload=?",
-                    (json.dumps(plan), chat, symbol, revision, state, raw),
-                )
-                if changed.rowcount:
-                    telegram_tracking.event(
-                        conn, chat, symbol, revision, "STOP_BEFORE_MARKET_ENTRY",
-                        "SETUP KALDIRILDI — MARKET girişinden önce stop seviyesi görüldü.",
-                        plan,
-                    )
-
     def tracked(self, chat):
         return list(self.iter_tracked(chat))
 

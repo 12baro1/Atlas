@@ -11,6 +11,7 @@ Three distinct pools:
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy
 
 import json
 import logging
@@ -372,11 +373,10 @@ class OpportunityPool:
             self.add_candidate(candidate)
             self.validate_candidate(candidate.setup_id)
 
-    def prepare_best_reply(self, chat, count, *, performance=None, correlations=None):
-        with self._lock:
-            items = self.follow_best(chat, count, subscribe=False,
-                                     performance=performance, correlations=correlations)
-            return items, self.tracking.displayed_observations(items)
+    def prepare_best_reply(self, chat, count, *, performance=None, correlations=None, market_check=None):
+        items = self.follow_best(chat, count, subscribe=False, performance=performance,
+                                 correlations=correlations, market_check=market_check)
+        return items, self.tracking.displayed_observations(items)
 
     def follow_best_reply(self, chat, displayed, requested_at):
         """Record the requested setups and return their symbols' tracking status."""
@@ -384,44 +384,54 @@ class OpportunityPool:
             now_ms = int(time.time() * 1000)
             rows = []
             for row in displayed:
-                current = self._validated.get(row["setup"]["setup_id"])
-                if current and self._fresh_validation(current, now_ms):
+                shown = row["setup"]
+                current = self._validated.get(shown["setup_id"])
+                if current and current.to_dict() == shown and self._fresh_validation(current, now_ms):
                     # A neutral analysis can advance the watch timestamp
                     # while leaving the displayed setup valid.
                     row, = self.tracking.displayed_observations([current])
-                rows.append(row)
+                    rows.append(row)
             return self.tracking.follow_delivered(chat, rows, requested_at=requested_at)
 
+    def is_current_opportunity(self, candidate):
+        with self._lock:
+            return (self._validated.get(candidate.setup_id) == candidate
+                    and self._fresh_validation(candidate, int(time.time() * 1000)))
+
     def follow_best(self, chat, count, symbol=None, setup_id=None, *, subscribe=True,
-                    performance=None, correlations=None):
+                    performance=None, correlations=None, market_check=None):
         with self._lock:
             ranked = self.get_best_setups(limit=len(self._validated), performance=performance)
-            selected = {}
-            for item in ranked:
-                if (symbol and item.symbol != symbol) or (setup_id and item.setup_id != setup_id):
-                    continue
-                if item.symbol in selected:
-                    continue
-                # Diversification uses actual aligned 4h-return correlations
-                # only. Missing correlations are unknown, never invented.
-                if isinstance(correlations, dict):
-                    same_risk = False
-                    for other in selected.values():
-                        corr = correlations.get(frozenset((item.symbol, other.symbol)))
-                        if not isinstance(corr, (int, float)) or not math.isfinite(corr):
-                            continue
-                        signed = corr if item.direction == other.direction else -corr
-                        if signed >= 0.90:
-                            same_risk = True
-                            break
-                    if same_risk:
+            if market_check is not None:
+                ranked = deepcopy(ranked)
+        selected = {}
+        for item in ranked:
+            if (symbol and item.symbol != symbol) or (setup_id and item.setup_id != setup_id):
+                continue
+            if item.symbol in selected:
+                continue
+            # Diversification uses actual aligned 4h-return correlations
+            # only. Missing correlations are unknown, never invented.
+            if isinstance(correlations, dict):
+                same_risk = False
+                for other in selected.values():
+                    corr = correlations.get(frozenset((item.symbol, other.symbol)))
+                    if not isinstance(corr, (int, float)) or not math.isfinite(corr):
                         continue
-                selected[item.symbol] = item
-                if len(selected) >= count:
-                    break
-            if subscribe:
-                self.tracking.follow(chat, selected.values())
-            return list(selected.values())
+                    signed = corr if item.direction == other.direction else -corr
+                    if signed >= 0.90:
+                        same_risk = True
+                        break
+                if same_risk:
+                    continue
+            if item.entry_type == "MARKET" and market_check is not None and not market_check(item):
+                continue
+            selected[item.symbol] = item
+            if len(selected) >= count:
+                break
+        if subscribe:
+            self.tracking.follow(chat, selected.values())
+        return list(selected.values())
 
     def add_candidate(self, candidate: SetupCandidate) -> bool:
         """
@@ -770,7 +780,7 @@ class OpportunityPool:
             
             # Sort by net RR desc, then confidence desc
             candidates.sort(key=lambda c: (c.net_rr_after_costs, c.confidence), reverse=True)
-            return candidates[:limit]
+            return deepcopy(candidates[:limit])
     
     def get_best_setups(self, limit: int = 5, rank: str = "composite", *, performance=None) -> List[SetupCandidate]:
         """Read-only ranking of the validated pool.
