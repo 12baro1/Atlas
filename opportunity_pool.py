@@ -379,7 +379,7 @@ class OpportunityPool:
             return items, self.tracking.displayed_observations(items)
 
     def follow_best_reply(self, chat, displayed, requested_at):
-        """Record the delivered setup and reconcile subsequent market observations."""
+        """Record the requested setups and return their symbols' tracking status."""
         with self._lock:
             now_ms = int(time.time() * 1000)
             rows = []
@@ -390,7 +390,7 @@ class OpportunityPool:
                     # while leaving the displayed setup valid.
                     row, = self.tracking.displayed_observations([current])
                 rows.append(row)
-            self.tracking.follow_delivered(chat, rows, requested_at=requested_at)
+            return self.tracking.follow_delivered(chat, rows, requested_at=requested_at)
 
     def follow_best(self, chat, count, symbol=None, setup_id=None, *, subscribe=True,
                     performance=None, correlations=None):

@@ -301,6 +301,7 @@ class PoolStore:
         self.follow_delivered(chat, [row])
 
     def follow_delivered(self, chat, observations, *, requested_at=None):
+        tracking_status = {}
         with self._transaction() as conn:
             for row in observations:
                 symbol = row["symbol"]
@@ -332,6 +333,14 @@ class PoolStore:
                     revision, = conn.execute("SELECT revision FROM chat_follows WHERE chat=? AND symbol=?",
                                              (chat,symbol)).fetchone()
                     self._apply_observation(conn, chat, revision, newer, announce=True)
+                tracking_status[symbol] = conn.execute(
+                    "SELECT p.setup_id,p.state,t.muted FROM chat_follows f "
+                    "LEFT JOIN chat_plans p USING(chat,symbol,revision) "
+                    "LEFT JOIN chat_tracking_preferences t USING(chat,symbol) "
+                    "WHERE f.chat=? AND f.symbol=?",
+                    (chat, symbol),
+                ).fetchone()
+        return tracking_status
 
     def displayed_observations(self, setups):
         observations = []
