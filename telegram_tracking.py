@@ -222,6 +222,10 @@ def resolve_bar(plan, symbol, candle, width, history, now):
     verified = max(plan["opened_at"], plan.get("verified_until", 0))
     if candle.time + width <= verified:
         return False
+    if getattr(candle, "volume", None) == 0 and candle.low == candle.high:
+        plan["last_processed_candle_time"] = candle.time
+        plan["verified_until"] = candle.time + width
+        return False
     if candle.time >= verified and apply_bar(plan, candle, width):
         plan["verified_until"] = candle.time + width
         return False

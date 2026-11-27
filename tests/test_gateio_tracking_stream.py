@@ -66,3 +66,20 @@ def test_socket_groups_same_millisecond_and_waits_for_later_timestamp():
     receive(stream, [(START + 200, 102)])
     [group] = stream.trade_range(BTC, START, START + 1000)
     assert group.prices == {100, 101}
+
+
+def test_stream_excludes_internal_insurance_fills_from_market_prices():
+    stream = GateTrackingStream()
+    stream.follow([BTC])
+    receive(stream, [(START - 2000, 100), (START + 100, 101)])
+    stream._consume({
+        "channel": "futures.trades",
+        "event": "update",
+        "result": [{
+            "contract": "BTC_USDT", "id": 3, "create_time_ms": START + 150,
+            "price": "80", "size": 1, "is_internal": True,
+        }],
+    }, {"BTC_USDT"})
+    receive(stream, [(START + 200, 102)])
+    [group] = stream.trade_range(BTC, START, START + 1000)
+    assert group.prices == {101}

@@ -58,6 +58,8 @@ class GateTrackingStream:
                 contract = row["contract"]
                 if contract not in subscribed or contract not in self._wanted:
                     continue
+                if row.get("is_internal") is True:
+                    continue
                 stamp = trade_timestamp_ms(row["create_time_ms"])
                 trade_id = int(row["id"])
                 price, size = float(row["price"]), abs(float(row["size"]))
