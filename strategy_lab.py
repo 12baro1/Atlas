@@ -993,8 +993,8 @@ class SevenStrategyLab:
                 finite = all(math.isfinite(value) and value > 0 for value in [entry, stop, *targets])
                 geometry_ok = (
                     finite
-                    and ((direction == "LONG" and stop < entry < targets[0] <= targets[1] <= targets[2])
-                         or (direction == "SHORT" and targets[0] >= targets[1] >= targets[2] and targets[0] < entry < stop))
+                    and ((direction == "LONG" and stop < entry < targets[0] < targets[1] < targets[2])
+                         or (direction == "SHORT" and stop > entry > targets[0] > targets[1] > targets[2]))
                 )
             except (TypeError, ValueError, OverflowError):
                 geometry_ok = False

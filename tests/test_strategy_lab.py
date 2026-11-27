@@ -696,6 +696,20 @@ def test_common_filter_finalizes_raw_strategy_geometry_and_selects_complete_plan
 
 
 
+def test_common_filter_rejects_targets_that_collapse_to_same_exchange_price(monkeypatch):
+    import strategy_lab
+
+    raw = strategy_lab._raw_candidate("LONG", 100.0, 98.0, 1.0, "trend_pullback", 75.0)
+    raw.update(stop_loss=98.0, tp1=102.2, tp2=102.8, tp3=110.0)
+    monkeypatch.setattr(strategy_lab, "_trend_pullback", lambda data: dict(raw))
+    report = SevenStrategyLab().analyze({
+        "symbol": "BTC/USDT:USDT", "current_price": 100.0, "tick_size": 1.0,
+    })
+    trend = next(row for row in report["strategies"] if row["strategy_id"] == "trend_pullback")
+    assert trend["status"] == "BLOCKED_COMMON_FILTER"
+    assert trend["rejection_reasons"] == ["INVALID_OR_INCONSISTENT_SETUP_GEOMETRY"]
+
+
 def test_common_filter_distant_targets_cannot_offset_weak_net_tp1(monkeypatch):
     import strategy_lab
 

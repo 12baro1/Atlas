@@ -113,6 +113,8 @@ def simulate_trade_partial(
     direction="LONG",
     tp_weights=None,
     max_holding_bars=None,
+    *,
+    break_even_target=2,
 ):
     """Kısmi TP ve gecikmeli trailing-stop simülasyonu (journal ile aynı mum mantığı).
 
@@ -242,8 +244,7 @@ def simulate_trade_partial(
             hit_levels.add(level_no)
             reached_order.append(level_no)
 
-            # TP1 leaves the original stop intact; TP2 moves it to entry.
-            stop_moved_this_target = level_no == 2 and 3 not in hit_levels
+            stop_moved_this_target = level_no == break_even_target
             if stop_moved_this_target:
                 if is_long:
                     trailing_stop = max(carried_stop if carried_stop is not None else stop, entry)
@@ -1043,6 +1044,7 @@ class BacktestRunner:
                         entry=entry_price, stop_loss=stop, targets=tps,
                         future_candles=future, direction=signal_dir,
                         tp_weights=trade_tp_weights, max_holding_bars=horizon_after_fill,
+                        break_even_target=1,
                     )
                 else:
                     outcome = simulate_trade(
@@ -1059,6 +1061,7 @@ class BacktestRunner:
                     entry=entry_price, stop_loss=stop, targets=tps,
                     future_candles=future, direction=signal_dir,
                     tp_weights=trade_tp_weights, max_holding_bars=self.max_holding_bars,
+                    break_even_target=1,
                 )
             else:
                 outcome = simulate_trade(

@@ -378,7 +378,7 @@ class ScanService:
                     pool.publish_cycle(generation, [], self.queue.generation_symbols(generation))
                 return complete
             cursor = rows[-1][0]
-            pool.publish_cycle(generation, [row for _, row in rows], batch_cursor=cursor)
+            pool.publish_cycle(generation, [row for _, row in rows if row is not None], batch_cursor=cursor)
             if not self._check_published_batch(pool, f"{generation}:{cursor}"):
                 return False
         return False
@@ -483,8 +483,8 @@ class ScanService:
                 self._monitored_job = None
             # If SQLite is busy the lease can expire and the job can be reclaimed.
             # Do not turn a database write failure into a failed market analysis.
-            self.queue.complete(symbol, ok=ok, claim=job, **({"result": result} if self.continuous else {}),
-                                error=error)
+            publication = {"result": result, "stage_failure": True} if self.continuous else {}
+            self.queue.complete(symbol, ok=ok, claim=job, error=error, **publication)
             finished = time.monotonic()
             logger.info("Scan symbol=%s ok=%s elapsed_ms=%.0f gate_requests=%d gate_ms=%.0f", symbol, ok,
                         (finished-started)*1000, metrics.count-requests_before,

@@ -36,7 +36,8 @@ def breached_setup_stop(direction, stop, opened_at, evidence):
 class TradeJournal:
     """Atlas analiz, trade ve performans kayıtlarını tek bir yerde toplar."""
 
-    _MOVE_STOP_TO_TP1_AT_TP2 = True
+    _BREAK_EVEN_TARGET = 2
+    _INCLUDE_OPENING_TIMESTAMP = False
 
     def __init__(self, db_path=None):
         self.db_path = str(db_path) if db_path else None
@@ -1169,8 +1170,8 @@ class TradeJournal:
         """Teorik sinyal sonucunu mumlar üzerinde ilerletir.
 
         Partial TP mantığı desteklenir: TP ağırlıkları normalize edilerek
-        pozisyon paylarına çevrilir (varsayılan 3 TP → her biri %33.3). TP1'den sonra
-        koruyucu stop breakeven'e, TP2'den sonra TP1 seviyesine taşınır.
+        pozisyon paylarına çevrilir (varsayılan 3 TP → her biri %33.3).
+        Koruyucu stop, belirlenen hedef alındığında girişe taşınır.
         TP sonrası SL gelen senaryo 'WIN' olarak değil gerçekleşen kısmi R
         ile işaretlenir.
 
@@ -1187,10 +1188,11 @@ class TradeJournal:
 
         candles = self._candles_for_symbol(candles, symbol)
         opened_at = int(outcome.get("opened_at") or 0)
+        first_eligible_at = opened_at + (0 if self._INCLUDE_OPENING_TIMESTAMP else 1)
         last_processed_at = int(outcome.get("last_processed_candle_time") or 0)
         matching = [
             candle for candle in candles
-            if int(getattr(candle, "time", 0) or 0) > opened_at
+            if int(getattr(candle, "time", 0) or 0) >= first_eligible_at
             and int(getattr(candle, "time", 0) or 0) > last_processed_at
         ]
         matching.sort(key=lambda candle: int(getattr(candle, "time", 0) or 0))
@@ -1287,10 +1289,7 @@ class TradeJournal:
                     rr_tp = (entry - tp_price) / risk
                 realized += weight * rr_tp
                 reached.append(level_no)
-                # Koruma stopunu taşı
-                # TP1 alone does not move the stop. After TP2, protect
-                # the remaining position at the actual filled entry.
-                stop_moved_this_target = level_no == 2 and 3 not in reached
+                stop_moved_this_target = level_no == self._BREAK_EVEN_TARGET
                 if stop_moved_this_target:
                     if side == "LONG":
                         trailing_stop = max(current_stop if current_stop is not None else stop_loss, entry)

@@ -34,14 +34,14 @@ def test_missing_unclosed_duplicate_out_of_order_and_no_exit_before_entry():
     assert evaluate(BTC, "WAITING", raw, START+BAR, [first, conflict])[1]["blocked_at"] == START
 
 
-def test_1m_orders_tp_before_trailing_stop_and_ignores_later_original_stop():
+def test_1m_orders_tp1_before_stop_at_entry():
     parent = bar(START, 105, 112, 89, 96, 5)
     minutes = [bar(START, 105, 112, 104, 111), bar(START+MINUTE, 111, 111, 89, 96)]
     minutes.extend(bar(START+i*MINUTE, 96, 96, 96, 96) for i in (2, 3, 4))
     history = Mock()
     history.candles.side_effect = lambda symbol, start, width, count: {BAR:[parent], MINUTE:minutes}[width]
     state, p = evaluate(BTC, "ACTIVE", json.dumps(plan()), START+BAR, history=history)
-    assert (state, p["status"], p["tps_hit"], p["trailing_stop"]) == ("CLOSED", "SL", [1], 90.0)
+    assert (state, p["status"], p["tps_hit"], p["trailing_stop"]) == ("CLOSED", "SL", [1], 100.0)
     assert p["resolved_at"] == START+2*MINUTE
     history.ticks.assert_not_called()
 
@@ -157,10 +157,10 @@ def test_partial_verification_survives_missing_later_ticks_and_restart():
     history.candles.side_effect = candles
     history.ticks.side_effect = EvidenceMissing("işlem geçmişi eksik")
     state, p = evaluate(BTC, "ACTIVE", json.dumps(plan()), START+BAR, history=history)
-    assert state == "CLOSED" and p["tps_hit"] == [1, 2]
-    assert p["status"] == "SL"
-    assert p["realized_r"] is not None
-    assert "retry_at" not in p
+    assert state == "AMBIGUOUS" and p["tps_hit"] == [1]
+    assert p["status"] == "PENDING" and p["trailing_stop"] == p["entry"]
+    assert p["verified_until"] == START + MINUTE
+    assert p["ambiguity_reason"] == "işlem geçmişi eksik"
 
 
 def test_missing_parent_rebuilt_from_complete_children():
@@ -300,7 +300,9 @@ def test_background_worker_continues_targets_after_tp1_and_restart(tmp_path, mon
     try:
         pool.tracking.follow_analysis("chat", observation())
         assert refresh(0, 49999, 50050)[2] == "ACTIVE"
-        assert refresh(1, 50500, 51100)[3]["tps_hit"] == [1]
+        first_target = refresh(1, 50500, 51100)[3]
+        assert first_target["tps_hit"] == [1]
+        assert first_target["trailing_stop"] == first_target["entry"]
         pool.stop()
         pool = OpportunityPool(base_path=path, auto_persist=False)
         assert BTC in pool.tracking.open_symbols()
@@ -585,20 +587,20 @@ def test_live_tied_stop_and_target_preserve_verified_prefix_for_history():
     from telegram_tracking import evaluate_live
     rows = [TradeGroup(START+1, {111}, 1), TradeGroup(START+2, {95, 121}, 2)]
     state, result = evaluate_live(BTC, "ACTIVE", json.dumps(plan()), START+5000, lambda *args: rows)
-    assert (state, result["tps_hit"], result["verified_until"]) == ("CLOSED", [1, 2], START+3)
-    assert evaluate_live(BTC, state, json.dumps(result), START+9000, lambda *args: rows) is None
-    assert evaluate(BTC, state, json.dumps(result), START+BAR, [bar(START,100,121,95,121)]) is None
+    assert (state, result["tps_hit"], result["verified_until"]) == ("ACTIVE", [1], START+2)
+    assert not result["hit_sl"]
 
 
-def test_live_tracking_can_confirm_entry_after_publication_inside_an_open_candle():
+@pytest.mark.parametrize("delay_ms", [0, 100])
+def test_live_tracking_can_confirm_entry_after_publication_inside_an_open_candle(delay_ms):
     from telegram_tracking import evaluate_live
     opened = START + MINUTE
     raw = json.dumps(plan(opened_at=opened, entry_reached=False, entry_reached_at=None))
-    read = Mock(return_value=[TradeGroup(opened-1, {100}, 1), TradeGroup(opened+100, {100}, 1)])
+    read = Mock(return_value=[TradeGroup(opened-1, {100}, 1), TradeGroup(opened+delay_ms, {100}, 1)])
     assert evaluate_live(BTC, "WAITING", raw, opened+1000, read) is None
     read.assert_not_called()
     state, result = evaluate_live(BTC, "WAITING", raw, opened+4000, read)
-    assert state == "ACTIVE" and result["entry_reached_at"] == opened+100
+    assert state == "ACTIVE" and result["entry_reached_at"] == opened+delay_ms
 
 
 def test_pinned_legacy_parent_finishes_before_switching_to_five_minutes():

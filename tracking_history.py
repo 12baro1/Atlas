@@ -71,9 +71,6 @@ class TrackingHistory:
     """Per-worker cache of closed ranges. Volumes here are native contract counts."""
     def __init__(self):
         self.exchange = GateFuturesExchange(timeout=4, max_retries=1)
-        # Gate otherwise serializes fractional contracts as integers,
-        # which can turn a real fill or candle volume into zero.
-        self.exchange.session.headers["X-Gate-Size-Decimal"] = "1"
         self.last_request = 0
         self.candles = lru_cache(maxsize=32)(self._candles)
         self.ticks = lru_cache(maxsize=16)(self._ticks)
