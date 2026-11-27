@@ -69,15 +69,22 @@ def test_two_replays_pass_identical_closed_primary_benchmark_and_sector_bars():
         assert result["sector_peer_universe"]["ADA/USDT:USDT"]["4h"] == result["4h"]
 
 
-def test_market_fill_uses_next_open_and_shifts_plan_geometry():
+def test_market_fill_uses_nearby_next_open_without_shifting_structural_stop():
     outcome = simulate_candidate(
         candidate(),
-        [Bar(101, 101.5, 100.5, 101.2), Bar(101.2, 104, 101, 103), Bar(103, 103, 98.5, 99)],
+        [Bar(100.2, 100.5, 100.0, 100.4), Bar(100.4, 104, 100.3, 103), Bar(103, 103, 97.5, 99)],
         maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
     )
-    assert outcome["entry"] == 101.0
-    assert outcome["stop_loss"] == 99.0
+    assert outcome["entry"] == 100.2
+    assert outcome["stop_loss"] == 98.0
     assert outcome["gross_r"] > 0
+
+
+def test_market_replay_rejects_a_late_open_even_before_tp1():
+    assert simulate_candidate(
+        candidate(), [Bar(101, 101.5, 100.5, 101.2)],
+        maker_fee=0, taker_fee=0, spread_rate=0, slippage_rate=0,
+    ) is None
 
 
 def test_limit_order_is_not_filled_without_price_touch():

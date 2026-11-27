@@ -25,6 +25,7 @@ from backtest import (
     _configured_partial_tp_weights,
 )
 from engine import AtlasEngine
+from market_plan_safety import market_entry_risk_valid
 from strategy_outcome_journal import StrategyOutcomeJournal
 from historical_derivatives import load_historical_derivatives
 from microstructure_archive import snapshot_at as archived_microstructure_at
@@ -199,9 +200,12 @@ def simulate_candidate(candidate, future_candles, *, maker_fee=0.0002, taker_fee
         fill_open = float(fill_candle.open)
         entry = fill_open
         entry_type = "MARKET"
-        shift = fill_open - planned_entry
-        stop += shift
-        targets = [value + shift for value in targets]
+        if not market_entry_risk_valid(
+            direction, planned_entry, fill_open, stop, targets[0],
+            {"maker_fee_rate": maker_fee, "taker_fee_rate": taker_fee,
+             "spread_rate": spread_rate, "slippage_rate": slippage_rate},
+        ):
+            return None
         simulation_start_offset = 0
         simulation_candles = future_candles[:max_bars]
         simulation_horizon = max_bars

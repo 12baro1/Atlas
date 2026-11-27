@@ -1090,6 +1090,7 @@ class TelegramCommandService:
                     "MARKET_STOP_ALREADY_HIT": "Stop seviyesi daha önce görüldü.",
                     "MARKET_ENTRY_PRICE_STALE": "Giriş fiyatı güncel piyasa fiyatından uzaklaştı.",
                     "MARKET_SIGNAL_EXPIRED": "MARKET sinyalinin süresi doldu.",
+                    "MARKET_ENTRY_QUALITY_REJECTED": "Güncel fiyatta stop riski veya net TP1 eşiği geçilmedi.",
                     "MARKET_VERIFICATION_UNAVAILABLE": "Güncel fiyat doğrulanamadı.",
                 }.get(reason, "Girişin güncelliği ve fiyat geçmişi doğrulanamadı.")
                 return f"ATLAS | {symbol.upper()}\nMARKET GİRİŞİ REDDEDİLDİ\nNeden: {detail}\nKarar: İŞLEME GİRME"

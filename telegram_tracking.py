@@ -5,10 +5,9 @@ import time
 
 import requests
 
-from config import Config
-from execution_costs import estimate_stop_cost
 from core.candle import Candle
 from tracking_history import BAR, MINUTE, TEN_SECONDS, QUARTER_HOUR, EvidenceMissing, indexed, matches, trades_match
+from market_plan_safety import market_entry_risk_valid
 from telegram_prices import confirmed_target_levels, tracked_levels
 from trade_journal import TradeJournal
 
@@ -176,33 +175,10 @@ def _exit_levels_in_bar(plan, candle):
 
 
 def _market_entry_risk_valid(plan, entry):
-    """Recheck stop economics against the actual theoretical MARKET entry."""
-    try:
-        stop = float(plan["stop_loss"])
-        entry = float(entry)
-        planned = float(plan["entry"])
-        if not all(math.isfinite(x) and x > 0 for x in (entry, stop, planned)):
-            return False
-        distance = abs(stop - entry)
-        if distance <= 0 or distance / entry < float(getattr(Config, "MIN_STOP_PERCENT", 0.0005)):
-            return False
-        # A market reference cannot drift arbitrarily from the approved setup.
-        if abs(entry - planned) / planned > float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PCT", 0.05)):
-            return False
-        costs = plan["payload"]["execution_costs"]
-        stop_cost = estimate_stop_cost(
-            entry, stop, entry_type="MARKET",
-            maker_fee_rate=costs.get("maker_fee_rate", 0.0002),
-            taker_fee_rate=costs.get("taker_fee_rate", 0.00055),
-            spread_rate=costs.get("spread_rate", 0.0002),
-            slippage_rate=costs.get("slippage_rate", 0.0003),
-        )
-        max_cost_r = float(getattr(Config, "MAX_STOP_EXECUTION_COST_R", 0.5))
-        if max_cost_r <= 0 or stop_cost["total"] / distance > max_cost_r:
-            return False
-        return True
-    except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
-        return False
+    return market_entry_risk_valid(
+        plan["direction"], plan["entry"], entry, plan["stop_loss"], plan["tp1"],
+        plan["payload"]["execution_costs"],
+    )
 
 
 def apply_bar(plan, candle, width):
@@ -211,13 +187,12 @@ def apply_bar(plan, candle, width):
         plan["last_processed_candle_time"] = candle.time
         return True
     long = plan["direction"] == "LONG"
-    stop = plan.get("trailing_stop", plan["stop_loss"])
-    targets, touched, stopped = _exit_levels_in_bar(plan, candle)
+    _, touched, stopped = _exit_levels_in_bar(plan, candle)
     market = not plan["entry_reached"] and plan["payload"]["execution_costs"]["entry_type"] == "MARKET"
     entry = candle.open if market else plan["entry"]
     if not plan["entry_reached"]:
         if market:
-            if not (stop < entry < targets[0] if long else stop > entry > targets[0]):
+            if entry is None:
                 return False
             if not _market_entry_risk_valid(plan, entry):
                 plan.update(status="ENTRY_REJECTED", resolved_at=candle.time)
@@ -521,7 +496,7 @@ def save(conn, symbol, row, result):
     if plan["status"] == "SL":
         record("STOP", "Sinyal takibi: stop görüldü.")
     if new_state == "INVALIDATED" and plan.get("status") == "ENTRY_REJECTED":
-        record("ENTRY_REJECTED", "MARKET giriş reddedildi: stop mesafesi veya işlem maliyeti güvenli değil.")
+        record("ENTRY_REJECTED", "MARKET giriş reddedildi: fiyat sapması, stop riski veya net TP1 eşiği.")
     if new_state == "CLOSED":
         watch_closed_targets(conn, chat, symbol, revision, plan)
         record("CLOSED", f"Sinyal kapandı | {plan['realized_r']:+.2f}R")

@@ -11,6 +11,7 @@ from statistics import median
 
 from strategies.orderflow.strategy import _ORDERBOOK_ENGINE
 from strategies.candidate import STRATEGY_NAMES, _configured_partial_tp_weights, _raw_candidate
+from market_plan_safety import market_entry_distance_ok
 from strategy_catalog import TRADE_STRATEGY_IDS, SPECIALIST_IDS
 from shared.analysis_services import _current_price, _entry_reference
 from shared.microstructure_services import _trade_flow
@@ -1019,8 +1020,7 @@ class SevenStrategyLab:
                 distance_pct = abs(entry - current_price) / current_price
                 candidate["entry_distance_pct"] = distance_pct
                 if entry_type == "MARKET":
-                    max_market_distance = float(getattr(Config, "MAX_MARKET_ENTRY_DISTANCE_PERCENT", 0.003))
-                    if distance_pct > max_market_distance:
+                    if not market_entry_distance_ok(entry, current_price):
                         execution_rejection = "MARKET_ENTRY_TOO_FAR"
                 elif direction == "LONG" and entry >= current_price:
                     execution_rejection = "LONG_LIMIT_NOT_BELOW_MARKET"
