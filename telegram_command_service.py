@@ -846,7 +846,7 @@ class TelegramCommandService:
             del self._delivery.actions
 
     def _analysis_symbol_for_command(self, raw_command: str):
-        """Return a symbol only for commands routed to the long-running analyzer."""
+        """Identify commands that can wait on external market data."""
         normalized = normalize_command(raw_command)
         if not str(raw_command or "").strip().startswith("/"):
             from atlas_tui import _parse_liquidity_command
@@ -859,7 +859,9 @@ class TelegramCommandService:
         if command is None and len(parts) == 1:
             from atlas_tui import _is_symbol_input
             return parts[0].upper() if _is_symbol_input(parts[0]) else None
-        if not command or command.handler not in {"handle_analyze_symbol", "handle_liquidity"}:
+        if command and command.handler in {"handle_best_five", "handle_best_ten"}:
+            return "FIRSAT KONTROLÜ"
+        if not command or command.handler not in {"handle_analyze_symbol", "handle_liquidity", "handle_setup_symbol"}:
             return None
         symbol = parts[1] if command.takes_parameter and len(parts) > 1 else parts[0]
         return str(symbol or "").strip().upper() or None
@@ -880,7 +882,7 @@ class TelegramCommandService:
                 self._analysis_threads.pop(symbol, None)
 
     def _dispatch_background_analysis(self, raw_command: str, command_label: str) -> bool:
-        """Run slow single-symbol analyses outside the serial command worker."""
+        """Keep market requests outside the serial command worker."""
         symbol = self._analysis_symbol_for_command(raw_command)
         if not symbol:
             return False
@@ -888,7 +890,7 @@ class TelegramCommandService:
             if symbol in self._analysis_threads:
                 message = f"ATLAS | {symbol} analizi zaten çalışıyor."
             elif self._analysis_threads:
-                message = "Bir sembol analizi sürüyor. Tamamlandığında tekrar deneyebilirsiniz."
+                message = "Bir piyasa kontrolü sürüyor. Tamamlandığında tekrar deneyebilirsiniz."
             else:
                 thread = threading.Thread(
                     target=self._run_background_analysis, args=(raw_command, command_label, symbol),
@@ -1211,11 +1213,11 @@ class TelegramCommandService:
         )
 
     def handle_best_five(self) -> str:
-        """Handle /eniyi5 — strictly read-only from the Setup Pool."""
+        """Show and track the best five currently eligible opportunities."""
         return self._format_best_setups(5)
 
     def handle_best_ten(self) -> str:
-        """Handle /eniyi10 — strictly read-only from the Setup Pool."""
+        """Show and track the best ten currently eligible opportunities."""
         return self._format_best_setups(10)
 
 
@@ -1229,10 +1231,15 @@ class TelegramCommandService:
         if not _is_symbol_input(symbol):
             return "KULLANIM: /setup BTC"
         normalized = self.runtime.normalize_symbol(symbol)
-        items = get_opportunity_pool().get_validated_setups(symbol=normalized, limit=1)
+        pool = get_opportunity_pool()
+        items = pool.get_validated_setups(symbol=normalized, limit=1)
         if not items:
             return f"{normalized} — Doğrulanmış setup yok."
         item = items[0]
+        if item.entry_type == "MARKET" and not self._verify_market_proposal(item):
+            return f"{normalized} — MARKET girişi doğrulanamadı. Karar: ATLA."
+        if not pool.is_current_opportunity(item):
+            return f"{normalized} — Setup güncellendi veya süresi doldu. Karar: ATLA."
         return _format_telegram_card(dict(symbol=item.symbol, direction=item.direction,
             strategy=item.strategy_name, decision_action="EXECUTE", entry_type=item.entry_type,
             entry=item.entry_price, stop_loss=item.stop_loss, tp_levels=[item.tp1,item.tp2,item.tp3],
@@ -1415,17 +1422,18 @@ class TelegramCommandService:
             lines.insert(2, "Kuyruk kaldığı yerden sürdürülüyor.")
         return "\n".join(lines)
 
+    def _verify_market_proposal(self, item):
+        try:
+            return self.runtime.verify_market_opportunity(item) is True
+        except Exception as exc:
+            self.logger.warning("MARKET pre-display check unavailable | type=%s", type(exc).__name__)
+            return False
+
     def _format_best_setups(self, count: int) -> str:
         """Show pool plans and report the tracking result for explicit selections."""
         pool = get_opportunity_pool()
         tracking_status = {}
-        if count != 20:
-            try:
-                self.runtime.prune_market_opportunities(count)
-            except Exception as exc:
-                # Verification failure must not bypass the pool's own age
-                # guard; never fabricate an entry price on network errors.
-                self.logger.warning("MARKET pre-display check unavailable | type=%s", type(exc).__name__)
+        market_checks = 0
         # Performance snapshots are revision-scoped, cost-adjusted IS/OOS
         # samples. Unknown/sparse history is neutral rather than a win-rate.
         performance = None
@@ -1446,28 +1454,36 @@ class TelegramCommandService:
             except Exception as exc:
                 self.logger.warning("Opportunity correlation snapshot unavailable | type=%s", type(exc).__name__)
             requested_at = int(time.time() * 1000)
-            # Preserve the historical two-argument pool contract when no
-            # additional evidence is available (e.g. offline adapters).
-            if performance is None and correlations is None:
-                best, shown = pool.prepare_best_reply(self.chat_id, count)
-            else:
-                best, shown = pool.prepare_best_reply(
-                    self.chat_id, count, performance=performance, correlations=correlations
-                )
+
+            def check_market(item):
+                nonlocal market_checks
+                if market_checks >= count:
+                    return False
+                market_checks += 1
+                return self._verify_market_proposal(item)
+
+            best, shown = pool.prepare_best_reply(
+                self.chat_id, count, performance=performance, correlations=correlations, market_check=check_market
+            )
             if best:
                 # Persist the user's explicit selection before replying. The
                 # portfolio must not disappear if Telegram delivery fails after
                 # Atlas has acknowledged the command. Duplicate requests are
                 # idempotent in the shared tracking transaction.
-                tracking_status = pool.follow_best_reply(self.chat_id, shown, requested_at) or {}
+                tracking_status = pool.follow_best_reply(self.chat_id, shown, requested_at)
+                best = [item for item in best if item.symbol in tracking_status]
         title = "HAVUZ" if count == 20 else f"EN İYİ {count} SETUP"
         if not best:
+            if market_checks:
+                return f"{title}\nBu sorguda güncel MARKET girişi doğrulanamadı. Karar: ATLA."
             return f"{title}\nDoğrulanmış setup havuzu boş."
         lines = [title]
         for index, item in enumerate(best, 1):
             lines.append(f"{index}. {item.symbol.replace(':USDT','')} | {item.direction} | "
                          f"{_format_strategy_name(item.strategy_name)} | {_format_rr(item.net_rr_after_costs)}")
             lines.append(format_plan_levels(item.entry_price, item.stop_loss, item.tp1, item.tp2, item.tp3))
+            if count == 20 and item.entry_type == "MARKET":
+                lines.append("MARKET · Güncel giriş kontrolü için /setup " + item.symbol.split("/")[0])
             if item.symbol not in tracking_status:
                 continue
             tracked_id, state, muted = tracking_status[item.symbol]
@@ -1479,6 +1495,8 @@ class TelegramCommandService:
                 lines.append("Yeni setup takibe alınmadı. Önceki kayıt doğrulama bekliyor.")
             elif tracked_id != item.setup_id and state == "ACTIVE":
                 lines.append("Yeni setup takibe alınmadı. Önceki işlem hâlâ açık.")
+            elif tracked_id != item.setup_id and state == "WAITING":
+                lines.append("Yeni setup takibe alınmadı. Önceki giriş takip ediliyor.")
             else:
                 lines.append("Bu setup için /islemler listesinde güncel takip yok.")
         return "\n".join(lines)

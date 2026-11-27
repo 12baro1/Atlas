@@ -706,42 +706,29 @@ class AtlasRuntime:
                     correlations[frozenset((left, right))] = max(-1.0, min(1.0, corr))
         return correlations
 
-    def prune_market_opportunities(self, limit=5):
-        """Verify pending MARKETs with fresh Gate.io data before Telegram ranking.
-
-        No other strategy is rescanned. Missing evidence hides a MARKET until
-        its next full validation; only a proven stop touch invalidates the
-        tracked hypothetical setup. This avoids unbounded API calls.
-        """
+    def verify_market_opportunity(self, candidate):
+        """Verify the exact MARKET proposal being considered for display."""
         from market_plan_safety import check_market_plan
         from data_engine import exchange as market_exchange
         pool = self._opportunity_pool()
-        candidates = pool.get_best_setups(limit=max(5, min(int(limit) * 3, 30)))
-        for candidate in candidates:
-            if candidate.entry_type != "MARKET":
-                continue
-            valid, reason = check_market_plan(
-                market_exchange, candidate.symbol, candidate.direction,
-                candidate.entry_price, candidate.stop_loss, candidate.created_at_ms,
-                tp1=candidate.tp1, costs=candidate.execution_costs,
-            )
-            if valid:
-                continue
-            if reason == "MARKET_STOP_ALREADY_HIT":
-                pool.invalidate_setup(candidate.setup_id, reason)
-                pool.tracking.invalidate_unentered_setup(candidate.setup_id, reason)
-            else:
-                # A stale or unavailable feed is not evidence that the stop
-                # was hit. Do not report an invented loss.
-                with pool._lock:
-                    current = pool._validated.get(candidate.setup_id)
-                    if current is not None:
-                        current.requires_revalidation = True
-                        pool.save_all()
-            self.logger.warning(
-                "MARKET opportunity hidden | symbol=%s reason=%s",
-                candidate.symbol, reason,
-            )
+        valid, reason = check_market_plan(
+            market_exchange, candidate.symbol, candidate.direction,
+            candidate.entry_price, candidate.stop_loss, candidate.created_at_ms,
+            tp1=candidate.tp1, costs=candidate.execution_costs,
+        )
+        if valid:
+            return True
+        # The proposal check starts at the enclosing minute. A wick in that
+        # candle cannot establish whether an existing position entered first.
+        with pool._lock:
+            if pool._validated.get(candidate.setup_id) == candidate:
+                if reason == "MARKET_STOP_ALREADY_HIT":
+                    pool.invalidate_setup(candidate.setup_id, reason)
+                else:
+                    pool._validated[candidate.setup_id].requires_revalidation = True
+                    pool.save_all()
+        self.logger.warning("MARKET opportunity hidden | symbol=%s reason=%s", candidate.symbol, reason)
+        return False
 
     def strategy_performance(self, symbol=None, regime=None):
         """Return independently aggregated, cost-adjusted IS/OOS results per strategy."""

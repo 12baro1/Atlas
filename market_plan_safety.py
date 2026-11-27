@@ -113,7 +113,7 @@ def check_market_plan(exchange, symbol, direction, entry, stop, signal_ms, *, tp
         bars = exchange.fetch_ohlcv(symbol, "1m", since=start, limit=4) or []
         if not bars:
             return False, "MARKET_1M_HISTORY_UNAVAILABLE"
-        valid_latest = 0
+        observed_minutes = set()
         for bar in bars:
             try:
                 ts, high, low = int(bar[0]), float(bar[2]), float(bar[3])
@@ -123,11 +123,19 @@ def check_market_plan(exchange, symbol, direction, entry, stop, signal_ms, *, tp
                 return False, "MARKET_1M_HISTORY_INVALID"
             if ts < start or ts > checked:
                 continue
-            valid_latest = max(ts, valid_latest)
+            if ts % MINUTE:
+                return False, "MARKET_1M_HISTORY_INVALID"
+            observed_minutes.add(ts)
             if stop_breached(direction, stop, low, high):
                 return False, "MARKET_STOP_ALREADY_HIT"
-        if not valid_latest or checked - valid_latest > 2 * MINUTE:
-            return False, "MARKET_1M_HISTORY_STALE"
+        last_required = max(start, (stamp // MINUTE - 1) * MINUTE)
+        if not set(range(start, last_required + MINUTE, MINUTE)).issubset(observed_minutes):
+            return False, "MARKET_1M_HISTORY_GAP"
+        finished = int(time.time() * 1000) if now_ms is None else now
+        if finished - signal_time > MAX_MARKET_SIGNAL_AGE_MS:
+            return False, "MARKET_SIGNAL_EXPIRED"
+        if finished - stamp > MAX_TICKER_AGE_MS:
+            return False, "MARKET_TICKER_UNAVAILABLE"
         if tp1 is not None and not market_entry_risk_valid(direction, entry, latest, stop, tp1, costs or {}):
             return False, "MARKET_ENTRY_QUALITY_REJECTED"
     except Exception:

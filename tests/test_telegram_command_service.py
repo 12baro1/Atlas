@@ -437,14 +437,15 @@ def test_best_setups_output_includes_levels_per_displayed_plan(monkeypatch):
         created_at_ms=0, updated_at_ms=0,
     )
     pool = SimpleNamespace(
-        prepare_best_reply=lambda chat, count: ([setup], []),
-        follow_best_reply=lambda chat, shown, requested_at: None,
+        prepare_best_reply=lambda chat, count, **options: ([setup], []),
+        follow_best_reply=lambda chat, shown, requested_at: {setup.symbol: (None, None, True)},
     )
     monkeypatch.setattr(telegram_module, "get_opportunity_pool", lambda: pool)
     service = TelegramCommandService(object(), "token", "chat")
     message = service._format_best_setups(5)
     assert message.splitlines() == ["EN İYİ 5 SETUP", "1. BTC/USDT | LONG | SMC | +1.80R",
-                                    "Giriş: 100.0 | Stop: 98.0", "TP1: 102.0 | TP2: 104.0 | TP3: 106.0"]
+                                    "Giriş: 100.0 | Stop: 98.0", "TP1: 102.0 | TP2: 104.0 | TP3: 106.0",
+                                    "Yeni setup takibe alınmadı. Bu sembolün takibi kapalı."]
 
 
 def test_scan_status_contains_only_queue_and_market_status():
@@ -806,6 +807,33 @@ def test_notifications_run_while_polling_has_no_updates(monkeypatch):
         assert delivered.wait(2)
     finally:
         assert service.stop(timeout=3)
+
+
+def test_market_opportunity_check_does_not_hold_up_trade_report(monkeypatch):
+    import threading
+
+    bot = TelegramCommandService(None, "offline", "chat")
+    started, release, reported = threading.Event(), threading.Event(), threading.Event()
+
+    def execute(command):
+        if command == "/eniyi10":
+            started.set()
+            release.wait(3)
+        elif command == "/islemler":
+            reported.set()
+
+    monkeypatch.setattr(bot, "_command_and_reply", execute)
+    worker = threading.Thread(target=bot._command_worker_loop)
+    worker.start()
+    try:
+        bot._command_queue.put_nowait(("/eniyi10", "eniyi10"))
+        assert started.wait(1)
+        bot._command_queue.put_nowait(("/islemler", "islemler"))
+        assert reported.wait(1)
+    finally:
+        release.set()
+        bot.stop_flag.set()
+        worker.join(2)
 
 
 def test_polling_reconnect_preserves_first_fresh_command_and_offset(monkeypatch):
