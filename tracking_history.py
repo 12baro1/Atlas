@@ -71,6 +71,9 @@ class TrackingHistory:
     """Per-worker cache of closed ranges. Volumes here are native contract counts."""
     def __init__(self):
         self.exchange = GateFuturesExchange(timeout=4, max_retries=1)
+        # Gate otherwise serializes fractional contracts as integers,
+        # which can turn a real fill or candle volume into zero.
+        self.exchange.session.headers["X-Gate-Size-Decimal"] = "1"
         self.last_request = 0
         self.candles = lru_cache(maxsize=32)(self._candles)
         self.ticks = lru_cache(maxsize=16)(self._ticks)
@@ -82,7 +85,10 @@ class TrackingHistory:
     def _get(self, endpoint, symbol, start, end, **params):
         sleep(max(0, self.last_request + 0.25 - monotonic()))
         self.last_request = monotonic()
-        query = {'contract': self.exchange.market_id(symbol), 'from': start // 1000, 'to': (end - 1) // 1000, **params}
+        # The trades endpoint compares to a second boundary, while the
+        # candle endpoint includes candles whose start equals "to".
+        to = (end + 999) // 1000 if endpoint == "trades" else (end - 1) // 1000
+        query = {'contract': self.exchange.market_id(symbol), 'from': start // 1000, 'to': to, **params}
         return self.exchange._get('/futures/usdt/' + endpoint, query)
 
     def _candles(self, symbol, start, width, count):
@@ -101,6 +107,8 @@ class TrackingHistory:
         """
         if end <= start:
             return []
+        query_start = start // 1000 * 1000
+        query_end = (end + 999) // 1000 * 1000
         page_limit, max_pages = 1000, 8
         ticks, ids = {}, set()
         offset = 0
@@ -118,18 +126,25 @@ class TrackingHistory:
             for row in rows:
                 try:
                     stamp = trade_timestamp_ms(row["create_time_ms"])
-                    price = float(row["price"])
-                    size = abs(float(row["size"]))
                     trade_id = row["id"]
                 except (KeyError, TypeError, ValueError, OverflowError) as exc:
                     raise EvidenceMissing("Geçersiz işlem kaydı") from exc
-                if not isfinite(price) or not isfinite(size) or min(price, size) <= 0:
-                    raise EvidenceMissing("Geçersiz işlem fiyatı veya hacmi")
-                if not start <= stamp < end:
+                if not query_start <= stamp <= query_end:
                     raise EvidenceMissing("İşlem geçmişi istenen aralık dışında")
                 if trade_id in ids:
                     raise EvidenceMissing("Gate.io işlem sayfaları örtüşüyor")
                 ids.add(trade_id)
+                # Keep an exact half-open interval. Gate excludes internal
+                # insurance/ADL transfers from its market candlesticks.
+                if not start <= stamp < end or row.get("is_internal") is True:
+                    continue
+                try:
+                    price = float(row["price"])
+                    size = abs(float(row["size"]))
+                except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                    raise EvidenceMissing("Geçersiz işlem kaydı") from exc
+                if not isfinite(price) or not isfinite(size) or min(price, size) <= 0:
+                    raise EvidenceMissing("Geçersiz işlem fiyatı veya hacmi")
                 group = ticks.setdefault(stamp, TradeGroup(stamp))
                 group.prices.add(price)
                 group.volume += size

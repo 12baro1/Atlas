@@ -118,7 +118,7 @@ def test_gate_futures_wire_format_and_fractional_epoch_seconds(monkeypatch):
     monkeypatch.setattr(history.exchange, "_get", get)
     assert history.candles("CAP/USDT:USDT", START, MINUTE, 1) == [bar(START,.0977,.09772,.09751,.09768,66)]
     assert history.ticks("CAP/USDT:USDT", START)[0].time == 1795140954218
-    assert get.call_args.args[1] == {"contract":"CAP_USDT","from":1795140900,"to":1795140959,"limit":1000}
+    assert get.call_args.args[1] == {"contract":"CAP_USDT","from":1795140900,"to":1795140960,"limit":1000}
 
 
 @pytest.mark.parametrize(("position", "candle"), [
@@ -630,6 +630,50 @@ def test_gate_trade_history_pages_full_time_range_without_fabricated_order(monke
     assert get.call_count == 2
     assert get.call_args_list[0].kwargs == {"limit": 1000}
     assert get.call_args_list[1].kwargs == {"limit": 1000, "offset": 1000}
+
+
+def test_gate_trade_history_includes_final_second_with_native_decimal_sizes(monkeypatch):
+    from tracking_history import trades_match
+
+    history = TrackingHistory()
+    assert history.exchange.session.headers["X-Gate-Size-Decimal"] == "1"
+    end = START + MINUTE
+    rows = [
+        dict(id=5, create_time_ms=end, price="900", size="2"),
+        dict(id=4, create_time_ms=end - 5, price="101", size="-0.5"),
+        dict(id=3, create_time_ms=end - 10, price="90", size="3", is_internal=True),
+        dict(id=2, create_time_ms=START + 10, price="100", size="0.2"),
+        dict(id=1, create_time_ms=START, price="100", size="0.5"),
+    ]
+    get = Mock(side_effect=[
+        rows, [dict(o="100", h="101", l="100", c="101", v="1.2", t=START // 1000)],
+    ])
+    monkeypatch.setattr(history.exchange, "_get", get)
+    groups = history.trade_range(BTC, START, end)
+    assert [group.time for group in groups] == [START, START + 10, end - 5]
+    [minute] = history.candles(BTC, START, MINUTE, 1)
+    assert trades_match(minute, groups)
+    trade_query, candle_query = [call.args[1] for call in get.call_args_list]
+    assert trade_query["to"] == end // 1000
+    assert candle_query["to"] == end // 1000 - 1
+
+
+def test_empty_opening_candle_does_not_block_market_reference_in_next_bar():
+    opened = START + 3500
+    history = Mock()
+    history.candles.return_value = [
+        bar(START, 100, 100, 100, 100, 0),
+        bar(START + BAR, 100, 102, 99, 101),
+    ]
+    pending = plan(opened_at=opened, entry_reached=False, entry_reached_at=None,
+                   payload={"execution_costs": {"entry_type": "MARKET"}})
+    state, tracked = evaluate(BTC, "AMBIGUOUS", json.dumps(pending),
+                              START + 2 * BAR, history=history)
+    assert state == "ACTIVE"
+    assert tracked["entry_reached_at"] == START + BAR
+    assert not tracked.get("tps_hit")
+    history.candles.assert_called_once_with(BTC, START, BAR, 2)
+    history.trade_range.assert_not_called()
 
 
 def test_gate_trade_history_refuses_overlapping_pages(monkeypatch):
