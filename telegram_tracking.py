@@ -7,7 +7,7 @@ import requests
 
 from core.candle import Candle
 from tracking_history import BAR, MINUTE, TEN_SECONDS, QUARTER_HOUR, EvidenceMissing, candle_history_expired, indexed, matches, trades_match
-from market_plan_safety import market_entry_risk_valid
+from market_plan_safety import MAX_MARKET_SIGNAL_AGE_MS, market_entry_risk_valid
 from telegram_prices import confirmed_target_levels, tracked_levels
 from trade_journal import TradeJournal
 
@@ -88,6 +88,8 @@ def _same_trade_setup(previous, setup, previous_id):
 
 
 def transition(conn, chat, symbol, revision, setup, *, announce, user_requested=False):
+    now = int(time.time() * 1000)
+    separate = False
     current = conn.execute("SELECT setup_id,state,payload FROM chat_plans WHERE chat=? AND symbol=? AND revision=?",
                            (chat, symbol, revision)).fetchone()
     if current:
@@ -95,9 +97,14 @@ def transition(conn, chat, symbol, revision, setup, *, announce, user_requested=
         old = json.loads(raw)
         if setup and previous_id == setup["setup_id"] and state not in {"INVALIDATED", "REMOVED"}:
             return
-        pending_market = (state == "WAITING"
-                          and (old.get("payload") or {}).get("execution_costs", {}).get("entry_type") == "MARKET")
-        if state in {"ACTIVE","AMBIGUOUS"} or pending_market:
+        old_market = (old.get("payload") or {}).get("execution_costs", {}).get("entry_type") == "MARKET"
+        pending_market = state == "WAITING" and old_market
+        separate = bool(
+            user_requested and setup and state == "AMBIGUOUS" and old_market
+            and old.get("opened_at") and now - old["opened_at"] > MAX_MARKET_SIGNAL_AGE_MS
+            and not entry_confirmed(old) and not _same_trade_setup(old, setup, previous_id)
+        )
+        if (state in {"ACTIVE", "AMBIGUOUS"} or pending_market) and not separate:
             # Preserve open positions and plans pending verification.
             # Notify the follower once per distinct new pool setup.
             if setup and previous_id != setup["setup_id"] and announce:
@@ -107,10 +114,8 @@ def transition(conn, chat, symbol, revision, setup, *, announce, user_requested=
                       "Bu semboldeki mevcut takip kaydı devam ediyor.",
                       old)
             return
-        if setup and setup.get("entry_type") == "MARKET" and not user_requested:
-            return
-        if state == "WAITING":
-            old["resolved_at"] = int(time.time()*1000)
+        if state == "WAITING" and not setup:
+            old["resolved_at"] = now
             conn.execute("UPDATE chat_plans SET state='INVALIDATED',payload=? WHERE chat=? AND symbol=? AND revision=?",
                          (json.dumps(old),chat, symbol, revision))
             if announce and not setup:
@@ -120,28 +125,39 @@ def transition(conn, chat, symbol, revision, setup, *, announce, user_requested=
     # Pool publications are informational. Only a user-requested command may
     # start tracking an untracked symbol or restart after a terminal plan.
     # A still-WAITING user-selected plan may be replaced as its setup evolves.
-    if not user_requested and (not current or state != "WAITING"):
+    if not user_requested and (not current or state != "WAITING" or setup.get("entry_type") == "MARKET"):
         return
-    # A closed trade is immutable. Pool refreshes may publish a different ID
-    # for the same geometry; neither must create another virtual entry.
-    closed = conn.execute(
-        "SELECT setup_id,payload FROM chat_plans WHERE chat=? AND symbol=? AND state='CLOSED'",
-        (chat, symbol),
+    # Prior revisions may still be replaying. Preserve confirmed positions
+    # and prevent duplicate geometry across historical and live revisions.
+    prior = conn.execute(
+        "SELECT setup_id,state,payload FROM chat_plans WHERE chat=? AND symbol=? "
+        "AND (state='CLOSED' OR (revision<>? AND state IN ('ACTIVE','WAITING','AMBIGUOUS')))",
+        (chat, symbol, revision),
     ).fetchall()
-    if any(_same_trade_setup(json.loads(raw), setup, previous_id)
-           for previous_id, raw in closed):
-        return
+    for prior_id, prior_state, raw in prior:
+        prior_plan = json.loads(raw)
+        if (_same_trade_setup(prior_plan, setup, prior_id) or prior_state == "ACTIVE"
+                or (prior_state == "AMBIGUOUS" and entry_confirmed(prior_plan))):
+            return
+    if current and state == "WAITING":
+        old["resolved_at"] = now
+        conn.execute("UPDATE chat_plans SET state='INVALIDATED',payload=? WHERE chat=? AND symbol=? AND revision=?",
+                     (json.dumps(old), chat, symbol, revision))
     revision += 1
     costs = dict(setup.get("execution_costs") or {}, entry_type=setup["entry_type"])
     outcome = dict(symbol=symbol, direction=setup["direction"], entry=setup["entry_price"],
                    stop_loss=setup["stop_loss"], tp1=setup["tp1"], tp2=setup["tp2"], tp3=setup["tp3"],
-                   strategy=setup["strategy_name"], strategy_id=setup["strategy_id"], opened_at=int(time.time()*1000), status="PENDING",
+                   strategy=setup["strategy_name"], strategy_id=setup["strategy_id"], opened_at=now, status="PENDING",
                    partial_weights=costs.get("partial_exit_weights") or CandleSimulation()._signal_partial_weights(), realized_r=0.0,
                    entry_reached=False, payload={"execution_costs":costs})
     conn.execute("UPDATE chat_follows SET revision=? WHERE chat=? AND symbol=?", (revision, chat, symbol))
     conn.execute("INSERT INTO chat_plans VALUES(?,?,?,?,?,?)",
                  (chat, symbol, revision, setup["setup_id"], "WAITING", json.dumps(outcome)))
     if announce:
+        if separate:
+            event(conn, chat, symbol, revision, "SETUP",
+                  "YENİ SETUP TAKİBE ALINDI\nÖnceki kaydın doğrulaması sürüyor.", outcome)
+            return
         label = "YENİ SETUP" if not current or state in {"INVALIDATED","CLOSED","UNVERIFIED","REMOVED"} else "SETUP GÜNCELLENDİ"
         previous = f"\nEski: {old['direction']} | {old['strategy']}" if current else ""
         event(conn, chat, symbol, revision, "SETUP", f"{label}{previous}\nYeni: {outcome['direction']} | {outcome['strategy']}", outcome)
