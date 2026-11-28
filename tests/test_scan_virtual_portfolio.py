@@ -175,6 +175,12 @@ def test_restart_checks_published_batch_before_claiming_next_symbol(tmp_path, po
 
 
 def test_smaller_persisted_scan_still_publishes_results(tmp_path, pool):
+    from opportunity_pool import SetupCandidate
+
+    other_symbol = "ETH/USDT:USDT"
+    other = SetupCandidate.from_dict(observation(other_symbol)["setup"])
+    pool.add_candidate(other)
+    pool.validate_candidate(other.setup_id)
     queue = ScanQueue(tmp_path / "queue")
     try:
         generation = queue.rebuild([BTC])["generation"]
@@ -186,7 +192,7 @@ def test_smaller_persisted_scan_still_publishes_results(tmp_path, pool):
         inventory.get_ranked_symbols.return_value = [BTC]
         scanner = ScanService(runtime, queue, inventory, continuous=True)
         scanner.roll_cycle()
-        assert pool.get_best_setups()[0].symbol == BTC
+        assert {item.symbol for item in pool.get_best_setups()} == {BTC, other_symbol}
         assert int(pool.tracking.get_meta("published_generation")) == generation
         assert queue.current_generation() > generation
         assert "Son havuz güncellemesi" in service().handle_pool_status()

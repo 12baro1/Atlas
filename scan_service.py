@@ -378,7 +378,11 @@ class ScanService:
             if not rows or (len(rows) < SCAN_PUBLICATION_BATCH_SIZE and not complete
                             and not self._market_batch_expiring(observations)):
                 if complete:
-                    pool.publish_cycle(generation, [], self.queue.generation_symbols(generation))
+                    members = self.queue.generation_symbols(generation)
+                    # A shorter ranking can be a partial ticker response.
+                    # Its omissions are insufficient to retire other plans.
+                    universe = members if len(members) >= self.universe_limit else None
+                    pool.publish_cycle(generation, [], universe)
                 return complete
             cursor = rows[-1][0]
             pool.publish_cycle(generation, observations, batch_cursor=cursor)
