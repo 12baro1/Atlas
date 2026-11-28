@@ -158,3 +158,23 @@ def test_market_wick_hides_proposal_without_guessing_existing_trade_order(tmp_pa
         assert not pool.tracking.pending_notifications(pool_chat)
     finally:
         pool.stop()
+
+
+def test_transient_market_verification_failure_can_retry_same_fresh_setup(tmp_path, monkeypatch):
+    pool = opportunity_pool.OpportunityPool(base_path=tmp_path / "pool", auto_persist=False)
+    try:
+        item = candidate("BTC", entry_type="MARKET")
+        item.tp1, item.tp2, item.tp3 = 102.0, 104.0, 106.0
+        publish(pool, item)
+        market = FakeMarket(fail=True)
+        monkeypatch.setattr("data_engine.exchange", market)
+        runtime = AtlasRuntime.__new__(AtlasRuntime)
+        runtime._opportunity_pool = lambda: pool
+        runtime.logger = logging.getLogger("test.market.guard")
+        assert runtime.verify_market_opportunity(item) is False
+        assert pool.get_best_setups() == [item]
+        market.fail = False
+        market.timestamp = int(time.time() * 1000)
+        assert runtime.verify_market_opportunity(item) is True
+    finally:
+        pool.stop()

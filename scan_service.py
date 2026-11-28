@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from gateio_futures import request_metrics
+from market_plan_safety import MAX_MARKET_SIGNAL_AGE_MS
 import sqlite3
 import threading
 import time
@@ -373,14 +374,31 @@ class ScanService:
             return False
         while not self._stop_event.is_set():
             rows = self.queue.staged_batch(generation, cursor, SCAN_PUBLICATION_BATCH_SIZE)
-            if not rows or (len(rows) < SCAN_PUBLICATION_BATCH_SIZE and not complete):
+            observations = [row for _, row in rows if row is not None]
+            if not rows or (len(rows) < SCAN_PUBLICATION_BATCH_SIZE and not complete
+                            and not self._market_batch_expiring(observations)):
                 if complete:
-                    pool.publish_cycle(generation, [], self.queue.generation_symbols(generation))
+                    members = self.queue.generation_symbols(generation)
+                    # A shorter ranking can be a partial ticker response.
+                    # Its omissions are insufficient to retire other plans.
+                    universe = members if len(members) >= self.universe_limit else None
+                    pool.publish_cycle(generation, [], universe)
                 return complete
             cursor = rows[-1][0]
-            pool.publish_cycle(generation, [row for _, row in rows if row is not None], batch_cursor=cursor)
+            pool.publish_cycle(generation, observations, batch_cursor=cursor)
             if not self._check_published_batch(pool, f"{generation}:{cursor}"):
                 return False
+        return False
+
+    @staticmethod
+    def _market_batch_expiring(observations):
+        now = int(time.time() * 1000)
+        for row in observations:
+            setup = row.get("setup") or {}
+            if setup.get("entry_type") == "MARKET" and setup.get("created_at_ms"):
+                age = now - setup["created_at_ms"]
+                if MAX_MARKET_SIGNAL_AGE_MS // 2 <= age <= MAX_MARKET_SIGNAL_AGE_MS:
+                    return True
         return False
 
     def _check_published_batch(self, pool, marker):
@@ -400,7 +418,7 @@ class ScanService:
             status = self.queue.progress()
             gen = status["generation"]
             published = int(pool.tracking.get_meta("published_generation", "0"))
-            if status["total"] == self.universe_limit and gen > published:
+            if status["total"] and gen > published:
                 if status["complete"] and self.queue.restore_unstaged_jobs(gen):
                     return
                 finalized = self._publish_scan_batches(pool, gen, complete=status["complete"])
@@ -414,7 +432,7 @@ class ScanService:
                 return
             self._last_rank_attempt = time.monotonic()
             ranked = self.inventory.get_ranked_symbols(limit=self.universe_limit, require_volume=True)
-            if len(set(ranked)) == self.universe_limit:
+            if ranked:
                 self.queue.rebuild(ranked, batch_tag=f"continuous_{self.universe_limit}", preserve_unfinished=True,
                                    ranking_source="gateio_24h_quote_volume")
 

@@ -243,6 +243,9 @@ class PoolStore:
             if publication:
                 marker, value, decisions = publication
                 conn.execute("INSERT OR REPLACE INTO pool_meta VALUES(?,?)", (marker,str(value)))
+                if decisions:
+                    conn.execute("INSERT OR REPLACE INTO pool_meta VALUES('last_opportunity_batch_ms',?)",
+                                 (str(int(time.time() * 1000)),))
                 for row in decisions:
                     symbol = row["symbol"]
                     if row.get("new_validation"):

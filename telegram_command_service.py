@@ -1339,12 +1339,15 @@ class TelegramCommandService:
             "",
             f"Aday: {stats.get('candidates', 0)}",
             f"Doğrulanmış: {stats.get('validated', 0)}",
-            f"Şimdi girilebilir: {stats.get('validated', 0)}",
+            f"Güncel giriş adayı: {stats.get('validated', 0)}",
             f"Doğrulanmış kayıt (toplam): {stats.get('validated_stored', stats.get('validated', 0))}",
             f"Aktif takip: {stats.get('active', 0)}",
             f"Arşiv: {stats.get('history', 0)}",
         ]
         waiting = stats.get("validated_stored", stats.get("validated", 0)) - stats.get("validated", 0)
+        if stats.get("last_batch_ms"):
+            published = datetime.fromtimestamp(stats["last_batch_ms"] / 1000, ZoneInfo("Europe/Istanbul"))
+            lines.append(f"Son havuz güncellemesi {published:%d.%m %H:%M} TSİ")
         if stats.get("market_expired"):
             lines.append(f"MARKET süresi dolan: {stats['market_expired']} (2 dakika sonra yeni giriş değildir)")
         if stats.get("needs_revalidation"):
@@ -1365,6 +1368,8 @@ class TelegramCommandService:
                 f"TP1: {_format_price(item.tp1)} | TP2: {_format_price(item.tp2)} | TP3: {_format_price(item.tp3)}",
                 f"Net RR: {_format_rr(item.net_rr_after_costs)}",
             ])
+            if entry_type == "MARKET":
+                lines.append("Güncel MARKET giriş kontrolü: /setup " + item.symbol.split("/")[0])
         else:
             lines.extend(["", "Şu an girilebilir doğrulanmış setup yok."])
             if stats.get("validated_stored"):

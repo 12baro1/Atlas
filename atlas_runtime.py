@@ -724,7 +724,7 @@ class AtlasRuntime:
             if pool._validated.get(candidate.setup_id) == candidate:
                 if reason == "MARKET_STOP_ALREADY_HIT":
                     pool.invalidate_setup(candidate.setup_id, reason)
-                else:
+                elif reason in {"MARKET_ENTRY_PRICE_STALE", "MARKET_ENTRY_QUALITY_REJECTED"}:
                     pool._validated[candidate.setup_id].requires_revalidation = True
                     pool.save_all()
         self.logger.warning("MARKET opportunity hidden | symbol=%s reason=%s", candidate.symbol, reason)
@@ -903,6 +903,7 @@ class AtlasRuntime:
                                                          regime=strategy_lab.get("regime")) if selected else None
                     if selected and not candidate:
                         return {"ok": False, "error": "invalid_selected_plan"}
+                    rejected_market = None
                     if (candidate is not None and candidate.entry_type == "MARKET"
                             and isinstance(data.get("data_provenance"), dict)):
                         from market_plan_safety import check_market_plan
@@ -916,9 +917,12 @@ class AtlasRuntime:
                             with self._lock:
                                 counter = self._strategy_telemetry.setdefault("market_preflight_rejections", defaultdict(int))
                                 _count_reason(counter, reason, 32)
-                            self._inc("skipped")
                             self._log(f"SKIP {symbol} MARKET: {reason}")
-                            return {"ok": False, "symbol": symbol, "error": reason}
+                            if not from_scan:
+                                self._inc("skipped")
+                                return {"ok": False, "symbol": symbol, "error": reason}
+                            rejected_market = reason
+                            candidate = None
                     evidence = {"structure_close": closed_15m[-1].close, "symbol": symbol, "cutoff": int(closed_15m[-1].time),
                                 "observed": started, "setup": candidate.to_dict() if candidate else None,
                                 "blocked_strategies": [row["strategy_id"] for row in diagnostics["strategies"]
@@ -929,11 +933,12 @@ class AtlasRuntime:
                     tracking_bars = data.get("5m") or data.get("5M")
                     if tracking_bars:
                         pool.tracking.advance_tracking(symbol, tracking_bars)
-                    self._register_result(result)
-                    with self._lock:
-                        self._latest_analysis_by_symbol[symbol] = result
-                        self._latest_analysis_at[symbol] = started
-                    self._prune_latest_analyses()
+                    if not rejected_market:
+                        self._register_result(result)
+                        with self._lock:
+                            self._latest_analysis_by_symbol[symbol] = result
+                            self._latest_analysis_at[symbol] = started
+                        self._prune_latest_analyses()
                     if Config.SIGNAL_TRACKING_ENABLED:
                         resolved = self.engine.trade_journal.resolve_signal_outcomes({symbol: closed_15m})
                         if resolved:
@@ -952,7 +957,7 @@ class AtlasRuntime:
             return {
                 "ok": True,
                 "symbol": symbol,
-                "result": result,
+                "result": None if rejected_market else result,
                 "cycle_result": evidence,
                 "elapsed_ms": int(time.time() * 1000) - started,
             }
