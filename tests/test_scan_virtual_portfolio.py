@@ -174,6 +174,50 @@ def test_restart_checks_published_batch_before_claiming_next_symbol(tmp_path, po
     queue.close()
 
 
+def test_smaller_persisted_scan_still_publishes_results(tmp_path, pool):
+    queue = ScanQueue(tmp_path / "queue")
+    try:
+        generation = queue.rebuild([BTC])["generation"]
+        claim = queue.claim_next()
+        queue.complete(BTC, True, claim=claim, result=observation())
+        runtime = MagicMock()
+        runtime._opportunity_pool.return_value = pool
+        inventory = MagicMock()
+        inventory.get_ranked_symbols.return_value = [BTC]
+        scanner = ScanService(runtime, queue, inventory, continuous=True)
+        scanner.roll_cycle()
+        assert pool.get_best_setups()[0].symbol == BTC
+        assert int(pool.tracking.get_meta("published_generation")) == generation
+        assert queue.current_generation() > generation
+        assert "Son havuz güncellemesi" in service().handle_pool_status()
+    finally:
+        queue.close()
+
+
+def test_scan_publishes_market_before_waiting_for_full_batch(tmp_path, pool, monkeypatch):
+    import time
+
+    now = 1_800_000_000
+    monkeypatch.setattr(time, "time", lambda: now)
+    queue = ScanQueue(tmp_path / "queue")
+    try:
+        queue.rebuild([BTC] + [f"S{i}/USDT:USDT" for i in range(1, 50)])
+        claim = queue.claim_next()
+        row = observation(stamp=(now - 75) * 1000)
+        row["setup"].update(entry_type="MARKET", created_at_ms=row["observed"])
+        queue.complete(BTC, True, claim=claim, result=row)
+        runtime = MagicMock()
+        runtime._opportunity_pool.return_value = pool
+        refresh = MagicMock()
+        scanner = ScanService(runtime, queue, MagicMock(), continuous=True, refresh_tracked_setups=refresh)
+        scanner.roll_cycle()
+        assert pool.get_best_setups()[0].symbol == BTC
+        assert queue.progress()["done"] == 1
+        refresh.assert_called_once()
+    finally:
+        queue.close()
+
+
 def test_scan_publishes_and_checks_tracking_after_ten_terminal_jobs_including_failures(tmp_path, pool):
     from contextlib import closing
 
@@ -365,19 +409,21 @@ def test_concurrent_revisions_keep_newest_observation(pool):
     assert len(live)==1 and live[0]["tp3"]==53010
 
 
-def test_runtime_market_input_to_stage_and_manual_portfolio(pool, monkeypatch):
+@pytest.mark.parametrize("reject_market", [False, True])
+def test_runtime_market_input_to_stage_and_manual_portfolio(pool, monkeypatch, reject_market):
     import time
     import threading
     import atlas_runtime as module
     runtime = make_runtime()
     runtime._journal_lock = threading.Lock()
     runtime.engine = MagicMock()
-    runtime.engine.analyze.return_value = engine_shaped_result()
+    runtime.engine.analyze.return_value = engine_shaped_result(entry_type="MARKET" if reject_market else "LIMIT")
     selected = runtime.engine.analyze.return_value["strategy_lab"]["selected"]
     runtime.engine.analyze.return_value["strategy_lab"]["regime"]={"label":"TREND"}
     selected.update(risk_validation={"eligible": True}, risk_plan={
         "final_geometry_reconciled": True, "risk_setup_valid": True})
     runtime._scanner_stats = {}
+    runtime._strategy_telemetry = {}
     runtime._latest_analysis_by_symbol = {}
     runtime._latest_analysis_at = {}
     for name in ("_inc","_log","_set_status","_accumulate_strategy_telemetry","_register_result",
@@ -388,9 +434,15 @@ def test_runtime_market_input_to_stage_and_manual_portfolio(pool, monkeypatch):
     for name in ("get_correlation_universe","get_smt_universe"):
         monkeypatch.setattr(module,name,lambda **kwargs:{})
     bar = SimpleNamespace(time=int(time.time()*1000)-901000,open=50000,low=49900,high=50100,close=50000,volume=10)
-    monkeypatch.setattr(module,"get_market_data",lambda *args,**kwargs:{"symbol":BTC,"15m":[bar]})
+    monkeypatch.setattr(module,"get_market_data",lambda *args,**kwargs:{"symbol":BTC,"15m":[bar], "data_provenance": {}})
+    monkeypatch.setattr("market_plan_safety.check_market_plan", lambda *args, **kwargs: (False, "MARKET_1M_HISTORY_GAP"))
     result = runtime.analyze_for_cycle(BTC)
     assert result["ok"], result.get("error")
+    if reject_market:
+        assert result["result"] is None and result["cycle_result"]["setup"] is None
+        assert "mean_reversion" in result["cycle_result"]["broken"]
+        runtime._register_result.assert_not_called()
+        return
     assert result["cycle_result"]["setup"] and not pool.get_best_setups()
     bot = telegram.TelegramCommandService(runtime,"offline","1")
     assert "LONG" in bot.execute_command("/btc")

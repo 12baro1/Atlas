@@ -56,7 +56,7 @@ def test_expired_market_is_stored_but_not_actionable(tmp_path, monkeypatch):
         report = service().handle_pool_status()
         assert "MARKET süresi dolan: 1" in report
         assert "Doğrulanmış kayıt (toplam): 1" in report
-        assert "Şimdi girilebilir: 0" in report
+        assert "Güncel giriş adayı: 0" in report
         assert "Şu an girilebilir doğrulanmış setup yok" in report
     finally:
         pool.stop()

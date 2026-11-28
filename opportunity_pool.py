@@ -1267,6 +1267,7 @@ class OpportunityPool:
                 "candidates": len(self._candidates),
                 "validated": validated_now,
                 "validated_stored": len(self._validated),
+                "last_batch_ms": int(self.tracking.get_meta("last_opportunity_batch_ms", "0")),
                 "market_expired": expired_market,
                 "needs_revalidation": unverified_evidence,
                 "active": len(self._active),
